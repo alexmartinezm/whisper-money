@@ -1,60 +1,44 @@
 # Categorías
 
-Las categorías ayudan a Whisper Money a entender cada transacción. Elige bien la categoría y tus informes serán más fáciles de confiar.
+Las categorías explican qué significa cada transacción. Elige bien la categoría y tus informes serán más fáciles de confiar.
 
 {{TOC}}
 
 ## Inicio rápido
 
-Si solo lees una sección, lee esta.
+1. Decide si la transacción es ingreso, gasto o transferencia.
+2. Usa categorías de transferencia para dinero que se mueve entre tus propias cuentas.
+3. Revisa las transacciones sin categoría a menudo.
+4. Crea reglas de automatización para comercios repetidos.
 
-1. **Elige qué es la transacción.** ¿Es gasto, ingreso, ahorro, inversión o transferencia?
-2. **Usa transferencias para dinero que se mueve entre tus propias cuentas.** Así evitas contar el mismo dinero dos veces.
-3. **Revisa las transacciones sin categoría a menudo.** Los informes solo son útiles cuando las transacciones tienen la categoría correcta.
-4. **Crea reglas de automatización para transacciones repetidas.** Deja que Whisper Money gestione futuras coincidencias.
-
-> ¿No sabes qué elegir? Empieza por el tipo de categoría. El nombre se puede ajustar después.
+> ¿No sabes qué elegir? Empieza por el tipo. Puedes cambiar el nombre de la categoría después.
 
 ## Mapa de categorías
-
-La idea básica es esta:
 
 ```mermaid
 flowchart TD
     transaction[Transacción] --> category[Categoría]
-    category --> reports[Informes]
-    category --> budgets[Presupuestos]
     category --> cashflow[Flujo de efectivo]
+    category --> budgets[Presupuestos]
+    category --> reports[Informes]
 ```
 
-Algunos ejemplos:
+Ejemplos:
 
-- 🛒 **Supermercado** → Gasto → informe de gastos y presupuestos.
-- 💼 **Salario** → Ingreso → informes de ingresos y flujo de efectivo.
-- 🏦 **Cuenta corriente a ahorro** → Transferencia o Ahorro → el flujo de efectivo sigue siendo preciso.
-- 📈 **Depósito en broker** → Inversión → la inversión queda separada del gasto diario.
-
-## Qué hacen las categorías
-
-Cada transacción puede tener una categoría.
-
-Whisper Money usa esa categoría para responder preguntas como:
-
-- ¿Cuánto gasté en comida?
-- ¿Cuánto ingreso entró este mes?
-- ¿Estoy ahorrando o invirtiendo con regularidad?
-- ¿Esto es un gasto real o moví dinero entre mis propias cuentas?
+- Supermercado → Gasto → informes de gasto y presupuestos.
+- Salario → Ingreso → informes de ingresos y flujo de efectivo.
+- Cuenta corriente a ahorro → Transferencia → evita contar dos veces.
 
 ## Tipos de categoría
 
-Cada categoría tiene un tipo. El tipo le dice a Whisper Money cómo tratar la transacción.
+Cada categoría tiene un tipo.
 
 <div class="cards-wrapper">
 
 <div class="card">
 ### Gasto
 
-Dinero que sale de tus finanzas.
+Usa este tipo para dinero que sale de tus finanzas.
 
 Ejemplos:
 
@@ -69,7 +53,7 @@ Ejemplos:
 <div class="card">
 ### Ingreso
 
-Dinero que entra en tus finanzas.
+Usa este tipo para dinero que entra en tus finanzas.
 
 Ejemplos:
 
@@ -84,7 +68,7 @@ Ejemplos:
 <div class="card">
 ### Transferencia
 
-Dinero que se mueve entre cuentas tuyas.
+Usa este tipo cuando el dinero se mueve entre cuentas que son tuyas.
 
 Ejemplos:
 
@@ -93,40 +77,13 @@ Ejemplos:
 - Cuenta bancaria a inversión
 
 </div>
-
-<div class="card">
-### Ahorro
-
-Dinero que apartas intencionadamente.
-
-Ejemplos:
-
-- Fondo de emergencia
-- Entrada para una casa
-- Fondo de vacaciones
-- Otros objetivos de dinero
-
 </div>
-
-<div class="card">
-### Inversión
-
-Dinero que va a activos o cuentas de inversión.
-
-Ejemplos:
-
-- Depósitos en broker
-- Fondos indexados
-- Aportaciones para jubilación
-- Compras de cripto
-    </div>
-    </div>
 
 ## Transferencias y dirección de flujo de efectivo
 
-Las transferencias también pueden tener una dirección de flujo de efectivo.
+Las categorías de transferencia pueden mostrarse u ocultarse en flujo de efectivo.
 
-Elige la opción que mejor encaje con cómo quieres que aparezca la transferencia:
+Opciones:
 
 - **No mostrar**: oculta la transferencia del flujo de efectivo.
 - **Mostrar como entrada de efectivo**: muestra la transferencia como dinero que entra.
@@ -136,7 +93,7 @@ Para la mayoría de movimientos entre tus propias cuentas, **No mostrar** es la 
 
 ## Transacciones sin categoría
 
-Las transacciones importadas pueden empezar sin categoría.
+Las transacciones importadas o sincronizadas pueden empezar sin categoría.
 
 Prueba esta rutina:
 
@@ -145,19 +102,15 @@ Prueba esta rutina:
 3. Deja las confusas para más tarde si hace falta.
 4. Crea reglas de automatización para comercios o descripciones repetidas.
 
-Así mantienes los informes limpios sin convertir la categorización en una tarea pesada.
-
 ## Cambiar una categoría
 
-Cambiar la categoría de una transacción actualiza todos los informes que incluyen esa transacción.
+Cambiar la categoría de una transacción actualiza los informes que incluyen esa transacción.
 
-Esto puede cambiar:
+Esto puede afectar:
 
 - Totales de gasto
 - Progreso de presupuestos
 - Totales de ingresos
-- Totales de ahorro
-- Totales de inversión
 - Flujo de efectivo
 
 Cambiar la categoría en sí, como su nombre o tipo, afecta a todas las transacciones que usan esa categoría.
@@ -175,10 +128,6 @@ Normalmente no. Si ya registras las compras de la tarjeta, el pago es dinero mov
 ### ¿Cuántas categorías debería crear?
 
 Empieza con pocas. Demasiadas categorías hacen que los informes sean más difíciles de leer. Añade más solo cuando necesites más detalle.
-
-### ¿Cuándo debería crear una regla de automatización?
-
-Crea una cuando el mismo comercio o descripción siempre acaba con la misma categoría.
 
 ## Buenos hábitos con categorías
 
