@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
@@ -13,17 +14,20 @@ class DocumentationController extends Controller
     public function __invoke(?string $slug = null): Response
     {
         $slug ??= $this->defaultSlug();
-        $page = $this->page($slug);
+        $locale = $this->locale();
+        $page = $this->page($slug, $locale);
         $markdown = File::get($page['file']);
 
         return Inertia::render('documentation/show', [
             'document' => [
                 'slug' => $slug,
+                'locale' => $locale,
                 'title' => $page['title'],
                 'description' => $page['description'],
-                'html' => $this->html($markdown),
+                'html' => $this->html($markdown, $locale),
             ],
-            'navigation' => $this->navigation($slug),
+            'navigation' => $this->navigation($slug, $locale),
+            'languages' => $this->languageLinks($slug, $locale),
         ]);
     }
 
@@ -38,10 +42,44 @@ class DocumentationController extends Controller
         return $slug;
     }
 
+    private function locale(): string
+    {
+        $locale = App::currentLocale();
+
+        if (array_key_exists($locale, $this->supportedLocales())) {
+            return $locale;
+        }
+
+        return $this->fallbackLocale();
+    }
+
+    private function fallbackLocale(): string
+    {
+        $locale = config('documentation.fallback_locale', 'en');
+
+        return is_string($locale) && $locale !== '' ? $locale : 'en';
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function supportedLocales(): array
+    {
+        $locales = config('documentation.locales', []);
+
+        if (! is_array($locales)) {
+            return [];
+        }
+
+        return collect($locales)
+            ->mapWithKeys(fn (mixed $label, string $locale): array => [$locale => (string) $label])
+            ->all();
+    }
+
     /**
      * @return array{title: string, description: string, file: string}
      */
-    private function page(string $slug): array
+    private function page(string $slug, string $locale): array
     {
         $page = config("documentation.pages.{$slug}");
 
@@ -49,28 +87,149 @@ class DocumentationController extends Controller
             throw new NotFoundHttpException;
         }
 
-        if (! File::exists($page['file'])) {
+        $file = $this->localizedValue($page['file'], $locale);
+
+        if (! File::exists($file)) {
             throw new NotFoundHttpException;
         }
 
         return [
-            'title' => (string) $page['title'],
-            'description' => (string) $page['description'],
-            'file' => (string) $page['file'],
+            'title' => $this->localizedValue($page['title'], $locale),
+            'description' => $this->localizedValue($page['description'], $locale),
+            'file' => $file,
         ];
     }
 
-    private function html(string $markdown): string
+    private function localizedValue(mixed $value, string $locale): string
     {
+        if (is_array($value)) {
+            $fallbackLocale = $this->fallbackLocale();
+            $localized = $value[$locale] ?? $value[$fallbackLocale] ?? null;
+
+            if (is_string($localized)) {
+                return $localized;
+            }
+
+            throw new NotFoundHttpException;
+        }
+
+        if (! is_string($value)) {
+            throw new NotFoundHttpException;
+        }
+
+        return $value;
+    }
+
+    private function html(string $markdown, string $locale): string
+    {
+        $cardBlocks = $this->extractCardBlocks($markdown);
         $headings = $this->headings($markdown);
-        $html = (string) Str::of($markdown)->markdown([
+        $html = (string) Str::of($cardBlocks['markdown'])->markdown([
             'html_input' => 'strip',
             'allow_unsafe_links' => false,
         ]);
 
-        $html = $this->replaceTocPlaceholder($html, $headings);
+        $html = $this->replaceTocPlaceholder($html, $headings, $locale);
+        $html = $this->replaceCardPlaceholders($html, $cardBlocks['html']);
 
         return $this->addHeadingIds($html, $headings);
+    }
+
+    /**
+     * @return array{markdown: string, html: array<string, string>}
+     */
+    private function extractCardBlocks(string $markdown): array
+    {
+        $cardBlocks = [];
+        $output = [];
+        $lines = preg_split('/\R/', $markdown) ?: [];
+        $index = 0;
+        $insideWrapper = false;
+        $insideCard = false;
+        $wrapperCards = [];
+        $cardLines = [];
+
+        foreach ($lines as $line) {
+            if (! $insideWrapper && trim($line) === '<div class="cards-wrapper">') {
+                $insideWrapper = true;
+                $wrapperCards = [];
+
+                continue;
+            }
+
+            if (! $insideWrapper) {
+                $output[] = $line;
+
+                continue;
+            }
+
+            if (! $insideCard && trim($line) === '<div class="card">') {
+                $insideCard = true;
+                $cardLines = [];
+
+                continue;
+            }
+
+            if (trim($line) === '</div>') {
+                if ($insideCard) {
+                    $insideCard = false;
+                    $wrapperCards[] = trim(implode("\n", $cardLines));
+                    $cardLines = [];
+
+                    continue;
+                }
+
+                $placeholder = "DOCUMENTATION_CARDS_{$index}";
+                $cardBlocks[$placeholder] = $this->cardsHtml($wrapperCards);
+                $output[] = $placeholder;
+                $insideWrapper = false;
+                $wrapperCards = [];
+                $index++;
+
+                continue;
+            }
+
+            if ($insideCard) {
+                $cardLines[] = $line;
+            }
+        }
+
+        return [
+            'markdown' => implode("\n", $output),
+            'html' => $cardBlocks,
+        ];
+    }
+
+    /**
+     * @param  array<int, string>  $cards
+     */
+    private function cardsHtml(array $cards): string
+    {
+        $items = collect($cards)
+            ->filter()
+            ->map(fn (string $card): string => '<section class="card">'.(string) Str::of($card)->markdown([
+                'html_input' => 'strip',
+                'allow_unsafe_links' => false,
+            ]).'</section>')
+            ->implode('');
+
+        if ($items === '') {
+            return '';
+        }
+
+        return '<div class="cards-wrapper">'.$items.'</div>';
+    }
+
+    /**
+     * @param  array<string, string>  $cardBlocks
+     */
+    private function replaceCardPlaceholders(string $html, array $cardBlocks): string
+    {
+        foreach ($cardBlocks as $placeholder => $cardHtml) {
+            $html = str_replace(["<p>{$placeholder}</p>", $placeholder], $cardHtml, $html);
+        }
+
+        return $html;
     }
 
     /**
@@ -118,6 +277,7 @@ class DocumentationController extends Controller
             ->map(fn (mixed $level): int => (int) $level)
             ->filter(fn (int $level): bool => $level >= 1 && $level <= 6)
             ->unique()
+            ->sort()
             ->values()
             ->all();
     }
@@ -155,7 +315,7 @@ class DocumentationController extends Controller
     /**
      * @param  array<int, array{level: int, title: string, id: string}>  $headings
      */
-    private function replaceTocPlaceholder(string $html, array $headings): string
+    private function replaceTocPlaceholder(string $html, array $headings, string $locale): string
     {
         $placeholder = config('documentation.toc.placeholder', '{{TOC}}');
 
@@ -165,7 +325,7 @@ class DocumentationController extends Controller
 
         return str_replace(
             ["<p>{$placeholder}</p>", $placeholder],
-            $this->tocHtml($headings),
+            $this->tocHtml($headings, $locale),
             $html,
         );
     }
@@ -173,7 +333,7 @@ class DocumentationController extends Controller
     /**
      * @param  array<int, array{level: int, title: string, id: string}>  $headings
      */
-    private function tocHtml(array $headings): string
+    private function tocHtml(array $headings, string $locale): string
     {
         if ($headings === []) {
             return '';
@@ -189,7 +349,12 @@ class DocumentationController extends Controller
             ))
             ->implode('');
 
-        return '<nav class="documentation-toc" aria-label="Table of contents"><p>On this page</p><ol>'.$items.'</ol></nav>';
+        return '<nav class="documentation-toc" aria-label="Table of contents"><p>'.$this->tocTitle($locale).'</p><ol>'.$items.'</ol></nav>';
+    }
+
+    private function tocTitle(string $locale): string
+    {
+        return e($this->localizedValue(config('documentation.toc.title', 'On this page'), $locale));
     }
 
     /**
@@ -198,29 +363,31 @@ class DocumentationController extends Controller
      */
     private function numberedHeadings(array $headings): array
     {
-        $currentH2 = 0;
-        $currentH3 = 0;
+        $levels = $this->tocLevels();
+        $counts = [];
 
         return collect($headings)
-            ->map(function (array $heading) use (&$currentH2, &$currentH3): array {
-                if ($heading['level'] === 2) {
-                    $currentH2++;
-                    $currentH3 = 0;
-
-                    return [...$heading, 'number' => (string) $currentH2];
-                }
-
-                if ($heading['level'] === 3) {
-                    if ($currentH2 === 0) {
-                        $currentH2 = 1;
+            ->map(function (array $heading) use ($levels, &$counts): array {
+                foreach ($levels as $level) {
+                    if ($level > $heading['level']) {
+                        unset($counts[$level]);
                     }
-
-                    $currentH3++;
-
-                    return [...$heading, 'number' => "{$currentH2}.{$currentH3}"];
                 }
 
-                return [...$heading, 'number' => ''];
+                foreach ($levels as $level) {
+                    if ($level < $heading['level'] && ! isset($counts[$level])) {
+                        $counts[$level] = 1;
+                    }
+                }
+
+                $counts[$heading['level']] = ($counts[$heading['level']] ?? 0) + 1;
+
+                $number = collect($levels)
+                    ->filter(fn (int $level): bool => $level <= $heading['level'] && isset($counts[$level]))
+                    ->map(fn (int $level): int => $counts[$level])
+                    ->implode('.');
+
+                return [...$heading, 'number' => $number];
             })
             ->all();
     }
@@ -264,7 +431,7 @@ class DocumentationController extends Controller
     /**
      * @return array<int, array{slug: string, title: string, url: string, active: bool}>
      */
-    private function navigation(string $activeSlug): array
+    private function navigation(string $activeSlug, string $locale): array
     {
         $pages = config('documentation.pages', []);
 
@@ -275,9 +442,25 @@ class DocumentationController extends Controller
         return collect($pages)
             ->map(fn (array $page, string $slug): array => [
                 'slug' => $slug,
-                'title' => (string) $page['title'],
-                'url' => route('documentation.show', ['slug' => $slug], false),
+                'title' => $this->localizedValue($page['title'] ?? '', $locale),
+                'url' => route('documentation.show', ['slug' => $slug, 'lang' => $locale], false),
                 'active' => $slug === $activeSlug,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array<int, array{locale: string, label: string, url: string, active: bool}>
+     */
+    private function languageLinks(string $slug, string $activeLocale): array
+    {
+        return collect($this->supportedLocales())
+            ->map(fn (string $label, string $locale): array => [
+                'locale' => $locale,
+                'label' => $label,
+                'url' => route('documentation.show', ['slug' => $slug, 'lang' => $locale], false),
+                'active' => $locale === $activeLocale,
             ])
             ->values()
             ->all();
