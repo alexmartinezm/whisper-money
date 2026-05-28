@@ -8,6 +8,7 @@ use App\Models\Transaction;
 use App\Services\AccountMetricsService;
 use App\Services\CategoryTree;
 use App\Services\PeriodComparator;
+use App\Services\UserMonthPeriodService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -20,6 +21,7 @@ class DashboardController extends Controller
     public function __construct(
         private AccountMetricsService $accountMetricsService,
         private CategoryTree $tree,
+        private UserMonthPeriodService $userMonthPeriodService,
     ) {}
 
     public function __invoke(Request $request): Response
@@ -50,11 +52,9 @@ class DashboardController extends Controller
     private function getTopCategories(Request $request): array
     {
         $user = $request->user();
-        $now = Carbon::now();
-        $from = $now->copy()->subDays(30);
-        $to = $now->copy();
+        $periodDates = $this->userMonthPeriodService->current($user);
 
-        $period = new PeriodComparator($from, $to);
+        $period = new PeriodComparator($periodDates['from'], $periodDates['end_inclusive']);
         $previousPeriod = $period->previous();
 
         $currentSpending = $this->getCategorySpending($user->id, $period->from, $period->to);
@@ -85,11 +85,9 @@ class DashboardController extends Controller
     private function getCashflowSummary(Request $request): array
     {
         $user = $request->user();
-        $now = Carbon::now();
-        $from = $now->copy()->startOfMonth();
-        $to = $now->copy()->endOfMonth();
+        $periodDates = $this->userMonthPeriodService->current($user);
 
-        $period = new PeriodComparator($from, $to);
+        $period = new PeriodComparator($periodDates['from'], $periodDates['end_inclusive']);
         $previousPeriod = $period->previous();
 
         return [

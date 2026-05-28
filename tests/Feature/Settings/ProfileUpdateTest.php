@@ -21,6 +21,7 @@ test('profile information can be updated', function () {
             'name' => 'Test User',
             'email' => 'test@example.com',
             'currency_code' => 'EUR',
+            'month_start_day' => 25,
         ]);
 
     $response
@@ -33,6 +34,7 @@ test('profile information can be updated', function () {
     expect($user->email)->toBe('test@example.com');
     expect($user->email_verified_at)->toBeNull();
     expect($user->currency_code)->toBe('EUR');
+    expect($user->month_start_day)->toBe(25);
 });
 
 test('profile accepts new latam primary currency', function () {
@@ -44,6 +46,7 @@ test('profile accepts new latam primary currency', function () {
             'name' => 'Test User',
             'email' => 'test@example.com',
             'currency_code' => 'ARS',
+            'month_start_day' => 1,
         ]);
 
     $response
@@ -119,9 +122,25 @@ test('profile rejects bitcoin as primary currency', function () {
             'name' => 'Test User',
             'email' => 'test@example.com',
             'currency_code' => 'BTC',
+            'month_start_day' => 1,
         ]);
 
     $response->assertSessionHasErrors(['currency_code']);
+});
+
+test('profile rejects unsupported month start day', function () {
+    $user = User::factory()->create();
+
+    $response = $this
+        ->actingAs($user)
+        ->patch(route('profile.update'), [
+            'name' => 'Test User',
+            'email' => 'test@example.com',
+            'currency_code' => 'USD',
+            'month_start_day' => 24,
+        ]);
+
+    $response->assertSessionHasErrors(['month_start_day']);
 });
 
 test('email verification status is unchanged when the email address is unchanged', function () {
@@ -133,6 +152,7 @@ test('email verification status is unchanged when the email address is unchanged
             'name' => 'Test User',
             'email' => $user->email,
             'currency_code' => $user->currency_code,
+            'month_start_day' => 1,
         ]);
 
     $response

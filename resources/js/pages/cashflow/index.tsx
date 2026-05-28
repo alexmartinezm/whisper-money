@@ -7,21 +7,12 @@ import HeadingSmall from '@/components/heading-small';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { CashflowPeriodType, useCashflowData } from '@/hooks/use-cashflow-data';
 import AppSidebarLayout from '@/layouts/app/app-sidebar-layout';
+import { getUserPeriodRange, userMonthStartDay } from '@/lib/user-periods';
 import { cashflow } from '@/routes';
 import { BreadcrumbItem } from '@/types';
 import { __ } from '@/utils/i18n';
 import { Head, router, usePage } from '@inertiajs/react';
-import {
-    endOfMonth,
-    endOfQuarter,
-    endOfYear,
-    format,
-    getQuarter,
-    parse,
-    startOfMonth,
-    startOfQuarter,
-    startOfYear,
-} from 'date-fns';
+import { format, getQuarter, parse } from 'date-fns';
 import { useEffect, useState } from 'react';
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -34,6 +25,7 @@ const breadcrumbs: BreadcrumbItem[] = [
 function parsePeriodParam(
     period: string | null,
     periodType: CashflowPeriodType,
+    monthStartDay: number,
 ): Date {
     if (!period) {
         return new Date();
@@ -44,7 +36,11 @@ function parsePeriodParam(
             const match = /^(\d{4})-Q([1-4])$/.exec(period);
 
             if (match) {
-                return new Date(Number(match[1]), (Number(match[2]) - 1) * 3);
+                return new Date(
+                    Number(match[1]),
+                    (Number(match[2]) - 1) * 3,
+                    monthStartDay,
+                );
             }
         }
 
@@ -52,44 +48,24 @@ function parsePeriodParam(
             const match = /^(\d{4})$/.exec(period);
 
             if (match) {
-                return new Date(Number(match[1]), 0);
+                return new Date(Number(match[1]), 0, monthStartDay);
             }
         }
 
         const parsedDate = parse(period, 'yyyy-MM', new Date());
 
         if (!isNaN(parsedDate.getTime())) {
-            return parsedDate;
+            return new Date(
+                parsedDate.getFullYear(),
+                parsedDate.getMonth(),
+                monthStartDay,
+            );
         }
     } catch {
         return new Date();
     }
 
     return new Date();
-}
-
-function getPeriodRange(
-    currentDate: Date,
-    periodType: CashflowPeriodType,
-): { from: Date; to: Date } {
-    if (periodType === 'quarter') {
-        return {
-            from: startOfQuarter(currentDate),
-            to: endOfQuarter(currentDate),
-        };
-    }
-
-    if (periodType === 'year') {
-        return {
-            from: startOfYear(currentDate),
-            to: endOfYear(currentDate),
-        };
-    }
-
-    return {
-        from: startOfMonth(currentDate),
-        to: endOfMonth(currentDate),
-    };
 }
 
 function formatPeriodParam(
@@ -113,19 +89,28 @@ export default function CashflowPage() {
         period: initialPeriod,
         periodType: initialPeriodType,
     } = usePage<{
-        auth: { user: { currency_code: string } };
+        auth: { user: { currency_code: string; month_start_day: number } };
         period: string | null;
         periodType: CashflowPeriodType;
     }>().props;
 
     const [periodType, setPeriodType] =
         useState<CashflowPeriodType>(initialPeriodType);
+    const monthStartDay = userMonthStartDay(auth.user.month_start_day);
 
     const [currentDate, setCurrentDate] = useState<Date>(() =>
-        parsePeriodParam(initialPeriod, initialPeriodType),
+        parsePeriodParam(initialPeriod, initialPeriodType, monthStartDay),
     );
-
-    const period = getPeriodRange(currentDate, periodType);
+    const userPeriod = getUserPeriodRange(
+        currentDate,
+        periodType,
+        monthStartDay,
+    );
+    const period = {
+        from: userPeriod.from,
+        to: userPeriod.endInclusive,
+    };
+    const periodParam = formatPeriodParam(userPeriod.from, periodType);
 
     const {
         summary,
@@ -140,8 +125,6 @@ export default function CashflowPage() {
     });
 
     useEffect(() => {
-        const periodParam = formatPeriodParam(currentDate, periodType);
-
         if (initialPeriod !== periodParam || initialPeriodType !== periodType) {
             router.visit(
                 cashflow({
@@ -154,7 +137,7 @@ export default function CashflowPage() {
                 },
             );
         }
-    }, [currentDate, initialPeriod, initialPeriodType, periodType]);
+    }, [initialPeriod, initialPeriodType, periodParam, periodType]);
 
     return (
         <AppSidebarLayout breadcrumbs={breadcrumbs}>
@@ -172,6 +155,7 @@ export default function CashflowPage() {
                     <PeriodNavigation
                         currentDate={currentDate}
                         periodType={periodType}
+                        monthStartDay={monthStartDay}
                         onDateChange={setCurrentDate}
                         onPeriodTypeChange={setPeriodType}
                     />

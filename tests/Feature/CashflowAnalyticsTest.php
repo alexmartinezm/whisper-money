@@ -259,6 +259,49 @@ test('cashflow summary includes actual saved and invested amounts', function () 
         ->assertJsonPath('current.investments', 15000);
 });
 
+test('cashflow summary respects custom salary month boundaries', function () {
+    $this->user->update(['month_start_day' => 25]);
+
+    $incomeCategory = Category::factory()->create([
+        'user_id' => $this->user->id,
+        'type' => CategoryType::Income,
+    ]);
+
+    $account = Account::factory()->create(['user_id' => $this->user->id]);
+
+    foreach ([
+        ['date' => '2026-01-24', 'amount' => 10000],
+        ['date' => '2026-01-25', 'amount' => 20000],
+        ['date' => '2026-02-24', 'amount' => 30000],
+        ['date' => '2026-02-25', 'amount' => 40000],
+    ] as $transaction) {
+        Transaction::factory()->create([
+            'user_id' => $this->user->id,
+            'account_id' => $account->id,
+            'category_id' => $incomeCategory->id,
+            'amount' => $transaction['amount'],
+            'transaction_date' => $transaction['date'],
+        ]);
+    }
+
+    $summary = $this->getJson('/api/cashflow/summary?'.http_build_query([
+        'from' => '2026-01-25',
+        'to' => '2026-02-24',
+    ]));
+    $trend = $this->getJson('/api/cashflow/trend?'.http_build_query([
+        'from' => '2026-01-25',
+        'to' => '2026-02-24',
+    ]));
+
+    $summary->assertOk()
+        ->assertJsonPath('current.income', 50000)
+        ->assertJsonPath('previous.income', 10000);
+
+    $trend->assertOk()
+        ->assertJsonPath('data.0.month', '2026-01')
+        ->assertJsonPath('data.0.income', 50000);
+});
+
 test('cashflow summary compares full quarter against previous full quarter', function () {
     $incomeCategory = Category::factory()->create([
         'user_id' => $this->user->id,

@@ -4,6 +4,7 @@ namespace App\Http\Requests\Settings;
 
 use App\Models\User;
 use App\Services\CurrencyOptions;
+use App\Services\UserMonthPeriodService;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -32,6 +33,7 @@ class ProfileUpdateRequest extends FormRequest
             ],
             'currency_code' => ['required', 'string', 'max:3', Rule::in($currencyOptions->primaryCodes())],
             'locale' => ['nullable', 'string', Rule::in(['en', 'es'])],
+            'month_start_day' => ['required', 'integer', Rule::in(UserMonthPeriodService::ALLOWED_START_DAYS)],
         ];
     }
 }

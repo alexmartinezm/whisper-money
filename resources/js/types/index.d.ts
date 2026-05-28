@@ -101,6 +101,7 @@ export interface User {
     currency_code: CurrencyCode;
     locale: string | null;
     timezone: string | null;
+    month_start_day: 1 | 25 | 26 | 27 | 28;
     avatar?: string;
     email_verified_at: string | null;
     two_factor_enabled?: boolean;

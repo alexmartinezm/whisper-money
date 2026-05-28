@@ -7,9 +7,11 @@ use App\Enums\CategoryType;
 use App\Http\Controllers\Controller;
 use App\Models\Category;
 use App\Models\Transaction;
+use App\Models\User;
 use App\Services\CategoryTree;
 use App\Services\ExchangeRateService;
 use App\Services\PeriodComparator;
+use App\Services\UserMonthPeriodService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -20,6 +22,7 @@ class CashflowAnalyticsController extends Controller
     public function __construct(
         private ExchangeRateService $exchangeRateService,
         private CategoryTree $tree,
+        private UserMonthPeriodService $userMonthPeriodService,
     ) {}
 
     public function summary(Request $request): JsonResponse
@@ -78,17 +81,19 @@ class CashflowAnalyticsController extends Controller
         $user = $request->user();
 
         if (isset($validated['from'], $validated['to'])) {
-            $start = Carbon::parse($validated['from'])->startOfMonth();
-            $end = Carbon::parse($validated['to'])->endOfMonth();
+            $start = Carbon::parse($validated['from'])->startOfDay();
+            $end = Carbon::parse($validated['to'])->startOfDay();
         } else {
             $months = $validated['months'] ?? 12;
-            $end = isset($validated['to'])
-                ? Carbon::parse($validated['to'])->endOfMonth()
-                : Carbon::now()->endOfMonth();
-            $start = $end->copy()->subMonthsNoOverflow($months - 1)->startOfMonth();
+            $endPeriod = $this->userMonthPeriodService->monthContaining(
+                $user,
+                isset($validated['to']) ? Carbon::parse($validated['to']) : Carbon::now(),
+            );
+            $end = $endPeriod['end_inclusive'];
+            $start = $endPeriod['from']->copy()->subMonthsNoOverflow($months - 1);
         }
 
-        $monthlyTotals = $this->getMonthlyTrendTotals($user->id, $user->currency_code, $start, $end);
+        $monthlyTotals = $this->getMonthlyTrendTotals($user->id, $user->currency_code, $start, $end, $user);
 
         $data = [];
         $current = $start->copy();
@@ -326,7 +331,7 @@ class CashflowAnalyticsController extends Controller
         return $categorized;
     }
 
-    private function getMonthlyTrendTotals(string $userId, string $userCurrency, Carbon $from, Carbon $to): Collection
+    private function getMonthlyTrendTotals(string $userId, string $userCurrency, Carbon $from, Carbon $to, User $user): Collection
     {
         $transactions = Transaction::query()
             ->where('transactions.user_id', $userId)
@@ -337,7 +342,9 @@ class CashflowAnalyticsController extends Controller
         $this->preloadExchangeRates($transactions, $userCurrency);
 
         return $transactions
-            ->groupBy(fn (Transaction $transaction): string => $transaction->transaction_date->format('Y-m'))
+            ->groupBy(fn (Transaction $transaction): string => $this->userMonthPeriodService
+                ->monthContaining($user, $transaction->transaction_date)['from']
+                ->format('Y-m'))
             ->map(function (Collection $transactions) use ($userCurrency): array {
                 $income = 0;
                 $expense = 0;

@@ -218,6 +218,54 @@ export default function Account({
                                     />
                                 </div>
 
+                                <div className="grid gap-2">
+                                    <Label htmlFor="month_start_day">
+                                        {__('Start of month')}
+                                    </Label>
+
+                                    <Select
+                                        name="month_start_day"
+                                        defaultValue={String(
+                                            auth.user.month_start_day ?? 1,
+                                        )}
+                                        required
+                                    >
+                                        <SelectTrigger className="mt-1 w-full">
+                                            <SelectValue
+                                                placeholder={__(
+                                                    'Select start of month',
+                                                )}
+                                            />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="1">
+                                                {__('Calendar month (1st)')}
+                                            </SelectItem>
+                                            {[25, 26, 27, 28].map((day) => (
+                                                <SelectItem
+                                                    key={day}
+                                                    value={String(day)}
+                                                >
+                                                    {__('Day :day', {
+                                                        day: String(day),
+                                                    })}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+
+                                    <p className="text-sm text-muted-foreground">
+                                        {__(
+                                            'Cashflow periods and analysis will start on this day.',
+                                        )}
+                                    </p>
+
+                                    <InputError
+                                        className="mt-2"
+                                        message={errors.month_start_day}
+                                    />
+                                </div>
+
                                 {mustVerifyEmail &&
                                     auth.user.email_verified_at === null && (
                                         <div>

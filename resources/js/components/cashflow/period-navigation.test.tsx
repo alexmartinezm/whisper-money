@@ -23,6 +23,7 @@ describe('PeriodNavigation', () => {
             <PeriodNavigation
                 currentDate={new Date(2026, 0, 1)}
                 periodType="month"
+                monthStartDay={1}
                 onDateChange={() => undefined}
                 onPeriodTypeChange={() => undefined}
             />,

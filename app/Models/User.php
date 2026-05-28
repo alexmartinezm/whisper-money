@@ -47,6 +47,7 @@ class User extends Authenticatable implements HasLocalePreference, MustVerifyEma
         'currency_code',
         'locale',
         'timezone',
+        'month_start_day',
     ];
 
     /**
@@ -76,6 +77,7 @@ class User extends Authenticatable implements HasLocalePreference, MustVerifyEma
             'paywall_seen_at' => 'datetime',
             'last_logged_in_at' => 'datetime',
             'last_active_at' => 'datetime',
+            'month_start_day' => 'integer',
         ];
     }
 

@@ -82,3 +82,40 @@ test('dashboard top categories roll child spending up into the parent', function
         ->assertJsonPath('props.topCategories.0.category.id', $food->id)
         ->assertJsonPath('props.topCategories.0.amount', 3000);
 });
+
+test('dashboard cashflow summary uses user month start day', function () {
+    $this->travelTo('2026-02-10');
+
+    $user = User::factory()->onboarded()->create(['month_start_day' => 25]);
+    $this->actingAs($user);
+
+    $incomeCategory = Category::factory()->create([
+        'user_id' => $user->id,
+        'type' => CategoryType::Income,
+    ]);
+
+    foreach ([
+        ['date' => '2026-01-24', 'amount' => 10000],
+        ['date' => '2026-01-25', 'amount' => 20000],
+        ['date' => '2026-02-24', 'amount' => 30000],
+    ] as $transaction) {
+        Transaction::factory()->create([
+            'user_id' => $user->id,
+            'category_id' => $incomeCategory->id,
+            'amount' => $transaction['amount'],
+            'transaction_date' => $transaction['date'],
+        ]);
+    }
+
+    $response = $this->get(route('dashboard'));
+
+    $response->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('dashboard')
+            ->missing('cashflowSummary')
+            ->loadDeferredProps(fn ($reload) => $reload
+                ->where('cashflowSummary.current.income', 50000)
+                ->where('cashflowSummary.previous.income', 10000)
+            )
+        );
+});
