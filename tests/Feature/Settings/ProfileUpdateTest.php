@@ -1,6 +1,8 @@
 <?php
 
+use App\Features\CustomMonthStartDay;
 use App\Models\User;
+use Laravel\Pennant\Feature;
 
 test('profile page is displayed', function () {
     $user = User::factory()->create();
@@ -14,6 +16,7 @@ test('profile page is displayed', function () {
 
 test('profile information can be updated', function () {
     $user = User::factory()->create();
+    Feature::for($user)->activate(CustomMonthStartDay::class);
 
     $response = $this
         ->actingAs($user)
@@ -130,6 +133,7 @@ test('profile rejects bitcoin as primary currency', function () {
 
 test('profile rejects unsupported month start day', function () {
     $user = User::factory()->create();
+    Feature::for($user)->activate(CustomMonthStartDay::class);
 
     $response = $this
         ->actingAs($user)
@@ -141,6 +145,25 @@ test('profile rejects unsupported month start day', function () {
         ]);
 
     $response->assertSessionHasErrors(['month_start_day']);
+});
+
+test('profile ignores month start day when feature is disabled', function () {
+    $user = User::factory()->create(['month_start_day' => 1]);
+
+    $response = $this
+        ->actingAs($user)
+        ->patch(route('profile.update'), [
+            'name' => 'Test User',
+            'email' => 'test@example.com',
+            'currency_code' => 'USD',
+            'month_start_day' => 25,
+        ]);
+
+    $response
+        ->assertSessionHasNoErrors()
+        ->assertRedirect(route('account.edit'));
+
+    expect($user->refresh()->month_start_day)->toBe(1);
 });
 
 test('email verification status is unchanged when the email address is unchanged', function () {

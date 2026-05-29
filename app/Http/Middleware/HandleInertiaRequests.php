@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use App\Enums\BankingConnectionStatus;
 use App\Features\CalculateBalancesOnImport;
+use App\Features\CustomMonthStartDay;
 use App\Features\TransactionAnalysis;
 use App\Models\BankingConnection;
 use App\Services\CurrencyOptions;
@@ -168,18 +169,21 @@ class HandleInertiaRequests extends Middleware
             return [
                 'cashflow' => true,
                 'calculateBalancesOnImport' => false,
+                'customMonthStartDay' => false,
                 'transactionAnalysis' => false,
             ];
         }
 
         $features = Feature::for($user)->values([
             CalculateBalancesOnImport::class,
+            CustomMonthStartDay::class,
             TransactionAnalysis::class,
         ]);
 
         return [
             'cashflow' => true,
             'calculateBalancesOnImport' => $features[CalculateBalancesOnImport::class] !== false,
+            'customMonthStartDay' => $features[CustomMonthStartDay::class] !== false,
             'transactionAnalysis' => $features[TransactionAnalysis::class] !== false,
         ];
     }
