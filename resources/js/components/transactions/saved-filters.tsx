@@ -18,16 +18,25 @@ import {
 import { Input } from '@/components/ui/input';
 import {
     deserializeFilters,
+    filtersFingerprint,
     hasActiveFilters,
     type SerializedFilters,
     serializeFilters,
 } from '@/lib/transaction-filter-serialization';
+import { cn } from '@/lib/utils';
 import { type TransactionFilters } from '@/types/transaction';
 import { type UUID } from '@/types/uuid';
 import { __ } from '@/utils/i18n';
 import axios from 'axios';
-import { Bookmark, Plus, Trash2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import {
+    Bookmark,
+    BookmarkCheck,
+    Check,
+    Plus,
+    Save,
+    Trash2,
+} from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
 interface SavedFilter {
@@ -43,11 +52,43 @@ interface SavedFiltersProps {
 
 export function SavedFilters({ filters, onLoad }: SavedFiltersProps) {
     const [savedFilters, setSavedFilters] = useState<SavedFilter[]>([]);
+    const [activeId, setActiveId] = useState<UUID | null>(null);
     const [saveDialogOpen, setSaveDialogOpen] = useState(false);
     const [name, setName] = useState('');
     const [isSaving, setIsSaving] = useState(false);
 
     const canSave = hasActiveFilters(filters);
+
+    const currentFingerprint = useMemo(
+        () => filtersFingerprint(serializeFilters(filters)),
+        [filters],
+    );
+
+    // The saved filter that exactly matches the current filters, if any.
+    const matchingSaved = useMemo(
+        () =>
+            savedFilters.find(
+                (savedFilter) =>
+                    filtersFingerprint(savedFilter.filters) ===
+                    currentFingerprint,
+            ) ?? null,
+        [savedFilters, currentFingerprint],
+    );
+
+    // Keep track of the saved filter we're working from: it follows an exact
+    // match, and otherwise sticks around (so edits can be saved over it) until
+    // the filters are cleared.
+    useEffect(() => {
+        if (matchingSaved) {
+            setActiveId(matchingSaved.id);
+        } else if (!canSave) {
+            setActiveId(null);
+        }
+    }, [matchingSaved, canSave]);
+
+    const activeFilter =
+        savedFilters.find((savedFilter) => savedFilter.id === activeId) ?? null;
+    const isDirty = activeFilter !== null && matchingSaved === null;
 
     useEffect(() => {
         let active = true;
@@ -69,6 +110,7 @@ export function SavedFilters({ filters, onLoad }: SavedFiltersProps) {
     }, []);
 
     function handleLoad(savedFilter: SavedFilter) {
+        setActiveId(savedFilter.id);
         onLoad(deserializeFilters(savedFilter.filters));
     }
 
@@ -77,6 +119,9 @@ export function SavedFilters({ filters, onLoad }: SavedFiltersProps) {
         setSavedFilters((current) =>
             current.filter((item) => item.id !== savedFilter.id),
         );
+        if (activeId === savedFilter.id) {
+            setActiveId(null);
+        }
 
         try {
             await axios.delete(`/api/saved-filters/${savedFilter.id}`);
@@ -84,6 +129,26 @@ export function SavedFilters({ filters, onLoad }: SavedFiltersProps) {
             console.error('Failed to delete saved filter:', error);
             setSavedFilters(previous);
             toast.error(__('Failed to delete the saved filter'));
+        }
+    }
+
+    async function handleUpdate(savedFilter: SavedFilter) {
+        try {
+            const response = await axios.patch<{ data: SavedFilter }>(
+                `/api/saved-filters/${savedFilter.id}`,
+                { filters: serializeFilters(filters) },
+            );
+
+            setSavedFilters((current) =>
+                current.map((item) =>
+                    item.id === savedFilter.id ? response.data.data : item,
+                ),
+            );
+            setActiveId(savedFilter.id);
+            toast.success(__('Filter updated'));
+        } catch (error) {
+            console.error('Failed to update saved filter:', error);
+            toast.error(__('Failed to update the saved filter'));
         }
     }
 
@@ -108,6 +173,7 @@ export function SavedFilters({ filters, onLoad }: SavedFiltersProps) {
                     a.name.localeCompare(b.name),
                 ),
             );
+            setActiveId(response.data.data.id);
             setSaveDialogOpen(false);
             setName('');
             toast.success(__('Filter saved'));
@@ -127,13 +193,34 @@ export function SavedFilters({ filters, onLoad }: SavedFiltersProps) {
         <>
             <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                    <Button
-                        variant="outline"
-                        size="icon"
-                        aria-label={__('Saved filters')}
-                    >
-                        <Bookmark className="h-4 w-4" />
-                    </Button>
+                    {activeFilter ? (
+                        <Button
+                            variant="secondary"
+                            className="max-w-[200px]"
+                            aria-label={__('Saved filters')}
+                        >
+                            <BookmarkCheck className="mr-1 h-4 w-4 shrink-0" />
+                            <span className="truncate">
+                                {activeFilter.name}
+                            </span>
+                            {isDirty && (
+                                <span
+                                    className="ml-1 text-muted-foreground"
+                                    title={__('Unsaved changes')}
+                                >
+                                    •
+                                </span>
+                            )}
+                        </Button>
+                    ) : (
+                        <Button
+                            variant="outline"
+                            size="icon"
+                            aria-label={__('Saved filters')}
+                        >
+                            <Bookmark className="h-4 w-4" />
+                        </Button>
+                    )}
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="w-64">
                     <DropdownMenuLabel>{__('Saved filters')}</DropdownMenuLabel>
@@ -150,8 +237,18 @@ export function SavedFilters({ filters, onLoad }: SavedFiltersProps) {
                                 onSelect={() => handleLoad(savedFilter)}
                                 className="group justify-between gap-2"
                             >
-                                <span className="truncate">
-                                    {savedFilter.name}
+                                <span className="flex min-w-0 items-center gap-2">
+                                    <Check
+                                        className={cn(
+                                            'h-3.5 w-3.5 shrink-0',
+                                            matchingSaved?.id === savedFilter.id
+                                                ? 'opacity-100'
+                                                : 'opacity-0',
+                                        )}
+                                    />
+                                    <span className="truncate">
+                                        {savedFilter.name}
+                                    </span>
                                 </span>
                                 <button
                                     type="button"
@@ -170,6 +267,19 @@ export function SavedFilters({ filters, onLoad }: SavedFiltersProps) {
                     )}
 
                     <DropdownMenuSeparator />
+
+                    {isDirty && activeFilter && (
+                        <DropdownMenuItem
+                            onSelect={(event) => {
+                                event.preventDefault();
+                                handleUpdate(activeFilter);
+                            }}
+                        >
+                            <Save className="mr-1 h-4 w-4" />
+                            {__('Update “:name”', { name: activeFilter.name })}
+                        </DropdownMenuItem>
+                    )}
+
                     <DropdownMenuItem
                         disabled={!canSave}
                         onSelect={(event) => {
@@ -178,7 +288,7 @@ export function SavedFilters({ filters, onLoad }: SavedFiltersProps) {
                         }}
                     >
                         <Plus className="mr-1 h-4 w-4" />
-                        {__('Save current filters…')}
+                        {__('Save as new filter…')}
                     </DropdownMenuItem>
                 </DropdownMenuContent>
             </DropdownMenu>

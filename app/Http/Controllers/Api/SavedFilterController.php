@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\StoreSavedFilterRequest;
+use App\Http\Requests\Api\UpdateSavedFilterRequest;
 use App\Models\SavedFilter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -31,6 +32,17 @@ class SavedFilterController extends Controller
         return response()->json([
             'data' => $savedFilter->only(['id', 'name', 'filters']),
         ], 201);
+    }
+
+    public function update(UpdateSavedFilterRequest $request, SavedFilter $savedFilter): JsonResponse
+    {
+        abort_unless($savedFilter->user_id === $request->user()->id, 403);
+
+        $savedFilter->update(['filters' => $request->validated('filters')]);
+
+        return response()->json([
+            'data' => $savedFilter->only(['id', 'name', 'filters']),
+        ]);
     }
 
     public function destroy(Request $request, SavedFilter $savedFilter): JsonResponse

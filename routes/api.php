@@ -65,5 +65,6 @@ Route::middleware(['web', 'auth'])->group(function () {
     // Saved filters (shared between transactions and analysis screens)
     Route::get('saved-filters', [SavedFilterController::class, 'index'])->name('api.saved-filters.index');
     Route::post('saved-filters', [SavedFilterController::class, 'store'])->name('api.saved-filters.store');
+    Route::patch('saved-filters/{savedFilter}', [SavedFilterController::class, 'update'])->name('api.saved-filters.update');
     Route::delete('saved-filters/{savedFilter}', [SavedFilterController::class, 'destroy'])->name('api.saved-filters.destroy');
 });

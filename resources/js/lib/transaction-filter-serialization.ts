@@ -76,3 +76,23 @@ export function deserializeFilters(
 export function hasActiveFilters(filters: TransactionFilters): boolean {
     return Object.keys(serializeFilters(filters)).length > 0;
 }
+
+/**
+ * Stable, order-insensitive fingerprint of a serialized filter set, so two
+ * filter sets that select the same things compare equal regardless of the
+ * order ids were added or which empty keys are present.
+ */
+export function filtersFingerprint(filters: SerializedFilters): string {
+    return JSON.stringify({
+        date_from: filters.date_from ?? null,
+        date_to: filters.date_to ?? null,
+        amount_min: filters.amount_min ?? null,
+        amount_max: filters.amount_max ?? null,
+        category_ids: [...(filters.category_ids ?? [])].sort(),
+        account_ids: [...(filters.account_ids ?? [])].sort(),
+        label_ids: [...(filters.label_ids ?? [])].sort(),
+        creditor_name: filters.creditor_name ?? '',
+        debtor_name: filters.debtor_name ?? '',
+        search: filters.search ?? '',
+    });
+}

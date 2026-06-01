@@ -72,6 +72,38 @@ test('the same name can be reused by a different user', function () {
         ->assertCreated();
 });
 
+test('a user can update their own saved filter', function () {
+    $savedFilter = SavedFilter::factory()->create([
+        'user_id' => $this->user->id,
+        'filters' => ['search' => 'old'],
+    ]);
+
+    $response = $this->patchJson("/api/saved-filters/{$savedFilter->id}", [
+        'filters' => ['search' => 'new', 'category_ids' => ['food']],
+    ])->assertOk();
+
+    expect($response->json('data.filters.search'))->toBe('new');
+
+    $this->assertDatabaseHas('saved_filters', [
+        'id' => $savedFilter->id,
+        'name' => $savedFilter->name,
+    ]);
+    expect($savedFilter->fresh()->filters)->toBe([
+        'search' => 'new',
+        'category_ids' => ['food'],
+    ]);
+});
+
+test('a user cannot update another user saved filter', function () {
+    $savedFilter = SavedFilter::factory()->create(['filters' => ['search' => 'old']]);
+
+    $this->patchJson("/api/saved-filters/{$savedFilter->id}", [
+        'filters' => ['search' => 'hacked'],
+    ])->assertForbidden();
+
+    expect($savedFilter->fresh()->filters)->toBe(['search' => 'old']);
+});
+
 test('a user can delete their own saved filter', function () {
     $savedFilter = SavedFilter::factory()->create(['user_id' => $this->user->id]);
 
