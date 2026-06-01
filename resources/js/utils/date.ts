@@ -56,6 +56,21 @@ export function formatMonthFromYearMonth(
 }
 
 /**
+ * Format a month number (1-12 or "01".."12") to its full name (e.g. "January"),
+ * ignoring the year. Capitalizes the first letter for locales that lowercase months.
+ */
+export function formatMonthName(
+    month: string | number,
+    locale: string = 'en-US',
+): string {
+    const monthIndex =
+        (typeof month === 'string' ? parseInt(month, 10) : month) - 1;
+    const formatted = formatDate(new Date(2000, monthIndex, 1), 'MMMM', locale);
+
+    return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+}
+
+/**
  * Format a date to show month and year (e.g., "January 2026" or "Enero 2026")
  * Capitalizes the first letter
  */

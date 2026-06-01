@@ -115,7 +115,7 @@ class AnalysisController extends Controller
         return match ($groupBy) {
             'category' => $transaction->category_id,
             'account' => $transaction->account_id,
-            'month' => $transaction->transaction_date->format('Y-m'),
+            'month' => $transaction->transaction_date->format('m'),
             default => null,
         };
     }

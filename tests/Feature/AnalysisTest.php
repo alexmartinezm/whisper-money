@@ -100,9 +100,10 @@ test('uncategorized transactions group under a null key', function () {
     expect($groups[0]['amount'])->toBe(-1500);
 });
 
-test('groups by month bucket transactions by year-month', function () {
+test('groups by month bucket transactions by calendar month across years', function () {
     makeTransaction(['amount' => -1000, 'transaction_date' => '2026-01-15']);
     makeTransaction(['amount' => -2000, 'transaction_date' => '2026-01-20']);
+    makeTransaction(['amount' => -4000, 'transaction_date' => '2025-01-10']); // different year, same month
     makeTransaction(['amount' => -5000, 'transaction_date' => '2026-02-10']);
 
     $groups = collect($this->getJson('/api/analysis?group_by=month')
@@ -110,9 +111,10 @@ test('groups by month bucket transactions by year-month', function () {
         ->json('groups'))
         ->keyBy('key');
 
-    expect($groups['2026-01']['amount'])->toBe(-3000);
-    expect($groups['2026-01']['count'])->toBe(2);
-    expect($groups['2026-02']['amount'])->toBe(-5000);
+    // All January transactions collapse together regardless of year.
+    expect($groups['01']['amount'])->toBe(-7000);
+    expect($groups['01']['count'])->toBe(3);
+    expect($groups['02']['amount'])->toBe(-5000);
 });
 
 test('groups by label count a transaction once per label and bucket unlabeled separately', function () {
