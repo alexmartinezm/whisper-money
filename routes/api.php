@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\AnalysisController;
 use App\Http\Controllers\Api\CashflowAnalyticsController;
 use App\Http\Controllers\Api\DashboardAnalyticsController;
 use App\Http\Controllers\Api\ImportDataController;
+use App\Http\Controllers\Api\SavedFilterController;
 use App\Http\Controllers\Api\TransactionController;
 use App\Http\Controllers\EncryptionController;
 use App\Http\Controllers\Sync\TransactionSyncController;
@@ -60,4 +61,9 @@ Route::middleware(['web', 'auth'])->group(function () {
 
     // Expense / income analysis
     Route::get('analysis', [AnalysisController::class, 'index'])->name('api.analysis.index');
+
+    // Saved filters (shared between transactions and analysis screens)
+    Route::get('saved-filters', [SavedFilterController::class, 'index'])->name('api.saved-filters.index');
+    Route::post('saved-filters', [SavedFilterController::class, 'store'])->name('api.saved-filters.store');
+    Route::delete('saved-filters/{savedFilter}', [SavedFilterController::class, 'destroy'])->name('api.saved-filters.destroy');
 });

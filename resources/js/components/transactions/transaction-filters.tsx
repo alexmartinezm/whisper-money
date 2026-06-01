@@ -5,6 +5,7 @@ import { Check, ChevronsUpDown, Tag, X } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
 
 import { AccountName } from '@/components/accounts/account-name';
+import { SavedFilters } from '@/components/transactions/saved-filters';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -165,239 +166,268 @@ export function TransactionFilters({
                                 categories={categories}
                                 selectedIds={filters.categoryIds}
                                 onToggle={handleCategoryToggle}
-                                triggerClassName="w-[180px]"
+                                triggerClassName="w-[230px]"
                             />
                             <LabelMultiSelect
                                 labels={labels}
                                 selectedIds={filters.labelIds}
                                 onToggle={handleLabelToggle}
-                                triggerClassName="w-[160px]"
+                                triggerClassName="w-[210px]"
                             />
                         </>
                     )}
 
-                    <Popover open={isOpen} onOpenChange={setIsOpen}>
-                        <PopoverTrigger asChild>
-                            <Button variant="outline">
-                                {__('Filters')}
+                    <div className="flex items-center gap-2 lg:ml-auto">
+                        <Popover open={isOpen} onOpenChange={setIsOpen}>
+                            <PopoverTrigger asChild>
+                                <Button variant="outline">
+                                    {__('Filters')}
 
-                                {activeFilterCount > 0 && (
-                                    <Badge
-                                        variant="secondary"
-                                        className="ml-2 rounded-full px-1.5 py-0.5"
-                                    >
-                                        {activeFilterCount}
-                                    </Badge>
-                                )}
-                            </Button>
-                        </PopoverTrigger>
-                        <PopoverContent
-                            className="max-h-[600px] w-96 overflow-y-auto"
-                            align="start"
-                        >
-                            <div className="space-y-4">
-                                <div className="flex items-center justify-between">
-                                    <h4 className="font-medium">
-                                        {__('Filters')}
-                                    </h4>
-                                </div>
-
-                                <div className="space-y-2">
-                                    <FormLabel>{__('Date')}</FormLabel>
-                                    <div className="grid grid-cols-2 gap-2 pt-2">
-                                        <Input
-                                            type="date"
-                                            value={
-                                                filters.dateFrom
-                                                    ? format(
-                                                          filters.dateFrom,
-                                                          'yyyy-MM-dd',
-                                                      )
-                                                    : ''
-                                            }
-                                            onChange={(e) =>
-                                                onFiltersChange({
-                                                    ...filters,
-                                                    dateFrom: e.target.value
-                                                        ? new Date(
-                                                              e.target.value,
-                                                          )
-                                                        : null,
-                                                })
-                                            }
-                                            placeholder={__('From')}
-                                        />
-
-                                        <Input
-                                            type="date"
-                                            value={
-                                                filters.dateTo
-                                                    ? format(
-                                                          filters.dateTo,
-                                                          'yyyy-MM-dd',
-                                                      )
-                                                    : ''
-                                            }
-                                            onChange={(e) =>
-                                                onFiltersChange({
-                                                    ...filters,
-                                                    dateTo: e.target.value
-                                                        ? new Date(
-                                                              e.target.value,
-                                                          )
-                                                        : null,
-                                                })
-                                            }
-                                            placeholder={__('To')}
-                                        />
+                                    {activeFilterCount > 0 && (
+                                        <Badge
+                                            variant="secondary"
+                                            className="ml-2 rounded-full px-1.5 py-0.5"
+                                        >
+                                            {activeFilterCount}
+                                        </Badge>
+                                    )}
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent
+                                className="max-h-[600px] w-96 overflow-y-auto"
+                                align="start"
+                            >
+                                <div className="space-y-4">
+                                    <div className="flex items-center justify-between">
+                                        <h4 className="font-medium">
+                                            {__('Filters')}
+                                        </h4>
                                     </div>
-                                </div>
 
-                                <div className="space-y-2">
-                                    <FormLabel>{__('Amount')}</FormLabel>
-                                    <div className="grid grid-cols-2 gap-2 pt-2">
-                                        <Input
-                                            type="number"
-                                            step="0.01"
-                                            value={filters.amountMin ?? ''}
-                                            onChange={(e) =>
-                                                onFiltersChange({
-                                                    ...filters,
-                                                    amountMin: e.target.value
-                                                        ? parseFloat(
-                                                              e.target.value,
+                                    <div className="space-y-2">
+                                        <FormLabel>{__('Date')}</FormLabel>
+                                        <div className="grid grid-cols-2 gap-2 pt-2">
+                                            <Input
+                                                type="date"
+                                                value={
+                                                    filters.dateFrom
+                                                        ? format(
+                                                              filters.dateFrom,
+                                                              'yyyy-MM-dd',
                                                           )
-                                                        : null,
-                                                })
-                                            }
-                                            placeholder={__('Min')}
-                                        />
+                                                        : ''
+                                                }
+                                                onChange={(e) =>
+                                                    onFiltersChange({
+                                                        ...filters,
+                                                        dateFrom: e.target.value
+                                                            ? new Date(
+                                                                  e.target
+                                                                      .value,
+                                                              )
+                                                            : null,
+                                                    })
+                                                }
+                                                placeholder={__('From')}
+                                            />
 
-                                        <Input
-                                            type="number"
-                                            step="0.01"
-                                            value={filters.amountMax ?? ''}
-                                            onChange={(e) =>
-                                                onFiltersChange({
-                                                    ...filters,
-                                                    amountMax: e.target.value
-                                                        ? parseFloat(
-                                                              e.target.value,
+                                            <Input
+                                                type="date"
+                                                value={
+                                                    filters.dateTo
+                                                        ? format(
+                                                              filters.dateTo,
+                                                              'yyyy-MM-dd',
                                                           )
-                                                        : null,
-                                                })
-                                            }
-                                            placeholder={__('Max')}
-                                        />
+                                                        : ''
+                                                }
+                                                onChange={(e) =>
+                                                    onFiltersChange({
+                                                        ...filters,
+                                                        dateTo: e.target.value
+                                                            ? new Date(
+                                                                  e.target
+                                                                      .value,
+                                                              )
+                                                            : null,
+                                                    })
+                                                }
+                                                placeholder={__('To')}
+                                            />
+                                        </div>
                                     </div>
-                                </div>
 
-                                <div className="space-y-2">
-                                    <FormLabel>
-                                        {__('Counterparties')}
-                                    </FormLabel>
-                                    <div className="grid grid-cols-2 gap-2 pt-2">
-                                        <Input
-                                            value={creditorName}
-                                            onChange={(e) =>
-                                                setCreditorName(e.target.value)
-                                            }
-                                            placeholder={__('Creditor name')}
-                                        />
-                                        <Input
-                                            value={debtorName}
-                                            onChange={(e) =>
-                                                setDebtorName(e.target.value)
-                                            }
-                                            placeholder={__('Debtor name')}
-                                        />
+                                    <div className="space-y-2">
+                                        <FormLabel>{__('Amount')}</FormLabel>
+                                        <div className="grid grid-cols-2 gap-2 pt-2">
+                                            <Input
+                                                type="number"
+                                                step="0.01"
+                                                value={filters.amountMin ?? ''}
+                                                onChange={(e) =>
+                                                    onFiltersChange({
+                                                        ...filters,
+                                                        amountMin: e.target
+                                                            .value
+                                                            ? parseFloat(
+                                                                  e.target
+                                                                      .value,
+                                                              )
+                                                            : null,
+                                                    })
+                                                }
+                                                placeholder={__('Min')}
+                                            />
+
+                                            <Input
+                                                type="number"
+                                                step="0.01"
+                                                value={filters.amountMax ?? ''}
+                                                onChange={(e) =>
+                                                    onFiltersChange({
+                                                        ...filters,
+                                                        amountMax: e.target
+                                                            .value
+                                                            ? parseFloat(
+                                                                  e.target
+                                                                      .value,
+                                                              )
+                                                            : null,
+                                                    })
+                                                }
+                                                placeholder={__('Max')}
+                                            />
+                                        </div>
                                     </div>
-                                </div>
 
-                                {!inlineCategoryLabel && (
                                     <div className="space-y-2">
                                         <FormLabel>
-                                            {__('Categories')}
+                                            {__('Counterparties')}
                                         </FormLabel>
-                                        <div className="pt-2">
-                                            <CategoryMultiSelect
-                                                categories={categories}
-                                                selectedIds={
-                                                    filters.categoryIds
+                                        <div className="grid grid-cols-2 gap-2 pt-2">
+                                            <Input
+                                                value={creditorName}
+                                                onChange={(e) =>
+                                                    setCreditorName(
+                                                        e.target.value,
+                                                    )
                                                 }
-                                                onToggle={handleCategoryToggle}
-                                                triggerClassName="w-full"
+                                                placeholder={__(
+                                                    'Creditor name',
+                                                )}
+                                            />
+                                            <Input
+                                                value={debtorName}
+                                                onChange={(e) =>
+                                                    setDebtorName(
+                                                        e.target.value,
+                                                    )
+                                                }
+                                                placeholder={__('Debtor name')}
                                             />
                                         </div>
                                     </div>
-                                )}
 
-                                {!inlineCategoryLabel && (
-                                    <div className="space-y-2">
-                                        <FormLabel>{__('Labels')}</FormLabel>
-                                        <div className="pt-2">
-                                            <LabelMultiSelect
-                                                labels={labels}
-                                                selectedIds={filters.labelIds}
-                                                onToggle={handleLabelToggle}
-                                                triggerClassName="w-full"
-                                            />
+                                    {!inlineCategoryLabel && (
+                                        <div className="space-y-2">
+                                            <FormLabel>
+                                                {__('Categories')}
+                                            </FormLabel>
+                                            <div className="pt-2">
+                                                <CategoryMultiSelect
+                                                    categories={categories}
+                                                    selectedIds={
+                                                        filters.categoryIds
+                                                    }
+                                                    onToggle={
+                                                        handleCategoryToggle
+                                                    }
+                                                    triggerClassName="w-full"
+                                                />
+                                            </div>
                                         </div>
-                                    </div>
-                                )}
+                                    )}
 
-                                {!hideAccountFilter && (
-                                    <div className="space-y-2">
-                                        <FormLabel>{__('Accounts')}</FormLabel>
-                                        <div className="flex flex-wrap gap-2 pt-2">
-                                            {accounts.map((account) => {
-                                                const isSelected =
-                                                    filters.accountIds.includes(
-                                                        account.id,
+                                    {!inlineCategoryLabel && (
+                                        <div className="space-y-2">
+                                            <FormLabel>
+                                                {__('Labels')}
+                                            </FormLabel>
+                                            <div className="pt-2">
+                                                <LabelMultiSelect
+                                                    labels={labels}
+                                                    selectedIds={
+                                                        filters.labelIds
+                                                    }
+                                                    onToggle={handleLabelToggle}
+                                                    triggerClassName="w-full"
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {!hideAccountFilter && (
+                                        <div className="space-y-2">
+                                            <FormLabel>
+                                                {__('Accounts')}
+                                            </FormLabel>
+                                            <div className="flex flex-wrap gap-2 pt-2">
+                                                {accounts.map((account) => {
+                                                    const isSelected =
+                                                        filters.accountIds.includes(
+                                                            account.id,
+                                                        );
+                                                    return (
+                                                        <Badge
+                                                            key={account.id}
+                                                            variant={
+                                                                isSelected
+                                                                    ? 'default'
+                                                                    : 'outline'
+                                                            }
+                                                            className="cursor-pointer px-2 py-1"
+                                                            onClick={() =>
+                                                                handleAccountToggle(
+                                                                    account.id,
+                                                                )
+                                                            }
+                                                        >
+                                                            <AccountName
+                                                                account={
+                                                                    account
+                                                                }
+                                                                length={{
+                                                                    min: 6,
+                                                                    max: 28,
+                                                                }}
+                                                            />
+                                                        </Badge>
                                                     );
-                                                return (
-                                                    <Badge
-                                                        key={account.id}
-                                                        variant={
-                                                            isSelected
-                                                                ? 'default'
-                                                                : 'outline'
-                                                        }
-                                                        className="cursor-pointer px-2 py-1"
-                                                        onClick={() =>
-                                                            handleAccountToggle(
-                                                                account.id,
-                                                            )
-                                                        }
-                                                    >
-                                                        <AccountName
-                                                            account={account}
-                                                            length={{
-                                                                min: 6,
-                                                                max: 28,
-                                                            }}
-                                                        />
-                                                    </Badge>
-                                                );
-                                            })}
+                                                })}
+                                            </div>
                                         </div>
-                                    </div>
-                                )}
-                            </div>
-                        </PopoverContent>
-                    </Popover>
+                                    )}
+                                </div>
+                            </PopoverContent>
+                        </Popover>
 
-                    {activeFilterCount > 0 && (
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={clearFilters}
-                            className="h-9"
-                        >
-                            <X className="mr-1 h-4 w-4" />
-                            {__('Clear')}
-                        </Button>
-                    )}
+                        <SavedFilters
+                            filters={filters}
+                            onLoad={onFiltersChange}
+                        />
+
+                        {activeFilterCount > 0 && (
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={clearFilters}
+                                className="h-9"
+                            >
+                                <X className="mr-1 h-4 w-4" />
+                                {__('Clear')}
+                            </Button>
+                        )}
+                    </div>
                 </div>
 
                 {actions ? <div className="w-full">{actions}</div> : null}
@@ -446,7 +476,11 @@ function CategoryMultiSelect({
                 >
                     {selectedIds.length > 0 ? (
                         <span className="truncate">
-                            {selectedIds.length} {__('selected')}
+                            {selectedIds.length === 1
+                                ? __('1 category selected')
+                                : __(':count categories selected', {
+                                      count: selectedIds.length,
+                                  })}
                         </span>
                     ) : (
                         <span className="text-muted-foreground">
@@ -561,7 +595,11 @@ function LabelMultiSelect({
                 >
                     {selectedIds.length > 0 ? (
                         <span className="truncate">
-                            {selectedIds.length} {__('selected')}
+                            {selectedIds.length === 1
+                                ? __('1 label selected')
+                                : __(':count labels selected', {
+                                      count: selectedIds.length,
+                                  })}
                         </span>
                     ) : (
                         <span className="text-muted-foreground">
