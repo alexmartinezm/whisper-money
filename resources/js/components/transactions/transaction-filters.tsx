@@ -420,12 +420,24 @@ function CategoryMultiSelect({
     triggerClassName,
 }: CategoryMultiSelectProps) {
     const [open, setOpen] = useState(false);
+    // Snapshot the selected-first order when the dropdown opens so items don't
+    // reshuffle as the user toggles; it recomputes on the next open.
+    const [orderedCategories, setOrderedCategories] = useState<Category[]>(() =>
+        sortSelectedFirst(categories, selectedIds),
+    );
     const isUncategorizedSelected = selectedIds.includes(
         UNCATEGORIZED_CATEGORY_ID,
     );
 
+    function handleOpenChange(next: boolean) {
+        if (next) {
+            setOrderedCategories(sortSelectedFirst(categories, selectedIds));
+        }
+        setOpen(next);
+    }
+
     return (
-        <Popover open={open} onOpenChange={setOpen}>
+        <Popover open={open} onOpenChange={handleOpenChange}>
             <PopoverTrigger asChild>
                 <Button
                     variant="outline"
@@ -469,7 +481,7 @@ function CategoryMultiSelect({
                                 {__('Uncategorized')}
                             </div>
                         </CommandItem>
-                        {categories.map((category) => {
+                        {orderedCategories.map((category) => {
                             const isSelected = selectedIds.includes(
                                 category.id,
                             );
@@ -526,9 +538,21 @@ function LabelMultiSelect({
     triggerClassName,
 }: LabelMultiSelectProps) {
     const [open, setOpen] = useState(false);
+    // Snapshot the selected-first order when the dropdown opens so items don't
+    // reshuffle as the user toggles; it recomputes on the next open.
+    const [orderedLabels, setOrderedLabels] = useState<Label[]>(() =>
+        sortSelectedFirst(labels, selectedIds),
+    );
+
+    function handleOpenChange(next: boolean) {
+        if (next) {
+            setOrderedLabels(sortSelectedFirst(labels, selectedIds));
+        }
+        setOpen(next);
+    }
 
     return (
-        <Popover open={open} onOpenChange={setOpen}>
+        <Popover open={open} onOpenChange={handleOpenChange}>
             <PopoverTrigger asChild>
                 <Button
                     variant="outline"
@@ -552,7 +576,7 @@ function LabelMultiSelect({
                     <CommandInput placeholder={__('Search labels...')} />
                     <CommandList>
                         <CommandEmpty>{__('No labels found.')}</CommandEmpty>
-                        {labels.map((label) => {
+                        {orderedLabels.map((label) => {
                             const isSelected = selectedIds.includes(label.id);
                             const colorClasses = getLabelColorClasses(
                                 label.color,
@@ -599,3 +623,14 @@ function LabelMultiSelect({
 }
 
 const UNCATEGORIZED_CATEGORY_ID = 'uncategorized';
+
+/** Returns selected items first, preserving the original order within each group. */
+function sortSelectedFirst<T extends { id: string }>(
+    items: T[],
+    selectedIds: string[],
+): T[] {
+    return [
+        ...items.filter((item) => selectedIds.includes(item.id)),
+        ...items.filter((item) => !selectedIds.includes(item.id)),
+    ];
+}
