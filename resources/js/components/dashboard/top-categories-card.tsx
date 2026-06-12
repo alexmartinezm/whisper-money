@@ -39,6 +39,8 @@ interface CategoryData {
 
 interface TopCategoriesCardProps {
     categories: CategoryData[];
+    from?: string;
+    to?: string;
     loading?: boolean;
 }
 
@@ -48,6 +50,8 @@ function rowKey(item: CategoryData): string {
 
 export function TopCategoriesCard({
     categories,
+    from,
+    to,
     loading,
 }: TopCategoriesCardProps) {
     const { auth } = usePage<SharedData>().props;
@@ -56,10 +60,10 @@ export function TopCategoriesCard({
     const { dateFrom, dateTo } = useMemo(() => {
         const now = new Date();
         return {
-            dateFrom: format(subDays(now, 30), 'yyyy-MM-dd'),
-            dateTo: format(now, 'yyyy-MM-dd'),
+            dateFrom: from ?? format(subDays(now, 30), 'yyyy-MM-dd'),
+            dateTo: to ?? format(now, 'yyyy-MM-dd'),
         };
-    }, []);
+    }, [from, to]);
 
     const fetchChildren = useCallback(
         async (categoryId: string): Promise<CategoryData[]> => {
@@ -177,7 +181,7 @@ export function TopCategoriesCard({
                         }
                     />
                 </div>
-                <CardDescription>{__('on the last 30 days')}</CardDescription>
+                <CardDescription>{__('this month')}</CardDescription>
             </CardHeader>
             <CardContent>
                 <div className="space-y-3">

@@ -18,6 +18,7 @@ interface PeriodNavigationProps {
     currentDate: Date;
     periodType: CashflowPeriodType;
     monthStartDay: UserMonthStartDay;
+    referenceDate?: Date;
     onDateChange: (date: Date) => void;
     onPeriodTypeChange: (periodType: CashflowPeriodType) => void;
 }
@@ -35,11 +36,12 @@ export function PeriodNavigation({
     currentDate,
     periodType,
     monthStartDay,
+    referenceDate,
     onDateChange,
     onPeriodTypeChange,
 }: PeriodNavigationProps) {
     const locale = useLocale();
-    const now = new Date();
+    const now = referenceDate ?? new Date();
     const periodStart = getUserPeriodRange(
         currentDate,
         periodType,

@@ -13,28 +13,28 @@ class PeriodComparator
 
     public function previous(): self
     {
-        $days = $this->from->diffInDays($this->to) + 1;
+        $from = $this->from->copy()->startOfDay();
+        $exclusiveEnd = $this->to->copy()->startOfDay()->addDay();
 
-        // If it's a full month range (e.g. 1st to end of month), shift by months
-        if ($this->isFullMonthRange()) {
-            $months = $this->from->diffInMonths($this->to->copy()->addDay());
+        $months = (int) $from->diffInMonths($exclusiveEnd);
 
-            $previousFrom = $this->from->copy()->subMonthsNoOverflow($months);
-            $previousTo = $previousFrom->copy()->addMonthsNoOverflow($months - 1)->endOfMonth();
-
-            return new self($previousFrom, $previousTo);
+        // Period boundaries are anchored to a month start day (calendar or
+        // custom), so whole-month ranges shift by months rather than by day
+        // count. This keeps the previous period correctly aligned even when
+        // adjacent months differ in length (e.g. a 25th-to-24th salary month).
+        if ($months >= 1) {
+            return new self(
+                $from->copy()->subMonthsNoOverflow($months),
+                $from->copy()->subDay()->endOfDay(),
+            );
         }
 
-        return new self(
-            $this->from->copy()->subDays($days),
-            $this->from->copy()->subDay()
-        );
-    }
+        $days = (int) $from->diffInDays($exclusiveEnd);
 
-    private function isFullMonthRange(): bool
-    {
-        return $this->from->day === 1 &&
-               $this->to->isLastOfMonth();
+        return new self(
+            $from->copy()->subDays($days),
+            $from->copy()->subDay()->endOfDay(),
+        );
     }
 
     public static function fromRequest(array $validated): self

@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\CategoryType;
+use App\Features\CustomMonthStartDay;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\ExchangeRate;
@@ -9,6 +10,7 @@ use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Testing\TestResponse;
+use Laravel\Pennant\Feature;
 
 beforeEach(function () {
     Http::fake();
@@ -180,6 +182,23 @@ test('summary trend is null when the earlier half has no spending', function () 
 
     expect($response->json('summary.average_per_month'))->toBe(500);
     expect($response->json('summary.trend_percentage'))->toBeNull();
+});
+
+test('it buckets by the user salary month when the custom start day is active', function () {
+    $this->user->update(['month_start_day' => 25]);
+    Feature::for($this->user)->activate(CustomMonthStartDay::class);
+
+    $category = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Expense, 'name' => 'Food']);
+
+    // Now is 2026-06-15, so the current salary period is May 25 - Jun 24,
+    // keyed '2026-05'. A Jun 10 spend falls in that period, not calendar June.
+    makeBreakdownTransaction(['amount' => -4000, 'category_id' => $category->id, 'transaction_date' => '2026-06-10']);
+
+    $response = monthlyBreakdown($category)->assertOk();
+
+    expect($response->json('months'))->toHaveCount(12);
+    expect($response->json('months.11.key'))->toBe('2026-05');
+    expect($response->json('months.11.'.$category->id))->toBe(4000);
 });
 
 test('foreign-currency transactions are converted to the user currency', function () {

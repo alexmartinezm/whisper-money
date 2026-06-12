@@ -62,7 +62,7 @@ class DashboardController extends Controller
 
         $totalAmount = $currentSpending->sum('amount');
 
-        return $currentSpending
+        $categories = $currentSpending
             ->sortByDesc('amount')
             ->take(10)
             ->map(function ($item) use ($previousSpending, $totalAmount) {
@@ -80,6 +80,14 @@ class DashboardController extends Controller
             })
             ->values()
             ->all();
+
+        return [
+            'categories' => $categories,
+            // Share the resolved period so the drill-down and links query the
+            // same window the parent rows were computed for.
+            'from' => $periodDates['from']->toDateString(),
+            'to' => $periodDates['end_inclusive']->toDateString(),
+        ];
     }
 
     private function getCashflowSummary(Request $request): array

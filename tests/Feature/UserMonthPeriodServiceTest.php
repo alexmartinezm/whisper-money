@@ -1,11 +1,21 @@
 <?php
 
+use App\Features\CustomMonthStartDay;
 use App\Models\User;
 use App\Services\UserMonthPeriodService;
 use Carbon\Carbon;
+use Laravel\Pennant\Feature;
+
+function customStartDayUser(int $startDay): User
+{
+    $user = User::factory()->create(['month_start_day' => $startDay]);
+    Feature::for($user)->activate(CustomMonthStartDay::class);
+
+    return $user;
+}
 
 it('returns natural month periods by default', function () {
-    $user = User::factory()->make(['month_start_day' => 1]);
+    $user = customStartDayUser(1);
     $period = app(UserMonthPeriodService::class)->monthContaining($user, Carbon::parse('2026-02-14'));
 
     expect($period['from']->toDateString())->toBe('2026-02-01')
@@ -14,7 +24,7 @@ it('returns natural month periods by default', function () {
 });
 
 it('returns salary month periods for custom start days', function () {
-    $user = User::factory()->make(['month_start_day' => 25]);
+    $user = customStartDayUser(25);
     $period = app(UserMonthPeriodService::class)->monthContaining($user, Carbon::parse('2026-02-14'));
     $previousPeriod = app(UserMonthPeriodService::class)->monthContaining($user, $period['from']->copy()->subDay());
 
@@ -26,7 +36,7 @@ it('returns salary month periods for custom start days', function () {
 });
 
 it('starts a new salary month on the configured day', function () {
-    $user = User::factory()->make(['month_start_day' => 28]);
+    $user = customStartDayUser(28);
     $period = app(UserMonthPeriodService::class)->monthContaining($user, Carbon::parse('2026-02-28'));
 
     expect($period['from']->toDateString())->toBe('2026-02-28')
@@ -34,7 +44,18 @@ it('starts a new salary month on the configured day', function () {
 });
 
 it('falls back to the first for invalid stored values', function () {
-    $user = User::factory()->make(['month_start_day' => 2]);
+    $user = customStartDayUser(2);
 
     expect(app(UserMonthPeriodService::class)->startDay($user))->toBe(1);
+});
+
+it('ignores the stored start day while the feature is disabled', function () {
+    $user = User::factory()->create(['month_start_day' => 25]);
+
+    $service = app(UserMonthPeriodService::class);
+    $period = $service->monthContaining($user, Carbon::parse('2026-02-14'));
+
+    expect($service->startDay($user))->toBe(1)
+        ->and($period['from']->toDateString())->toBe('2026-02-01')
+        ->and($period['end_inclusive']->toDateString())->toBe('2026-02-28');
 });

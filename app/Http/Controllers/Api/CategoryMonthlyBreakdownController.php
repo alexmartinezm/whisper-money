@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Category;
 use App\Models\Transaction;
 use App\Services\ExchangeRateService;
+use App\Services\UserMonthPeriodService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -27,6 +28,7 @@ class CategoryMonthlyBreakdownController extends Controller
 
     public function __construct(
         private ExchangeRateService $exchangeRateService,
+        private UserMonthPeriodService $userMonthPeriodService,
     ) {}
 
     public function __invoke(Request $request, Category $category): JsonResponse
@@ -36,7 +38,9 @@ class CategoryMonthlyBreakdownController extends Controller
         abort_unless($category->user_id === $user->id, 403);
 
         $currency = $user->currency_code;
-        $start = Carbon::now()->startOfMonth()->subMonths(self::MONTHS - 1);
+        $startDay = $this->userMonthPeriodService->startDay($user);
+        $start = $this->userMonthPeriodService->current($user)['from']
+            ->subMonthsNoOverflow(self::MONTHS - 1);
 
         $parentMap = Category::query()
             ->where('user_id', $user->id)
@@ -77,7 +81,7 @@ class CategoryMonthlyBreakdownController extends Controller
 
         foreach ($transactions as $transaction) {
             $amount = $this->convertTransactionAmount($transaction, $currency) * $orientation;
-            $monthKey = $transaction->transaction_date->format('Y-m');
+            $monthKey = $this->periodKey($transaction->transaction_date, $startDay);
             $segment = $this->segmentFor($transaction->category_id, $category->id, $parentMap, $hasChildren);
 
             $buckets[$monthKey][$segment] = ($buckets[$monthKey][$segment] ?? 0) + $amount;
@@ -271,10 +275,21 @@ class CategoryMonthlyBreakdownController extends Controller
             }
 
             $months[] = $point;
-            $cursor->addMonth();
+            $cursor->addMonthNoOverflow();
         }
 
         return $months;
+    }
+
+    /**
+     * The Y-m label of the month period a date belongs to: dates before the
+     * user's start day roll into the period that opened the previous month.
+     */
+    private function periodKey(Carbon $date, int $startDay): string
+    {
+        return $date->day >= $startDay
+            ? $date->format('Y-m')
+            : $date->copy()->subMonthNoOverflow()->format('Y-m');
     }
 
     private function convertTransactionAmount(Transaction $transaction, string $currency): int

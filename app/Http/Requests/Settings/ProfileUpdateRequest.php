@@ -38,7 +38,7 @@ class ProfileUpdateRequest extends FormRequest
         ];
 
         if (Feature::for($this->user())->active(CustomMonthStartDay::class)) {
-            $rules['month_start_day'] = ['required', 'integer', Rule::in(UserMonthPeriodService::ALLOWED_START_DAYS)];
+            $rules['month_start_day'] = ['sometimes', 'required', 'integer', Rule::in(UserMonthPeriodService::ALLOWED_START_DAYS)];
         }
 
         return $rules;

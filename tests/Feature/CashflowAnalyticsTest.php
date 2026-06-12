@@ -2,12 +2,14 @@
 
 use App\Enums\CategoryCashflowDirection;
 use App\Enums\CategoryType;
+use App\Features\CustomMonthStartDay;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\ExchangeRate;
 use App\Models\Transaction;
 use App\Models\User;
 use Illuminate\Support\Facades\Http;
+use Laravel\Pennant\Feature;
 
 beforeEach(function () {
     Http::fake();
@@ -261,6 +263,7 @@ test('cashflow summary includes actual saved and invested amounts', function () 
 
 test('cashflow summary respects custom salary month boundaries', function () {
     $this->user->update(['month_start_day' => 25]);
+    Feature::for($this->user)->activate(CustomMonthStartDay::class);
 
     $incomeCategory = Category::factory()->create([
         'user_id' => $this->user->id,
@@ -300,6 +303,46 @@ test('cashflow summary respects custom salary month boundaries', function () {
     $trend->assertOk()
         ->assertJsonPath('data.0.month', '2026-01')
         ->assertJsonPath('data.0.income', 50000);
+});
+
+test('trend keeps transactions when the requested range is not period-aligned', function () {
+    $this->user->update(['month_start_day' => 25]);
+    Feature::for($this->user)->activate(CustomMonthStartDay::class);
+
+    $incomeCategory = Category::factory()->create([
+        'user_id' => $this->user->id,
+        'type' => CategoryType::Income,
+    ]);
+
+    $account = Account::factory()->create(['user_id' => $this->user->id]);
+
+    // Jan 10 belongs to the Dec 25 - Jan 24 salary period ('2025-12'). A
+    // calendar-aligned request must still surface it rather than drop it.
+    foreach ([
+        ['date' => '2026-01-10', 'amount' => 10000],
+        ['date' => '2026-02-10', 'amount' => 20000],
+    ] as $transaction) {
+        Transaction::factory()->create([
+            'user_id' => $this->user->id,
+            'account_id' => $account->id,
+            'category_id' => $incomeCategory->id,
+            'amount' => $transaction['amount'],
+            'transaction_date' => $transaction['date'],
+        ]);
+    }
+
+    $trend = $this->getJson('/api/cashflow/trend?'.http_build_query([
+        'from' => '2026-01-01',
+        'to' => '2026-02-28',
+    ]));
+
+    $trend->assertOk();
+
+    $income = collect($trend->json('data'))->pluck('income', 'month');
+
+    expect($income->get('2025-12'))->toBe(10000)
+        ->and($income->get('2026-01'))->toBe(20000)
+        ->and($income->sum())->toBe(30000);
 });
 
 test('cashflow summary compares full quarter against previous full quarter', function () {

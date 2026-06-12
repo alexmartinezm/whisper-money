@@ -2,9 +2,11 @@
 
 namespace App\Services;
 
+use App\Features\CustomMonthStartDay;
 use App\Models\User;
 use Carbon\Carbon;
 use Carbon\CarbonInterface;
+use Laravel\Pennant\Feature;
 
 class UserMonthPeriodService
 {
@@ -13,6 +15,13 @@ class UserMonthPeriodService
 
     public function startDay(User $user): int
     {
+        // The custom start day only takes effect while the feature is active,
+        // so rolling the flag back cleanly reverts everyone to calendar months
+        // instead of stranding them on a salary month they can no longer edit.
+        if (! Feature::for($user)->active(CustomMonthStartDay::class)) {
+            return 1;
+        }
+
         $startDay = (int) ($user->month_start_day ?? 1);
 
         return in_array($startDay, self::ALLOWED_START_DAYS, true) ? $startDay : 1;

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Account;
 use App\Models\Bank;
 use App\Models\Category;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -45,6 +46,9 @@ class CashflowController extends Controller
             'banks' => $banks,
             'period' => $validPeriod,
             'periodType' => $validPeriodType,
+            // Resolve "today" in the user's timezone so the client agrees with
+            // the server on which period is current near month boundaries.
+            'today' => Carbon::now($user->timezone)->toDateString(),
         ]);
     }
 

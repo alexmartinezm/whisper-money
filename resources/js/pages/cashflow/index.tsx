@@ -9,7 +9,7 @@ import { CashflowPeriodType, useCashflowData } from '@/hooks/use-cashflow-data';
 import AppSidebarLayout from '@/layouts/app/app-sidebar-layout';
 import { getUserPeriodRange, userMonthStartDay } from '@/lib/user-periods';
 import { cashflow } from '@/routes';
-import { BreadcrumbItem } from '@/types';
+import { BreadcrumbItem, SharedData } from '@/types';
 import { __ } from '@/utils/i18n';
 import { Head, router, usePage } from '@inertiajs/react';
 import { format, getQuarter, parse } from 'date-fns';
@@ -26,9 +26,10 @@ function parsePeriodParam(
     period: string | null,
     periodType: CashflowPeriodType,
     monthStartDay: number,
+    fallback: Date,
 ): Date {
     if (!period) {
-        return new Date();
+        return fallback;
     }
 
     try {
@@ -52,7 +53,7 @@ function parsePeriodParam(
             }
         }
 
-        const parsedDate = parse(period, 'yyyy-MM', new Date());
+        const parsedDate = parse(period, 'yyyy-MM', fallback);
 
         if (!isNaN(parsedDate.getTime())) {
             return new Date(
@@ -62,10 +63,10 @@ function parsePeriodParam(
             );
         }
     } catch {
-        return new Date();
+        return fallback;
     }
 
-    return new Date();
+    return fallback;
 }
 
 function formatPeriodParam(
@@ -86,20 +87,36 @@ function formatPeriodParam(
 export default function CashflowPage() {
     const {
         auth,
+        features,
         period: initialPeriod,
         periodType: initialPeriodType,
-    } = usePage<{
-        auth: { user: { currency_code: string; month_start_day: number } };
-        period: string | null;
-        periodType: CashflowPeriodType;
-    }>().props;
+        today,
+    } = usePage<
+        SharedData & {
+            period: string | null;
+            periodType: CashflowPeriodType;
+            today: string;
+        }
+    >().props;
 
     const [periodType, setPeriodType] =
         useState<CashflowPeriodType>(initialPeriodType);
-    const monthStartDay = userMonthStartDay(auth.user.month_start_day);
+    // Only honour the custom start day while the feature is active so the
+    // client matches the server, which reverts to calendar months otherwise.
+    const monthStartDay = features.customMonthStartDay
+        ? userMonthStartDay(auth.user.month_start_day)
+        : 1;
+    const referenceDate = today
+        ? parse(today, 'yyyy-MM-dd', new Date())
+        : new Date();
 
     const [currentDate, setCurrentDate] = useState<Date>(() =>
-        parsePeriodParam(initialPeriod, initialPeriodType, monthStartDay),
+        parsePeriodParam(
+            initialPeriod,
+            initialPeriodType,
+            monthStartDay,
+            referenceDate,
+        ),
     );
     const userPeriod = getUserPeriodRange(
         currentDate,
@@ -156,6 +173,7 @@ export default function CashflowPage() {
                         currentDate={currentDate}
                         periodType={periodType}
                         monthStartDay={monthStartDay}
+                        referenceDate={referenceDate}
                         onDateChange={setCurrentDate}
                         onPeriodTypeChange={setPeriodType}
                     />

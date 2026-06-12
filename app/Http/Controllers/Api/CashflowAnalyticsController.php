@@ -81,8 +81,11 @@ class CashflowAnalyticsController extends Controller
         $user = $request->user();
 
         if (isset($validated['from'], $validated['to'])) {
-            $start = Carbon::parse($validated['from'])->startOfDay();
-            $end = Carbon::parse($validated['to'])->startOfDay();
+            // Snap the bounds to the user's period start so the emitted month
+            // buckets line up with how transactions are grouped below;
+            // otherwise transactions in a partial leading period are dropped.
+            $start = $this->userMonthPeriodService->monthContaining($user, Carbon::parse($validated['from']))['from'];
+            $end = $this->userMonthPeriodService->monthContaining($user, Carbon::parse($validated['to']))['end_inclusive'];
         } else {
             $months = $validated['months'] ?? 12;
             $endPeriod = $this->userMonthPeriodService->monthContaining(
@@ -111,7 +114,7 @@ class CashflowAnalyticsController extends Controller
                 'net' => $income - $expense,
             ];
 
-            $current->addMonth();
+            $current->addMonthNoOverflow();
         }
 
         return $this->cashflowJson([
@@ -341,10 +344,18 @@ class CashflowAnalyticsController extends Controller
 
         $this->preloadExchangeRates($transactions, $userCurrency);
 
+        $startDay = $this->userMonthPeriodService->startDay($user);
+
         return $transactions
-            ->groupBy(fn (Transaction $transaction): string => $this->userMonthPeriodService
-                ->monthContaining($user, $transaction->transaction_date)['from']
-                ->format('Y-m'))
+            ->groupBy(function (Transaction $transaction) use ($startDay): string {
+                $date = $transaction->transaction_date;
+
+                // Bucket by the period a transaction falls in: dates before the
+                // start day belong to the period that opened the prior month.
+                return $date->day >= $startDay
+                    ? $date->format('Y-m')
+                    : $date->copy()->subMonthNoOverflow()->format('Y-m');
+            })
             ->map(function (Collection $transactions) use ($userCurrency): array {
                 $income = 0;
                 $expense = 0;

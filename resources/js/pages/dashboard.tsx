@@ -28,15 +28,19 @@ interface CashflowSummary {
 interface DashboardProps extends SharedData {
     showEncryptionPrompt: boolean;
     netWorthEvolution?: NetWorthEvolutionData;
-    topCategories?: Array<{
-        category: Category | null;
-        category_id?: string | null;
-        amount: number;
-        previous_amount: number;
-        total_amount: number;
-        has_children?: boolean;
-        is_direct?: boolean;
-    }>;
+    topCategories?: {
+        categories: Array<{
+            category: Category | null;
+            category_id?: string | null;
+            amount: number;
+            previous_amount: number;
+            total_amount: number;
+            has_children?: boolean;
+            is_direct?: boolean;
+        }>;
+        from: string;
+        to: string;
+    };
     cashflowSummary?: {
         current: CashflowSummary;
         previous: CashflowSummary;
@@ -121,7 +125,7 @@ export default function Dashboard() {
         return map;
     }, [accountMetrics]);
 
-    const topCategories = props.topCategories ?? [];
+    const topCategories = props.topCategories?.categories ?? [];
 
     const refetch = useCallback(() => {
         router.reload({
@@ -232,7 +236,11 @@ export default function Dashboard() {
                             <TopCategoriesCard categories={[]} loading={true} />
                         }
                     >
-                        <TopCategoriesCard categories={topCategories} />
+                        <TopCategoriesCard
+                            categories={topCategories}
+                            from={props.topCategories?.from}
+                            to={props.topCategories?.to}
+                        />
                     </Deferred>
 
                     {props.features.cashflow && (
