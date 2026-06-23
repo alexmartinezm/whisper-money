@@ -601,6 +601,25 @@ export function AccountBalanceChart({
         return null;
     }, [activeChartData, currentInvestedAmount, hasCurrencyToggle]);
 
+    // A lone invested point (e.g. a freshly connected account whose history was
+    // backfilled with balances but cost basis only for the latest date) renders
+    // as a single dot with nothing to connect to. Only draw the invested
+    // overlay once there are at least two points to plot.
+    const hasInvestedSeries = useMemo(
+        () =>
+            activeChartData.filter(
+                (point) =>
+                    point.invested_amount !== null &&
+                    point.invested_amount !== undefined,
+            ).length >= 2,
+        [activeChartData],
+    );
+
+    const showInvestedOverlay =
+        showInvestmentBenefits &&
+        activeCurrentInvestedAmount !== null &&
+        hasInvestedSeries;
+
     const activeShortTrend = useMemo(() => {
         if (currencyMode !== 'user' || !hasCurrencyToggle) return shortTrend;
         const historicalData = activeChartData.filter((d) => !d.projected);
@@ -1043,23 +1062,20 @@ export function AccountBalanceChart({
                                         activeDot={{ r: 5 }}
                                         fillOpacity={1}
                                     />
-                                    {showInvestmentBenefits &&
-                                        activeCurrentInvestedAmount !==
-                                            null && (
-                                            <Line
-                                                dataKey="invested_amount"
-                                                type="monotone"
-                                                stroke="var(--color-chart-6)"
-                                                strokeWidth={1.5}
-                                                strokeDasharray="2 2"
-                                                dot={false}
-                                                activeDot={{ r: 4 }}
-                                                connectNulls
-                                            />
-                                        )}
+                                    {showInvestedOverlay && (
+                                        <Line
+                                            dataKey="invested_amount"
+                                            type="monotone"
+                                            stroke="var(--color-chart-6)"
+                                            strokeWidth={1.5}
+                                            strokeDasharray="2 2"
+                                            dot={false}
+                                            activeDot={{ r: 4 }}
+                                            connectNulls
+                                        />
+                                    )}
                                 </AreaChart>
-                            ) : showInvestmentBenefits &&
-                              activeCurrentInvestedAmount !== null ? (
+                            ) : showInvestedOverlay ? (
                                 <ComposedChart
                                     accessibilityLayer
                                     data={activeChartData.slice(1)}
