@@ -5,7 +5,7 @@ namespace App\Http\Requests\OpenBanking;
 use App\Enums\BankingProvider;
 use Illuminate\Foundation\Http\FormRequest;
 
-class ConnectBinanceRequest extends FormRequest
+class ConnectInteractiveBrokersRequest extends FormRequest
 {
     public function authorize(): bool
     {
@@ -17,9 +17,6 @@ class ConnectBinanceRequest extends FormRequest
      */
     public function rules(): array
     {
-        return [
-            ...BankingProvider::Binance->credentialRules(),
-            'country' => ['required', 'string', 'size:2'],
-        ];
+        return BankingProvider::InteractiveBrokers->credentialRules();
     }
 }
