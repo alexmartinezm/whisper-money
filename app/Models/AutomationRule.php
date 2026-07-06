@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\RuleOrigin;
+use App\Models\Concerns\BelongsToSpace;
 use Database\Factories\AutomationRuleFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
@@ -19,10 +20,11 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class AutomationRule extends Model
 {
     /** @use HasFactory<AutomationRuleFactory> */
-    use HasFactory, HasUuids, SoftDeletes;
+    use BelongsToSpace, HasFactory, HasUuids, SoftDeletes;
 
     protected $fillable = [
         'user_id',
+        'space_id',
         'title',
         'priority',
         'origin',
