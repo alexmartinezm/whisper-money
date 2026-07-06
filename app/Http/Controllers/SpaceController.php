@@ -131,14 +131,18 @@ class SpaceController extends Controller
     }
 
     /**
-     * Remove a member from a space (owner only). Their pointer self-heals back to
-     * their personal space on their next request.
+     * Remove a member from a space (owner only), sending them back to their
+     * personal space so they never sit on a pointer to a space they've lost.
      */
     public function removeMember(Request $request, Space $space, User $member): RedirectResponse
     {
         abort_unless($space->owner_id === $request->user()->id, 403);
 
         $space->members()->detach($member->id);
+
+        if ($member->current_space_id === $space->id) {
+            $member->forceFill(['current_space_id' => $member->personalSpace->id])->save();
+        }
 
         return back()->with('success', __('Member removed.'));
     }
