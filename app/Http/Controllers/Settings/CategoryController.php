@@ -28,6 +28,7 @@ class CategoryController extends Controller
     public function index(): Response
     {
         $categories = auth()->user()
+            ->activeSpace()
             ->categories()
             ->forDisplay()
             ->get();
