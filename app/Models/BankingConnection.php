@@ -54,6 +54,7 @@ class BankingConnection extends Model
     ];
 
     protected $hidden = [
+        'space_id',
         'api_token',
         'api_secret',
         'pending_accounts_data',

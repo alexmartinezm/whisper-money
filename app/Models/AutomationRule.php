@@ -34,6 +34,11 @@ class AutomationRule extends Model
         'action_note_iv',
     ];
 
+    /** @var list<string> */
+    protected $hidden = [
+        'space_id',
+    ];
+
     protected function casts(): array
     {
         return [

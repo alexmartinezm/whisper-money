@@ -34,6 +34,7 @@ class Budget extends Model
     /** @var list<string> */
     protected $hidden = [
         'period_duration',
+        'space_id',
     ];
 
     protected function casts(): array
