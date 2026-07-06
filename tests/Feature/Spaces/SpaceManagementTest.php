@@ -1,5 +1,6 @@
 <?php
 
+use App\Actions\CreateDefaultCategories;
 use App\Features\Spaces;
 use App\Models\Account;
 use App\Models\Category;
@@ -11,6 +12,11 @@ it('creates a space, seeds its categories and switches to it', function () {
     $user = User::factory()->onboarded()->create();
     Feature::for($user)->activate(Spaces::class);
 
+    // The personal space already carries the default categories (as it would
+    // after registration), so seeding the same names into a second space must
+    // NOT collide — category name uniqueness is per space, not per user.
+    app(CreateDefaultCategories::class)->handle($user, $user->personalSpace);
+
     $this->actingAs($user)->post('/settings/spaces', ['name' => 'Acme'])
         ->assertRedirect();
 
@@ -18,7 +24,8 @@ it('creates a space, seeds its categories and switches to it', function () {
 
     expect($space)->not->toBeNull()
         ->and($user->fresh()->current_space_id)->toBe($space->id)
-        ->and(Category::where('space_id', $space->id)->count())->toBeGreaterThan(0);
+        ->and(Category::where('space_id', $space->id)->count())->toBeGreaterThan(0)
+        ->and(Category::where('space_id', $user->personalSpace->id)->count())->toBeGreaterThan(0);
 });
 
 it('forbids creating a space without the spaces feature', function () {
