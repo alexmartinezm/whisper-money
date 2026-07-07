@@ -3,6 +3,7 @@
 namespace App\Mail;
 
 use App\Models\SpaceInvitation;
+use App\Models\User;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Mail\Mailable;
@@ -30,7 +31,7 @@ class SpaceInvitationMail extends Mailable implements ShouldQueue
     {
         return new Envelope(
             subject: __(':inviter invited you to :space on Whisper Money', [
-                'inviter' => $this->invitation->invitedBy?->name ?? __('Someone'),
+                'inviter' => User::query()->whereKey($this->invitation->invited_by_id)->value('name') ?? __('Someone'),
                 'space' => $this->invitation->space->name,
             ]),
         );
@@ -41,9 +42,8 @@ class SpaceInvitationMail extends Mailable implements ShouldQueue
         return new Content(
             markdown: 'mail.space-invitation',
             with: [
-                'invitation' => $this->invitation,
                 'spaceName' => $this->invitation->space->name,
-                'inviterName' => $this->invitation->invitedBy?->name ?? __('A Whisper Money user'),
+                'inviterName' => User::query()->whereKey($this->invitation->invited_by_id)->value('name') ?? __('A Whisper Money user'),
                 'acceptUrl' => route('spaces.invitations.accept', $this->invitation->token),
             ],
         );
