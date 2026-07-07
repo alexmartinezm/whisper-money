@@ -121,8 +121,10 @@ class Transaction extends Model
      */
     protected function resolveDefaultSpaceId(): ?string
     {
-        if ($this->account_id !== null) {
-            $spaceId = Account::query()->whereKey($this->account_id)->value('space_id');
+        $accountId = $this->getAttribute('account_id');
+
+        if ($accountId !== null) {
+            $spaceId = Account::query()->whereKey($accountId)->value('space_id');
 
             if ($spaceId !== null) {
                 return $spaceId;

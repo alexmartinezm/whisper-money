@@ -14,7 +14,7 @@ use App\Models\Transaction;
 use App\Models\User;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\DB;
 
 class BackfillSpaces extends Command
 {
@@ -69,12 +69,11 @@ class BackfillSpaces extends Command
      */
     private function stamp(string $model, string $ownerId, string $spaceId): void
     {
-        $query = $model::query()->whereNull('space_id')->where('user_id', $ownerId);
-
-        if (in_array(SoftDeletes::class, class_uses_recursive($model), true)) {
-            $query->withTrashed();
-        }
-
-        $query->update(['space_id' => $spaceId]);
+        // Go through the query builder rather than Eloquent so soft-deleted rows
+        // are stamped too (no soft-delete global scope to work around).
+        DB::table((new $model)->getTable())
+            ->whereNull('space_id')
+            ->where('user_id', $ownerId)
+            ->update(['space_id' => $spaceId]);
     }
 }

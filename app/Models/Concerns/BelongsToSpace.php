@@ -58,10 +58,12 @@ trait BelongsToSpace
      */
     protected function spaceIdFromUser(): ?string
     {
-        if ($this->user_id === null) {
+        $userId = $this->getAttribute('user_id');
+
+        if ($userId === null) {
             return null;
         }
 
-        return User::query()->whereKey($this->user_id)->value('current_space_id');
+        return User::query()->whereKey($userId)->value('current_space_id');
     }
 }
