@@ -37,6 +37,16 @@ const getNavItems = (
     isDemoAccount: boolean,
     spacesEnabled: boolean,
 ): (NavItem | NavSectionHeader | NavDivider)[] => [
+    ...(spacesEnabled
+        ? [
+              {
+                  type: 'nav-item' as const,
+                  title: 'Spaces',
+                  href: spacesIndex(),
+                  icon: null,
+              },
+          ]
+        : []),
     {
         type: 'nav-item' as const,
         title: 'Bank accounts',
@@ -67,16 +77,6 @@ const getNavItems = (
         href: labelsIndex(),
         icon: null,
     },
-    ...(spacesEnabled
-        ? [
-              {
-                  type: 'nav-item' as const,
-                  title: 'Spaces',
-                  href: spacesIndex(),
-                  icon: null,
-              },
-          ]
-        : []),
     { type: 'divider' },
     {
         type: 'section-header',
