@@ -6,6 +6,16 @@ import {
     update as updateSpace,
 } from '@/actions/App/Http/Controllers/SpaceController';
 import HeadingSmall from '@/components/heading-small';
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import {
     Dialog,
@@ -36,6 +46,7 @@ export default function Spaces() {
     const { spaces, currentSpace } = usePage<SharedData>().props;
     const [createOpen, setCreateOpen] = useState(false);
     const [renaming, setRenaming] = useState<Space | null>(null);
+    const [deleting, setDeleting] = useState<Space | null>(null);
     const [name, setName] = useState('');
     const [processing, setProcessing] = useState(false);
 
@@ -73,16 +84,16 @@ export default function Spaces() {
         );
     };
 
-    const remove = (space: Space) => {
-        if (
-            !window.confirm(
-                __('Delete this space? This cannot be undone.') +
-                    ` (${space.name})`,
-            )
-        ) {
+    const confirmDelete = () => {
+        if (!deleting) {
             return;
         }
-        router.delete(destroySpace(space.id).url, { preserveScroll: true });
+        setProcessing(true);
+        router.delete(destroySpace(deleting.id).url, {
+            preserveScroll: true,
+            onFinish: () => setProcessing(false),
+            onSuccess: () => setDeleting(null),
+        });
     };
 
     return (
@@ -169,7 +180,7 @@ export default function Spaces() {
                                                     size="sm"
                                                     className="text-destructive hover:text-destructive"
                                                     onClick={() =>
-                                                        remove(space)
+                                                        setDeleting(space)
                                                     }
                                                 >
                                                     {__('Delete')}
@@ -270,6 +281,35 @@ export default function Spaces() {
                     </form>
                 </DialogContent>
             </Dialog>
+
+            <AlertDialog
+                open={deleting !== null}
+                onOpenChange={(open) => !open && setDeleting(null)}
+            >
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>
+                            {__('Delete space')}
+                        </AlertDialogTitle>
+                        <AlertDialogDescription>
+                            {__('Delete this space? This cannot be undone.')}
+                            {deleting ? ` (${deleting.name})` : ''}
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel disabled={processing}>
+                            {__('Cancel')}
+                        </AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={confirmDelete}
+                            disabled={processing}
+                            variant="destructive"
+                        >
+                            {__('Delete')}
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </AppLayout>
     );
 }

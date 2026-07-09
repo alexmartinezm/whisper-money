@@ -2229,5 +2229,8 @@
     "Switch": "Cambiar",
     "Rename": "Renombrar",
     "Rename space": "Renombrar espacio",
-    "Remove or move this space's accounts before deleting it.": "Elimina o mueve las cuentas de este espacio antes de borrarlo."
+    "Remove or move this space's accounts before deleting it.": "Elimina o mueve las cuentas de este espacio antes de borrarlo.",
+    "Spaces settings": "Configuración de espacios",
+    "Delete space": "Eliminar espacio",
+    "This space has no accounts yet.": "Este espacio aún no tiene cuentas."
 }
