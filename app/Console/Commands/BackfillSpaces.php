@@ -43,8 +43,11 @@ class BackfillSpaces extends Command
     {
         $chunk = (int) $this->option('chunk');
 
+        // Soft-deleted users are included: their accounts/transactions still
+        // exist and must be stamped too, so a restored account keeps its data
+        // and the column can eventually go NOT NULL.
         $this->info('Provisioning personal spaces…');
-        User::query()->whereNull('current_space_id')->chunkById($chunk, function ($users): void {
+        User::withTrashed()->whereNull('current_space_id')->chunkById($chunk, function ($users): void {
             foreach ($users as $user) {
                 $user->provisionPersonalSpace();
             }
