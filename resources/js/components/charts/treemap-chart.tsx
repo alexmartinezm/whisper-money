@@ -8,7 +8,8 @@ import { formatCurrency } from '@/utils/currency';
 import { __ } from '@/utils/i18n';
 import { router } from '@inertiajs/react';
 import { format } from 'date-fns';
-import { useEffect, useMemo, useState } from 'react';
+import { ChevronRight } from 'lucide-react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { ResponsiveContainer, Tooltip, Treemap } from 'recharts';
 
 interface TreemapChartProps {
@@ -26,7 +27,7 @@ interface TreemapDatum {
     size: number;
     color: string;
     categoryId: string;
-    children?: TreemapDatum[];
+    hasChildren: boolean;
     // Satisfies recharts' TreemapDataType index signature.
     [key: string]: unknown;
 }
@@ -73,19 +74,18 @@ function CategoryNode({
     size = 0,
     color = 'var(--color-chart-4)',
     categoryId,
-    children,
+    hasChildren = false,
     currency,
     locale,
     isPrivacyModeEnabled,
 }: TreemapNodeProps) {
-    // depth 0 is the invisible root; only leaves/parents carry a category.
+    // depth 0 is the invisible root; only leaves carry a category.
     if (depth < 1 || !categoryId) {
         return null;
     }
 
     const showName = width >= 40 && height >= 22;
     const showAmount = width >= 55 && height >= 40;
-    const hasChildren = Array.isArray(children) && children.length > 0;
 
     return (
         <g style={{ cursor: 'pointer' }}>
@@ -176,10 +176,11 @@ export function TreemapChart({
     const { isPrivacyModeEnabled } = usePrivacyMode();
     const { categoryBarColor } = useChartColors();
 
-    // Nest mode needs the full tree upfront, so prefetch each parent's children.
-    // ponytail: one level deep — matches the old sankey; deeper nesting would
-    // need recursive fetching and rollUp already caps categories at depth 3.
-    const [childrenByParent, setChildrenByParent] = useState<
+    // Self-controlled drill-down: recharts' native "nest" breadcrumb can't
+    // offer a way back to the root, so we keep our own path + children cache
+    // and render a flat treemap per level.
+    const [path, setPath] = useState<Array<{ id: string; name: string }>>([]);
+    const [childrenById, setChildrenById] = useState<
         Record<string, SankeyCategory[]>
     >({});
 
@@ -188,91 +189,29 @@ export function TreemapChart({
         : '';
 
     useEffect(() => {
-        if (!period) {
-            return;
-        }
-
-        const parents = categories.filter(
-            (item) => item.has_children && item.category_id,
-        );
-
-        if (parents.length === 0) {
-            setChildrenByParent({});
-            return;
-        }
-
-        const from = format(period.from, 'yyyy-MM-dd');
-        const to = format(period.to, 'yyyy-MM-dd');
-        let cancelled = false;
-
-        Promise.all(
-            parents.map(async (parent) => {
-                const response = await fetch(
-                    `/api/cashflow/sankey?from=${from}&to=${to}&parent=${parent.category_id}`,
-                );
-                const json: SankeyData = await response.json();
-                const kids =
-                    mode === 'income'
-                        ? json.income_categories
-                        : json.expense_categories;
-
-                return [parent.category_id, kids] as const;
-            }),
-        )
-            .then((entries) => {
-                if (cancelled) {
-                    return;
-                }
-
-                const next: Record<string, SankeyCategory[]> = {};
-                entries.forEach(([id, kids]) => {
-                    next[id] = kids;
-                });
-                setChildrenByParent(next);
-            })
-            .catch((error) => {
-                console.error('Failed to fetch subcategories:', error);
-            });
-
-        return () => {
-            cancelled = true;
-        };
-        // categoryBarColor is intentionally excluded: it changes identity every
-        // render and colours are applied in the memo below, not here.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [categories, periodKey, mode]);
+        setPath([]);
+        setChildrenById({});
+    }, [periodKey, mode]);
 
     const data = useMemo<TreemapDatum[]>(() => {
-        const toDatum = (
-            item: SankeyCategory,
-            index: number,
-        ): TreemapDatum => ({
-            name: item.category.name,
-            size: item.amount,
-            color: categoryBarColor(item.category.color, index),
-            categoryId: item.category_id ?? '',
-        });
+        const current =
+            path.length === 0
+                ? categories
+                : (childrenById[path[path.length - 1].id] ?? []);
 
-        const sortPositive = (items: SankeyCategory[]): SankeyCategory[] =>
-            [...items]
-                .filter((item) => item.amount > 0)
-                .sort((a, b) => b.amount - a.amount);
+        return [...current]
+            .filter((item) => item.amount > 0)
+            .sort((a, b) => b.amount - a.amount)
+            .map((item, index) => ({
+                name: item.category.name,
+                size: item.amount,
+                color: categoryBarColor(item.category.color, index),
+                categoryId: item.category_id ?? '',
+                hasChildren: !!item.has_children,
+            }));
+    }, [categories, childrenById, path, categoryBarColor]);
 
-        return sortPositive(categories).map((item, index) => {
-            const datum = toDatum(item, index);
-            const kids = item.category_id
-                ? childrenByParent[item.category_id]
-                : undefined;
-
-            if (kids && kids.length > 0) {
-                datum.children = sortPositive(kids).map(toDatum);
-            }
-
-            return datum;
-        });
-    }, [categories, childrenByParent, categoryBarColor]);
-
-    if (total === 0 || data.length === 0) {
+    if (total === 0 || categories.length === 0) {
         return (
             <div
                 className={cn(
@@ -286,8 +225,38 @@ export function TreemapChart({
         );
     }
 
-    const navigate = (categoryId: unknown) => {
-        if (!categoryId || typeof categoryId !== 'string' || !period) {
+    const drillInto = async (categoryId: string, name: string) => {
+        if (!period) {
+            return;
+        }
+
+        if (!(categoryId in childrenById)) {
+            try {
+                const from = format(period.from, 'yyyy-MM-dd');
+                const to = format(period.to, 'yyyy-MM-dd');
+                const response = await fetch(
+                    `/api/cashflow/sankey?from=${from}&to=${to}&parent=${categoryId}`,
+                );
+                const json: SankeyData = await response.json();
+                const kids =
+                    mode === 'income'
+                        ? json.income_categories
+                        : json.expense_categories;
+                setChildrenById((previous) => ({
+                    ...previous,
+                    [categoryId]: kids,
+                }));
+            } catch (error) {
+                console.error('Failed to fetch subcategories:', error);
+                return;
+            }
+        }
+
+        setPath((previous) => [...previous, { id: categoryId, name }]);
+    };
+
+    const navigate = (categoryId: string) => {
+        if (!categoryId || !period) {
             return;
         }
 
@@ -302,30 +271,68 @@ export function TreemapChart({
         );
     };
 
+    const rootLabel = mode === 'income' ? __('Income') : __('Expenses');
+
     return (
-        <div
-            className={cn(
-                'w-full',
-                // Recharts renders the nest breadcrumb with hardcoded inline
-                // styles; override them to match the design system.
-                '[&_.recharts-treemap-nest-index-box]:!mr-1 [&_.recharts-treemap-nest-index-box]:!rounded [&_.recharts-treemap-nest-index-box]:!bg-muted [&_.recharts-treemap-nest-index-box]:!px-2 [&_.recharts-treemap-nest-index-box]:!text-foreground',
-                className,
+        <div className={cn('w-full', className)}>
+            {path.length > 0 && (
+                <nav
+                    aria-label={__('Breadcrumb')}
+                    className="mb-3 flex flex-wrap items-center gap-1 text-sm"
+                >
+                    <button
+                        type="button"
+                        onClick={() => setPath([])}
+                        className="cursor-pointer font-medium text-muted-foreground hover:text-foreground"
+                    >
+                        {rootLabel}
+                    </button>
+                    {path.map((item, index) => {
+                        const isLast = index === path.length - 1;
+
+                        return (
+                            <Fragment key={item.id}>
+                                <ChevronRight className="size-3.5 text-muted-foreground" />
+                                {isLast ? (
+                                    <span className="font-medium text-foreground">
+                                        {item.name}
+                                    </span>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={() =>
+                                            setPath(path.slice(0, index + 1))
+                                        }
+                                        className="cursor-pointer text-muted-foreground hover:text-foreground"
+                                    >
+                                        {item.name}
+                                    </button>
+                                )}
+                            </Fragment>
+                        );
+                    })}
+                </nav>
             )}
-        >
+
             <ResponsiveContainer width="100%" height={height}>
                 <Treemap
                     data={data}
                     dataKey="size"
-                    type="nest"
                     nodeGap={2}
-                    // ponytail: key by mode so a toggle switch re-lays out cleanly
-                    key={mode}
+                    // ponytail: key by level so switching mode/level re-lays out cleanly
+                    key={`${mode}-${path.length}`}
                     isAnimationActive={false}
-                    // In nest mode onClick fires on every node; parents zoom in,
-                    // so only leaves navigate to their transactions.
                     onClick={(node) => {
-                        if (!node.children) {
-                            navigate(node.categoryId);
+                        const id = node.categoryId;
+
+                        if (typeof id !== 'string' || !id) {
+                            return;
+                        }
+
+                        if (node.hasChildren) {
+                            drillInto(id, String(node.name ?? ''));
+                        } else {
+                            navigate(id);
                         }
                     }}
                     content={
