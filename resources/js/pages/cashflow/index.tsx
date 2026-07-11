@@ -2,9 +2,10 @@ import { BreakdownCard } from '@/components/cashflow/breakdown-card';
 import { NetCashflowCard } from '@/components/cashflow/net-cashflow-card';
 import { PeriodNavigation } from '@/components/cashflow/period-navigation';
 import { SavedInvestedCard } from '@/components/cashflow/saved-invested-card';
-import { CashflowTrendChart, SankeyChart } from '@/components/charts';
+import { CashflowTrendChart, TreemapChart } from '@/components/charts';
 import HeadingSmall from '@/components/heading-small';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { CashflowPeriodType, useCashflowData } from '@/hooks/use-cashflow-data';
 import AppSidebarLayout from '@/layouts/app/app-sidebar-layout';
 import { cashflow } from '@/routes';
@@ -121,6 +122,8 @@ export default function CashflowPage() {
     const [periodType, setPeriodType] =
         useState<CashflowPeriodType>(initialPeriodType);
 
+    const [flowMode, setFlowMode] = useState<'income' | 'expense'>('expense');
+
     const [currentDate, setCurrentDate] = useState<Date>(() =>
         parsePeriodParam(initialPeriod, initialPeriodType),
     );
@@ -202,19 +205,54 @@ export default function CashflowPage() {
                     periodType={periodType}
                 />
 
-                {/* Sankey Diagram */}
+                {/* Treemap */}
                 <Card>
-                    <CardHeader className="pb-4">
+                    <CardHeader className="flex flex-row items-center justify-between gap-4 pb-4">
                         <CardTitle className="text-base">
                             {__('Money Flow')}
                         </CardTitle>
+
+                        <ToggleGroup
+                            type="single"
+                            value={flowMode}
+                            onValueChange={(value) => {
+                                if (value) {
+                                    setFlowMode(value as 'income' | 'expense');
+                                }
+                            }}
+                            variant="outline"
+                            size="sm"
+                        >
+                            <ToggleGroupItem
+                                value="income"
+                                className="cursor-pointer px-3 text-xs aria-checked:bg-primary/10"
+                            >
+                                {__('Income')}
+                            </ToggleGroupItem>
+                            <ToggleGroupItem
+                                value="expense"
+                                className="cursor-pointer px-3 text-xs aria-checked:bg-primary/10"
+                            >
+                                {__('Expenses')}
+                            </ToggleGroupItem>
+                        </ToggleGroup>
                     </CardHeader>
                     <CardContent>
                         {isLoading ? (
                             <div className="h-[400px] animate-pulse rounded bg-gray-200 dark:bg-gray-700" />
                         ) : (
-                            <SankeyChart
-                                data={sankey}
+                            <TreemapChart
+                                categories={
+                                    flowMode === 'income'
+                                        ? sankey.income_categories
+                                        : sankey.expense_categories
+                                }
+                                total={
+                                    flowMode === 'income'
+                                        ? sankey.total_income
+                                        : sankey.total_expense
+                                }
+                                mode={flowMode}
                                 height={400}
                                 currency={auth.user.currency_code}
                                 period={period}
