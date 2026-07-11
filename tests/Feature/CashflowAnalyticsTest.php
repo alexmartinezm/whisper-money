@@ -1480,3 +1480,62 @@ test('drilling into a parent splits it into children plus a direct node', functi
     expect($directNode['category_id'])->toBe($parent->id)
         ->and($directNode['amount'])->toBe(10000);
 });
+
+test('sankey nested=1 returns the full three-level tree with rolled-up amounts', function () {
+    $account = Account::factory()->create(['user_id' => $this->user->id]);
+
+    $food = Category::factory()->create([
+        'user_id' => $this->user->id,
+        'name' => 'Food',
+        'type' => CategoryType::Expense,
+    ]);
+    $groceries = Category::factory()->childOf($food)->create([
+        'user_id' => $this->user->id,
+        'name' => 'Groceries',
+    ]);
+    $organic = Category::factory()->childOf($groceries)->create([
+        'user_id' => $this->user->id,
+        'name' => 'Organic',
+    ]);
+
+    // $100 directly on Food, $50 directly on Groceries, $30 on Organic.
+    foreach ([[$food, -10000], [$groceries, -5000], [$organic, -3000]] as [$category, $amount]) {
+        Transaction::factory()->create([
+            'user_id' => $this->user->id,
+            'account_id' => $account->id,
+            'category_id' => $category->id,
+            'amount' => $amount,
+            'transaction_date' => now(),
+        ]);
+    }
+
+    $response = $this->getJson('/api/cashflow/sankey?'.http_build_query([
+        'from' => now()->startOfMonth()->toDateString(),
+        'to' => now()->endOfMonth()->toDateString(),
+        'nested' => 1,
+    ]));
+
+    $response->assertOk()->assertJsonPath('total_expense', 18000);
+
+    $expense = collect($response->json('expense_categories'));
+    expect($expense)->toHaveCount(1);
+
+    $foodNode = $expense->first();
+    expect($foodNode['category_id'])->toBe($food->id)
+        ->and($foodNode['amount'])->toBe(18000);
+
+    $foodChildren = collect($foodNode['children']);
+    expect($foodChildren)->toHaveCount(2);
+
+    $groceriesNode = $foodChildren->firstWhere('category_id', $groceries->id);
+    expect($groceriesNode['is_direct'])->toBeFalse()
+        ->and($groceriesNode['amount'])->toBe(8000);
+
+    $foodDirect = $foodChildren->firstWhere('is_direct', true);
+    expect($foodDirect['category_id'])->toBe($food->id)
+        ->and($foodDirect['amount'])->toBe(10000);
+
+    $groceriesChildren = collect($groceriesNode['children']);
+    expect($groceriesChildren->firstWhere('category_id', $organic->id)['amount'])->toBe(3000)
+        ->and($groceriesChildren->firstWhere('is_direct', true)['amount'])->toBe(5000);
+});

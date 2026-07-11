@@ -2,9 +2,10 @@ import { BreakdownCard } from '@/components/cashflow/breakdown-card';
 import { NetCashflowCard } from '@/components/cashflow/net-cashflow-card';
 import { PeriodNavigation } from '@/components/cashflow/period-navigation';
 import { SavedInvestedCard } from '@/components/cashflow/saved-invested-card';
-import { CashflowTrendChart, SankeyChart } from '@/components/charts';
+import { CashflowTrendChart, MultiLevelDonut } from '@/components/charts';
 import HeadingSmall from '@/components/heading-small';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { CashflowPeriodType, useCashflowData } from '@/hooks/use-cashflow-data';
 import AppSidebarLayout from '@/layouts/app/app-sidebar-layout';
 import { cashflow } from '@/routes';
@@ -121,6 +122,10 @@ export default function CashflowPage() {
     const [periodType, setPeriodType] =
         useState<CashflowPeriodType>(initialPeriodType);
 
+    const [donutView, setDonutView] = useState<'combined' | 'expense'>(
+        'combined',
+    );
+
     const [currentDate, setCurrentDate] = useState<Date>(() =>
         parsePeriodParam(initialPeriod, initialPeriodType),
     );
@@ -202,19 +207,47 @@ export default function CashflowPage() {
                     periodType={periodType}
                 />
 
-                {/* Sankey Diagram */}
+                {/* Money Flow donut */}
                 <Card>
-                    <CardHeader className="pb-4">
+                    <CardHeader className="flex flex-row items-center justify-between gap-2 pb-4">
                         <CardTitle className="text-base">
                             {__('Money Flow')}
                         </CardTitle>
+
+                        <ToggleGroup
+                            type="single"
+                            value={donutView}
+                            onValueChange={(value) => {
+                                if (value) {
+                                    setDonutView(
+                                        value as 'combined' | 'expense',
+                                    );
+                                }
+                            }}
+                            variant="outline"
+                            size="sm"
+                        >
+                            <ToggleGroupItem
+                                value="combined"
+                                className="cursor-pointer px-3 text-xs aria-checked:bg-primary/10"
+                            >
+                                {__('Combined')}
+                            </ToggleGroupItem>
+                            <ToggleGroupItem
+                                value="expense"
+                                className="cursor-pointer px-3 text-xs aria-checked:bg-primary/10"
+                            >
+                                {__('Expenses only')}
+                            </ToggleGroupItem>
+                        </ToggleGroup>
                     </CardHeader>
                     <CardContent>
                         {isLoading ? (
                             <div className="h-[400px] animate-pulse rounded bg-gray-200 dark:bg-gray-700" />
                         ) : (
-                            <SankeyChart
+                            <MultiLevelDonut
                                 data={sankey}
+                                showIncome={donutView === 'combined'}
                                 height={400}
                                 currency={auth.user.currency_code}
                                 period={period}

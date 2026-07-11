@@ -220,6 +220,116 @@ class CategoryTree
     }
 
     /**
+     * Build the full nested spend tree for a set of leaf amounts.
+     *
+     * Every category keeps the amount that sits directly on it plus a recursive
+     * `children` array, so a caller can render all levels at once (e.g. a
+     * concentric multi-level donut). A node that carries both direct spend and
+     * real children surfaces the direct portion as a synthetic "Direct" child,
+     * so a node's children always sum to the node total and the rings align.
+     * Bounded by MAX_DEPTH; the category tree is acyclic by construction.
+     *
+     * @param  array<int, array{category_id: ?string, category: Category|null, amount: int}>  $categorized
+     * @return array<int, array{category_id: string, category: Category, amount: int, is_direct: bool, children: array<int, mixed>}>
+     */
+    public function nest(array $categorized, string $userId): array
+    {
+        $categories = Category::query()
+            ->where('user_id', $userId)
+            ->forDisplay()
+            ->get()
+            ->keyBy('id');
+
+        $parentMap = $categories->mapWithKeys(fn (Category $category): array => [$category->id => $category->parent_id])->all();
+
+        $childrenMap = [];
+        foreach ($parentMap as $id => $parentId) {
+            if ($parentId !== null) {
+                $childrenMap[$parentId][] = $id;
+            }
+        }
+
+        $directAmount = [];
+        foreach ($categorized as $item) {
+            $categoryId = $item['category_id'];
+
+            if ($categoryId === null || ! array_key_exists($categoryId, $parentMap)) {
+                continue;
+            }
+
+            $directAmount[$categoryId] = ($directAmount[$categoryId] ?? 0) + $item['amount'];
+        }
+
+        $build = function (string $id, int $depth) use (&$build, $categories, $childrenMap, $directAmount): ?array {
+            if ($depth > Category::MAX_DEPTH) {
+                return null;
+            }
+
+            $direct = $directAmount[$id] ?? 0;
+
+            $children = [];
+            foreach ($childrenMap[$id] ?? [] as $childId) {
+                $childNode = $build($childId, $depth + 1);
+
+                if ($childNode !== null) {
+                    $children[] = $childNode;
+                }
+            }
+
+            $total = $direct + array_sum(array_column($children, 'amount'));
+
+            if ($total <= 0) {
+                return null;
+            }
+
+            $category = $categories->get($id);
+
+            if ($direct > 0 && $children !== []) {
+                $children[] = [
+                    'category_id' => $category->id,
+                    'category' => (new Category)->forceFill([
+                        'id' => $category->id,
+                        'name' => __('Direct'),
+                        'icon' => $category->icon,
+                        'color' => $category->color,
+                        'type' => $category->type,
+                        'cashflow_direction' => $category->cashflow_direction,
+                        'parent_id' => $category->id,
+                    ]),
+                    'amount' => $direct,
+                    'is_direct' => true,
+                    'children' => [],
+                ];
+            }
+
+            usort($children, fn (array $a, array $b): int => $b['amount'] <=> $a['amount']);
+
+            return [
+                'category_id' => $category->id,
+                'category' => $category,
+                'amount' => $total,
+                'is_direct' => false,
+                'children' => $children,
+            ];
+        };
+
+        $roots = [];
+        foreach ($parentMap as $id => $parentId) {
+            if ($parentId === null) {
+                $node = $build($id, 1);
+
+                if ($node !== null) {
+                    $roots[] = $node;
+                }
+            }
+        }
+
+        usort($roots, fn (array $a, array $b): int => $b['amount'] <=> $a['amount']);
+
+        return $roots;
+    }
+
+    /**
      * Build a two-level spending breakdown: each top-level category with its
      * rolled-up total, and the immediate sub-categories that carry spending
      * nested beneath it. Grand-children fold into their level-2 ancestor;

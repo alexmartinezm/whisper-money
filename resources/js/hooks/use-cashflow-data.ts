@@ -15,10 +15,14 @@ export interface CashflowSummary {
 
 export interface SankeyCategory {
     category: Category;
-    category_id: string;
+    category_id: string | null;
     amount: number;
     has_children?: boolean;
     is_direct?: boolean;
+    /** Present when the sankey endpoint is queried with `nested=1`. */
+    children?: SankeyCategory[];
+    /** Client-side synthetic node (e.g. a grouped "Other" slice). */
+    synthetic?: boolean;
 }
 
 export interface SankeyData {
@@ -122,8 +126,8 @@ export function useCashflowData({
                     fetch(`/api/cashflow/summary${periodQuery}`).then((r) =>
                         r.json(),
                     ),
-                    fetch(`/api/cashflow/sankey${periodQuery}`).then((r) =>
-                        r.json(),
+                    fetch(`/api/cashflow/sankey${periodQuery}&nested=1`).then(
+                        (r) => r.json(),
                     ),
                     fetch(`/api/cashflow/trend${trendQuery}`).then((r) =>
                         r.json(),

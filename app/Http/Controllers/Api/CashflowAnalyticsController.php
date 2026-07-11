@@ -51,6 +51,7 @@ class CashflowAnalyticsController extends Controller
             'from' => 'required|date',
             'to' => 'required|date',
             'parent' => 'nullable|uuid',
+            'nested' => 'nullable|boolean',
         ]);
 
         $from = Carbon::parse($validated['from']);
@@ -58,10 +59,18 @@ class CashflowAnalyticsController extends Controller
         $user = $request->user();
         $drillParentId = $validated['parent'] ?? null;
 
-        // Split by sign, not by category type: a single category can appear on
-        // both sides when it has both incoming and outgoing transactions.
-        $incomeCategories = $this->getSankeyBreakdown($user->id, $user->currency_code, $from, $to, '>', $drillParentId);
-        $expenseCategories = $this->getSankeyBreakdown($user->id, $user->currency_code, $from, $to, '<', $drillParentId);
+        if ($request->boolean('nested')) {
+            // The nested donut mirrors the income/expense breakdown cards:
+            // strictly typed Income/Expense, so savings, investments and
+            // transfers are left out and its totals match the rest of the page.
+            $incomeCategories = $this->getNestedCategoryTree($user->id, $user->currency_code, $from, $to, CategoryType::Income);
+            $expenseCategories = $this->getNestedCategoryTree($user->id, $user->currency_code, $from, $to, CategoryType::Expense);
+        } else {
+            // Split by sign, not by category type: a single category can appear
+            // on both sides when it has both incoming and outgoing transactions.
+            $incomeCategories = $this->getSankeyBreakdown($user->id, $user->currency_code, $from, $to, '>', $drillParentId);
+            $expenseCategories = $this->getSankeyBreakdown($user->id, $user->currency_code, $from, $to, '<', $drillParentId);
+        }
 
         $totalIncome = $incomeCategories->sum('amount');
         $totalExpense = $expenseCategories->sum('amount');
@@ -333,6 +342,70 @@ class CashflowAnalyticsController extends Controller
         }
 
         return $categorized;
+    }
+
+    /**
+     * The full nested Income/Expense tree for the donut, strictly by category
+     * type (no savings, investments or transfers), so its totals match the
+     * summary and breakdown cards. Uncategorized amounts on the matching sign
+     * surface as a single top-level node.
+     */
+    private function getNestedCategoryTree(string $userId, string $userCurrency, Carbon $from, Carbon $to, CategoryType $type): Collection
+    {
+        $transactions = Transaction::query()
+            ->where('transactions.user_id', $userId)
+            ->whereBetween('transactions.transaction_date', [$from, $to])
+            ->with(['account', 'category'])
+            ->get();
+
+        $this->preloadExchangeRates($transactions, $userCurrency);
+
+        $categorized = $transactions
+            ->filter(fn (Transaction $transaction): bool => $transaction->categoryType() === $type)
+            ->groupBy('category_id')
+            ->map(function (Collection $transactions) use ($userCurrency): array {
+                $totalAmount = $transactions->sum(fn (Transaction $transaction): int => $this->convertTransactionAmount($transaction, $userCurrency));
+
+                return [
+                    'category_id' => $transactions->first()->category_id,
+                    'category' => $transactions->first()->category,
+                    'amount' => abs($totalAmount),
+                    'total_amount' => $totalAmount,
+                ];
+            })
+            ->filter(fn (array $item): bool => $this->categoryNetAmountMatchesSide($item['total_amount'], $type))
+            ->map(fn (array $item): array => [
+                'category_id' => $item['category_id'],
+                'category' => $item['category'],
+                'amount' => $item['amount'],
+            ]);
+
+        $tree = collect($this->tree->nest($categorized->values()->all(), $userId));
+
+        $uncategorized = $transactions
+            ->filter(function (Transaction $transaction) use ($type): bool {
+                return $transaction->category_id === null
+                    && $this->matchesSign($transaction->amount, $type === CategoryType::Income ? '>' : '<');
+            })
+            ->sum(fn (Transaction $transaction): int => $this->convertTransactionAmount($transaction, $userCurrency));
+
+        if ($uncategorized != 0) {
+            $tree->push([
+                'category_id' => null,
+                'category' => (new Category)->forceFill([
+                    'id' => null,
+                    'name' => $type === CategoryType::Income ? __('Unknown Income') : __('Unknown Expense'),
+                    'type' => $type,
+                    'color' => 'gray',
+                    'icon' => 'HelpCircle',
+                ]),
+                'amount' => abs($uncategorized),
+                'is_direct' => false,
+                'children' => [],
+            ]);
+        }
+
+        return $tree;
     }
 
     private function getMonthlyTrendTotals(string $userId, string $userCurrency, Carbon $from, Carbon $to): Collection
