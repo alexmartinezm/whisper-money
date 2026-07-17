@@ -45,6 +45,42 @@ test('it never warns a subscribed user even when the subscriptions flag is off',
     Queue::assertNotPushed(SendUpdateEmailJob::class);
 });
 
+test('it never warns a trialing or past-due subscriber even when the subscriptions flag is off', function (string $status) {
+    config(['subscriptions.enabled' => false]);
+
+    $billed = User::factory()->create();
+    Transaction::factory()->for($billed)->create();
+    $billed->subscriptions()->create([
+        'type' => 'default',
+        'stripe_id' => "sub_{$status}",
+        'stripe_status' => $status,
+        'stripe_price' => 'price_test123',
+        'trial_ends_at' => $status === 'trialing' ? now()->addDays(5) : null,
+    ]);
+
+    artisan('encryption:notify-removal', ['--force' => true])->assertSuccessful();
+
+    Queue::assertNotPushed(SendUpdateEmailJob::class);
+})->with(['trialing', 'past_due']);
+
+test('it warns a subscriber who is only in the cancellation grace period', function () {
+    config(['subscriptions.enabled' => false]);
+
+    $grace = User::factory()->create();
+    Transaction::factory()->for($grace)->create();
+    $grace->subscriptions()->create([
+        'type' => 'default',
+        'stripe_id' => 'sub_grace123',
+        'stripe_status' => 'active',
+        'stripe_price' => 'price_test123',
+        'ends_at' => now()->addDays(5),
+    ]);
+
+    artisan('encryption:notify-removal', ['--force' => true])->assertSuccessful();
+
+    Queue::assertPushed(SendUpdateEmailJob::class, fn (SendUpdateEmailJob $job) => $job->user->is($grace));
+});
+
 test('it queues on the emails queue', function () {
     $user = User::factory()->create();
     Transaction::factory()->for($user)->create();
