@@ -44,7 +44,7 @@ class CategorizeTransactions
         $byRef = $transactions->keyBy(fn (Transaction $transaction): string => $transaction->id);
         $results = $this->resolve($user, $transactions, $catalog);
 
-        $labelBar = (float) config('ai_categorization.label_confidence');
+        $labelBar = $user->aiConfidenceThresholdPercent() / 100;
         $model = (string) config('ai_categorization.model');
         $outcomes = [];
 

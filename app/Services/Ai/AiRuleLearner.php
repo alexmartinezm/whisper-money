@@ -64,6 +64,14 @@ class AiRuleLearner
             return null;
         }
 
+        // Never generalise a suggestion we weren't confident enough to even apply
+        // to the single transaction. This ties tier 2 to the user's (possibly
+        // raised) label bar: the effective rule bar is max(label bar, rule bar),
+        // so raising the threshold to reduce automation also holds back rules.
+        if (! $outcome->applied) {
+            return null;
+        }
+
         if ($outcome->confidence < (float) config('ai_categorization.rule_confidence')) {
             return null;
         }

@@ -286,6 +286,17 @@ class User extends Authenticatable implements HasLocalePreference, MustVerifyEma
     }
 
     /**
+     * The minimum confidence (as a percentage, 0-100) at which an AI-suggested
+     * category is auto-applied, falling back to the global default when the user
+     * has never adjusted it. Stored in percent; the engine divides by 100.
+     */
+    public function aiConfidenceThresholdPercent(): int
+    {
+        return $this->setting->ai_confidence_threshold
+            ?? (int) round((float) config('ai_categorization.label_confidence') * 100);
+    }
+
+    /**
      * Record an AI consent for the current consent version (idempotent).
      */
     public function recordAiConsent(string $scope = AiConsent::SCOPE_FINANCE): AiConsent

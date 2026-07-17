@@ -79,6 +79,32 @@ it('auto-applies the category when confidence clears the label bar', function ()
         ->and($outcomes[0]->merchantUnambiguous)->toBeTrue();
 });
 
+it('honours the user confidence threshold over the config default', function () {
+    $user = User::factory()->create();
+    $user->setting()->create(['ai_confidence_threshold' => 90]);
+    $category = groceries($user);
+    $transaction = uncategorized($user);
+
+    $index = leafIndex(CategoryCatalog::forUser($user), $category->id);
+
+    TransactionCategorizationAgent::fake([
+        ['results' => [[
+            'ref' => $transaction->id,
+            'category_index' => $index,
+            'confidence' => 0.8,
+            'merchant_unambiguous' => true,
+        ]]],
+    ]);
+
+    $outcomes = app(CategorizeTransactions::class)->forTransactions($user, collect([$transaction]));
+
+    $transaction->refresh();
+
+    expect($transaction->category_id)->toBeNull()
+        ->and($transaction->ai_suggested_category_id)->toBe($category->id)
+        ->and($outcomes[0]->applied)->toBeFalse();
+});
+
 it('leaves the transaction blank but records the suggestion when confidence is below the label bar', function () {
     $user = User::factory()->create();
     $category = groceries($user);

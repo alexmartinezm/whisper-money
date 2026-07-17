@@ -191,6 +191,7 @@ class SubscriptionController extends Controller
 
         return Inertia::render('settings/billing', [
             'hasAiConsent' => $user->hasActiveAiConsent(),
+            'aiConfidenceThreshold' => $user->aiConfidenceThresholdPercent(),
             'refund' => [
                 'canSelfRefund' => $this->experimentOffer->canSelfRefund($user),
                 'deadline' => $subscription !== null && $this->experimentOffer->variantFor($user) === SubscriptionExperiment::PAY_NOW

@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\OpenBanking\ConnectionController;
 use App\Http\Controllers\Settings\AccountController;
+use App\Http\Controllers\Settings\AiConfidenceThresholdController;
 use App\Http\Controllers\Settings\AutomationRuleApplicationController;
 use App\Http\Controllers\Settings\AutomationRuleController;
 use App\Http\Controllers\Settings\BankController;
@@ -96,6 +97,9 @@ Route::middleware('auth')->group(function () {
 
     Route::patch('settings/net-worth-chart-real-estate-preference', [NetWorthChartRealEstatePreferenceController::class, 'update'])
         ->name('net-worth-chart-real-estate-preference.update');
+
+    Route::patch('settings/ai-confidence-threshold', [AiConfidenceThresholdController::class, 'update'])
+        ->name('ai-confidence-threshold.update');
 
     Route::get('settings/billing', [SubscriptionController::class, 'billing'])->name('settings.billing');
     Route::get('settings/billing/portal', [SubscriptionController::class, 'billingPortal'])->name('settings.billing.portal');

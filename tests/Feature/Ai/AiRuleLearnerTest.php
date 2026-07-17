@@ -52,6 +52,19 @@ it('creates an ai-owned rule at the lowest priority and links the transaction', 
         ->and($transaction->refresh()->categorized_by_rule_id)->toBe($rule->id);
 });
 
+it('does not learn a rule from a confident suggestion that was not applied', function () {
+    $user = User::factory()->create();
+    $category = expenseCategory($user);
+    $transaction = merchantTransaction($user, 'Mercadona');
+
+    // Above rule_confidence and unambiguous, but the user's raised label bar kept
+    // it from being applied (applied = false) — no forward rule should be learned.
+    $notApplied = new CategorizationOutcome($transaction, $category->id, 0.9, true, false);
+
+    expect(app(AiRuleLearner::class)->learn($notApplied))->toBeNull()
+        ->and($transaction->refresh()->categorized_by_rule_id)->toBeNull();
+});
+
 it('resolves a fresh instance per container lookup so the memoized corpus cannot leak or go stale', function () {
     // The per-user corpus cache has no invalidation and is safe only while the
     // learner is never a singleton. Guard that invariant.

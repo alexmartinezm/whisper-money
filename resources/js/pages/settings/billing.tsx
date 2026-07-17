@@ -29,7 +29,7 @@ import {
     SparklesIcon,
     ZapIcon,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -389,12 +389,66 @@ function SubscribedSection({
     );
 }
 
+function ConfidenceThresholdControl({ initial }: { initial: number }) {
+    const [value, setValue] = useState(initial);
+    const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+    const handleChange = (next: number) => {
+        setValue(next);
+        clearTimeout(saveTimer.current);
+        saveTimer.current = setTimeout(() => {
+            router.patch(
+                '/settings/ai-confidence-threshold',
+                { ai_confidence_threshold: next },
+                {
+                    preserveScroll: true,
+                    preserveState: true,
+                    only: ['aiConfidenceThreshold'],
+                },
+            );
+        }, 400);
+    };
+
+    return (
+        <div className="mt-4 border-t pt-4">
+            <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">
+                    {__('Confidence threshold')}
+                </span>
+                <span className="text-sm font-medium text-muted-foreground tabular-nums">
+                    {value}%
+                </span>
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">
+                {__(
+                    'Only auto-apply a suggested category when the AI is at least this confident. Higher keeps more transactions uncategorized but makes the ones it does apply more accurate. Changes apply to transactions categorized from now on.',
+                )}
+            </p>
+            <input
+                type="range"
+                min={50}
+                max={95}
+                step={5}
+                value={value}
+                aria-label={__('Confidence threshold')}
+                aria-valuetext={`${value}%`}
+                onChange={(event) =>
+                    handleChange(Number(event.currentTarget.value))
+                }
+                className="mt-3 w-full accent-emerald-600"
+            />
+        </div>
+    );
+}
+
 function AiConsentSection({
     initialConsent,
     hasProPlan,
+    initialConfidenceThreshold,
 }: {
     initialConsent: boolean;
     hasProPlan: boolean;
+    initialConfidenceThreshold: number;
 }) {
     const [consented, setConsented] = useState(initialConsent);
     const [saving, setSaving] = useState(false);
@@ -458,6 +512,12 @@ function AiConsentSection({
                     </div>
                 </label>
 
+                {consented && (
+                    <ConfidenceThresholdControl
+                        initial={initialConfidenceThreshold}
+                    />
+                )}
+
                 {!hasProPlan && (
                     <p className="mt-3 border-t pt-3 text-sm text-amber-600 dark:text-amber-400">
                         {__(
@@ -471,8 +531,19 @@ function AiConsentSection({
 }
 
 export default function Billing() {
-    const { auth, pricing, locale, hasAiConsent, refund } = usePage<
-        SharedData & { hasAiConsent: boolean; refund?: RefundInfo }
+    const {
+        auth,
+        pricing,
+        locale,
+        hasAiConsent,
+        aiConfidenceThreshold,
+        refund,
+    } = usePage<
+        SharedData & {
+            hasAiConsent: boolean;
+            aiConfidenceThreshold: number;
+            refund?: RefundInfo;
+        }
     >().props;
     const isDemoAccount = auth?.isDemoAccount ?? false;
     const hasProPlan = auth?.hasProPlan ?? false;
@@ -505,6 +576,7 @@ export default function Billing() {
                     <AiConsentSection
                         initialConsent={hasAiConsent}
                         hasProPlan={hasProPlan}
+                        initialConfidenceThreshold={aiConfidenceThreshold}
                     />
                 </div>
             </SettingsLayout>
