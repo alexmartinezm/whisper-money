@@ -409,10 +409,21 @@ class User extends Authenticatable implements HasLocalePreference, MustVerifyEma
      */
     public function hasActiveSubscriptionOrTrial(): bool
     {
-        if (! config('subscriptions.enabled')) {
-            return false;
-        }
+        return config('subscriptions.enabled') && $this->isBilled();
+    }
 
+    /**
+     * Whether the user is on a generic trial or holds a subscription that is still
+     * valid and not merely coasting through its grace period (it will not renew).
+     *
+     * Unlike hasActiveSubscriptionOrTrial() this is independent of the
+     * `subscriptions.enabled` flag: that flag controls whether the paywall is
+     * enforced, not whether real Stripe subscriptions exist. Destructive flows that
+     * must never touch a paying customer (the encryption cleanup commands) rely on
+     * this flag-independent check.
+     */
+    public function isBilled(): bool
+    {
         if ($this->onGenericTrial()) {
             return true;
         }
