@@ -28,8 +28,8 @@ test('it queues a warning email for users with encrypted transactions or account
     Queue::assertNotPushed(SendUpdateEmailJob::class, fn (SendUpdateEmailJob $job) => $job->user->is($clean));
 });
 
-test('it never warns a subscribed user', function () {
-    config(['subscriptions.enabled' => true]);
+test('it never warns a subscribed user even when the subscriptions flag is off', function () {
+    config(['subscriptions.enabled' => false]);
 
     $subscribed = User::factory()->create();
     Transaction::factory()->for($subscribed)->create();

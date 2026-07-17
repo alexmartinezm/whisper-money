@@ -28,8 +28,8 @@ test('it soft-deletes users with encrypted data who did not sign in within the g
     expect(User::whereKey($clean->id)->exists())->toBeTrue();
 });
 
-test('it never deletes a subscribed user', function () {
-    config(['subscriptions.enabled' => true]);
+test('it never deletes a subscribed user even when the subscriptions flag is off', function () {
+    config(['subscriptions.enabled' => false]);
 
     $subscribed = User::factory()->create(['last_active_at' => now()->subDays(30)]);
     Transaction::factory()->for($subscribed)->create();
