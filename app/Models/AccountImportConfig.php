@@ -20,14 +20,6 @@ class AccountImportConfig extends Model
         'config',
     ];
 
-    /** @var list<string> */
-    protected $hidden = [
-        'id',
-        'account_id',
-        'created_at',
-        'updated_at',
-    ];
-
     protected function casts(): array
     {
         return [
