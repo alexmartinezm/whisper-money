@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\AccountType;
+use App\Enums\CategoryType;
 use App\Models\Account;
 use App\Models\AccountBalance;
 use App\Models\AutomationRule;
@@ -10,6 +11,7 @@ use App\Models\Label;
 use App\Models\RealEstateDetail;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\Transactions\ReplaceTransactionSplits;
 
 beforeEach(function () {
     config(['landing.hide_auth_buttons' => false]);
@@ -246,6 +248,44 @@ test('account show includes the account transactions and excludes other accounts
             ->missing('transactions')
             ->loadDeferredProps(fn ($reload) => $reload
                 ->has('transactions', 2)
+            )
+        );
+});
+
+test('account show serializes split transaction details', function () {
+    $account = Account::factory()->create([
+        'user_id' => $this->user->id,
+        'type' => AccountType::Checking,
+    ]);
+    $transaction = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'space_id' => $account->space_id,
+        'account_id' => $account->id,
+        'category_id' => null,
+        'amount' => -10000,
+    ]);
+    $food = Category::factory()->create([
+        'user_id' => $this->user->id,
+        'space_id' => $account->space_id,
+        'type' => CategoryType::Expense,
+    ]);
+    $home = Category::factory()->create([
+        'user_id' => $this->user->id,
+        'space_id' => $account->space_id,
+        'type' => CategoryType::Expense,
+    ]);
+    app(ReplaceTransactionSplits::class)->replace($transaction, [
+        ['category_id' => $food->id, 'amount' => -6000],
+        ['category_id' => $home->id, 'amount' => -4000],
+    ]);
+
+    $this->get(route('accounts.show', $account))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->loadDeferredProps(fn ($reload) => $reload
+                ->where('transactions.0.is_split', true)
+                ->where('transactions.0.split_count', 2)
+                ->where('transactions.0.splits.0.category.id', $food->id)
             )
         );
 });

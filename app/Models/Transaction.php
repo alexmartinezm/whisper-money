@@ -141,6 +141,24 @@ class Transaction extends Model
         return $this->belongsTo(Category::class);
     }
 
+    /** @return HasMany<TransactionSplit, $this> */
+    public function splits(): HasMany
+    {
+        return $this->hasMany(TransactionSplit::class)->orderBy('position');
+    }
+
+    /** @return Attribute<bool, never> */
+    protected function isSplit(): Attribute
+    {
+        return Attribute::make(get: fn (): bool => $this->relationLoaded('splits') && $this->splits->isNotEmpty());
+    }
+
+    /** @return Attribute<int, never> */
+    protected function splitCount(): Attribute
+    {
+        return Attribute::make(get: fn (): int => $this->relationLoaded('splits') ? $this->splits->count() : 0);
+    }
+
     /**
      * The type of the assigned category, resilient to phantom categories that
      * are force-filled with a raw string type (e.g. the synthetic
@@ -149,6 +167,10 @@ class Transaction extends Model
     public function categoryType(): ?CategoryType
     {
         $type = $this->category?->getAttribute('type');
+
+        if ($type === null && $this->relationLoaded('splits') && $this->splits->isNotEmpty()) {
+            $type = $this->splits->first()->category?->getAttribute('type');
+        }
 
         if ($type instanceof CategoryType) {
             return $type;
@@ -169,7 +191,7 @@ class Transaction extends Model
     public function isIncomeSide(): bool
     {
         return $this->categoryType() === CategoryType::Income
-            || ($this->category_id === null && $this->amount > 0);
+            || ($this->category_id === null && (! $this->relationLoaded('splits') || $this->splits->isEmpty()) && $this->amount > 0);
     }
 
     /**
@@ -182,7 +204,7 @@ class Transaction extends Model
     public function isExpenseSide(): bool
     {
         return $this->categoryType() === CategoryType::Expense
-            || ($this->category_id === null && $this->amount < 0);
+            || ($this->category_id === null && (! $this->relationLoaded('splits') || $this->splits->isEmpty()) && $this->amount < 0);
     }
 
     /** @return BelongsTo<AutomationRule, $this> */
@@ -243,7 +265,9 @@ class Transaction extends Model
      */
     public function scopePendingAiCategorization(Builder $query): Builder
     {
-        return $query->whereNull('category_id')->whereNull('description_iv');
+        return $query->whereNull('category_id')
+            ->whereNull('description_iv')
+            ->whereDoesntHave('splits');
     }
 
     /**
@@ -296,10 +320,15 @@ class Transaction extends Model
                 if ($hasCategoryFilter) {
                     $outer->where(function (Builder $q) use ($realIds, $hasUncategorized) {
                         if (! empty($realIds)) {
-                            $q->whereIn('category_id', $realIds);
+                            $q->where(function (Builder $categorized) use ($realIds) {
+                                $categorized->whereIn('category_id', $realIds)
+                                    ->orWhereHas('splits', fn (Builder $splitQuery) => $splitQuery->whereIn('category_id', $realIds));
+                            });
                         }
                         if ($hasUncategorized) {
-                            $q->orWhereNull('category_id');
+                            $q->orWhere(function (Builder $uncategorized) {
+                                $uncategorized->whereNull('category_id')->whereDoesntHave('splits');
+                            });
                         }
                     });
                 }

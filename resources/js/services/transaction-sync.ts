@@ -27,25 +27,31 @@ interface TransactionFilters {
     searchText?: string;
 }
 
+export function transformTransactionFromServer(
+    data: Record<string, unknown>,
+): Record<string, unknown> {
+    const serverLabels = data.labels as unknown;
+    const label_ids = Array.isArray(serverLabels)
+        ? serverLabels.map((label) => String((label as { id: unknown }).id))
+        : [];
+    // Relations other than labels (including embedded splits) remain intact.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { labels, ...rest } = data;
+
+    return {
+        ...rest,
+        transaction_date: String(data.transaction_date).slice(0, 10),
+        label_ids,
+    };
+}
+
 class TransactionSyncService {
     private syncManager: TransactionSyncManager;
 
     constructor() {
         this.syncManager = new TransactionSyncManager({
             endpoint: '/api/sync/transactions',
-            transformFromServer: (data) => {
-                const label_ids = data.labels?.map((l: { id: string }) => l.id);
-                // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                const { labels, ...rest } = data;
-                return {
-                    ...rest,
-                    transaction_date: String(data.transaction_date).slice(
-                        0,
-                        10,
-                    ),
-                    label_ids: label_ids || [],
-                };
-            },
+            transformFromServer: transformTransactionFromServer,
         });
     }
 

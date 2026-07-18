@@ -12,6 +12,15 @@ export type TransactionSource =
 
 export type CategorySource = 'manual' | 'rule' | 'ai' | 'bank';
 
+export interface TransactionSplit {
+    id?: UUID;
+    transaction_id?: UUID;
+    category_id: UUID;
+    amount: number;
+    position: number;
+    category?: Category;
+}
+
 export interface Transaction {
     id: UUID;
     user_id: UUID;
@@ -33,6 +42,9 @@ export interface Transaction {
     label_ids?: UUID[];
     created_at: string;
     updated_at: string;
+    splits?: TransactionSplit[];
+    is_split?: boolean;
+    split_count?: number;
 }
 
 export interface ServerTransaction extends Transaction {

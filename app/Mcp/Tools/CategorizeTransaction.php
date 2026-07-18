@@ -3,8 +3,10 @@
 namespace App\Mcp\Tools;
 
 use App\Enums\CategorySource;
+use App\Models\Transaction;
 use App\Models\User;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Illuminate\Support\Facades\DB;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
@@ -39,12 +41,26 @@ class CategorizeTransaction extends WriteTool
             ? $this->categoryInSpace($request, $space)->id
             : null;
 
-        $transaction->category_id = $categoryId;
-        $transaction->category_source = $categoryId === null ? null : CategorySource::Manual;
-        $transaction->ai_confidence = null;
-        $transaction->categorized_by_rule_id = null;
-        $transaction->save();
+        $result = DB::transaction(function () use ($transaction, $categoryId): Transaction|Response {
+            $locked = Transaction::query()->whereKey($transaction->id)->lockForUpdate()->firstOrFail();
 
-        return $this->json(['transaction' => $this->presentTransaction($transaction->refresh())]);
+            if ($locked->splits()->exists()) {
+                return Response::error('This transaction is split. Category changes are blocked; edit its split lines in Whisper Money.');
+            }
+
+            $locked->category_id = $categoryId;
+            $locked->category_source = $categoryId === null ? null : CategorySource::Manual;
+            $locked->ai_confidence = null;
+            $locked->categorized_by_rule_id = null;
+            $locked->save();
+
+            return $locked;
+        });
+
+        if ($result instanceof Response) {
+            return $result;
+        }
+
+        return $this->json(['transaction' => $this->presentTransaction($result->refresh())]);
     }
 }

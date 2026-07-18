@@ -56,21 +56,36 @@ class TransactionAnalysisController extends Controller
 
         $transactions = Transaction::query()
             ->where('user_id', $user->id)
-            ->with(['account.bank', 'category', 'labels'])
+            ->with(['account.bank', 'category', 'labels', 'splits.category'])
             ->applyFilters($filters)
             ->get();
 
         $this->preloadExchangeRates($transactions, $currency);
 
-        $byCategory = $this->categoryBreakdown($transactions, $currency, $user->id);
-        $byTag = $this->tagBreakdown($transactions, $currency);
-        $byPayee = $this->payeeBreakdown($transactions, $currency);
-        $byAccount = $this->accountBreakdown($transactions, $currency);
+        $analysisTransactions = $this->effectiveTransactions($transactions, $currency);
+        $requestedCategoryIds = $validated['category_ids'] ?? [];
+        $includeUncategorized = in_array('uncategorized', $requestedCategoryIds, true);
+        $categoryIds = array_values(array_filter(
+            $requestedCategoryIds,
+            fn (string $categoryId): bool => $categoryId !== 'uncategorized',
+        ));
+        $categoryIds = $this->tree->expand($user->id, $categoryIds);
+        if ($requestedCategoryIds !== []) {
+            $analysisTransactions = $analysisTransactions
+                ->filter(fn (Transaction $transaction): bool => in_array($transaction->category_id, $categoryIds, true)
+                    || ($includeUncategorized && $transaction->category_id === null))
+                ->values();
+        }
+
+        $byCategory = $this->categoryBreakdown($analysisTransactions, $currency, $user->id);
+        $byTag = $this->tagBreakdown($analysisTransactions, $currency);
+        $byPayee = $this->payeeBreakdown($analysisTransactions, $currency);
+        $byAccount = $this->accountBreakdown($analysisTransactions, $currency);
 
         return response()
             ->json([
                 'currency' => $currency,
-                'summary' => $this->summaryTotals($transactions, $currency),
+                'summary' => $this->summaryTotals($analysisTransactions, $currency),
                 'by_category' => $byCategory->values(),
                 'distinct_category_count' => $byCategory->count(),
                 'by_tag' => $byTag->values(),
@@ -80,7 +95,7 @@ class TransactionAnalysisController extends Controller
                 'by_account' => $byAccount->values(),
                 'distinct_account_count' => $byAccount->count(),
                 'largest_expenses' => $this->largestExpenses($transactions, $currency),
-                'over_time' => $this->overTime($transactions, $currency),
+                'over_time' => $this->overTime($analysisTransactions, $currency),
             ])
             ->header('Cache-Control', 'no-store, private');
     }
@@ -113,7 +128,7 @@ class TransactionAnalysisController extends Controller
             'income' => $income,
             'expense' => $expense,
             'net' => $income - $expense,
-            'count' => $transactions->count(),
+            'count' => $transactions->pluck('id')->unique()->count(),
             'days' => $days,
             'average_expense_per_day' => $days > 0 ? intdiv($expense, $days) : $expense,
         ];
@@ -286,11 +301,15 @@ class TransactionAnalysisController extends Controller
                 'date' => $transaction->transaction_date->toDateString(),
                 'description' => $transaction->description,
                 'amount' => abs($this->convertTransactionAmount($transaction, $currency)),
-                'category' => $transaction->category ? [
+                'category' => $transaction->splits->isNotEmpty() ? [
+                    'name' => __('Split'),
+                    'color' => 'gray',
+                    'icon' => 'Split',
+                ] : ($transaction->category ? [
                     'name' => $transaction->category->name,
                     'color' => $transaction->category->color,
                     'icon' => $transaction->category->icon,
-                ] : null,
+                ] : null),
                 'account' => [
                     'name' => $transaction->account->name,
                     'bank' => $transaction->account->bank ? [

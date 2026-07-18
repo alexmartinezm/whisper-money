@@ -8,6 +8,7 @@ use App\Jobs\RetryTransientAiCategorizationJob;
 use App\Models\Transaction;
 use App\Models\User;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Laravel\Ai\Enums\Lab;
 use Laravel\Ai\Exceptions\FailoverableException;
@@ -28,7 +29,8 @@ class CategorizeTransactions
     public function forTransactions(User $user, Collection $transactions): array
     {
         $transactions = $transactions->filter(
-            fn (Transaction $transaction): bool => $transaction->description_iv === null,
+            fn (Transaction $transaction): bool => $transaction->description_iv === null
+                && ! $transaction->splits()->exists(),
         )->values();
 
         if ($transactions->isEmpty()) {
@@ -66,7 +68,9 @@ class CategorizeTransactions
             $confidence = (float) ($result['confidence'] ?? 0.0);
             $applied = $confidence >= $labelBar;
 
-            $this->recordOutcome($transaction, $categoryId, $confidence, $applied, $model);
+            if (! $this->recordOutcome($transaction, $categoryId, $confidence, $applied, $model)) {
+                continue;
+            }
 
             $outcomes[] = new CategorizationOutcome(
                 transaction: $transaction,
@@ -86,19 +90,30 @@ class CategorizeTransactions
      * suggestion is kept (for confidence-bar tuning and a future confirm UI);
      * at or above it the category is also auto-applied.
      */
-    private function recordOutcome(Transaction $transaction, string $categoryId, float $confidence, bool $applied, string $model): void
+    private function recordOutcome(Transaction $transaction, string $categoryId, float $confidence, bool $applied, string $model): bool
     {
-        $transaction->ai_suggested_category_id = $categoryId;
-        $transaction->ai_confidence = $confidence;
-        $transaction->ai_suggested_category_at = now();
-        $transaction->ai_model = $model;
+        return DB::transaction(function () use ($transaction, $categoryId, $confidence, $applied, $model): bool {
+            $locked = Transaction::query()->lockForUpdate()->findOrFail($transaction->id);
 
-        if ($applied) {
-            $transaction->category_id = $categoryId;
-            $transaction->category_source = CategorySource::Ai;
-        }
+            if ($locked->splits()->exists()) {
+                return false;
+            }
 
-        $transaction->save();
+            $locked->ai_suggested_category_id = $categoryId;
+            $locked->ai_confidence = $confidence;
+            $locked->ai_suggested_category_at = now();
+            $locked->ai_model = $model;
+
+            if ($applied) {
+                $locked->category_id = $categoryId;
+                $locked->category_source = CategorySource::Ai;
+            }
+
+            $locked->save();
+            $transaction->setRawAttributes($locked->getAttributes(), true);
+
+            return true;
+        });
     }
 
     /**

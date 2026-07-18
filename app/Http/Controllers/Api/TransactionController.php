@@ -18,7 +18,7 @@ class TransactionController extends Controller
     {
         $query = $request->user()
             ->transactions()
-            ->with('labels');
+            ->with(['labels', 'splits.category']);
 
         if ($request->query('encrypted') === 'true') {
             $query->where(fn ($q) => $q->whereNotNull('description_iv')->orWhereNotNull('notes_iv'));
@@ -33,6 +33,7 @@ class TransactionController extends Controller
         $perPage = min(max((int) $request->query('per_page', 100), 1), 100);
 
         $transactions = $query->simplePaginate($perPage);
+        $transactions->getCollection()->each->append(['is_split', 'split_count']);
 
         return response()->json($transactions);
     }

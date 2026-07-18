@@ -13,6 +13,7 @@ use App\Services\CategorySpendingService;
 use App\Services\ExchangeRateService;
 use App\Services\LoanAmortizationService;
 use App\Services\PeriodComparator;
+use App\Services\Transactions\EffectiveTransactionPostings;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\Request;
@@ -24,6 +25,7 @@ class DashboardAnalyticsController extends Controller
         private AccountMetricsService $accountMetricsService,
         private LoanAmortizationService $loanAmortizationService,
         private CategorySpendingService $categorySpendingService,
+        private EffectiveTransactionPostings $postings,
     ) {}
 
     public function netWorth(Request $request)
@@ -505,40 +507,26 @@ class DashboardAnalyticsController extends Controller
 
     private function calculateSpending(Carbon $from, Carbon $to): int
     {
-        $spending = Transaction::query()
-            ->where('transactions.user_id', request()->user()->id)
-            ->whereBetween('transactions.transaction_date', [$from, $to])
-            ->join('categories', function ($join) {
-                $join->on('transactions.category_id', '=', 'categories.id')
-                    ->where('categories.type', '=', CategoryType::Expense)
-                    ->whereNull('categories.deleted_at');
-            })
-            ->sum('transactions.amount');
+        $spending = $this->postings->forTransactions(Transaction::query()
+            ->where('user_id', request()->user()->id)
+            ->whereBetween('transaction_date', [$from, $to])
+            ->with(['category', 'splits.category'])
+            ->get())
+            ->filter(fn ($posting): bool => $posting->category?->type === CategoryType::Expense)
+            ->sum('amount');
 
         return max(0, -$spending);
     }
 
     private function calculateCashFlow(Carbon $from, Carbon $to): array
     {
-        $income = Transaction::query()
-            ->where('transactions.user_id', request()->user()->id)
-            ->whereBetween('transactions.transaction_date', [$from, $to])
-            ->join('categories', function ($join) {
-                $join->on('transactions.category_id', '=', 'categories.id')
-                    ->where('categories.type', '=', CategoryType::Income)
-                    ->whereNull('categories.deleted_at');
-            })
-            ->sum('transactions.amount');
-
-        $expense = Transaction::query()
-            ->where('transactions.user_id', request()->user()->id)
-            ->whereBetween('transactions.transaction_date', [$from, $to])
-            ->join('categories', function ($join) {
-                $join->on('transactions.category_id', '=', 'categories.id')
-                    ->where('categories.type', '=', CategoryType::Expense)
-                    ->whereNull('categories.deleted_at');
-            })
-            ->sum('transactions.amount');
+        $postings = $this->postings->forTransactions(Transaction::query()
+            ->where('user_id', request()->user()->id)
+            ->whereBetween('transaction_date', [$from, $to])
+            ->with(['category', 'splits.category'])
+            ->get());
+        $income = $postings->filter(fn ($posting): bool => $posting->category?->type === CategoryType::Income)->sum('amount');
+        $expense = $postings->filter(fn ($posting): bool => $posting->category?->type === CategoryType::Expense)->sum('amount');
 
         return [
             'income' => max(0, $income),

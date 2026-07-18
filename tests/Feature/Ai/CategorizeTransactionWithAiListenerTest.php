@@ -1,9 +1,15 @@
 <?php
 
+use App\Enums\CategoryType;
+use App\Events\TransactionCreated;
 use App\Listeners\CategorizeTransactionWithAi;
+use App\Models\Account;
 use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\Ai\AiCategorizationGate;
+use App\Services\Ai\AiCategorizer;
+use App\Services\Transactions\ReplaceTransactionSplits;
 use Illuminate\Events\CallQueuedListener;
 use Illuminate\Support\Facades\Queue;
 
@@ -60,4 +66,32 @@ it('does not queue an AI categorization job when the transaction is already cate
     ]);
 
     expect(aiCategorizationJobsQueued())->toBe(0);
+});
+
+it('does not categorize a transaction that gained splits while the queued job waited', function () {
+    $user = aiEligibleUser();
+    $account = Account::factory()->create(['user_id' => $user->id]);
+    $transaction = Transaction::factory()->plaintext()->create([
+        'user_id' => $user->id,
+        'space_id' => $account->space_id,
+        'account_id' => $account->id,
+        'category_id' => null,
+        'amount' => -10000,
+    ]);
+    $food = Category::factory()->create(['user_id' => $user->id, 'space_id' => $account->space_id, 'type' => CategoryType::Expense]);
+    $home = Category::factory()->create(['user_id' => $user->id, 'space_id' => $account->space_id, 'type' => CategoryType::Expense]);
+    app(ReplaceTransactionSplits::class)->replace($transaction, [
+        ['category_id' => $food->id, 'amount' => -6000],
+        ['category_id' => $home->id, 'amount' => -4000],
+    ]);
+
+    $gate = Mockery::mock(AiCategorizationGate::class);
+    $gate->shouldNotReceive('allows');
+    $categorizer = Mockery::mock(AiCategorizer::class);
+    $categorizer->shouldNotReceive('run');
+
+    (new CategorizeTransactionWithAi($gate, $categorizer))
+        ->handle(new TransactionCreated($transaction));
+
+    expect($transaction->refresh()->category_id)->toBeNull();
 });

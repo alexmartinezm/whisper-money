@@ -12,6 +12,7 @@ use App\Services\CategoryTree;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -58,13 +59,17 @@ class CategoryController extends Controller
     {
         $this->authorize('update', $category);
 
-        try {
-            $category->update($request->validated());
-        } catch (UniqueConstraintViolationException $exception) {
-            $this->throwDuplicateCategoryNameValidationException($exception);
-        }
+        DB::transaction(function () use ($request, $category): void {
+            $category = $this->tree->lockSubtreeForMutation($category);
 
-        $this->tree->syncDescendantTypes($category);
+            try {
+                $category->update($request->validated());
+            } catch (UniqueConstraintViolationException $exception) {
+                $this->throwDuplicateCategoryNameValidationException($exception);
+            }
+
+            $this->tree->syncDescendantTypes($category);
+        }, attempts: 5);
 
         return to_route('categories.index');
     }
@@ -77,11 +82,15 @@ class CategoryController extends Controller
     {
         $this->authorize('delete', $category);
 
-        match ($request->strategy()) {
-            CategoryDeletionStrategy::Cascade => $this->tree->deleteSubtree($category),
-            CategoryDeletionStrategy::Promote => $this->detachChildrenAndDelete($category, null),
-            CategoryDeletionStrategy::Reparent => $this->detachChildrenAndDelete($category, $category->parent_id),
-        };
+        DB::transaction(function () use ($request, $category): void {
+            $category = $this->tree->lockSubtreeForMutation($category);
+
+            match ($request->strategy()) {
+                CategoryDeletionStrategy::Cascade => $this->tree->deleteSubtree($category),
+                CategoryDeletionStrategy::Promote => $this->detachChildrenAndDelete($category, null),
+                CategoryDeletionStrategy::Reparent => $this->detachChildrenAndDelete($category, $category->parent_id),
+            };
+        }, attempts: 5);
 
         return to_route('categories.index');
     }

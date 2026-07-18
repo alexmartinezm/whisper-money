@@ -28,6 +28,10 @@ class CategoryOverrideHandler
 
     public function record(Transaction $transaction, ?string $newCategoryId): ?AutomationRule
     {
+        if ($transaction->splits()->exists()) {
+            return null;
+        }
+
         if ($newCategoryId === $transaction->category_id) {
             return null;
         }

@@ -60,12 +60,17 @@ class CategoryMonthlyBreakdownController extends Controller
 
         $transactions = Transaction::query()
             ->where('user_id', $user->id)
-            ->whereIn('category_id', $subtreeIds)
+            ->where(function ($query) use ($subtreeIds): void {
+                $query->whereIn('category_id', $subtreeIds)
+                    ->orWhereHas('splits', fn ($splitQuery) => $splitQuery->whereIn('category_id', $subtreeIds));
+            })
             ->where('transaction_date', '>=', $start->toDateString())
-            ->with('account')
+            ->with(['account', 'category', 'splits.category'])
             ->get();
 
         $this->preloadExchangeRates($transactions, $currency);
+        $transactions = $this->effectiveTransactions($transactions, $currency)
+            ->whereIn('category_id', $subtreeIds);
 
         // Outflow categories store spending as negative amounts; flip the sign so
         // the expected direction reads as a positive bar. A transaction that runs

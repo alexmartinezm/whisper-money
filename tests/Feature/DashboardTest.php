@@ -1,9 +1,12 @@
 <?php
 
 use App\Enums\CategoryType;
+use App\Http\Middleware\HandleInertiaRequests;
+use App\Models\Account;
 use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\Transactions\ReplaceTransactionSplits;
 use Laravel\Fortify\Features;
 
 beforeEach(function () {
@@ -75,10 +78,40 @@ test('dashboard top categories roll child spending up into the parent', function
         'X-Inertia' => 'true',
         'X-Inertia-Partial-Component' => 'dashboard',
         'X-Inertia-Partial-Data' => 'topCategories',
+        'X-Inertia-Version' => app(HandleInertiaRequests::class)->version(request()),
     ]);
 
     $response->assertOk()
         ->assertJsonCount(1, 'props.topCategories')
         ->assertJsonPath('props.topCategories.0.category.id', $food->id)
         ->assertJsonPath('props.topCategories.0.amount', 3000);
+});
+
+test('dashboard cashflow uses split category types instead of the parent sign', function () {
+    $user = User::factory()->onboarded()->create();
+    $account = Account::factory()->create(['user_id' => $user->id]);
+    $transaction = Transaction::factory()->plaintext()->create([
+        'user_id' => $user->id,
+        'space_id' => $account->space_id,
+        'account_id' => $account->id,
+        'category_id' => null,
+        'amount' => 10000,
+        'transaction_date' => now(),
+    ]);
+    $food = Category::factory()->create(['user_id' => $user->id, 'space_id' => $account->space_id, 'type' => CategoryType::Expense]);
+    $home = Category::factory()->create(['user_id' => $user->id, 'space_id' => $account->space_id, 'type' => CategoryType::Expense]);
+
+    app(ReplaceTransactionSplits::class)->replace($transaction, [
+        ['category_id' => $food->id, 'amount' => 6000],
+        ['category_id' => $home->id, 'amount' => 4000],
+    ]);
+
+    $this->actingAs($user)->withoutVite()->get(route('dashboard'), [
+        'X-Inertia' => 'true',
+        'X-Inertia-Partial-Component' => 'dashboard',
+        'X-Inertia-Partial-Data' => 'cashflowSummary',
+        'X-Inertia-Version' => app(HandleInertiaRequests::class)->version(request()),
+    ])->assertOk()
+        ->assertJsonPath('props.cashflowSummary.current.income', 0)
+        ->assertJsonPath('props.cashflowSummary.current.expense', 0);
 });

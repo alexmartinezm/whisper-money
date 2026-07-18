@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\CategoryCashflowDirection;
 use App\Enums\CategoryType;
 use App\Models\Concerns\BelongsToSpace;
+use App\Services\CategoryTree;
 use Database\Factories\CategoryFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
@@ -13,6 +14,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Validation\ValidationException;
 
 /**
  * @property string $id
@@ -63,6 +65,31 @@ class Category extends Model
             'type' => CategoryType::class,
             'cashflow_direction' => CategoryCashflowDirection::class,
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::deleting(function (Category $category): void {
+            if (TransactionSplit::query()->where('category_id', $category->id)->exists()) {
+                throw ValidationException::withMessages([
+                    'category' => 'Categories used by split transactions cannot be deleted.',
+                ]);
+            }
+        });
+
+        static::updating(function (Category $category): void {
+            if (! $category->isDirty('type')) {
+                return;
+            }
+
+            $categoryIds = [$category->id, ...app(CategoryTree::class)->descendantIds($category)];
+
+            if (TransactionSplit::query()->whereIn('category_id', $categoryIds)->exists()) {
+                throw ValidationException::withMessages([
+                    'type' => 'Category types used by split transactions cannot be changed.',
+                ]);
+            }
+        });
     }
 
     /** @return BelongsTo<User, $this> */
