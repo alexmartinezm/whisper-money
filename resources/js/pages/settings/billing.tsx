@@ -1,11 +1,14 @@
 import HeadingSmall from '@/components/heading-small';
 import { ProBadge } from '@/components/pro-badge';
+import {
+    PlanCard,
+    UpgradeDialog,
+} from '@/components/subscription/upgrade-dialog';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import AppLayout from '@/layouts/app-layout';
 import SettingsLayout from '@/layouts/settings/layout';
-import { cn } from '@/lib/utils';
 import {
     destroy as revokeConsent,
     store as storeConsent,
@@ -100,71 +103,6 @@ function BenefitsGrid() {
     );
 }
 
-function PlanCard({
-    plan,
-    isSelected,
-    onSelect,
-    currency,
-    locale,
-}: {
-    planKey: string;
-    plan: Plan;
-    isSelected: boolean;
-    onSelect: () => void;
-    currency: string;
-    locale: string;
-}) {
-    const savingsPercent =
-        plan.original_price && plan.billing_period === 'year'
-            ? Math.round(
-                  ((plan.original_price - plan.price) / plan.original_price) *
-                      100,
-              )
-            : null;
-    const monthlyEquivalent =
-        plan.billing_period === 'year' ? plan.price / 12 : plan.price;
-
-    return (
-        <button
-            type="button"
-            onClick={onSelect}
-            className={cn(
-                'flex flex-1 flex-col rounded-lg border p-3 text-left transition-all',
-                isSelected
-                    ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-500 dark:bg-emerald-950/30'
-                    : 'border-border bg-card hover:border-muted-foreground/50',
-            )}
-        >
-            <div className="flex items-center gap-2">
-                <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                    {plan.billing_period === 'year'
-                        ? __('Annual')
-                        : __('Monthly')}
-                </span>
-                {savingsPercent && savingsPercent > 0 && (
-                    <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                        {__('Saving')} {savingsPercent}%
-                    </span>
-                )}
-            </div>
-            <div className="mt-1 flex items-baseline gap-1">
-                <span className="text-xl font-bold">
-                    {formatCurrency(monthlyEquivalent * 100, currency, locale)}
-                </span>
-                <span className="text-sm text-muted-foreground">
-                    {__('/month')}
-                </span>
-            </div>
-            {plan.billing_period === 'year' && (
-                <span className="mt-2 text-xs text-muted-foreground">
-                    {__('Billed annually at')}{' '}
-                    {formatCurrency(plan.price * 100, currency, locale)}
-                </span>
-            )}
-        </button>
-    );
-}
-
 function UpgradeSection({
     planEntries,
     defaultPlan,
@@ -201,7 +139,6 @@ function UpgradeSection({
                     {planEntries.map(([key, plan]) => (
                         <PlanCard
                             key={key}
-                            planKey={key}
                             plan={plan}
                             isSelected={key === selectedPlan}
                             onSelect={() => setSelectedPlan(key)}
@@ -392,14 +329,24 @@ function SubscribedSection({
 function AiConsentSection({
     initialConsent,
     hasProPlan,
+    onUpgradeNeeded,
 }: {
     initialConsent: boolean;
     hasProPlan: boolean;
+    onUpgradeNeeded: () => void;
 }) {
     const [consented, setConsented] = useState(initialConsent);
     const [saving, setSaving] = useState(false);
 
     const handleToggle = async (checked: boolean) => {
+        // Free users can't enable AI directly — it needs a paid plan. Prompt
+        // them to subscribe instead of recording consent (which would silently
+        // lock them behind the paywall on the next navigation).
+        if (checked && !hasProPlan) {
+            onUpgradeNeeded();
+            return;
+        }
+
         setSaving(true);
         try {
             if (checked) {
@@ -457,14 +404,6 @@ function AiConsentSection({
                         </p>
                     </div>
                 </label>
-
-                {!hasProPlan && (
-                    <p className="mt-3 border-t pt-3 text-sm text-amber-600 dark:text-amber-400">
-                        {__(
-                            'You can give consent now, but AI categorization only runs while you have a paid plan.',
-                        )}
-                    </p>
-                )}
             </div>
         </div>
     );
@@ -478,6 +417,7 @@ export default function Billing() {
     const hasProPlan = auth?.hasProPlan ?? false;
     const planEntries = Object.entries(pricing.plans);
     const defaultPlan = pricing.plans[pricing.defaultPlan];
+    const [showAiUpgrade, setShowAiUpgrade] = useState(false);
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
@@ -505,7 +445,20 @@ export default function Billing() {
                     <AiConsentSection
                         initialConsent={hasAiConsent}
                         hasProPlan={hasProPlan}
+                        onUpgradeNeeded={() => setShowAiUpgrade(true)}
                     />
+
+                    {!hasProPlan && (
+                        <UpgradeDialog
+                            open={showAiUpgrade}
+                            onOpenChange={setShowAiUpgrade}
+                            title={__('AI categorization is a paid feature')}
+                            description={__(
+                                'Subscribe to a plan to let AI categorize your transactions automatically. You can enable AI right after subscribing.',
+                            )}
+                            source="ai_categorization"
+                        />
+                    )}
                 </div>
             </SettingsLayout>
         </AppLayout>
