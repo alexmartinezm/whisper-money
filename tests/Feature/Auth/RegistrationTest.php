@@ -4,7 +4,6 @@ use App\Models\User;
 use App\Notifications\VerifyEmailNotification;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Queue;
-use Inertia\Testing\AssertableInertia as Assert;
 
 beforeEach(function () {
     config(['landing.hide_auth_buttons' => false]);
@@ -16,18 +15,20 @@ test('registration screen can be rendered', function () {
     $response->assertSuccessful();
 });
 
-test('registration screen stays accessible with force query when auth buttons are hidden', function () {
+test('registration screen is blocked when auth buttons are hidden', function () {
+    config(['landing.hide_auth_buttons' => true]);
+
+    $response = $this->withoutVite()->get(route('register'));
+
+    $response->assertNotFound();
+});
+
+test('registration screen is blocked with force query when auth buttons are hidden', function () {
     config(['landing.hide_auth_buttons' => true]);
 
     $response = $this->withoutVite()->get(route('register', ['force' => 1]));
 
-    $response
-        ->assertSuccessful()
-        ->assertInertia(fn (Assert $page) => $page
-            ->component('auth/register')
-            ->where('forcedRegistration', true)
-            ->where('hideAuthButtons', false)
-        );
+    $response->assertNotFound();
 });
 
 test('registration is blocked when auth buttons are hidden without force query', function () {
@@ -43,7 +44,7 @@ test('registration is blocked when auth buttons are hidden without force query',
     $response->assertNotFound();
 });
 
-test('new users can register with force query when auth buttons are hidden', function () {
+test('new users cannot register with force query when auth buttons are hidden', function () {
     Queue::fake();
 
     config(['landing.hide_auth_buttons' => true]);
@@ -55,10 +56,8 @@ test('new users can register with force query when auth buttons are hidden', fun
         'password_confirmation' => 'password',
     ]);
 
-    $this->assertAuthenticated();
-    $response
-        ->assertRedirect(route('onboarding', absolute: false))
-        ->assertCookie('whisper_money_returning_user');
+    $this->assertGuest();
+    $response->assertNotFound();
 });
 
 test('new users can register', function () {

@@ -5,7 +5,7 @@ use Inertia\Testing\AssertableInertia as Assert;
 
 use function Pest\Laravel\artisan;
 
-test('command outputs a signed landing auth link that works on another host', function () {
+test('command outputs a signed landing auth link without unlocking registration', function () {
     config(['landing.hide_auth_buttons' => true]);
 
     Artisan::call('landing:auth-link', ['--days' => 3]);
@@ -22,8 +22,8 @@ test('command outputs a signed landing auth link that works on another host', fu
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->component('welcome')
-            ->where('hideAuthButtons', false)
-            ->where('canRegister', true)
+            ->where('hideAuthButtons', true)
+            ->where('canRegister', false)
         );
 });
 

@@ -15,7 +15,7 @@ class GenerateLandingAuthLinkCommand extends Command
     protected $signature = 'landing:auth-link
         {--days=7 : Number of days before the link expires}';
 
-    protected $description = 'Generate a signed landing page link that unlocks authentication';
+    protected $description = 'Generate a signed landing page link';
 
     public function handle(): int
     {

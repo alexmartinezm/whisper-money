@@ -7,9 +7,8 @@ return [
     | Hide Authentication Buttons
     |--------------------------------------------------------------------------
     |
-    | When set to true, this will hide authentication buttons (login/register)
-    | from the landing page and block registration unless a valid override is
-    | present.
+    | When set to true, this hides authentication buttons (login/register)
+    | from the landing page and blocks public registration.
     |
     */
 
@@ -20,9 +19,8 @@ return [
     | Authentication Override
     |--------------------------------------------------------------------------
     |
-    | Temporary signed landing links can unlock authentication buttons for a
-    | limited time. Once a user opens a valid signed link, a secure cookie is
-    | stored so the same browser session can continue into the installed PWA.
+    | Signed landing links can carry waitlist or invitation context, but they
+    | do not override disabled public registration.
     |
     */
 

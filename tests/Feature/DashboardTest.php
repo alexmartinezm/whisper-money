@@ -38,13 +38,13 @@ test('new guests are redirected to the login page when auth buttons are hidden',
     $this->get(route('dashboard'))->assertRedirect(route('login'));
 });
 
-test('new guests with landing auth override are redirected to the registration page', function () {
+test('new guests with landing auth override are redirected to the login page', function () {
     config(['landing.hide_auth_buttons' => true]);
 
     $this
         ->withCookie(config('landing.auth_override.cookie_name'), '1')
         ->get(route('dashboard'))
-        ->assertRedirect(route('register'));
+        ->assertRedirect(route('login'));
 });
 
 test('authenticated users can visit the dashboard', function () {

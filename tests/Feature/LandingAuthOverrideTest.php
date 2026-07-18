@@ -10,18 +10,18 @@ beforeEach(function () {
     config(['landing.hide_auth_buttons' => true]);
 });
 
-test('signed landing link unlocks auth buttons and queues override cookie', function () {
+test('signed landing link keeps auth buttons hidden and does not queue override cookie', function () {
     $signedUrl = 'https://dev.whisper.money.localhost:1355'
         .app(LandingAuthOverrideService::class)->signedPath(now()->addHour())
         .'&lang=es';
 
     $this->withoutVite()->get($signedUrl)
         ->assertOk()
-        ->assertCookie(config('landing.auth_override.cookie_name'))
+        ->assertCookieMissing(config('landing.auth_override.cookie_name'))
         ->assertInertia(fn (Assert $page) => $page
             ->component('welcome')
-            ->where('hideAuthButtons', false)
-            ->where('canRegister', true)
+            ->where('hideAuthButtons', true)
+            ->where('canRegister', false)
         );
 });
 
@@ -35,7 +35,7 @@ test('unsigned landing link keeps auth buttons hidden', function () {
         );
 });
 
-test('login page allows registration with the override cookie', function () {
+test('login page keeps registration disabled with the override cookie', function () {
     $cookieName = config('landing.auth_override.cookie_name');
 
     $this->withCookie($cookieName, '1')
@@ -44,11 +44,11 @@ test('login page allows registration with the override cookie', function () {
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->component('auth/login')
-            ->where('canRegister', true)
+            ->where('canRegister', false)
         );
 });
 
-test('new users can register with the override cookie', function () {
+test('new users cannot register with the override cookie', function () {
     Queue::fake();
 
     $cookieName = config('landing.auth_override.cookie_name');
@@ -60,21 +60,21 @@ test('new users can register with the override cookie', function () {
         'password_confirmation' => 'password',
     ]);
 
-    $this->assertAuthenticated();
-    $response->assertRedirect(route('onboarding', absolute: false));
+    $this->assertGuest();
+    $response->assertNotFound();
 });
 
-test('invitation url unlocks auth buttons and stores invited lead in session', function () {
+test('invitation url keeps auth buttons hidden and stores invited lead in session', function () {
     $lead = UserLead::factory()->ranked(1)->create();
 
     $url = app(LandingAuthOverrideService::class)->generateInvitationUrl($lead->id, days: 7);
 
     $this->withoutVite()->get($url)
         ->assertOk()
-        ->assertCookie(config('landing.auth_override.cookie_name'))
+        ->assertCookieMissing(config('landing.auth_override.cookie_name'))
         ->assertSessionHas('invited_lead_id', $lead->id)
         ->assertInertia(fn (AssertableInertia $page) => $page
             ->component('welcome')
-            ->where('hideAuthButtons', false)
+            ->where('hideAuthButtons', true)
         );
 });

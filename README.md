@@ -163,7 +163,7 @@ The template includes:
 | Variable                | Default | Description                                        |
 | ----------------------- | ------- | -------------------------------------------------- |
 | `DRIP_EMAILS_ENABLED`   | `true`  | Enable drip emails (welcome, onboarding, feedback) |
-| `HIDE_AUTH_BUTTONS`     | `false` | Hide login/register buttons on landing page        |
+| `HIDE_AUTH_BUTTONS`     | `false` | Hide login/register buttons and block registration |
 | `SUBSCRIPTIONS_ENABLED` | `false` | Enable Stripe subscriptions                        |
 | `STRIPE_KEY`            | -       | Stripe publishable key                             |
 | `STRIPE_SECRET`         | -       | Stripe secret key                                  |
