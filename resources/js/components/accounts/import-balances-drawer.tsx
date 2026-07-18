@@ -283,7 +283,7 @@ export function ImportBalancesDrawer({
             let finalDateFormat = detectedFormat;
 
             if (state.selectedAccountId) {
-                const savedConfig = loadBalanceImportConfig(
+                const savedConfig = await loadBalanceImportConfig(
                     state.selectedAccountId,
                 );
 
@@ -390,7 +390,7 @@ export function ImportBalancesDrawer({
             }
 
             if (state.selectedAccountId) {
-                saveBalanceImportConfig(state.selectedAccountId, {
+                void saveBalanceImportConfig(state.selectedAccountId, {
                     columnMapping: state.columnMapping,
                     dateFormat: state.dateFormat,
                 });

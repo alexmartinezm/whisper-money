@@ -1,44 +1,43 @@
 import type { BalanceColumnMapping } from '@/types/balance-import';
 import { DateFormat } from '@/types/import';
 import type { UUID } from '@/types/uuid';
+import axios from 'axios';
 
 interface BalanceImportConfig {
     columnMapping: BalanceColumnMapping;
     dateFormat: DateFormat;
 }
 
-const STORAGE_KEY_PREFIX = 'balance_import_config_account_';
+function configUrl(accountId: UUID): string {
+    return `/api/accounts/${accountId}/import-config`;
+}
 
-export function saveBalanceImportConfig(
+export async function saveBalanceImportConfig(
     accountId: UUID,
     config: BalanceImportConfig,
-): void {
-    if (typeof window === 'undefined') return;
-
+): Promise<void> {
     try {
-        const key = `${STORAGE_KEY_PREFIX}${accountId}`;
-        localStorage.setItem(key, JSON.stringify(config));
+        await axios.put(configUrl(accountId), {
+            type: 'balance',
+            config,
+        });
     } catch (error) {
         console.error('Failed to save balance import configuration:', error);
     }
 }
 
-export function loadBalanceImportConfig(
+export async function loadBalanceImportConfig(
     accountId: UUID,
-): BalanceImportConfig | null {
-    if (typeof window === 'undefined') return null;
-
+): Promise<BalanceImportConfig | null> {
     try {
-        const key = `${STORAGE_KEY_PREFIX}${accountId}`;
-        const stored = localStorage.getItem(key);
+        const { data } = await axios.get<{ data: BalanceImportConfig | null }>(
+            configUrl(accountId),
+            { params: { type: 'balance' } },
+        );
 
-        if (!stored) {
-            return null;
-        }
+        const config = data.data;
 
-        const config = JSON.parse(stored) as BalanceImportConfig;
-
-        if (!config.columnMapping || !config.dateFormat) {
+        if (!config || !config.columnMapping || !config.dateFormat) {
             return null;
         }
 
@@ -46,16 +45,5 @@ export function loadBalanceImportConfig(
     } catch (error) {
         console.error('Failed to load balance import configuration:', error);
         return null;
-    }
-}
-
-export function clearBalanceImportConfig(accountId: UUID): void {
-    if (typeof window === 'undefined') return;
-
-    try {
-        const key = `${STORAGE_KEY_PREFIX}${accountId}`;
-        localStorage.removeItem(key);
-    } catch (error) {
-        console.error('Failed to clear balance import configuration:', error);
     }
 }

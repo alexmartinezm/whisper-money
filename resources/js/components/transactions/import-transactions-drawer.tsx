@@ -227,7 +227,9 @@ export function ImportTransactionsDrawer({
             let finalDateFormat = detectedFormat;
 
             if (state.selectedAccountId) {
-                const savedConfig = loadImportConfig(state.selectedAccountId);
+                const savedConfig = await loadImportConfig(
+                    state.selectedAccountId,
+                );
 
                 if (savedConfig) {
                     const isValidMapping = (
@@ -458,7 +460,7 @@ export function ImportTransactionsDrawer({
             }
 
             if (state.selectedAccountId) {
-                saveImportConfig(state.selectedAccountId, {
+                void saveImportConfig(state.selectedAccountId, {
                     columnMapping: state.columnMapping,
                     dateFormat: state.dateFormat,
                 });
