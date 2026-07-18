@@ -44,7 +44,7 @@ class SearchTransactions extends McpTool
 
         $transactions = Transaction::query()
             ->forSpace($space)
-            ->with(['account:id,name', 'category:id,name,type'])
+            ->with(['account:id,name', 'category:id,name,type', 'splits.category:id,name,type'])
             ->when($request->string('query')->toString() !== '', function ($query) use ($request): void {
                 $term = '%'.$request->string('query')->toString().'%';
                 $query->where(function ($q) use ($term): void {
@@ -54,7 +54,12 @@ class SearchTransactions extends McpTool
                 });
             })
             ->when($request->string('account_id')->toString() !== '', fn ($query) => $query->where('account_id', $request->string('account_id')->toString()))
-            ->when($request->string('category_id')->toString() !== '', fn ($query) => $query->where('category_id', $request->string('category_id')->toString()))
+            ->when($request->string('category_id')->toString() !== '', function ($query) use ($request): void {
+                $categoryId = $request->string('category_id')->toString();
+                $query->where(fn ($categoryQuery) => $categoryQuery
+                    ->where('category_id', $categoryId)
+                    ->orWhereHas('splits', fn ($splitQuery) => $splitQuery->where('category_id', $categoryId)));
+            })
             ->when($request->string('from')->toString() !== '', fn ($query) => $query->whereDate('transaction_date', '>=', $request->string('from')->toString()))
             ->when($request->string('to')->toString() !== '', fn ($query) => $query->whereDate('transaction_date', '<=', $request->string('to')->toString()))
             ->when($request->has('min_amount'), fn ($query) => $query->where('amount', '>=', $request->integer('min_amount')))
@@ -75,6 +80,14 @@ class SearchTransactions extends McpTool
                 'source' => $transaction->source->value,
                 'creditor_name' => $transaction->creditor_name,
                 'debtor_name' => $transaction->debtor_name,
+                'is_split' => $transaction->splits->isNotEmpty(),
+                'splits' => $transaction->splits->map(fn ($split): array => [
+                    'id' => $split->id,
+                    'category_id' => $split->category_id,
+                    'category' => $split->category?->name,
+                    'amount' => $split->amount,
+                    'position' => $split->position,
+                ])->all(),
             ]);
 
         return $this->json([

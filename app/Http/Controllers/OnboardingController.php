@@ -56,6 +56,7 @@ class OnboardingController extends Controller
         $transactions = Transaction::query()
             ->where('user_id', $user->id)
             ->whereNull('category_id')
+            ->whereDoesntHave('splits')
             ->with(['account.bank', 'labels'])
             ->orderBy('transaction_date', 'desc')
             ->orderBy('id', 'desc')

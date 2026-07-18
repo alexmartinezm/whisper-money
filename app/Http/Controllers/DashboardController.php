@@ -9,9 +9,9 @@ use App\Services\AccountMetricsService;
 use App\Services\CashflowSummaryService;
 use App\Services\CategorySpendingService;
 use App\Services\PeriodComparator;
+use App\Services\Transactions\EffectiveTransactionPostings;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -20,6 +20,7 @@ class DashboardController extends Controller
     public function __construct(
         private AccountMetricsService $accountMetricsService,
         private CategorySpendingService $categorySpendingService,
+        private EffectiveTransactionPostings $effectivePostings,
     ) {}
 
     public function __invoke(Request $request): Response
@@ -110,21 +111,22 @@ class DashboardController extends Controller
 
     private function getTransactionSum(string $userId, Carbon $from, Carbon $to, CategoryType $type): int
     {
-        return Transaction::query()
+        $transactions = Transaction::query()
             ->where('transactions.user_id', $userId)
             ->whereBetween('transactions.transaction_date', [$from, $to])
-            ->where(function ($q) use ($type) {
-                $q->whereExists(function ($sub) use ($type) {
-                    $sub->select(DB::raw(1))
-                        ->from('categories')
-                        ->whereColumn('categories.id', 'transactions.category_id')
-                        ->where('categories.type', $type);
-                })
-                    ->orWhere(function ($q) use ($type) {
-                        $q->whereNull('transactions.category_id')
-                            ->where('transactions.amount', $type === CategoryType::Income ? '>' : '<', 0);
-                    });
+            ->with(['category', 'splits.category'])
+            ->get();
+
+        return $this->effectivePostings->forTransactions($transactions)
+            ->filter(function ($posting) use ($type): bool {
+                if ($posting->category !== null) {
+                    return $posting->category->type === $type;
+                }
+
+                return $type === CategoryType::Income
+                    ? $posting->amount > 0
+                    : $posting->amount < 0;
             })
-            ->sum('transactions.amount');
+            ->sum('amount');
     }
 }

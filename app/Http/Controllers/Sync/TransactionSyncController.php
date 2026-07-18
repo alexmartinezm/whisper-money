@@ -23,10 +23,12 @@ class TransactionSyncController extends Controller
         }
 
         $transactions = $query
-            ->with('labels')
+            ->with(['labels', 'splits.category'])
             ->orderBy('transaction_date', 'desc')
             ->orderBy('updated_at', 'desc')
             ->get();
+
+        $transactions->each->append(['is_split', 'split_count']);
 
         return response()->json([
             'data' => $transactions,

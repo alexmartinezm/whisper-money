@@ -155,6 +155,7 @@ export function createTransactionColumns({
                         banks={banks}
                         onUpdate={onUpdate}
                         onCategorized={onCategorized}
+                        onEdit={onEdit}
                         className="relative -top-0.5 max-w-[150px] md:max-w-[180px]"
                         withoutChevronIcon
                         isCategorizing={categorizingIds?.has(row.original.id)}

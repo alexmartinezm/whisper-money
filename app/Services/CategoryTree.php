@@ -4,9 +4,33 @@ namespace App\Services;
 
 use App\Models\Category;
 use App\Models\Transaction;
+use App\Models\TransactionSplit;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Validation\ValidationException;
 
 class CategoryTree
 {
+    public function lockSubtreeForMutation(Category $category): Category
+    {
+        $ids = [$category->id, ...$this->descendantIds($category)];
+
+        Transaction::query()
+            ->where(fn ($query) => $query
+                ->whereIn('category_id', $ids)
+                ->orWhereHas('splits', fn ($splits) => $splits->whereIn('category_id', $ids)))
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get();
+
+        return Category::query()
+            ->whereIn('id', $ids)
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get()
+            ->firstWhere('id', $category->id)
+            ?? throw new ModelNotFoundException;
+    }
+
     /**
      * Expand a set of category ids to also include every descendant id.
      *
@@ -395,6 +419,12 @@ class CategoryTree
     public function deleteSubtree(Category $category): void
     {
         $ids = [$category->id, ...$this->descendantIds($category)];
+
+        if (TransactionSplit::query()->whereIn('category_id', $ids)->exists()) {
+            throw ValidationException::withMessages([
+                'category' => 'Categories used by split transactions cannot be deleted.',
+            ]);
+        }
 
         Transaction::query()
             ->where('user_id', $category->user_id)

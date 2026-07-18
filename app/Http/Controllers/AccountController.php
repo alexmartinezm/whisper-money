@@ -129,10 +129,11 @@ class AccountController extends Controller
             // transfer itself hurts.
             'transactions' => $account->type->hasTransactionLedger()
                 ? Inertia::defer(fn () => $account->transactions()
-                    ->with(['category', 'labels'])
+                    ->with(['category', 'labels', 'splits.category'])
                     ->orderBy('transaction_date', 'desc')
                     ->orderBy('id', 'desc')
-                    ->get())
+                    ->get()
+                    ->each->append(['is_split', 'split_count']))
                 : [],
         ]);
     }

@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { transactionSyncService } from './transaction-sync';
+import {
+    transactionSyncService,
+    transformTransactionFromServer,
+} from './transaction-sync';
 
 const dbMock = vi.hoisted(() => ({
     transactions: {
@@ -51,5 +54,43 @@ describe('transactionSyncService.delete', () => {
             data: undefined,
         });
         expect(dbMock.transactions.delete).toHaveBeenCalledWith('txn-1');
+    });
+});
+
+describe('transaction sync transformation', () => {
+    it('keeps embedded split lines while deriving label ids', () => {
+        const splits = [
+            {
+                id: 'split-1',
+                category_id: 'food',
+                amount: -6000,
+                position: 0,
+                category: { id: 'food', name: 'Food' },
+            },
+            {
+                id: 'split-2',
+                category_id: 'home',
+                amount: -4000,
+                position: 1,
+                category: { id: 'home', name: 'Home' },
+            },
+        ];
+
+        expect(
+            transformTransactionFromServer({
+                id: 'transaction-1',
+                transaction_date: '2026-07-18T00:00:00.000Z',
+                labels: [{ id: 'label-1' }],
+                splits,
+                is_split: true,
+                split_count: 2,
+            }),
+        ).toMatchObject({
+            transaction_date: '2026-07-18',
+            label_ids: ['label-1'],
+            splits,
+            is_split: true,
+            split_count: 2,
+        });
     });
 });

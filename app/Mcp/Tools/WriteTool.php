@@ -154,7 +154,7 @@ abstract class WriteTool extends McpTool
      */
     protected function presentTransaction(Transaction $transaction): array
     {
-        $transaction->loadMissing(['account:id,name', 'category:id,name', 'labels:id,name']);
+        $transaction->loadMissing(['account:id,name', 'category:id,name', 'labels:id,name', 'splits.category:id,name']);
 
         return [
             'id' => $transaction->id,
@@ -174,6 +174,14 @@ abstract class WriteTool extends McpTool
                 ->map(fn (Label $label): array => ['id' => $label->id, 'name' => $label->name])
                 ->values()
                 ->all(),
+            'is_split' => $transaction->splits->isNotEmpty(),
+            'splits' => $transaction->splits->map(fn ($split): array => [
+                'id' => $split->id,
+                'category_id' => $split->category_id,
+                'category' => $split->category?->name,
+                'amount' => $split->amount,
+                'position' => $split->position,
+            ])->all(),
         ];
     }
 

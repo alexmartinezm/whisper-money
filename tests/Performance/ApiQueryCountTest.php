@@ -50,7 +50,7 @@ test('cash flow API does not exceed query threshold', function () {
 });
 
 test('top categories API does not exceed query threshold', function () {
-    assertMaxQueries(13, function () {
+    assertMaxQueries(14, function () {
         $this->getJson("/api/dashboard/top-categories?{$this->dateParams}")->assertOk();
     }, 'API Top Categories');
 });
@@ -78,7 +78,7 @@ test('cashflow trend API does not exceed query threshold', function () {
 });
 
 test('cashflow breakdown API does not exceed query threshold', function () {
-    assertMaxQueries(15, function () {
+    assertMaxQueries(16, function () {
         $this->getJson("/api/cashflow/breakdown?type=expense&{$this->dateParams}")->assertOk();
     }, 'API Cashflow Breakdown');
 });

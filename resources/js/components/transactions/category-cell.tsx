@@ -37,6 +37,7 @@ interface CategoryCellProps {
     withoutChevronIcon?: boolean;
     /** AI is currently categorizing this row in the background. */
     isCategorizing?: boolean;
+    onEdit?: (transaction: DecryptedTransaction) => void;
 }
 
 export function CategoryCell({
@@ -49,6 +50,7 @@ export function CategoryCell({
     className,
     withoutChevronIcon,
     isCategorizing,
+    onEdit,
 }: CategoryCellProps) {
     const [isUpdating, setIsUpdating] = useState(false);
     const isMobile = useIsMobile();
@@ -58,6 +60,7 @@ export function CategoryCell({
     // Free-plan nudge: AI could categorize this row. Sampled to a configurable
     // share of rows so it stays subtle instead of marking every uncategorized one.
     const showAiUpsell =
+        !transaction.splits?.length &&
         !transaction.category_id &&
         subscriptionsEnabled &&
         !auth.hasProPlan &&
@@ -205,6 +208,44 @@ export function CategoryCell({
                 <Spinner className="size-4 shrink-0" />
                 <span className="truncate text-sm">{__('Categorizing…')}</span>
             </div>
+        );
+    }
+
+    if (transaction.splits?.length) {
+        const summary = transaction.splits
+            .map(
+                (split) =>
+                    `${split.category?.name ?? __('Unknown')}: ${new Intl.NumberFormat(
+                        undefined,
+                        {
+                            style: 'currency',
+                            currency: transaction.currency_code,
+                        },
+                    ).format(split.amount / 100)}`,
+            )
+            .join('\n');
+
+        return (
+            <TooltipProvider>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button
+                            type="button"
+                            className={cn(
+                                'text-left text-sm font-medium',
+                                className,
+                            )}
+                            onClick={() => onEdit?.(transaction)}
+                            aria-label={__('Edit split transaction')}
+                        >
+                            {__('Split')} · {transaction.splits.length}
+                        </button>
+                    </TooltipTrigger>
+                    <TooltipContent className="whitespace-pre-line">
+                        {summary}
+                    </TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
         );
     }
 

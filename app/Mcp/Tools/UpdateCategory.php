@@ -11,6 +11,7 @@ use App\Models\Space;
 use App\Models\User;
 use App\Services\CategoryTree;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Laravel\Mcp\Request;
@@ -43,51 +44,55 @@ class UpdateCategory extends WriteTool
 
     protected function write(Request $request, User $user): Response
     {
-        $request->validate([
-            'name' => ['sometimes', 'string', 'max:255'],
-            'icon' => ['sometimes', 'string'],
-            'color' => ['sometimes', Rule::enum(CategoryColor::class)],
-            'type' => ['sometimes', Rule::enum(CategoryType::class)],
-            'cashflow_direction' => ['sometimes', Rule::enum(CategoryCashflowDirection::class)],
-        ]);
-
-        $space = $this->resolveSpace($request, $user);
-        $category = $this->categoryInSpace($request, $space);
-
-        $parent = $request->has('parent_id')
-            ? $this->resolveParentCategory($request, $space, $category)
-            : $this->currentParent($category, $space);
-
-        $type = $parent !== null
-            ? $parent->type
-            : ($request->has('type') ? $request->enum('type', CategoryType::class) : $category->type);
-
-        $requestedDirection = $request->filled('cashflow_direction')
-            ? $request->string('cashflow_direction')->toString()
-            : $category->cashflow_direction->value;
-        $cashflow = $this->cashflowDirectionFor($type, $parent, $requestedDirection);
-
-        $name = $request->has('name') ? $request->string('name')->toString() : $category->name;
-
-        if ($this->categoryNameTaken($space, $name, $parent?->id, $category->id)) {
-            throw ValidationException::withMessages([
-                'name' => 'A category with that name already exists at this level.',
+        return DB::transaction(function () use ($request, $user): Response {
+            $request->validate([
+                'name' => ['sometimes', 'string', 'max:255'],
+                'icon' => ['sometimes', 'string'],
+                'color' => ['sometimes', Rule::enum(CategoryColor::class)],
+                'type' => ['sometimes', Rule::enum(CategoryType::class)],
+                'cashflow_direction' => ['sometimes', Rule::enum(CategoryCashflowDirection::class)],
             ]);
-        }
 
-        $category->fill([
-            'name' => $name,
-            'icon' => $request->has('icon') ? $request->string('icon')->toString() : $category->icon,
-            'color' => $request->has('color') ? $request->string('color')->toString() : $category->color,
-            'type' => $type->value,
-            'cashflow_direction' => $cashflow->value,
-            'parent_id' => $parent?->id,
-        ]);
-        $category->save();
+            $space = $this->resolveSpace($request, $user);
+            $category = $this->categoryInSpace($request, $space);
+            $tree = new CategoryTree;
+            $category = $tree->lockSubtreeForMutation($category);
 
-        (new CategoryTree)->syncDescendantTypes($category);
+            $parent = $request->has('parent_id')
+                ? $this->resolveParentCategory($request, $space, $category)
+                : $this->currentParent($category, $space);
 
-        return $this->json(['category' => $this->presentCategory($category->refresh())]);
+            $type = $parent !== null
+                ? $parent->type
+                : ($request->has('type') ? $request->enum('type', CategoryType::class) : $category->type);
+
+            $requestedDirection = $request->filled('cashflow_direction')
+                ? $request->string('cashflow_direction')->toString()
+                : $category->cashflow_direction->value;
+            $cashflow = $this->cashflowDirectionFor($type, $parent, $requestedDirection);
+
+            $name = $request->has('name') ? $request->string('name')->toString() : $category->name;
+
+            if ($this->categoryNameTaken($space, $name, $parent?->id, $category->id)) {
+                throw ValidationException::withMessages([
+                    'name' => 'A category with that name already exists at this level.',
+                ]);
+            }
+
+            $category->fill([
+                'name' => $name,
+                'icon' => $request->has('icon') ? $request->string('icon')->toString() : $category->icon,
+                'color' => $request->has('color') ? $request->string('color')->toString() : $category->color,
+                'type' => $type->value,
+                'cashflow_direction' => $cashflow->value,
+                'parent_id' => $parent?->id,
+            ]);
+            $category->save();
+
+            $tree->syncDescendantTypes($category);
+
+            return $this->json(['category' => $this->presentCategory($category->refresh())]);
+        }, attempts: 5);
     }
 
     private function currentParent(Category $category, Space $space): ?Category

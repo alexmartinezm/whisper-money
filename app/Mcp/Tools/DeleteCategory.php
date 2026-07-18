@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Services\CategoryTree;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Laravel\Mcp\Request;
@@ -33,23 +34,26 @@ class DeleteCategory extends WriteTool
 
     protected function write(Request $request, User $user): Response
     {
-        $request->validate([
-            'strategy' => ['sometimes', Rule::enum(CategoryDeletionStrategy::class)],
-        ]);
+        return DB::transaction(function () use ($request, $user): Response {
+            $request->validate([
+                'strategy' => ['sometimes', Rule::enum(CategoryDeletionStrategy::class)],
+            ]);
 
-        $space = $this->resolveSpace($request, $user);
-        $category = $this->categoryInSpace($request, $space);
+            $space = $this->resolveSpace($request, $user);
+            $category = $this->categoryInSpace($request, $space);
+            $tree = new CategoryTree;
+            $category = $tree->lockSubtreeForMutation($category);
 
-        $strategy = $request->enum('strategy', CategoryDeletionStrategy::class) ?? CategoryDeletionStrategy::Reparent;
-        $tree = new CategoryTree;
+            $strategy = $request->enum('strategy', CategoryDeletionStrategy::class) ?? CategoryDeletionStrategy::Reparent;
 
-        match ($strategy) {
-            CategoryDeletionStrategy::Cascade => $tree->deleteSubtree($category),
-            CategoryDeletionStrategy::Promote => $this->detachChildrenAndDelete($category, null),
-            CategoryDeletionStrategy::Reparent => $this->detachChildrenAndDelete($category, $category->parent_id),
-        };
+            match ($strategy) {
+                CategoryDeletionStrategy::Cascade => $tree->deleteSubtree($category),
+                CategoryDeletionStrategy::Promote => $this->detachChildrenAndDelete($category, null),
+                CategoryDeletionStrategy::Reparent => $this->detachChildrenAndDelete($category, $category->parent_id),
+            };
 
-        return $this->json(['deleted' => true, 'id' => $category->id, 'strategy' => $strategy->value]);
+            return $this->json(['deleted' => true, 'id' => $category->id, 'strategy' => $strategy->value]);
+        }, attempts: 5);
     }
 
     /**

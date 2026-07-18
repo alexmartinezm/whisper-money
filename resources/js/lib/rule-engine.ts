@@ -186,7 +186,10 @@ export async function evaluateRules(
                 consoleDebug(`[Rule Engine] ✓ Rule #${rule.id} matched!`);
                 return {
                     rule,
-                    categoryId: rule.action_category_id,
+                    categoryId:
+                        transaction.splits && transaction.splits.length > 0
+                            ? null
+                            : rule.action_category_id,
                     labelIds: rule.labels?.map((l) => l.id) || [],
                     labels: rule.labels || [],
                     note: rule.action_note,

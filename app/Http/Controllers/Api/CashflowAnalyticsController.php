@@ -186,10 +186,11 @@ class CashflowAnalyticsController extends Controller
         $transactions = Transaction::query()
             ->where('transactions.user_id', $userId)
             ->whereBetween('transactions.transaction_date', [$previousPeriod->from, $period->to])
-            ->with(['account', 'category'])
+            ->with(['account', 'category', 'splits.category'])
             ->get();
 
         $this->preloadExchangeRates($transactions, $userCurrency);
+        $transactions = $this->effectiveTransactions($transactions, $userCurrency);
 
         return [
             'current' => $this->cashflowSummaryFromTransactions(
@@ -245,10 +246,11 @@ class CashflowAnalyticsController extends Controller
         $transactions = Transaction::query()
             ->where('transactions.user_id', $userId)
             ->whereBetween('transactions.transaction_date', [$from, $to])
-            ->with(['account', 'category'])
+            ->with(['account', 'category', 'splits.category'])
             ->get();
 
         $this->preloadExchangeRates($transactions, $userCurrency);
+        $transactions = $this->effectiveTransactions($transactions, $userCurrency);
 
         $regularCategories = $transactions
             ->filter(function (Transaction $transaction) use ($type): bool {
@@ -340,10 +342,11 @@ class CashflowAnalyticsController extends Controller
         $transactions = Transaction::query()
             ->where('transactions.user_id', $userId)
             ->whereBetween('transactions.transaction_date', [$from, $to])
-            ->with(['account', 'category'])
+            ->with(['account', 'category', 'splits.category'])
             ->get();
 
         $this->preloadExchangeRates($transactions, $userCurrency);
+        $transactions = $this->effectiveTransactions($transactions, $userCurrency);
 
         return $transactions
             ->groupBy(fn (Transaction $transaction): string => $transaction->transaction_date->format('Y-m'))
@@ -398,10 +401,11 @@ class CashflowAnalyticsController extends Controller
         $transactions = Transaction::query()
             ->where('transactions.user_id', $userId)
             ->whereBetween('transactions.transaction_date', [$from, $to])
-            ->with(['account', 'category'])
+            ->with(['account', 'category', 'splits.category'])
             ->get();
 
         $this->preloadExchangeRates($transactions, $userCurrency);
+        $transactions = $this->effectiveTransactions($transactions, $userCurrency);
 
         $categorized = $transactions
             ->filter(fn (Transaction $transaction): bool => $transaction->categoryType() === $type)

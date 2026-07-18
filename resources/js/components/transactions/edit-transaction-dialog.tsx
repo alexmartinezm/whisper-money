@@ -1,6 +1,10 @@
 import { destroy } from '@/actions/App/Http/Controllers/Settings/AutomationRuleController';
 import { LabelCombobox } from '@/components/shared/label-combobox';
 import { CategorySelect } from '@/components/transactions/category-select';
+import {
+    TransactionSplitEditor,
+    validTransactionSplits,
+} from '@/components/transactions/transaction-split-editor';
 import { AmountInput } from '@/components/ui/amount-input';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -37,10 +41,14 @@ import {
 import { type AutomationRule } from '@/types/automation-rule';
 import { type Category } from '@/types/category';
 import { type Label } from '@/types/label';
-import { type DecryptedTransaction } from '@/types/transaction';
+import {
+    type DecryptedTransaction,
+    type TransactionSplit,
+} from '@/types/transaction';
 import { formatDate } from '@/utils/date';
 import { __ } from '@/utils/i18n';
 import { router } from '@inertiajs/react';
+import axios from 'axios';
 import { getYear, parseISO } from 'date-fns';
 import { Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -93,6 +101,8 @@ export function EditTransactionDialog({
     const [amount, setAmount] = useState<number>(0);
     const [accountId, setAccountId] = useState<string>('');
     const [categoryId, setCategoryId] = useState<string>('null');
+    const [splits, setSplits] = useState<TransactionSplit[] | null>(null);
+    const [removeSplits, setRemoveSplits] = useState(false);
     const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
     const [notes, setNotes] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -120,6 +130,15 @@ export function EditTransactionDialog({
             setAmount(transaction.amount);
             setAccountId(transaction.account_id);
             setCategoryId(transaction.category_id || 'null');
+            setSplits(
+                transaction.splits?.length
+                    ? transaction.splits.map((split, position) => ({
+                          ...split,
+                          position,
+                      }))
+                    : null,
+            );
+            setRemoveSplits(false);
             setSelectedLabelIds(
                 transaction.label_ids ||
                     transaction.labels?.map((l) => l.id) ||
@@ -137,6 +156,8 @@ export function EditTransactionDialog({
             );
             setAccountId(initialAccount?.id ?? '');
             setCategoryId('null');
+            setSplits(null);
+            setRemoveSplits(false);
             setSelectedLabelIds([]);
             setNotes('');
         }
@@ -300,6 +321,11 @@ export function EditTransactionDialog({
             }
         }
 
+        if (!validTransactionSplits(amount, splits, categories)) {
+            toast.error(__('Complete the split before saving'));
+            return;
+        }
+
         setIsSubmitting(true);
         try {
             const trimmedDescription = description.trim();
@@ -307,11 +333,18 @@ export function EditTransactionDialog({
             if (mode === 'create') {
                 const ruleResult = await checkAndApplyAutomationRules();
 
-                let finalCategoryId = categoryId === 'null' ? null : categoryId;
+                let finalCategoryId =
+                    splits === null && categoryId !== 'null'
+                        ? categoryId
+                        : null;
                 let finalNotes = notes.trim();
                 let finalLabelIds = [...selectedLabelIds];
 
-                if (ruleResult.categoryId && !finalCategoryId) {
+                if (
+                    splits === null &&
+                    ruleResult.categoryId &&
+                    !finalCategoryId
+                ) {
                     finalCategoryId = ruleResult.categoryId;
                 }
                 if (ruleResult.notes) {
@@ -355,6 +388,7 @@ export function EditTransactionDialog({
                             finalLabelIds.length > 0
                                 ? finalLabelIds
                                 : undefined,
+                        splits: splits ?? undefined,
                     },
                     {
                         updateBalance: selectedAccount.banking_connection_id
@@ -363,9 +397,10 @@ export function EditTransactionDialog({
                     },
                 );
 
-                const updatedCategory = finalCategoryId
+                const updatedCategory = createdTransaction.category_id
                     ? categories.find(
-                          (category) => category.id === finalCategoryId,
+                          (category) =>
+                              category.id === createdTransaction.category_id,
                       ) || null
                     : null;
 
@@ -427,11 +462,17 @@ export function EditTransactionDialog({
                     transaction_date?: string;
                     account_id?: string;
                     currency_code?: string;
+                    splits?: TransactionSplit[];
                 } = {
                     category_id: selectedCategoryId,
                     notes: encryptedNotes,
                     notes_iv: notesIv,
                     label_ids: selectedLabelIds,
+                    ...(splits !== null
+                        ? { splits }
+                        : removeSplits
+                          ? { splits: [] }
+                          : {}),
                 };
 
                 let finalDecryptedDescription =
@@ -470,11 +511,12 @@ export function EditTransactionDialog({
                 const updatedRecord = await transactionSyncService.getById(
                     transaction.id,
                 );
-                const updatedCategory = selectedCategoryId
-                    ? categories.find(
-                          (category) => category.id === selectedCategoryId,
-                      ) || null
-                    : null;
+                const updatedCategory =
+                    splits === null && selectedCategoryId
+                        ? categories.find(
+                              (category) => category.id === selectedCategoryId,
+                          ) || null
+                        : null;
 
                 const selectedLabels = labels.filter((label) =>
                     selectedLabelIds.includes(label.id),
@@ -482,8 +524,11 @@ export function EditTransactionDialog({
 
                 const updatedTransaction: DecryptedTransaction = {
                     ...transaction,
-                    category_id: selectedCategoryId,
+                    category_id: splits === null ? selectedCategoryId : null,
                     category: updatedCategory,
+                    splits: result.splits ?? splits ?? [],
+                    is_split: (result.splits ?? splits ?? []).length > 0,
+                    split_count: (result.splits ?? splits ?? []).length,
                     decryptedDescription: finalDecryptedDescription,
                     description:
                         updateData.description ?? transaction.description,
@@ -558,10 +603,18 @@ export function EditTransactionDialog({
             }
         } catch (error) {
             console.error('Failed to save transaction:', error);
+            const validationMessage = axios.isAxiosError(error)
+                ? Object.values(error.response?.data?.errors ?? {})
+                      .flat()
+                      .find((message): message is string =>
+                          Boolean(message && typeof message === 'string'),
+                      )
+                : null;
             toast.error(
-                mode === 'create'
-                    ? __('Failed to create transaction')
-                    : __('Failed to update transaction'),
+                validationMessage ??
+                    (mode === 'create'
+                        ? __('Failed to create transaction')
+                        : __('Failed to update transaction')),
             );
         } finally {
             setIsSubmitting(false);
@@ -827,21 +880,83 @@ export function EditTransactionDialog({
                             )}
                         </div>
 
-                        <div className="space-y-2">
-                            <FormLabel htmlFor="category">
-                                {__('Category')}
-                            </FormLabel>
-                            <CategorySelect
-                                value={categoryId}
-                                onValueChange={setCategoryId}
-                                categories={categories}
-                                disabled={isSubmitting}
-                                placeholder={__('Uncategorized')}
-                                triggerClassName="w-full"
-                                showUncategorized={true}
-                                data-testid="category-select"
-                            />
-                        </div>
+                        {splits === null ? (
+                            <div className="space-y-2">
+                                <FormLabel htmlFor="category">
+                                    {__('Category')}
+                                </FormLabel>
+                                <CategorySelect
+                                    value={categoryId}
+                                    onValueChange={setCategoryId}
+                                    categories={categories}
+                                    disabled={isSubmitting}
+                                    placeholder={__('Uncategorized')}
+                                    triggerClassName="w-full"
+                                    showUncategorized={true}
+                                    data-testid="category-select"
+                                />
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                        setRemoveSplits(false);
+                                        setSplits([
+                                            {
+                                                category_id:
+                                                    categoryId === 'null'
+                                                        ? ''
+                                                        : categoryId,
+                                                amount,
+                                                position: 0,
+                                            },
+                                            {
+                                                category_id: '',
+                                                amount: 0,
+                                                position: 1,
+                                            },
+                                        ]);
+                                    }}
+                                >
+                                    {__('Split transaction')}
+                                </Button>
+                            </div>
+                        ) : (
+                            <div className="space-y-2">
+                                <TransactionSplitEditor
+                                    amount={amount}
+                                    currencyCode={
+                                        selectedAccount?.currency_code ??
+                                        transaction?.currency_code ??
+                                        'USD'
+                                    }
+                                    categories={categories}
+                                    value={splits}
+                                    onChange={setSplits}
+                                    disabled={isSubmitting}
+                                />
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    onClick={() => {
+                                        if (
+                                            window.confirm(
+                                                __('Remove split transaction?'),
+                                            )
+                                        ) {
+                                            setCategoryId(
+                                                splits[0]?.category_id ||
+                                                    'null',
+                                            );
+                                            setSplits(null);
+                                            setRemoveSplits(true);
+                                        }
+                                    }}
+                                >
+                                    {__('Remove split')}
+                                </Button>
+                            </div>
+                        )}
 
                         <div className="space-y-2">
                             <FormLabel>{__('Labels')}</FormLabel>
@@ -895,7 +1010,14 @@ export function EditTransactionDialog({
                         </Button>
                         <Button
                             type="submit"
-                            disabled={isSubmitting}
+                            disabled={
+                                isSubmitting ||
+                                !validTransactionSplits(
+                                    amount,
+                                    splits,
+                                    categories,
+                                )
+                            }
                             data-testid="submit-transaction"
                         >
                             {isSubmitting

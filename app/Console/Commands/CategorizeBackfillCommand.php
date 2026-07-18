@@ -37,6 +37,7 @@ class CategorizeBackfillCommand extends Command
             ->where('user_id', $user->id)
             ->whereNull('category_id')
             ->whereNull('description_iv')
+            ->whereDoesntHave('splits')
             ->pluck('id');
 
         if ($pendingIds->isEmpty()) {

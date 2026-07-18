@@ -8,6 +8,7 @@ use App\Models\LabelTransaction;
 use App\Models\Transaction;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use JWadhams\JsonLogic;
 
@@ -101,24 +102,36 @@ class AutomationRuleService
         $changedTransactionIds = [];
 
         if ($rule->action_category_id !== null) {
-            $categoryTransactionIds = $transactions
-                ->filter(fn (Transaction $transaction): bool => $transaction->category_id !== $rule->action_category_id)
-                ->pluck('id')
-                ->all();
+            $candidateIds = $transactions->pluck('id')->all();
+            $categoryTransactionIds = DB::transaction(function () use ($candidateIds, $rule, $onlyUncategorized): array {
+                $eligibleIds = Transaction::query()
+                    ->whereIn('id', $candidateIds)
+                    ->orderBy('id')
+                    ->lockForUpdate()
+                    ->whereDoesntHave('splits')
+                    ->when($onlyUncategorized, fn ($query) => $query->whereNull('category_id'))
+                    ->where(fn ($query) => $query
+                        ->whereNull('category_id')
+                        ->orWhere('category_id', '!=', $rule->action_category_id))
+                    ->pluck('id')
+                    ->all();
 
-            if ($categoryTransactionIds !== []) {
-                Transaction::query()
-                    ->whereIn('id', $categoryTransactionIds)
-                    ->update([
-                        'category_id' => $rule->action_category_id,
-                        'category_source' => CategorySource::Rule->value,
-                        'categorized_by_rule_id' => $rule->id,
-                        'updated_at' => now(),
-                    ]);
-
-                foreach ($categoryTransactionIds as $transactionId) {
-                    $changedTransactionIds[$transactionId] = true;
+                if ($eligibleIds !== []) {
+                    Transaction::query()
+                        ->whereIn('id', $eligibleIds)
+                        ->update([
+                            'category_id' => $rule->action_category_id,
+                            'category_source' => CategorySource::Rule->value,
+                            'categorized_by_rule_id' => $rule->id,
+                            'updated_at' => now(),
+                        ]);
                 }
+
+                return $eligibleIds;
+            }, attempts: 5);
+
+            foreach ($categoryTransactionIds as $transactionId) {
+                $changedTransactionIds[$transactionId] = true;
             }
         }
 
@@ -177,7 +190,7 @@ class AutomationRuleService
     public function shouldSkipForOnlyUncategorized(AutomationRule $rule, Transaction $transaction): bool
     {
         if ($rule->action_category_id !== null) {
-            return $transaction->category_id !== null;
+            return $transaction->category_id !== null || $transaction->splits()->exists();
         }
 
         $ruleLabelIds = $rule->labels->pluck('id')->all();
@@ -312,42 +325,48 @@ class AutomationRuleService
 
     private function applyActions(Transaction $transaction, AutomationRule $rule): bool
     {
-        $changed = false;
+        return DB::transaction(function () use ($transaction, $rule): bool {
+            $locked = Transaction::query()->whereKey($transaction->id)->lockForUpdate()->firstOrFail();
+            $changed = false;
 
-        if ($rule->action_category_id !== null
-            && $transaction->category_id !== $rule->action_category_id) {
-            $transaction->category_id = $rule->action_category_id;
-            $transaction->category_source = CategorySource::Rule;
-            $transaction->categorized_by_rule_id = $rule->id;
-            $changed = true;
-        }
-
-        // Only apply plain (unencrypted) notes — encrypted notes require the user's key
-        if ($rule->action_note && $rule->action_note_iv === null) {
-            $existingNotes = $transaction->notes ?? '';
-            $ruleNote = $rule->action_note;
-
-            if (! $this->noteAlreadyPresent($existingNotes, $ruleNote)) {
-                $transaction->notes = $existingNotes
-                    ? $existingNotes."\n".$ruleNote
-                    : $ruleNote;
+            if ($rule->action_category_id !== null
+                && ! $locked->splits()->exists()
+                && $locked->category_id !== $rule->action_category_id) {
+                $locked->category_id = $rule->action_category_id;
+                $locked->category_source = CategorySource::Rule;
+                $locked->categorized_by_rule_id = $rule->id;
                 $changed = true;
             }
-        }
 
-        if ($transaction->isDirty()) {
-            $transaction->saveQuietly();
-        }
+            // Only apply plain (unencrypted) notes — encrypted notes require the user's key
+            if ($rule->action_note && $rule->action_note_iv === null) {
+                $existingNotes = $locked->notes ?? '';
+                $ruleNote = $rule->action_note;
 
-        $labelIds = $rule->labels->pluck('id')->all();
-        if (! empty($labelIds)) {
-            $result = $transaction->labels()->syncWithoutDetaching($labelIds);
-            if (! empty($result['attached'])) {
-                $changed = true;
+                if (! $this->noteAlreadyPresent($existingNotes, $ruleNote)) {
+                    $locked->notes = $existingNotes
+                        ? $existingNotes."\n".$ruleNote
+                        : $ruleNote;
+                    $changed = true;
+                }
             }
-        }
 
-        return $changed;
+            if ($locked->isDirty()) {
+                $locked->saveQuietly();
+            }
+
+            $labelIds = $rule->labels->pluck('id')->all();
+            if (! empty($labelIds)) {
+                $result = $locked->labels()->syncWithoutDetaching($labelIds);
+                if (! empty($result['attached'])) {
+                    $changed = true;
+                }
+            }
+
+            $transaction->setRawAttributes($locked->getAttributes(), true);
+
+            return $changed;
+        });
     }
 
     private function noteAlreadyPresent(string $existingNotes, string $note): bool

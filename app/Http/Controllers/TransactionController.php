@@ -15,9 +15,12 @@ use App\Models\Label;
 use App\Models\Transaction;
 use App\Services\Ai\CategoryOverrideHandler;
 use App\Services\ManualBalanceAdjuster;
+use App\Services\Transactions\ReplaceTransactionSplits;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -55,7 +58,7 @@ class TransactionController extends Controller
 
         $query = Transaction::query()
             ->where('user_id', $user->id)
-            ->with(['account.bank', 'category', 'labels', 'categorizedByRule:id,origin'])
+            ->with(['account.bank', 'category', 'labels', 'categorizedByRule:id,origin', 'splits.category'])
             ->applyFilters($filters);
 
         $nullableSortColumns = ['creditor_name', 'debtor_name'];
@@ -76,7 +79,7 @@ class TransactionController extends Controller
 
         $transactions->getCollection()->each(function (Transaction $transaction): void {
             $transaction->makeHidden(['creditor_name_sort', 'debtor_name_sort'])
-                ->append('ai_categorized');
+                ->append(['ai_categorized', 'is_split', 'split_count']);
         });
 
         $newestServed = $transactions->getCollection()->max('created_at');
@@ -168,6 +171,7 @@ class TransactionController extends Controller
         $transactions = Transaction::query()
             ->where('user_id', $user->id)
             ->whereNull('category_id')
+            ->whereDoesntHave('splits')
             ->with(['account.bank', 'labels'])
             ->orderBy('transaction_date', 'desc')
             ->orderBy('id', 'desc')
@@ -182,11 +186,12 @@ class TransactionController extends Controller
         ]);
     }
 
-    public function store(StoreTransactionRequest $request, ManualBalanceAdjuster $balanceAdjuster): JsonResponse
+    public function store(StoreTransactionRequest $request, ManualBalanceAdjuster $balanceAdjuster, ReplaceTransactionSplits $replaceSplits): JsonResponse
     {
         $data = $request->validated();
         $labelIds = $data['label_ids'] ?? null;
-        unset($data['label_ids']);
+        $splits = $data['splits'] ?? null;
+        unset($data['label_ids'], $data['splits']);
 
         $transaction = new Transaction([
             ...$data,
@@ -198,86 +203,113 @@ class TransactionController extends Controller
             $transaction->exists = false;
         }
 
-        $transaction->save();
+        DB::transaction(function () use ($transaction, $labelIds, $splits, $replaceSplits): void {
+            $transaction->save();
 
-        if ($labelIds !== null) {
-            $transaction->labels()->sync($labelIds);
-        }
+            if ($labelIds !== null) {
+                $transaction->labels()->sync($labelIds);
+            }
+
+            if ($splits !== null) {
+                $replaceSplits->replace($transaction, $splits, $transaction->category_id);
+            }
+        });
 
         if ($request->boolean('update_balance')) {
             $balanceAdjuster->applyCreatedTransaction($transaction);
         }
 
         return response()->json([
-            'data' => $transaction->load('labels'),
+            'data' => $transaction->fresh()->load(['labels', 'splits.category'])->append(['is_split', 'split_count']),
         ], 201);
     }
 
-    public function update(UpdateTransactionRequest $request, Transaction $transaction, ManualBalanceAdjuster $balanceAdjuster): JsonResponse
+    public function update(UpdateTransactionRequest $request, Transaction $transaction, ManualBalanceAdjuster $balanceAdjuster, ReplaceTransactionSplits $replaceSplits): JsonResponse
     {
         $this->authorize('update', $transaction);
 
         $data = $request->validated();
         $labelIds = $data['label_ids'] ?? null;
         $hasLabelUpdate = $request->has('label_ids');
-        unset($data['label_ids']);
+        $splits = $data['splits'] ?? null;
+        $hasSplitUpdate = $request->has('splits');
+        unset($data['label_ids'], $data['splits']);
 
         $learnedRule = null;
-
-        // A user-set category overrides any AI assignment: learn the correction as
-        // a forward-looking rule, log/self-heal as needed, and reset provenance.
-        if ($request->has('category_id')) {
-            $newCategoryId = $data['category_id'] ?? null;
-
-            if ($newCategoryId !== $transaction->category_id) {
-                $learnedRule = app(CategoryOverrideHandler::class)->record($transaction, $newCategoryId);
-
-                $data['category_source'] = $newCategoryId === null ? null : CategorySource::Manual->value;
-                $data['ai_confidence'] = null;
-                $data['categorized_by_rule_id'] = null;
-            }
-        }
-
-        // Snapshot the pre-edit account/date/amount before filling, so a manual
-        // account balance can be moved off the old values if the edit changes them.
         $originalSnapshot = clone $transaction;
 
-        // Update attributes directly without firing events yet
-        if (! empty($data)) {
-            $transaction->fill($data);
+        if ($transaction->splits()->exists() && ! $hasSplitUpdate && ($request->has('category_id') || $request->has('amount'))) {
+            throw ValidationException::withMessages([
+                'splits' => 'Category or amount changes on a split transaction require an explicit split replacement or removal.',
+            ]);
         }
 
-        // Sync labels if provided
-        if ($hasLabelUpdate) {
-            $transaction->labels()->sync($labelIds ?? []);
-            // Reload labels so the event listener has fresh data
-            $transaction->load('labels');
-        }
+        DB::transaction(function () use (
+            $request,
+            $transaction,
+            $data,
+            $labelIds,
+            $hasLabelUpdate,
+            $splits,
+            $hasSplitUpdate,
+            $replaceSplits,
+            $balanceAdjuster,
+            $originalSnapshot,
+            &$learnedRule,
+        ): void {
+            $transaction->setRawAttributes(
+                Transaction::query()->whereKey($transaction->id)->lockForUpdate()->firstOrFail()->getAttributes(),
+                true,
+            );
 
-        // Save to fire the updated event if there are any changes
-        // We need to save even if just labels changed (isDirty won't detect pivot changes)
-        if ($transaction->isDirty() || $hasLabelUpdate) {
-            // Touch the model to ensure it's marked as changed for the event
-            if (! $transaction->isDirty() && $hasLabelUpdate) {
-                $transaction->touch();
+            if ($transaction->splits()->exists() && ! $hasSplitUpdate && $request->hasAny(['category_id', 'amount'])) {
+                throw ValidationException::withMessages([
+                    'splits' => 'Category or amount changes on a split transaction require an explicit split replacement or removal.',
+                ]);
             }
-            $transaction->save();
-        }
 
-        // Move the manual account balance to match an edited amount/date/account:
-        // strip the pre-edit contribution (exactly as a deletion would) and apply
-        // the new one (exactly as a creation would), both cascading forward.
-        // ponytail: like create/delete, this trusts the opt-in flag and keeps no
-        // record of whether creation adjusted the balance, so mixing the flag
-        // across create and edit can drift; a transaction-derived balance would
-        // remove that trust. Connected accounts are skipped inside the adjuster.
-        if ($request->boolean('update_balance') && $transaction->wasChanged(['amount', 'transaction_date', 'account_id'])) {
-            $balanceAdjuster->reverseDeletedTransaction($originalSnapshot);
-            $balanceAdjuster->applyCreatedTransaction($transaction->load('account'));
-        }
+            // Split creation supersedes the simple category and must not teach a
+            // single-category correction.
+            if ($request->has('category_id') && ! ($hasSplitUpdate && $splits !== [])) {
+                $newCategoryId = $data['category_id'] ?? null;
+
+                if ($newCategoryId !== $transaction->category_id) {
+                    $learnedRule = app(CategoryOverrideHandler::class)->record($transaction, $newCategoryId);
+
+                    $data['category_source'] = $newCategoryId === null ? null : CategorySource::Manual->value;
+                    $data['ai_confidence'] = null;
+                    $data['categorized_by_rule_id'] = null;
+                }
+            }
+
+            if (! empty($data)) {
+                $transaction->fill($data);
+            }
+
+            if ($hasLabelUpdate) {
+                $transaction->labels()->sync($labelIds ?? []);
+                $transaction->load('labels');
+            }
+
+            if ($transaction->isDirty() || $hasLabelUpdate) {
+                if (! $transaction->isDirty() && $hasLabelUpdate) {
+                    $transaction->touch();
+                }
+                $transaction->save();
+            }
+
+            if ($hasSplitUpdate) {
+                $replaceSplits->replace($transaction, $splits ?? [], $data['category_id'] ?? null);
+            }
+
+            if ($request->boolean('update_balance') && $transaction->wasChanged(['amount', 'transaction_date', 'account_id'])) {
+                $balanceAdjuster->reverseDeletedTransaction($originalSnapshot);
+                $balanceAdjuster->applyCreatedTransaction($transaction->load('account'));
+            }
+        });
 
         return response()->json([
-            'data' => $transaction->fresh()->load('labels'),
+            'data' => $transaction->fresh()->load(['labels', 'splits.category'])->append(['is_split', 'split_count']),
             'learned_rule' => $learnedRule === null ? null : [
                 'id' => $learnedRule->id,
                 'title' => $learnedRule->title,
@@ -326,13 +358,16 @@ class TransactionController extends Controller
         }
 
         $updateData = [];
+        $skippedSplitCount = 0;
         if ($request->has('category_id')) {
             $newCategoryId = $request->input('category_id');
+            $splitIds = $transactions->filter(fn (Transaction $candidate): bool => $candidate->splits()->exists())->pluck('id');
+            $skippedSplitCount = $splitIds->count();
 
             $overrideHandler = app(CategoryOverrideHandler::class);
 
-            foreach ($transactions as $transaction) {
-                $overrideHandler->record($transaction, $newCategoryId);
+            foreach ($transactions->whereNotIn('id', $splitIds) as $candidate) {
+                $overrideHandler->record($candidate, $newCategoryId);
             }
 
             $updateData['category_id'] = $newCategoryId;
@@ -363,7 +398,17 @@ class TransactionController extends Controller
             } elseif ($filters !== null) {
                 $updateQuery->applyFilters($filters);
             }
+            if ($request->has('category_id')) {
+                $updateQuery->whereDoesntHave('splits');
+            }
             $updateQuery->update($updateData);
+
+            if ($request->has('category_id') && $skippedSplitCount > 0) {
+                $parentOnlyData = collect($updateData)->except(['category_id', 'category_source', 'ai_confidence', 'categorized_by_rule_id'])->all();
+                if ($parentOnlyData !== []) {
+                    Transaction::query()->whereIn('id', $splitIds)->update($parentOnlyData);
+                }
+            }
         }
 
         if ($hasLabelUpdate) {
@@ -376,6 +421,8 @@ class TransactionController extends Controller
         return response()->json([
             'message' => 'Transactions updated successfully',
             'count' => $transactions->count(),
+            'updated_count' => $transactions->count() - $skippedSplitCount,
+            'skipped_split_count' => $skippedSplitCount,
         ]);
     }
 }

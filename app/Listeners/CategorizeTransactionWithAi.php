@@ -45,7 +45,7 @@ class CategorizeTransactionWithAi implements ShouldQueue
 
     public function handle(TransactionCreated $event): void
     {
-        $transaction = $event->transaction;
+        $transaction = $event->transaction->refresh();
 
         // Re-check at run time: eligibility or the category may have changed while
         // the job waited in the queue.
@@ -63,6 +63,10 @@ class CategorizeTransactionWithAi implements ShouldQueue
         }
 
         if ($transaction->description_iv !== null) {
+            return false;
+        }
+
+        if ($transaction->splits()->exists()) {
             return false;
         }
 
