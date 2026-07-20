@@ -15,20 +15,16 @@ class EffectiveTransactionPostings
 
         if ($transaction->splits->isNotEmpty()) {
             return $transaction->splits->map(fn ($split): EffectiveTransactionPosting => new EffectiveTransactionPosting(
-                $transaction,
                 $split->category,
                 $split->category_id,
                 $split->amount,
-                true,
             ));
         }
 
         return collect([new EffectiveTransactionPosting(
-            $transaction,
             $transaction->category,
             $transaction->category_id,
             $transaction->amount,
-            false,
         )]);
     }
 

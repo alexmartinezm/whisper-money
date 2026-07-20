@@ -86,32 +86,6 @@ class CategoryTree
     }
 
     /**
-     * A category's id together with every ancestor id, walking up to the root.
-     *
-     * @return array<int, string>
-     */
-    public function ancestorAndSelfIds(string $userId, string $categoryId): array
-    {
-        $ids = [$categoryId];
-        $parentId = Category::query()
-            ->where('user_id', $userId)
-            ->whereKey($categoryId)
-            ->value('parent_id');
-
-        $guard = 0;
-
-        while ($parentId !== null && $guard++ < Category::MAX_DEPTH) {
-            $ids[] = $parentId;
-            $parentId = Category::query()
-                ->where('user_id', $userId)
-                ->whereKey($parentId)
-                ->value('parent_id');
-        }
-
-        return $ids;
-    }
-
-    /**
      * The depth of a category, where a root category is level 1.
      */
     public function depth(Category $category): int

@@ -66,8 +66,7 @@ it('uses either the parent or ordered split postings without double counting', f
 
     $normal = $service->forTransaction($transaction->load(['category', 'splits.category']));
     expect($normal)->toHaveCount(1)
-        ->and($normal->sum('amount'))->toBe(-10000)
-        ->and($normal->first()->fromSplit)->toBeFalse();
+        ->and($normal->sum('amount'))->toBe(-10000);
 
     makeIntegrationSplit($transaction, $food, $home);
     $postings = $service->forTransaction($transaction->refresh()->load(['category', 'splits.category']));
@@ -75,8 +74,7 @@ it('uses either the parent or ordered split postings without double counting', f
     expect($postings)->toHaveCount(2)
         ->and($postings->pluck('categoryId')->all())->toBe([$food->id, $home->id])
         ->and($postings->pluck('amount')->all())->toBe([-6000, -4000])
-        ->and($postings->sum('amount'))->toBe(-10000)
-        ->and($postings->every->fromSplit)->toBeTrue();
+        ->and($postings->sum('amount'))->toBe(-10000);
 });
 
 it('creates, serializes, replaces, and removes splits through transaction CRUD', function () {

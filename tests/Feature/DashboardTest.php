@@ -1,7 +1,6 @@
 <?php
 
 use App\Enums\CategoryType;
-use App\Http\Middleware\HandleInertiaRequests;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\Transaction;
@@ -78,7 +77,6 @@ test('dashboard top categories roll child spending up into the parent', function
         'X-Inertia' => 'true',
         'X-Inertia-Partial-Component' => 'dashboard',
         'X-Inertia-Partial-Data' => 'topCategories',
-        'X-Inertia-Version' => app(HandleInertiaRequests::class)->version(request()),
     ]);
 
     $response->assertOk()
@@ -110,7 +108,6 @@ test('dashboard cashflow uses split category types instead of the parent sign', 
         'X-Inertia' => 'true',
         'X-Inertia-Partial-Component' => 'dashboard',
         'X-Inertia-Partial-Data' => 'cashflowSummary',
-        'X-Inertia-Version' => app(HandleInertiaRequests::class)->version(request()),
     ])->assertOk()
         ->assertJsonPath('props.cashflowSummary.current.income', 0)
         ->assertJsonPath('props.cashflowSummary.current.expense', 0);
