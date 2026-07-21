@@ -78,6 +78,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { TableCell, TableRow } from '@/components/ui/table';
 import AppSidebarLayout from '@/layouts/app/app-sidebar-layout';
+import { getDescendantIds } from '@/lib/category-tree';
 import {
     isCursorPaginatedResponse,
     type CursorPaginatedResponse,
@@ -93,7 +94,10 @@ import {
     dismiss as dismissConsent,
     store as storeConsent,
 } from '@/routes/ai/consent';
-import { transactionSyncService } from '@/services/transaction-sync';
+import {
+    transactionSyncService,
+    type BulkUpdateResult,
+} from '@/services/transaction-sync';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { type Account, type Bank } from '@/types/account';
 import { type AutomationRule } from '@/types/automation-rule';
@@ -1037,6 +1041,19 @@ export default function Transactions({
         [],
     );
 
+    const categoryFilterIds = useMemo(() => {
+        if (filters.categoryIds.length === 0) {
+            return undefined;
+        }
+
+        return new Set(
+            filters.categoryIds.flatMap((categoryId) => [
+                categoryId,
+                ...getDescendantIds(categoryId, categories),
+            ]),
+        );
+    }, [categories, filters.categoryIds]);
+
     const columns = useMemo(
         () =>
             createTransactionColumns({
@@ -1052,6 +1069,7 @@ export default function Transactions({
                 onReEvaluateRules: handleReEvaluateRules,
                 isDateHidden: columnVisibility.transaction_date === false,
                 categorizingIds,
+                categoryFilterIds,
             }),
         [
             accounts,
@@ -1064,6 +1082,7 @@ export default function Transactions({
             handleReEvaluateRules,
             columnVisibility,
             categorizingIds,
+            categoryFilterIds,
         ],
     );
 
@@ -1111,7 +1130,7 @@ export default function Transactions({
         }
     }
 
-    async function handleBulkCategoryChange(categoryId: number | null) {
+    async function handleBulkCategoryChange(categoryId: string | null) {
         if (selectedIds.length === 0 && !isSelectingAll) {
             return;
         }
@@ -1120,7 +1139,7 @@ export default function Transactions({
         try {
             if (isSelectingAll) {
                 const toastId = toast.loading(__('Updating transactions...'));
-                const response = await axios.patch<{ count: number }>(
+                const response = await axios.patch<BulkUpdateResult>(
                     '/transactions/bulk',
                     {
                         filters: clientFiltersToBackendFilters(filters),
@@ -1129,28 +1148,39 @@ export default function Transactions({
                 );
                 toast.dismiss(toastId);
                 toast.success(
-                    __(`Updated :count transactions`, {
-                        count: response.data.count,
-                    }),
+                    response.data.skipped_split_count > 0
+                        ? __(
+                              'Updated :updated transactions; skipped :skipped split transactions',
+                              {
+                                  updated: response.data.updated_count,
+                                  skipped: response.data.skipped_split_count,
+                              },
+                          )
+                        : __('Updated :count transactions', {
+                              count: response.data.updated_count,
+                          }),
                 );
                 setRowSelection({});
                 setIsSelectingAll(false);
                 refreshTransactions();
             } else {
-                const categoriesMap = new Map(
-                    categories.map((category) => [category.id, category]),
+                const result = await transactionSyncService.updateMany(
+                    selectedIds,
+                    { category_id: categoryId },
                 );
-                const selectedCategory = categoryId
-                    ? categoriesMap.get(categoryId) || null
-                    : null;
 
-                await transactionSyncService.updateMany(selectedIds, {
-                    category_id: categoryId,
-                });
+                const selectedCategory = categoryId
+                    ? (categories.find(
+                          (category) => category.id === categoryId,
+                      ) ?? null)
+                    : null;
 
                 setAllTransactions((previous) =>
                     previous.map((transaction) => {
-                        if (selectedIds.includes(transaction.id.toString())) {
+                        if (
+                            selectedIds.includes(transaction.id.toString()) &&
+                            !transaction.is_split
+                        ) {
                             return {
                                 ...transaction,
                                 category_id: categoryId,
@@ -1162,9 +1192,17 @@ export default function Transactions({
                 );
 
                 toast.success(
-                    __(`Updated :count transactions`, {
-                        count: selectedIds.length,
-                    }),
+                    result.skipped_split_count > 0
+                        ? __(
+                              'Updated :updated transactions; skipped :skipped split transactions',
+                              {
+                                  updated: result.updated_count,
+                                  skipped: result.skipped_split_count,
+                              },
+                          )
+                        : __('Updated :count transactions', {
+                              count: result.updated_count,
+                          }),
                 );
 
                 setRowSelection({});

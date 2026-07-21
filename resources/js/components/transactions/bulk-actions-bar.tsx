@@ -30,7 +30,7 @@ interface BulkActionsBarProps {
     isSelectingAll?: boolean;
     categories: Category[];
     labels?: Label[];
-    onCategoryChange: (categoryId: number | null) => void;
+    onCategoryChange: (categoryId: string | null) => void;
     onLabelsChange: (labelIds: string[]) => void;
     onLabelCreated?: (label: Label) => void;
     onDelete: () => void;

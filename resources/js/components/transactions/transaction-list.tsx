@@ -847,7 +847,7 @@ export function TransactionList({
         }
     }
 
-    async function handleBulkCategoryChange(categoryId: number | null) {
+    async function handleBulkCategoryChange(categoryId: string | null) {
         const selectedIds = Object.keys(rowSelection);
         if (selectedIds.length === 0) {
             return;
@@ -855,20 +855,22 @@ export function TransactionList({
 
         setIsBulkUpdating(true);
         try {
-            await transactionSyncService.updateMany(selectedIds, {
-                category_id: categoryId,
-            });
-
-            const categoriesMap = new Map(
-                categories.map((category) => [category.id, category]),
+            const result = await transactionSyncService.updateMany(
+                selectedIds,
+                { category_id: categoryId },
             );
+
             const selectedCategory = categoryId
-                ? categoriesMap.get(categoryId) || null
+                ? (categories.find((category) => category.id === categoryId) ??
+                  null)
                 : null;
 
             setTransactions((previous) =>
                 previous.map((transaction) => {
-                    if (selectedIds.includes(transaction.id.toString())) {
+                    if (
+                        selectedIds.includes(transaction.id.toString()) &&
+                        !transaction.is_split
+                    ) {
                         return {
                             ...transaction,
                             category_id: categoryId,
@@ -877,6 +879,20 @@ export function TransactionList({
                     }
                     return transaction;
                 }),
+            );
+
+            toast.success(
+                result.skipped_split_count > 0
+                    ? __(
+                          'Updated :updated transactions; skipped :skipped split transactions',
+                          {
+                              updated: result.updated_count,
+                              skipped: result.skipped_split_count,
+                          },
+                      )
+                    : __('Updated :count transactions', {
+                          count: result.updated_count,
+                      }),
             );
 
             setRowSelection({});
