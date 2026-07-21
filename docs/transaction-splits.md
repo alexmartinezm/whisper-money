@@ -54,6 +54,24 @@ Bank importers do not create or modify splits. Deleting a parent cascades to its
 
 ## Deployment and rollback
 
+Before deploying hardened split writes, run the read-only integrity gate:
+
+```bash
+php artisan transactions:audit-splits --json --fail-on-invalid
+```
+
+The JSON artifact contains only IDs, anomaly codes, and counts. Resolve every anomaly before deployment. Rebuild historical budget assignments and advance parent delta-sync cursors only after a clean audit:
+
+```bash
+# Required preview; performs no writes.
+php artisan transactions:reconcile-splits
+
+# Explicit, resumable execution in short chunks.
+php artisan transactions:reconcile-splits --execute --chunk=200
+```
+
+Reconciliation never changes split line IDs, categories, amounts, positions, or timestamps. Re-running it is safe: budget rows use their existing unique identity and parent cursors advance once per execution.
+
 The migration is additive and sparse; no backfill is required. Deploy backend and frontend together. After deployment, monitor for:
 
 - split sums differing from parent amounts;
