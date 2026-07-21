@@ -3,9 +3,13 @@ import {
     validTransactionSplits,
 } from '@/components/transactions/transaction-split-editor';
 import type { Category } from '@/types/category';
-import type { TransactionSplit } from '@/types/transaction';
+import type { SplitLineInput } from '@/types/transaction';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('@/hooks/use-locale', () => ({
+    useLocale: () => 'en-US',
+}));
 
 vi.mock('@/components/transactions/category-select', () => ({
     CategorySelect: ({
@@ -59,7 +63,7 @@ const categories = [
     { id: 'salary', name: 'Salary', type: 'income' },
 ] as Category[];
 
-const splits: TransactionSplit[] = [
+const splits: SplitLineInput[] = [
     { category_id: 'food', amount: -6000, position: 0 },
     { category_id: 'home', amount: -3000, position: 1 },
 ];

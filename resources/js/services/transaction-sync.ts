@@ -1,7 +1,7 @@
 import { db, withDb } from '@/lib/dexie-db';
 import { TransactionSyncManager } from '@/lib/sync-manager';
 import type { LearnedRuleNotice } from '@/types/automation-rule';
-import type { Transaction } from '@/types/transaction';
+import type { SplitLineInput, Transaction } from '@/types/transaction';
 import type { UUID } from '@/types/uuid';
 import axios from 'axios';
 
@@ -10,8 +10,24 @@ export type UpdatedTransaction = Transaction & {
     learned_rule?: LearnedRuleNotice | null;
 };
 
-interface TransactionUpdateData extends Partial<Transaction> {
+export interface TransactionUpdateData extends Omit<
+    Partial<Transaction>,
+    'splits'
+> {
     label_ids?: string[];
+    splits?: SplitLineInput[];
+}
+
+export type TransactionCreateData = Omit<
+    Transaction,
+    'id' | 'created_at' | 'updated_at' | 'splits'
+> & {
+    splits?: SplitLineInput[];
+};
+
+export interface BulkUpdateResult {
+    updated_count: number;
+    skipped_split_count: number;
 }
 
 interface TransactionFilters {
@@ -72,7 +88,7 @@ class TransactionSyncService {
     }
 
     async create(
-        data: Omit<Transaction, 'id' | 'created_at' | 'updated_at'>,
+        data: TransactionCreateData,
         options?: { updateBalance?: boolean },
     ): Promise<Transaction> {
         const response = await axios.post('/transactions', {
@@ -93,7 +109,7 @@ class TransactionSyncService {
     }
 
     async createMany(
-        transactions: Omit<Transaction, 'id' | 'created_at' | 'updated_at'>[],
+        transactions: TransactionCreateData[],
     ): Promise<Transaction[]> {
         const created: Transaction[] = [];
 
@@ -137,20 +153,22 @@ class TransactionSyncService {
     async updateMany(
         ids: string[],
         data: TransactionUpdateData,
-    ): Promise<void> {
+    ): Promise<BulkUpdateResult> {
         const { label_ids, ...transactionData } = data;
 
-        await axios.patch('/transactions/bulk', {
+        const response = await axios.patch('/transactions/bulk', {
             transaction_ids: ids,
             label_ids: label_ids,
             ...transactionData,
         });
+
+        return response.data as BulkUpdateResult;
     }
 
     async updateByFilters(
         filters: TransactionFilters,
         data: TransactionUpdateData,
-    ): Promise<number> {
+    ): Promise<BulkUpdateResult> {
         const { label_ids, ...transactionData } = data;
 
         const requestFilters: Record<string, unknown> = {};
@@ -190,7 +208,7 @@ class TransactionSyncService {
             ...transactionData,
         });
 
-        return response.data.count || 0;
+        return response.data as BulkUpdateResult;
     }
 
     async delete(

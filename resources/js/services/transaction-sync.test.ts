@@ -13,6 +13,9 @@ const dbMock = vi.hoisted(() => ({
 
 const axiosMock = vi.hoisted(() => ({
     delete: vi.fn(async () => ({ data: {} })),
+    patch: vi.fn(async () => ({
+        data: { updated_count: 2, skipped_split_count: 1 },
+    })),
 }));
 
 // Keep the real withDb (reads globalThis live); swap only the Dexie-backed db.
@@ -54,6 +57,35 @@ describe('transactionSyncService.delete', () => {
             data: undefined,
         });
         expect(dbMock.transactions.delete).toHaveBeenCalledWith('txn-1');
+    });
+});
+
+describe('transactionSyncService bulk updates', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
+    it('returns updated and skipped split counts for explicit ids', async () => {
+        await expect(
+            transactionSyncService.updateMany(['tx-1', 'tx-2', 'tx-3'], {
+                category_id: 'category-1',
+            }),
+        ).resolves.toEqual({
+            updated_count: 2,
+            skipped_split_count: 1,
+        });
+    });
+
+    it('returns updated and skipped split counts for filters', async () => {
+        await expect(
+            transactionSyncService.updateByFilters(
+                { dateFrom: new Date('2026-07-01T00:00:00Z') },
+                { category_id: 'category-1' },
+            ),
+        ).resolves.toEqual({
+            updated_count: 2,
+            skipped_split_count: 1,
+        });
     });
 });
 

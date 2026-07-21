@@ -1,8 +1,10 @@
 import { CategorySelect } from '@/components/transactions/category-select';
 import { AmountInput } from '@/components/ui/amount-input';
 import { Button } from '@/components/ui/button';
+import { useLocale } from '@/hooks/use-locale';
 import { type Category } from '@/types/category';
-import { type TransactionSplit } from '@/types/transaction';
+import { type SplitLineInput } from '@/types/transaction';
+import { formatCurrency } from '@/utils/currency';
 import { __ } from '@/utils/i18n';
 import { Plus, Trash2 } from 'lucide-react';
 import { useMemo } from 'react';
@@ -11,8 +13,8 @@ interface TransactionSplitEditorProps {
     amount: number;
     currencyCode: string;
     categories: Category[];
-    value: TransactionSplit[];
-    onChange: (splits: TransactionSplit[]) => void;
+    value: SplitLineInput[];
+    onChange: (splits: SplitLineInput[]) => void;
     disabled?: boolean;
 }
 
@@ -24,6 +26,7 @@ export function TransactionSplitEditor({
     onChange,
     disabled = false,
 }: TransactionSplitEditorProps) {
+    const locale = useLocale();
     const splitCategories = useMemo(
         () =>
             categories.filter(
@@ -47,7 +50,7 @@ export function TransactionSplitEditor({
         [splitCategories, firstCategory],
     );
 
-    function update(index: number, patch: Partial<TransactionSplit>) {
+    function update(index: number, patch: Partial<SplitLineInput>) {
         const nextCategory =
             index === 0 && patch.category_id
                 ? splitCategories.find(
@@ -114,7 +117,7 @@ export function TransactionSplitEditor({
             {value.map((split, index) => (
                 <div
                     className="grid grid-cols-[minmax(0,1fr)_minmax(8rem,0.65fr)_auto] items-end gap-2"
-                    key={split.id ?? index}
+                    key={`${split.category_id}-${index}`}
                 >
                     <div className="space-y-1">
                         <label
@@ -192,8 +195,9 @@ export function TransactionSplitEditor({
                 aria-live="polite"
             >
                 <span>
-                    {__('Total')}: {(total / 100).toFixed(2)} ·{' '}
-                    {__('Remaining')}: {(remaining / 100).toFixed(2)}
+                    {__('Total')}: {formatCurrency(total, currencyCode, locale)}{' '}
+                    · {__('Remaining')}:{' '}
+                    {formatCurrency(remaining, currencyCode, locale)}
                 </span>
                 <Button type="button" variant="outline" size="sm" onClick={add}>
                     <Plus className="size-4" />
@@ -211,7 +215,7 @@ export function TransactionSplitEditor({
 
 export function validTransactionSplits(
     amount: number,
-    splits: TransactionSplit[] | null,
+    splits: SplitLineInput[] | null,
     categories?: Category[],
 ): boolean {
     if (splits === null) return true;

@@ -1,7 +1,13 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { transactionSyncService } from '@/services/transaction-sync';
+import type { Category } from '@/types/category';
+import type { DecryptedTransaction } from '@/types/transaction';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { EditTransactionDialog } from './edit-transaction-dialog';
+import {
+    EditTransactionDialog,
+    haveSplitLinesChanged,
+} from './edit-transaction-dialog';
 
 vi.mock('@/components/shared/label-combobox', () => ({
     LabelCombobox: () => <div />,
@@ -35,7 +41,8 @@ vi.mock('@/lib/rule-engine', () => ({
 vi.mock('@/services/transaction-sync', () => ({
     transactionSyncService: {
         create: vi.fn(),
-        update: vi.fn(),
+        update: vi.fn(async () => ({})),
+        getById: vi.fn(async () => null),
     },
 }));
 
@@ -97,8 +104,57 @@ vi.mock('@/components/ui/dialog', () => ({
     ),
 }));
 
+describe('split line dirty checking', () => {
+    const persisted = [
+        {
+            id: 'split-1',
+            transaction_id: 'tx-1',
+            category_id: 'category-1',
+            category: { id: 'category-1', name: 'Food' },
+            amount: -400,
+            position: 0,
+        },
+        {
+            id: 'split-2',
+            transaction_id: 'tx-1',
+            category_id: 'category-2',
+            category: { id: 'category-2', name: 'Travel' },
+            amount: -600,
+            position: 1,
+        },
+    ];
+
+    it('ignores persisted split metadata when lines are unchanged', () => {
+        expect(
+            haveSplitLinesChanged(persisted, [
+                { category_id: 'category-1', amount: -400, position: 0 },
+                { category_id: 'category-2', amount: -600, position: 1 },
+            ]),
+        ).toBe(false);
+    });
+
+    it('detects changed split amounts', () => {
+        expect(
+            haveSplitLinesChanged(persisted, [
+                { category_id: 'category-1', amount: -250, position: 0 },
+                { category_id: 'category-2', amount: -750, position: 1 },
+            ]),
+        ).toBe(true);
+    });
+
+    it('detects reordered split lines', () => {
+        expect(
+            haveSplitLinesChanged(persisted, [
+                { category_id: 'category-2', amount: -600, position: 0 },
+                { category_id: 'category-1', amount: -400, position: 1 },
+            ]),
+        ).toBe(true);
+    });
+});
+
 describe('EditTransactionDialog', () => {
     beforeEach(() => {
+        vi.clearAllMocks();
         globalThis.ResizeObserver = class {
             observe() {}
             unobserve() {}
@@ -316,6 +372,70 @@ describe('EditTransactionDialog', () => {
         expect(
             document.querySelector('input[type="date"]'),
         ).not.toBeInTheDocument();
+    });
+
+    it('omits unchanged split, category, and amount fields from a notes-only edit', async () => {
+        const categories = [
+            { id: 'food', name: 'Food', type: 'expense' },
+            { id: 'home', name: 'Home', type: 'expense' },
+        ] as Category[];
+        const transaction = {
+            ...manualTransaction,
+            id: 'tx-split',
+            category_id: null,
+            amount: -1200,
+            source: 'imported',
+            is_split: true,
+            split_count: 2,
+            splits: [
+                {
+                    id: 'split-1',
+                    transaction_id: 'tx-split',
+                    category_id: 'food',
+                    category: categories[0],
+                    amount: -700,
+                    position: 0,
+                },
+                {
+                    id: 'split-2',
+                    transaction_id: 'tx-split',
+                    category_id: 'home',
+                    category: categories[1],
+                    amount: -500,
+                    position: 1,
+                },
+            ],
+        } as DecryptedTransaction;
+
+        render(
+            <EditTransactionDialog
+                transaction={transaction}
+                categories={categories}
+                accounts={[checkingAccount]}
+                banks={[]}
+                labels={[]}
+                open
+                onOpenChange={vi.fn()}
+                onSuccess={vi.fn()}
+                mode="edit"
+            />,
+        );
+
+        fireEvent.change(screen.getByLabelText('Notes'), {
+            target: { value: 'Receipt checked' },
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+        await waitFor(() =>
+            expect(transactionSyncService.update).toHaveBeenCalledOnce(),
+        );
+        const payload = vi.mocked(transactionSyncService.update).mock
+            .calls[0][1];
+
+        expect(payload).toMatchObject({ notes: 'Receipt checked' });
+        expect(payload).not.toHaveProperty('splits');
+        expect(payload).not.toHaveProperty('category_id');
+        expect(payload).not.toHaveProperty('amount');
     });
 
     it('hides "update account balance" for a connected account', () => {

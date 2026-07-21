@@ -43,6 +43,7 @@ import { type Category } from '@/types/category';
 import { type Label } from '@/types/label';
 import {
     type DecryptedTransaction,
+    type SplitLineInput,
     type TransactionSplit,
 } from '@/types/transaction';
 import { formatDate } from '@/utils/date';
@@ -53,6 +54,29 @@ import { getYear, parseISO } from 'date-fns';
 import { Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
+
+function splitLineSignature(
+    splits: ReadonlyArray<
+        Pick<TransactionSplit, 'category_id' | 'amount' | 'position'>
+    >,
+): string {
+    return JSON.stringify(
+        splits.map(({ category_id, amount, position }) => ({
+            category_id,
+            amount,
+            position,
+        })),
+    );
+}
+
+export function haveSplitLinesChanged(
+    persisted: ReadonlyArray<
+        Pick<TransactionSplit, 'category_id' | 'amount' | 'position'>
+    >,
+    draft: readonly SplitLineInput[],
+): boolean {
+    return splitLineSignature(persisted) !== splitLineSignature(draft);
+}
 
 interface EditTransactionDialogProps {
     transaction: DecryptedTransaction | null;
@@ -101,7 +125,7 @@ export function EditTransactionDialog({
     const [amount, setAmount] = useState<number>(0);
     const [accountId, setAccountId] = useState<string>('');
     const [categoryId, setCategoryId] = useState<string>('null');
-    const [splits, setSplits] = useState<TransactionSplit[] | null>(null);
+    const [splits, setSplits] = useState<SplitLineInput[] | null>(null);
     const [removeSplits, setRemoveSplits] = useState(false);
     const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
     const [notes, setNotes] = useState('');
@@ -133,7 +157,8 @@ export function EditTransactionDialog({
             setSplits(
                 transaction.splits?.length
                     ? transaction.splits.map((split, position) => ({
-                          ...split,
+                          category_id: split.category_id,
+                          amount: split.amount,
                           position,
                       }))
                     : null,
@@ -452,7 +477,7 @@ export function EditTransactionDialog({
                 notesIv = null;
 
                 const updateData: {
-                    category_id: string | null;
+                    category_id?: string | null;
                     notes: string | null;
                     notes_iv: string | null;
                     description?: string;
@@ -462,13 +487,18 @@ export function EditTransactionDialog({
                     transaction_date?: string;
                     account_id?: string;
                     currency_code?: string;
-                    splits?: TransactionSplit[];
+                    splits?: SplitLineInput[];
                 } = {
-                    category_id: selectedCategoryId,
                     notes: encryptedNotes,
                     notes_iv: notesIv,
                     label_ids: selectedLabelIds,
-                    ...(splits !== null
+                    ...(splits === null &&
+                    (removeSplits ||
+                        selectedCategoryId !== transaction.category_id)
+                        ? { category_id: selectedCategoryId }
+                        : {}),
+                    ...(splits !== null &&
+                    haveSplitLinesChanged(transaction.splits ?? [], splits)
                         ? { splits }
                         : removeSplits
                           ? { splits: [] }
@@ -485,13 +515,26 @@ export function EditTransactionDialog({
                     editedAccount?.currency_code ?? transaction.currency_code;
 
                 if (canEditAllFields) {
-                    updateData.description = trimmedDescription;
-                    updateData.description_iv = null;
-                    finalDecryptedDescription = trimmedDescription;
-                    updateData.amount = amount;
-                    updateData.transaction_date = transactionDate;
-                    updateData.account_id = accountId;
-                    updateData.currency_code = editedCurrencyCode;
+                    if (
+                        trimmedDescription !== transaction.decryptedDescription
+                    ) {
+                        updateData.description = trimmedDescription;
+                        updateData.description_iv = null;
+                        finalDecryptedDescription = trimmedDescription;
+                    }
+                    if (amount !== transaction.amount) {
+                        updateData.amount = amount;
+                    }
+                    if (
+                        transactionDate !==
+                        transaction.transaction_date.split('T')[0]
+                    ) {
+                        updateData.transaction_date = transactionDate;
+                    }
+                    if (accountId !== transaction.account_id) {
+                        updateData.account_id = accountId;
+                        updateData.currency_code = editedCurrencyCode;
+                    }
                 }
 
                 const result = await transactionSyncService.update(
@@ -521,14 +564,17 @@ export function EditTransactionDialog({
                 const selectedLabels = labels.filter((label) =>
                     selectedLabelIds.includes(label.id),
                 );
+                const savedSplits =
+                    result.splits ??
+                    (removeSplits ? [] : (transaction.splits ?? []));
 
                 const updatedTransaction: DecryptedTransaction = {
                     ...transaction,
                     category_id: splits === null ? selectedCategoryId : null,
                     category: updatedCategory,
-                    splits: result.splits ?? splits ?? [],
-                    is_split: (result.splits ?? splits ?? []).length > 0,
-                    split_count: (result.splits ?? splits ?? []).length,
+                    splits: savedSplits,
+                    is_split: savedSplits.length > 0,
+                    split_count: savedSplits.length,
                     decryptedDescription: finalDecryptedDescription,
                     description:
                         updateData.description ?? transaction.description,

@@ -13,12 +13,18 @@ export type TransactionSource =
 export type CategorySource = 'manual' | 'rule' | 'ai' | 'bank';
 
 export interface TransactionSplit {
-    id?: UUID;
-    transaction_id?: UUID;
+    id: UUID;
+    transaction_id: UUID;
+    category_id: UUID;
+    category: Category | null;
+    amount: number;
+    position: number;
+}
+
+export interface SplitLineInput {
     category_id: UUID;
     amount: number;
     position: number;
-    category?: Category;
 }
 
 export interface Transaction {
