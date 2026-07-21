@@ -43,10 +43,12 @@ class ReplaceTransactionSplits
                 'ai_suggested_category_id' => null,
                 'ai_suggested_category_at' => null,
                 'ai_model' => null,
-            ])->save();
+            ]);
+            $locked->setUpdatedAt($locked->freshTimestamp());
+            $locked->save();
 
             return $locked->fresh(['splits.category']);
-        }, attempts: 5);
+        });
     }
 
     /** @param array<int, array{category_id: string, amount: int}> $splits */
@@ -70,15 +72,16 @@ class ReplaceTransactionSplits
             $this->fail('Split amounts must sum exactly to the transaction amount.');
         }
 
-        $ids = array_column($splits, 'category_id');
+        $ids = array_values(array_unique(array_column($splits, 'category_id')));
         $categories = Category::query()
             ->whereIn('id', $ids)
             ->where('user_id', $transaction->user_id)
             ->where('space_id', $transaction->space_id)
+            ->orderBy('id')
             ->lockForUpdate()
             ->get();
 
-        if ($categories->count() !== count(array_unique($ids))) {
+        if ($categories->count() !== count($ids)) {
             $this->fail('Every split category must belong to the transaction owner and space.');
         }
 
@@ -96,12 +99,15 @@ class ReplaceTransactionSplits
 
         $category = Category::query()
             ->whereKey($fallbackCategoryId)
-            ->where('user_id', $transaction->user_id)
-            ->where('space_id', $transaction->space_id)
+            ->lockForUpdate()
             ->first();
 
-        if ($category === null) {
+        if ($category === null || $category->user_id !== $transaction->user_id || $category->space_id !== $transaction->space_id) {
             $this->fail('The fallback category must belong to the transaction owner and space.');
+        }
+
+        if (! in_array($category->type, [CategoryType::Expense, CategoryType::Income], true)) {
+            $this->fail('The fallback category must have an expense or income type.');
         }
 
         $transaction->splits()->delete();
@@ -110,7 +116,9 @@ class ReplaceTransactionSplits
             'category_source' => 'manual',
             'ai_confidence' => null,
             'categorized_by_rule_id' => null,
-        ])->save();
+        ]);
+        $transaction->setUpdatedAt($transaction->freshTimestamp());
+        $transaction->save();
     }
 
     private function fail(string $message): never

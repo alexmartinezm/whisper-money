@@ -2,6 +2,9 @@
 
 use App\Contracts\BankingProviderInterface;
 use App\Enums\CategoryType;
+use App\Events\TransactionUpdated;
+use App\Features\TransactionSplitting;
+use App\Listeners\AssignTransactionToBudget;
 use App\Mcp\Servers\WhisperMoneyServer;
 use App\Mcp\Tools\CategorizeTransaction;
 use App\Mcp\Tools\SearchTransactions;
@@ -22,6 +25,7 @@ use App\Services\Transactions\EffectiveTransactionPostings;
 use App\Services\Transactions\ReplaceTransactionSplits;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Laravel\Pennant\Feature;
 
 uses(RefreshDatabase::class);
 
@@ -112,6 +116,38 @@ it('creates, serializes, replaces, and removes splits through transaction CRUD',
     ])->assertOk()
         ->assertJsonPath('data.category_id', $food->id)
         ->assertJsonPath('data.is_split', false);
+});
+
+it('blocks split creation and replacement while the flag is off but still allows unsplit', function () {
+    [$user, $account, $transaction, $food, $home] = splitIntegrationFixture();
+    Feature::for($user)->deactivate(TransactionSplitting::class);
+
+    $this->actingAs($user)->postJson(route('transactions.store'), [
+        'account_id' => $account->id,
+        'description' => 'Blocked split purchase',
+        'transaction_date' => '2026-07-18',
+        'amount' => -10000,
+        'currency_code' => 'EUR',
+        'source' => 'manually_created',
+        'splits' => [
+            ['category_id' => $food->id, 'amount' => -6000],
+            ['category_id' => $home->id, 'amount' => -4000],
+        ],
+    ])->assertForbidden();
+
+    makeIntegrationSplit($transaction, $food, $home);
+
+    $this->actingAs($user)->patchJson(route('transactions.update', $transaction), [
+        'splits' => [
+            ['category_id' => $food->id, 'amount' => -2500],
+            ['category_id' => $home->id, 'amount' => -7500],
+        ],
+    ])->assertForbidden();
+
+    $this->actingAs($user)->patchJson(route('transactions.update', $transaction), [
+        'category_id' => $food->id,
+        'splits' => [],
+    ])->assertOk()->assertJsonPath('data.is_split', false);
 });
 
 it('rejects implicit category or amount mutations on split parents', function () {
@@ -317,4 +353,49 @@ it('exposes split reads through MCP and blocks MCP categorization', function () 
 
     expect($transaction->refresh()->category_id)->toBeNull()
         ->and($transaction->splits()->count())->toBe(2);
+});
+
+it('returns replaced split details through delta sync', function () {
+    [$user, , $transaction, $food, $home] = splitIntegrationFixture();
+    makeIntegrationSplit($transaction, $food, $home);
+    $cursor = now()->subDay();
+    Transaction::withoutEvents(fn () => $transaction->forceFill(['updated_at' => $cursor])->saveQuietly());
+
+    $this->actingAs($user)->patchJson(route('transactions.update', $transaction), [
+        'splits' => [
+            ['category_id' => $food->id, 'amount' => -2500],
+            ['category_id' => $home->id, 'amount' => -7500],
+        ],
+    ])->assertOk();
+
+    $this->actingAs($user)->getJson('/api/sync/transactions?since='.urlencode($cursor->toISOString()))
+        ->assertOk()
+        ->assertJsonPath('data.0.id', $transaction->id)
+        ->assertJsonPath('data.0.is_split', true)
+        ->assertJsonPath('data.0.split_count', 2)
+        ->assertJsonPath('data.0.splits.0.amount', -2500)
+        ->assertJsonPath('data.0.splits.1.amount', -7500);
+});
+
+it('reassigns budgets without stale or duplicate rows after split replacement', function () {
+    [$user, , $transaction, $food, $home] = splitIntegrationFixture(['transaction_date' => now()]);
+    makeIntegrationSplit($transaction, $food, $home);
+    $foodBudget = Budget::factory()->forCategories($food)->create(['user_id' => $user->id]);
+    $homeBudget = Budget::factory()->forCategories($home)->create(['user_id' => $user->id]);
+    $foodPeriod = BudgetPeriod::factory()->create(['budget_id' => $foodBudget->id, 'start_date' => now()->subDay(), 'end_date' => now()->addDay()]);
+    $homePeriod = BudgetPeriod::factory()->create(['budget_id' => $homeBudget->id, 'start_date' => now()->subDay(), 'end_date' => now()->addDay()]);
+    app(BudgetTransactionService::class)->assignTransaction($transaction);
+
+    $this->actingAs($user)->patchJson(route('transactions.update', $transaction), [
+        'splits' => [
+            ['category_id' => $food->id, 'amount' => -2500],
+            ['category_id' => $home->id, 'amount' => -7500],
+        ],
+    ])->assertOk();
+
+    app(AssignTransactionToBudget::class)->handle(new TransactionUpdated($transaction->fresh()));
+
+    expect($foodPeriod->budgetTransactions()->sole()->amount)->toBe(2500)
+        ->and($homePeriod->budgetTransactions()->sole()->amount)->toBe(7500)
+        ->and($transaction->budgetTransactions()->count())->toBe(2);
 });

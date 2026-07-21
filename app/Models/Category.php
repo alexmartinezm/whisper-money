@@ -70,7 +70,10 @@ class Category extends Model
     protected static function booted(): void
     {
         static::deleting(function (Category $category): void {
-            if (TransactionSplit::query()->where('category_id', $category->id)->exists()) {
+            if (TransactionSplit::query()
+                ->where('category_id', $category->id)
+                ->lockForUpdate()
+                ->first() !== null) {
                 throw ValidationException::withMessages([
                     'category' => 'Categories used by split transactions cannot be deleted.',
                 ]);
@@ -84,7 +87,11 @@ class Category extends Model
 
             $categoryIds = [$category->id, ...app(CategoryTree::class)->descendantIds($category)];
 
-            if (TransactionSplit::query()->whereIn('category_id', $categoryIds)->exists()) {
+            if (TransactionSplit::query()
+                ->whereIn('category_id', $categoryIds)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->first() !== null) {
                 throw ValidationException::withMessages([
                     'type' => 'Category types used by split transactions cannot be changed.',
                 ]);

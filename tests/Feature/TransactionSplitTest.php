@@ -1,11 +1,13 @@
 <?php
 
 use App\Enums\CategoryType;
+use App\Events\TransactionUpdated;
 use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\TransactionSplit;
 use App\Services\Transactions\ReplaceTransactionSplits;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Validation\ValidationException;
 
 uses(RefreshDatabase::class);
@@ -128,6 +130,26 @@ it('requires an explicit fallback category when removing splits', function () {
         ->and($transaction->splits()->count())->toBe(0);
 });
 
+it('rejects fallback categories outside the owner space or soft deleted', function () {
+    $transaction = Transaction::factory()->create(['amount' => -10000]);
+    $first = splitCategory($transaction);
+    $second = splitCategory($transaction);
+    app(ReplaceTransactionSplits::class)->replace($transaction, [
+        ['category_id' => $first->id, 'amount' => -6000],
+        ['category_id' => $second->id, 'amount' => -4000],
+    ]);
+    $foreignOwner = Category::factory()->create(['space_id' => $transaction->space_id, 'type' => CategoryType::Expense]);
+    $foreignSpace = Category::factory()->create(['user_id' => $transaction->user_id, 'type' => CategoryType::Expense]);
+    $deleted = splitCategory($transaction);
+    $deleted->delete();
+
+    foreach ([$foreignOwner, $foreignSpace, $deleted] as $fallback) {
+        expect(fn () => app(ReplaceTransactionSplits::class)->replace($transaction, [], $fallback->id))
+            ->toThrow(ValidationException::class);
+        expect($transaction->splits()->count())->toBe(2);
+    }
+});
+
 it('protects split categories from deletion and type changes', function () {
     $transaction = Transaction::factory()->create(['amount' => -10000]);
     $first = splitCategory($transaction);
@@ -143,4 +165,47 @@ it('protects split categories from deletion and type changes', function () {
     expect($first->fresh())->not->toBeNull()
         ->and($first->fresh()->type)->toBe(CategoryType::Expense)
         ->and($transaction->splits()->count())->toBe(2);
+});
+
+it('touches the parent once after replacing lines and the event sees final lines', function () {
+    $transaction = Transaction::factory()->create(['amount' => -10000]);
+    $categories = [splitCategory($transaction), splitCategory($transaction)];
+    app(ReplaceTransactionSplits::class)->replace($transaction, [
+        ['category_id' => $categories[0]->id, 'amount' => -6000],
+        ['category_id' => $categories[1]->id, 'amount' => -4000],
+    ]);
+    $oldTimestamp = now()->subDay();
+    Transaction::withoutEvents(fn () => $transaction->forceFill(['updated_at' => $oldTimestamp])->saveQuietly());
+    $observed = [];
+    Event::listen(TransactionUpdated::class, function (TransactionUpdated $event) use (&$observed): void {
+        $observed[] = $event->transaction->fresh('splits')->splits->pluck('amount')->all();
+    });
+
+    app(ReplaceTransactionSplits::class)->replace($transaction, [
+        ['category_id' => $categories[0]->id, 'amount' => -2500],
+        ['category_id' => $categories[1]->id, 'amount' => -7500],
+    ]);
+
+    expect($transaction->fresh()->updated_at->gt($oldTimestamp))->toBeTrue()
+        ->and($observed)->toBe([[-2500, -7500]]);
+});
+
+it('touches the parent once after removing lines and the event sees no lines', function () {
+    $transaction = Transaction::factory()->create(['amount' => -10000]);
+    $categories = [splitCategory($transaction), splitCategory($transaction)];
+    app(ReplaceTransactionSplits::class)->replace($transaction, [
+        ['category_id' => $categories[0]->id, 'amount' => -6000],
+        ['category_id' => $categories[1]->id, 'amount' => -4000],
+    ]);
+    $oldTimestamp = now()->subDay();
+    Transaction::withoutEvents(fn () => $transaction->forceFill(['updated_at' => $oldTimestamp])->saveQuietly());
+    $observed = [];
+    Event::listen(TransactionUpdated::class, function (TransactionUpdated $event) use (&$observed): void {
+        $observed[] = $event->transaction->fresh('splits')->splits->count();
+    });
+
+    app(ReplaceTransactionSplits::class)->replace($transaction, [], $categories[0]->id);
+
+    expect($transaction->fresh()->updated_at->gt($oldTimestamp))->toBeTrue()
+        ->and($observed)->toBe([0]);
 });
