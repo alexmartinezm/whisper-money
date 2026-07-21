@@ -244,7 +244,6 @@ class TransactionController extends Controller
         }
 
         $learnedRule = null;
-        $originalSnapshot = clone $transaction;
 
         if ($transaction->splits()->exists() && ! $hasSplitUpdate && ($request->has('category_id') || $request->has('amount'))) {
             throw ValidationException::withMessages([
@@ -262,13 +261,13 @@ class TransactionController extends Controller
             $hasSplitUpdate,
             $replaceSplits,
             $balanceAdjuster,
-            $originalSnapshot,
             &$learnedRule,
         ): void {
             $transaction->setRawAttributes(
                 Transaction::query()->whereKey($transaction->id)->lockForUpdate()->firstOrFail()->getAttributes(),
                 true,
             );
+            $originalSnapshot = clone $transaction;
 
             if ($transaction->splits()->exists() && ! $hasSplitUpdate && $request->hasAny(['category_id', 'amount'])) {
                 throw ValidationException::withMessages([
@@ -290,27 +289,36 @@ class TransactionController extends Controller
                 }
             }
 
-            if (! empty($data)) {
-                $transaction->fill($data);
-            }
-
             if ($hasLabelUpdate) {
                 $transaction->labels()->sync($labelIds ?? []);
                 $transaction->load('labels');
             }
 
-            if ($transaction->isDirty() || $hasLabelUpdate) {
-                if (! $transaction->isDirty() && $hasLabelUpdate) {
-                    $transaction->touch();
-                }
-                $transaction->save();
-            }
-
             if ($hasSplitUpdate) {
-                $replaceSplits->replace($transaction, $splits ?? [], $data['category_id'] ?? null);
+                $updated = $replaceSplits->replace(
+                    $transaction,
+                    $splits ?? [],
+                    $data['category_id'] ?? null,
+                    $data,
+                );
+                $transaction->setRawAttributes($updated->getAttributes(), true);
+                $transaction->setRelations($updated->getRelations());
+            } else {
+                if (! empty($data)) {
+                    $transaction->fill($data);
+                }
+
+                if ($transaction->isDirty() || $hasLabelUpdate) {
+                    if (! $transaction->isDirty() && $hasLabelUpdate) {
+                        $transaction->touch();
+                    }
+                    $transaction->save();
+                }
             }
 
-            if ($request->boolean('update_balance') && $transaction->wasChanged(['amount', 'transaction_date', 'account_id'])) {
+            $balanceFieldsChanged = collect(['amount', 'transaction_date', 'account_id'])
+                ->contains(fn (string $field): bool => $originalSnapshot->getRawOriginal($field) !== $transaction->getRawOriginal($field));
+            if ($request->boolean('update_balance') && $balanceFieldsChanged) {
                 $balanceAdjuster->reverseDeletedTransaction($originalSnapshot);
                 $balanceAdjuster->applyCreatedTransaction($transaction->load('account'));
             }
@@ -380,18 +388,8 @@ class TransactionController extends Controller
         }
 
         $updateData = [];
-        $skippedSplitCount = 0;
         if ($request->has('category_id')) {
             $newCategoryId = $request->input('category_id');
-            $splitIds = $transactions->filter(fn (Transaction $candidate): bool => $candidate->splits()->exists())->pluck('id');
-            $skippedSplitCount = $splitIds->count();
-
-            $overrideHandler = app(CategoryOverrideHandler::class);
-
-            foreach ($transactions->whereNotIn('id', $splitIds) as $candidate) {
-                $overrideHandler->record($candidate, $newCategoryId);
-            }
-
             $updateData['category_id'] = $newCategoryId;
             $updateData['category_source'] = $newCategoryId === null ? null : CategorySource::Manual->value;
             $updateData['ai_confidence'] = null;
@@ -413,38 +411,97 @@ class TransactionController extends Controller
             ], 400);
         }
 
-        if (! empty($updateData)) {
-            $updateQuery = Transaction::query()->where('user_id', $user->id);
-            if ($transactionIds && count($transactionIds) > 0) {
-                $updateQuery->whereIn('id', $transactionIds);
-            } elseif ($filters !== null) {
-                $updateQuery->applyFilters($filters);
-            }
-            if ($request->has('category_id')) {
-                $updateQuery->whereDoesntHave('splits');
-            }
-            $updateQuery->update($updateData);
+        $selectedIds = $transactions->pluck('id');
+        $result = DB::transaction(function () use (
+            $user,
+            $transactionIds,
+            $selectedIds,
+            $request,
+            $updateData,
+            $hasLabelUpdate,
+            $labelIds,
+        ): array {
+            $lockedTransactions = Transaction::query()
+                ->where('user_id', $user->id)
+                ->whereIn('id', $selectedIds)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get()
+                ->load('splits');
 
-            if ($request->has('category_id') && $skippedSplitCount > 0) {
-                $parentOnlyData = collect($updateData)->except(['category_id', 'category_source', 'ai_confidence', 'categorized_by_rule_id'])->all();
-                if ($parentOnlyData !== []) {
-                    Transaction::query()->whereIn('id', $splitIds)->update($parentOnlyData);
+            if ($transactionIds && $lockedTransactions->count() !== count($transactionIds)) {
+                abort(403, 'Some transactions were not found or do not belong to you.');
+            }
+
+            $hasCategoryUpdate = $request->has('category_id');
+            $splitIds = $hasCategoryUpdate
+                ? $lockedTransactions->filter(fn (Transaction $candidate): bool => $candidate->splits->isNotEmpty())->pluck('id')
+                : collect();
+            $eligibleTransactions = $hasCategoryUpdate
+                ? $lockedTransactions->whereNotIn('id', $splitIds)
+                : $lockedTransactions;
+            $categoryData = collect($updateData)
+                ->only(['category_id', 'category_source', 'ai_confidence', 'categorized_by_rule_id'])
+                ->all();
+            $generalData = collect($updateData)
+                ->except(['category_id', 'category_source', 'ai_confidence', 'categorized_by_rule_id'])
+                ->all();
+
+            $changedIds = collect();
+            if ($hasCategoryUpdate) {
+                $categoryCandidates = $eligibleTransactions->filter(
+                    fn (Transaction $candidate): bool => collect($categoryData)->contains(
+                        fn (mixed $value, string $field): bool => $candidate->getRawOriginal($field) !== $value,
+                    ),
+                );
+                $overrideHandler = app(CategoryOverrideHandler::class);
+                foreach ($categoryCandidates as $candidate) {
+                    if ($candidate->category_id !== $request->input('category_id')) {
+                        $overrideHandler->record($candidate, $request->input('category_id'));
+                    }
+                }
+                if ($categoryCandidates->isNotEmpty()) {
+                    Transaction::query()
+                        ->whereIn('id', $categoryCandidates->pluck('id'))
+                        ->update($categoryData);
+                    $changedIds = $changedIds->merge($categoryCandidates->pluck('id'));
                 }
             }
-        }
 
-        if ($hasLabelUpdate) {
-            foreach ($transactions as $transaction) {
-                $transaction->labels()->sync($labelIds ?? []);
-                $transaction->save();
+            if ($generalData !== []) {
+                $generalCandidates = $lockedTransactions->filter(
+                    fn (Transaction $candidate): bool => collect($generalData)->contains(
+                        fn (mixed $value, string $field): bool => $candidate->getRawOriginal($field) !== $value,
+                    ),
+                );
+                if ($generalCandidates->isNotEmpty()) {
+                    Transaction::query()
+                        ->whereIn('id', $generalCandidates->pluck('id'))
+                        ->update($generalData);
+                    $changedIds = $changedIds->merge($generalCandidates->pluck('id'));
+                }
             }
-        }
+
+            if ($hasLabelUpdate) {
+                foreach ($lockedTransactions as $lockedTransaction) {
+                    $changes = $lockedTransaction->labels()->sync($labelIds ?? []);
+                    if ($changes['attached'] !== [] || $changes['detached'] !== [] || $changes['updated'] !== []) {
+                        $lockedTransaction->touch();
+                        $changedIds->push($lockedTransaction->id);
+                    }
+                }
+            }
+
+            return [
+                'count' => $lockedTransactions->count(),
+                'updated_count' => $changedIds->unique()->count(),
+                'skipped_split_count' => $splitIds->count(),
+            ];
+        }, attempts: 5);
 
         return response()->json([
             'message' => 'Transactions updated successfully',
-            'count' => $transactions->count(),
-            'updated_count' => $transactions->count() - $skippedSplitCount,
-            'skipped_split_count' => $skippedSplitCount,
+            ...$result,
         ]);
     }
 }

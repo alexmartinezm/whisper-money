@@ -142,10 +142,18 @@ class TransactionSyncService {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { labels: _labels, ...restServerData } = serverData;
 
-        return {
+        const updatedTransaction = {
             ...restServerData,
             transaction_date: String(serverData.transaction_date).slice(0, 10),
             label_ids: serverLabelIds || [],
+        } as Transaction;
+
+        await withDb<void>(async () => {
+            await db.transactions.put(updatedTransaction);
+        }, undefined);
+
+        return {
+            ...updatedTransaction,
             learned_rule: response.data.learned_rule ?? null,
         } as UpdatedTransaction;
     }

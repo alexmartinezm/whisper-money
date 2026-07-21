@@ -37,6 +37,7 @@ class AuditTransactionSplitsCommand extends Command
         $linesReviewed = (int) DB::table('transaction_splits')->count();
 
         Transaction::query()
+            ->withTrashed()
             ->whereHas('splits')
             ->with(['splits', 'splits.category' => fn ($query) => $query->withTrashed()])
             ->chunkById(200, function ($transactions) use (&$anomalies, &$parentsReviewed): void {

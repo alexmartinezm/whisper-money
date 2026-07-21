@@ -14,6 +14,7 @@ use App\Models\BankingConnection;
 use App\Models\Budget;
 use App\Models\BudgetPeriod;
 use App\Models\Category;
+use App\Models\Label;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Ai\UncategorizedTransactionMatcher;
@@ -25,6 +26,7 @@ use App\Services\Transactions\EffectiveTransactionPostings;
 use App\Services\Transactions\ReplaceTransactionSplits;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Event;
 use Laravel\Pennant\Feature;
 
 uses(RefreshDatabase::class);
@@ -118,6 +120,34 @@ it('creates, serializes, replaces, and removes splits through transaction CRUD',
         ->assertJsonPath('data.is_split', false);
 });
 
+it('emits one coherent update event after parent and split changes are complete', function () {
+    [$user, , $transaction, $food, $home] = splitIntegrationFixture();
+    makeIntegrationSplit($transaction, $food, $home);
+    $observedStates = [];
+    Event::listen(TransactionUpdated::class, function (TransactionUpdated $event) use (&$observedStates): void {
+        $fresh = $event->transaction->fresh('splits');
+        $observedStates[] = [
+            'amount' => $fresh->amount,
+            'split_sum' => (int) $fresh->splits->sum('amount'),
+            'split_count' => $fresh->splits->count(),
+        ];
+    });
+
+    $this->actingAs($user)->patchJson(route('transactions.update', $transaction), [
+        'amount' => -12000,
+        'splits' => [
+            ['category_id' => $food->id, 'amount' => -7000],
+            ['category_id' => $home->id, 'amount' => -5000],
+        ],
+    ])->assertOk();
+
+    expect($observedStates)->toBe([[
+        'amount' => -12000,
+        'split_sum' => -12000,
+        'split_count' => 2,
+    ]]);
+});
+
 it('blocks split creation and replacement while the flag is off but still allows unsplit', function () {
     [$user, $account, $transaction, $food, $home] = splitIntegrationFixture();
     Feature::for($user)->deactivate(TransactionSplitting::class);
@@ -188,6 +218,51 @@ it('filters split parents once and excludes them from uncategorized and bulk cat
 
     expect($transaction->refresh()->category_id)->toBeNull()
         ->and($transaction->splits()->count())->toBe(2);
+});
+
+it('reports only rows actually changed by a bulk category update', function () {
+    [$user, , $transaction, $food] = splitIntegrationFixture([
+        'category_id' => null,
+    ]);
+    $transaction->update([
+        'category_id' => $food->id,
+        'category_source' => 'manual',
+    ]);
+
+    $this->actingAs($user)->patchJson('/transactions/bulk', [
+        'transaction_ids' => [$transaction->id],
+        'category_id' => $food->id,
+    ])->assertOk()
+        ->assertJsonPath('updated_count', 0)
+        ->assertJsonPath('skipped_split_count', 0);
+});
+
+it('counts notes and label changes while skipping split category changes', function () {
+    [$user, $account, $splitTransaction, $food, $home] = splitIntegrationFixture();
+    makeIntegrationSplit($splitTransaction, $food, $home);
+    $regularTransaction = Transaction::factory()->plaintext()->create([
+        'user_id' => $user->id,
+        'space_id' => $account->space_id,
+        'account_id' => $account->id,
+        'category_id' => $food->id,
+    ]);
+    $label = Label::factory()->create(['user_id' => $user->id]);
+
+    $this->actingAs($user)->patchJson('/transactions/bulk', [
+        'transaction_ids' => [$splitTransaction->id, $regularTransaction->id],
+        'category_id' => $home->id,
+        'notes' => 'Shared note',
+        'label_ids' => [$label->id],
+    ])->assertOk()
+        ->assertJsonPath('updated_count', 2)
+        ->assertJsonPath('skipped_split_count', 1);
+
+    expect($splitTransaction->refresh()->category_id)->toBeNull()
+        ->and($splitTransaction->notes)->toBe('Shared note')
+        ->and($splitTransaction->labels()->pluck('labels.id')->all())->toBe([$label->id])
+        ->and($regularTransaction->refresh()->category_id)->toBe($home->id)
+        ->and($regularTransaction->notes)->toBe('Shared note')
+        ->and($regularTransaction->labels()->pluck('labels.id')->all())->toBe([$label->id]);
 });
 
 it('exposes split details in incremental sync and excludes split parents from AI candidates', function () {

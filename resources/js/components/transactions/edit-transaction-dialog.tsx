@@ -554,67 +554,56 @@ export function EditTransactionDialog({
                     },
                 );
 
-                const updatedRecord = await transactionSyncService.getById(
-                    transaction.id,
-                );
+                const { learned_rule: learnedRule, ...serverTransaction } =
+                    result;
+                const savedSplits = serverTransaction.splits ?? [];
+                const authoritativeCategoryId =
+                    serverTransaction.category_id ?? null;
                 const updatedCategory =
-                    splits === null && selectedCategoryId
+                    savedSplits.length === 0 && authoritativeCategoryId
                         ? categories.find(
-                              (category) => category.id === selectedCategoryId,
+                              (category) =>
+                                  category.id === authoritativeCategoryId,
                           ) || null
                         : null;
-
+                const authoritativeLabelIds = serverTransaction.label_ids ?? [];
                 const selectedLabels = labels.filter((label) =>
-                    selectedLabelIds.includes(label.id),
+                    authoritativeLabelIds.includes(label.id),
                 );
-                const savedSplits =
-                    result.splits ??
-                    (removeSplits ? [] : (transaction.splits ?? []));
+                const authoritativeAccount = accounts.find(
+                    (candidate) =>
+                        candidate.id === serverTransaction.account_id,
+                );
 
                 const updatedTransaction: DecryptedTransaction = {
                     ...transaction,
-                    category_id: splits === null ? selectedCategoryId : null,
+                    ...serverTransaction,
                     category: updatedCategory,
+                    label_ids: authoritativeLabelIds,
                     splits: savedSplits,
                     is_split: savedSplits.length > 0,
                     split_count: savedSplits.length,
                     decryptedDescription: finalDecryptedDescription,
-                    description:
-                        updateData.description ?? transaction.description,
-                    description_iv:
-                        updateData.description_iv ?? transaction.description_iv,
                     decryptedNotes: trimmedNotes || null,
-                    notes: encryptedNotes,
-                    notes_iv: notesIv,
-                    label_ids: selectedLabelIds,
                     labels: selectedLabels,
-                    updated_at:
-                        updatedRecord?.updated_at ?? transaction.updated_at,
-                    ...(canEditAllFields
-                        ? {
-                              amount,
-                              transaction_date: transactionDate,
-                              account_id: accountId,
-                              currency_code: editedCurrencyCode,
-                              account: editedAccount ?? transaction.account,
-                              bank: editedAccount?.bank?.id
-                                  ? banks.find(
-                                        (b) => b.id === editedAccount.bank?.id,
-                                    )
-                                  : transaction.bank,
-                          }
-                        : {}),
+                    account: authoritativeAccount ?? transaction.account,
+                    bank: authoritativeAccount?.bank?.id
+                        ? banks.find(
+                              (bank) =>
+                                  bank.id === authoritativeAccount.bank?.id,
+                          )
+                        : transaction.bank,
                 };
 
                 toast.success(__('Transaction updated successfully'));
                 onSuccess(updatedTransaction);
 
-                if (result.learned_rule) {
+                if (learnedRule) {
                     // The correction already taught the system a forward rule, so
                     // confirm that and offer an instant undo — and skip the
                     // "Automatize" prompt, which would only offer to create a rule
                     // that now exists. Mirrors the transaction-table flow.
-                    const ruleId = result.learned_rule.id;
+                    const ruleId = learnedRule.id;
 
                     toast.success(
                         __(

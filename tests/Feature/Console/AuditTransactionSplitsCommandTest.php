@@ -52,6 +52,15 @@ it('reports stable anomaly codes and fails only when requested', function () {
     $this->artisan('transactions:audit-splits', ['--fail-on-invalid' => true])->assertFailed();
 });
 
+it('audits restorable soft-deleted split parents', function () {
+    [$transaction, , $splits] = auditSplitFixture();
+    DB::table('transactions')->where('id', $transaction->id)->update(['deleted_at' => now()]);
+    DB::table('transaction_splits')->where('id', $splits[0]->id)->update(['amount' => -5000]);
+
+    expect(Artisan::call('transactions:audit-splits', ['--json' => true]))->toBe(0)
+        ->and(Artisan::output())->toContain('split_sum_mismatch');
+});
+
 it('reports ownership type soft delete sign and position anomalies', function () {
     [$transaction, $categories, $splits] = auditSplitFixture();
     DB::table('transaction_splits')->where('id', $splits[0]->id)->update(['position' => 4]);

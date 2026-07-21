@@ -7,15 +7,18 @@ import {
 const dbMock = vi.hoisted(() => ({
     transactions: {
         delete: vi.fn(async () => undefined),
+        put: vi.fn(async () => undefined),
     },
     sync_metadata: { delete: vi.fn(), get: vi.fn(), put: vi.fn() },
 }));
 
 const axiosMock = vi.hoisted(() => ({
     delete: vi.fn(async () => ({ data: {} })),
-    patch: vi.fn(async () => ({
-        data: { updated_count: 2, skipped_split_count: 1 },
-    })),
+    patch: vi.fn(
+        async (): Promise<{ data: Record<string, unknown> }> => ({
+            data: { updated_count: 2, skipped_split_count: 1 },
+        }),
+    ),
 }));
 
 // Keep the real withDb (reads globalThis live); swap only the Dexie-backed db.
@@ -25,6 +28,51 @@ vi.mock('@/lib/dexie-db', async (importOriginal) => {
 });
 
 vi.mock('axios', () => ({ default: axiosMock }));
+
+describe('transactionSyncService.update', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it('persists the authoritative server response in IndexedDB before returning it', async () => {
+        vi.stubGlobal('indexedDB', {} as IDBFactory);
+        axiosMock.patch.mockResolvedValueOnce({
+            data: {
+                data: {
+                    id: 'txn-1',
+                    transaction_date: '2026-07-21T00:00:00.000Z',
+                    updated_at: '2026-07-21T18:00:00.000Z',
+                    labels: [{ id: 'label-1' }],
+                    splits: [{ id: 'split-1', amount: -1000 }],
+                },
+                learned_rule: null,
+            },
+        });
+
+        const updated = await transactionSyncService.update('txn-1', {
+            amount: -1000,
+        });
+
+        expect(updated).toMatchObject({
+            id: 'txn-1',
+            transaction_date: '2026-07-21',
+            updated_at: '2026-07-21T18:00:00.000Z',
+            label_ids: ['label-1'],
+            splits: [{ id: 'split-1', amount: -1000 }],
+        });
+        expect(dbMock.transactions.put).toHaveBeenCalledWith(
+            expect.objectContaining({
+                id: 'txn-1',
+                updated_at: '2026-07-21T18:00:00.000Z',
+                label_ids: ['label-1'],
+            }),
+        );
+    });
+});
 
 describe('transactionSyncService.delete', () => {
     beforeEach(() => {

@@ -62,16 +62,16 @@ The browser keeps persisted `TransactionSplit` records separate from split mutat
 
 ## Performance baseline and SQL decision
 
-`tests/Performance/TransactionSplitVolumeTest.php` builds a deterministic MySQL dataset with 10,000 unsplit transactions, 2,000 split parents, 2–5 lines per parent, two accounts/currencies, category hierarchies, refunds, and isolation sentinels outside the user/date scope. It verifies 12,000 parent transactions, 17,000 effective postings, exact parent/posting accounting equivalence, hierarchy rollup totals, and bounded query counts.
+`tests/Performance/TransactionSplitVolumeTest.php` builds a deterministic MySQL dataset with 10,000 unsplit transactions, 2,000 split parents, 2–5 lines per parent, two accounts in one currency, category hierarchies, refunds, and isolation sentinels outside the user/date scope. It verifies 12,000 parent transactions, 17,000 effective postings, exact totals per category, exact hierarchy rollups per root, and bounded query counts.
 
-Local Docker baseline on PHP 8.4.21, after fixture creation:
+Local Docker baseline on PHP 8.4.21, after fixture creation. Each invocation measures three executions per path and reports the median and worst time:
 
-| Path | Run 1 | Run 2 | Queries | Peak additional memory |
+| Path | Invocation 1 median / worst | Invocation 2 median / worst | Queries | Peak additional memory |
 |---|---:|---:|---:|---:|
-| Category spending and hierarchy rollup | 1,849.08 ms | 1,766.16 ms | 5 | 78 MB |
-| Dashboard effective-posting expansion | 1,611.76 ms | 1,679.60 ms | 4 | 4 MB |
+| Category spending and hierarchy rollup | 1,938.66 / 1,948.99 ms | 1,853.80 / 2,034.17 ms | 5 | 78 MB |
+| Dashboard effective-posting expansion | 1,834.97 / 2,351.34 ms | 1,874.90 / 2,024.20 ms | 4 | 6 MB |
 
-These are local diagnostic baselines, not brittle CI limits. Query counts are asserted; runtime and memory are reported. At this representative volume, the current eager-loaded PHP expansion remains predictable and accounting-correct, so this hardening does **not** add an SQL effective-postings projection. Reconsider only with production-like profiling that shows these paths materially exceed the deployment's latency or memory budget.
+These are local diagnostic baselines, not brittle CI limits. Query counts and exact accounting are asserted; runtime and memory are reported. At this representative volume, the current eager-loaded PHP expansion remains predictable and accounting-correct, so this hardening does **not** add an SQL effective-postings projection. Reconsider only with production-like profiling that shows these paths materially exceed the deployment's latency or memory budget.
 
 ## Deployment and rollback
 

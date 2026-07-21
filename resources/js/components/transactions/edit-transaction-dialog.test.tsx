@@ -448,6 +448,42 @@ describe('EditTransactionDialog', () => {
         expect(payload).not.toHaveProperty('amount');
     });
 
+    it('uses the authoritative update response for the visible transaction state', async () => {
+        const onSuccess = vi.fn();
+        vi.mocked(transactionSyncService.update).mockResolvedValueOnce({
+            ...manualTransaction,
+            updated_at: '2026-07-21T18:00:00Z',
+            amount: -1500,
+            label_ids: [],
+            learned_rule: null,
+        });
+
+        render(
+            <EditTransactionDialog
+                transaction={manualTransaction}
+                categories={[]}
+                accounts={[checkingAccount]}
+                banks={[]}
+                labels={[]}
+                open
+                onOpenChange={vi.fn()}
+                onSuccess={onSuccess}
+                mode="edit"
+            />,
+        );
+
+        fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+        await waitFor(() =>
+            expect(onSuccess).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    updated_at: '2026-07-21T18:00:00Z',
+                    amount: -1500,
+                }),
+            ),
+        );
+    });
+
     it('hides "update account balance" for a connected account', () => {
         const connectedAccount = {
             ...checkingAccount,

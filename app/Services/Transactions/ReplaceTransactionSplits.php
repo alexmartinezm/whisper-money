@@ -10,40 +10,43 @@ use Illuminate\Validation\ValidationException;
 
 class ReplaceTransactionSplits
 {
-    /** @param array<int, array{category_id: string, amount: int}> $splits */
-    public function replace(Transaction $transaction, array $splits, ?string $fallbackCategoryId = null): Transaction
+    /**
+     * @param  array<int, array{category_id: string, amount: int}>  $splits
+     * @param  array<string, mixed>  $parentAttributes
+     */
+    public function replace(Transaction $transaction, array $splits, ?string $fallbackCategoryId = null, array $parentAttributes = []): Transaction
     {
-        return DB::transaction(function () use ($transaction, $splits, $fallbackCategoryId): Transaction {
+        return DB::transaction(function () use ($transaction, $splits, $fallbackCategoryId, $parentAttributes): Transaction {
             $locked = Transaction::query()->whereKey($transaction->id)->lockForUpdate()->firstOrFail();
+            $locked->fill($parentAttributes);
 
             if ($splits === []) {
                 $this->remove($locked, $fallbackCategoryId);
+            } else {
+                $this->validate($locked, $splits);
 
-                return $locked->fresh(['splits.category']);
+                $locked->splits()->delete();
+                $locked->splits()->createMany(array_map(
+                    fn (array $split, int $position): array => [
+                        'category_id' => $split['category_id'],
+                        'amount' => (int) $split['amount'],
+                        'position' => $position,
+                    ],
+                    $splits,
+                    array_keys($splits),
+                ));
+
+                $locked->forceFill([
+                    'category_id' => null,
+                    'category_source' => null,
+                    'ai_confidence' => null,
+                    'categorized_by_rule_id' => null,
+                    'ai_suggested_category_id' => null,
+                    'ai_suggested_category_at' => null,
+                    'ai_model' => null,
+                ]);
             }
 
-            $this->validate($locked, $splits);
-
-            $locked->splits()->delete();
-            $locked->splits()->createMany(array_map(
-                fn (array $split, int $position): array => [
-                    'category_id' => $split['category_id'],
-                    'amount' => (int) $split['amount'],
-                    'position' => $position,
-                ],
-                $splits,
-                array_keys($splits),
-            ));
-
-            $locked->forceFill([
-                'category_id' => null,
-                'category_source' => null,
-                'ai_confidence' => null,
-                'categorized_by_rule_id' => null,
-                'ai_suggested_category_id' => null,
-                'ai_suggested_category_at' => null,
-                'ai_model' => null,
-            ]);
             $locked->setUpdatedAt($locked->freshTimestamp());
             $locked->save();
 
@@ -117,8 +120,6 @@ class ReplaceTransactionSplits
             'ai_confidence' => null,
             'categorized_by_rule_id' => null,
         ]);
-        $transaction->setUpdatedAt($transaction->freshTimestamp());
-        $transaction->save();
     }
 
     private function fail(string $message): never

@@ -7,6 +7,8 @@ use App\Models\User;
 use App\Services\CategoryTree;
 use App\Services\Transactions\ReplaceTransactionSplits;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
+use PHPUnit\Framework\ExpectationFailedException;
 
 $concurrencyUserIds = [];
 
@@ -35,33 +37,95 @@ function concurrencyFixture(): array
     return [$transaction, $categories];
 }
 
-/** @param list<Closure(): void> $writers */
-function runSplitWriters(array $writers): void
+/**
+ * @param  list<Closure(): void>  $writers
+ * @param  list<string>  $allowedFailureMessages
+ */
+function runSplitWriters(array $writers, ?int $minimumSuccesses = null, array $allowedFailureMessages = []): void
 {
     DB::commit();
     DB::disconnect();
+    $barrier = sys_get_temp_dir().'/split-writers-'.bin2hex(random_bytes(8));
+    mkdir($barrier, 0700);
     $children = [];
 
-    foreach ($writers as $writer) {
+    foreach ($writers as $index => $writer) {
         $pid = pcntl_fork();
         if ($pid === 0) {
             DB::purge();
-            usleep(25000);
+            touch("{$barrier}/ready-{$index}");
+            $deadline = microtime(true) + 5;
+            while (! file_exists("{$barrier}/release")) {
+                if (microtime(true) >= $deadline) {
+                    exit(3);
+                }
+                usleep(1000);
+            }
             try {
                 $writer();
                 exit(0);
-            } catch (Throwable) {
+            } catch (Throwable $exception) {
+                file_put_contents(
+                    "{$barrier}/failure-{$index}.json",
+                    json_encode([
+                        'class' => $exception::class,
+                        'message' => $exception->getMessage(),
+                        'errors' => $exception instanceof ValidationException ? $exception->errors() : [],
+                    ], JSON_THROW_ON_ERROR),
+                );
                 exit(2);
             }
         }
-        $children[] = $pid;
+        $children[$index] = $pid;
     }
 
-    foreach ($children as $pid) {
-        pcntl_waitpid($pid, $status);
-        expect(pcntl_wexitstatus($status))->toBeIn([0, 2]);
+    $deadline = microtime(true) + 5;
+    while (count(glob("{$barrier}/ready-*") ?: []) !== count($writers)) {
+        if (microtime(true) >= $deadline) {
+            break;
+        }
+        usleep(1000);
     }
+    $allWritersReady = count(glob("{$barrier}/ready-*") ?: []) === count($writers);
+    touch("{$barrier}/release");
+
+    $statuses = [];
+    foreach ($children as $index => $pid) {
+        pcntl_waitpid($pid, $status);
+        $statuses[$index] = pcntl_wexitstatus($status);
+    }
+
+    $failures = [];
+    foreach ($statuses as $index => $status) {
+        $failurePath = "{$barrier}/failure-{$index}.json";
+        if ($status === 2 && file_exists($failurePath)) {
+            $failures[$index] = json_decode((string) file_get_contents($failurePath), true, flags: JSON_THROW_ON_ERROR);
+        }
+    }
+    foreach (glob("{$barrier}/*") ?: [] as $file) {
+        unlink($file);
+    }
+    rmdir($barrier);
     DB::purge();
+
+    expect($allWritersReady)->toBeTrue();
+    foreach ($statuses as $index => $status) {
+        expect($status)->toBeIn([0, 2]);
+        if ($status !== 2) {
+            continue;
+        }
+
+        $failure = $failures[$index] ?? null;
+        expect($failure)->not->toBeNull()
+            ->and($failure['class'])->toBe(ValidationException::class);
+        $messages = collect($failure['errors'])->flatten()->all();
+        expect($messages)->not->toBeEmpty()
+            ->and(collect($messages)->diff($allowedFailureMessages))->toBeEmpty();
+    }
+
+    $requiredSuccesses = $minimumSuccesses ?? count($writers);
+    expect(collect($statuses)->filter(fn (int $status): bool => $status === 0)->count())
+        ->toBeGreaterThanOrEqual($requiredSuccesses);
 }
 
 function mutateCategoryWithApplicationLocks(string $categoryId, Closure $mutation): void
@@ -85,6 +149,32 @@ function assertCompleteSplitState(Transaction $transaction): void
     }
 }
 
+it('rejects a vacuous concurrency run when every writer fails', function () {
+    expect(fn () => runSplitWriters([
+        fn () => throw new RuntimeException('writer one failed'),
+        fn () => throw new RuntimeException('writer two failed'),
+    ]))->toThrow(ExpectationFailedException::class);
+});
+
+it('rejects a concurrency run when one writer fails unexpectedly', function () {
+    expect(fn () => runSplitWriters([
+        fn () => null,
+        fn () => throw new RuntimeException('unexpected writer failure'),
+    ]))->toThrow(ExpectationFailedException::class);
+});
+
+it('rejects a validation failure that mixes allowed and unexpected errors', function () {
+    expect(fn () => runSplitWriters([
+        fn () => null,
+        fn () => throw ValidationException::withMessages([
+            'category' => 'Categories used by split transactions cannot be deleted.',
+            'unexpected' => 'Unexpected validation failure.',
+        ]),
+    ], minimumSuccesses: 1, allowedFailureMessages: [
+        'Categories used by split transactions cannot be deleted.',
+    ]))->toThrow(ExpectationFailedException::class);
+});
+
 it('serializes two competing replacements without combining payloads', function () {
     [$transaction, $categories] = concurrencyFixture();
     $payloadA = [['category_id' => $categories[0]->id, 'amount' => -2500], ['category_id' => $categories[1]->id, 'amount' => -7500]];
@@ -93,7 +183,7 @@ it('serializes two competing replacements without combining payloads', function 
     runSplitWriters([
         fn () => app(ReplaceTransactionSplits::class)->replace(Transaction::findOrFail($transaction->id), $payloadA),
         fn () => app(ReplaceTransactionSplits::class)->replace(Transaction::findOrFail($transaction->id), $payloadB),
-    ]);
+    ], minimumSuccesses: 2);
 
     assertCompleteSplitState($transaction);
     expect($transaction->fresh('splits')->splits->pluck('amount')->all())->toBeIn([[-2500, -7500], [-7000, -3000]]);
@@ -121,6 +211,9 @@ it('never references a deleted category when replace competes with delete', func
             $categories[2]->id,
             fn (Category $category) => $category->delete(),
         ),
+    ], minimumSuccesses: 1, allowedFailureMessages: [
+        'Categories used by split transactions cannot be deleted.',
+        'Every split category must belong to the transaction owner and space.',
     ]);
 
     assertCompleteSplitState($transaction);
@@ -137,6 +230,9 @@ it('keeps category types valid when replace competes with type mutation', functi
             $categories[2]->id,
             fn (Category $category) => $category->update(['type' => CategoryType::Income]),
         ),
+    ], minimumSuccesses: 1, allowedFailureMessages: [
+        'Category types used by split transactions cannot be changed.',
+        'Split categories must share an expense or income type.',
     ]);
 
     assertCompleteSplitState($transaction);

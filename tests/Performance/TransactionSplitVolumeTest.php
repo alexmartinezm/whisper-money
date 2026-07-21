@@ -43,6 +43,23 @@ function measureSplitVolumePath(Closure $callback): array
     ];
 }
 
+/**
+ * @return array{result: mixed, queries: int, median_milliseconds: float, worst_milliseconds: float, peak_memory_mb: float}
+ */
+function measureRepeatedSplitVolumePath(Closure $callback, int $runs = 3): array
+{
+    $measurements = collect(range(1, $runs))->map(fn () => measureSplitVolumePath($callback));
+    $times = $measurements->pluck('milliseconds')->sort()->values();
+
+    return [
+        'result' => $measurements->last()['result'],
+        'queries' => (int) $measurements->max('queries'),
+        'median_milliseconds' => (float) $times[(int) floor($times->count() / 2)],
+        'worst_milliseconds' => (float) $times->max(),
+        'peak_memory_mb' => (float) $measurements->max('peak_memory_mb'),
+    ];
+}
+
 it('measures representative effective split posting volume with exact accounting', function () {
     $from = Carbon::parse('2026-01-01');
     $to = Carbon::parse('2026-12-31');
@@ -58,7 +75,7 @@ it('measures representative effective split posting volume with exact accounting
     $secondaryAccount = Account::factory()->create([
         'user_id' => $user->id,
         'space_id' => $user->current_space_id,
-        'currency_code' => 'USD',
+        'currency_code' => 'EUR',
     ]);
     $otherAccount = Account::factory()->create([
         'user_id' => $otherUser->id,
@@ -89,6 +106,10 @@ it('measures representative effective split posting volume with exact accounting
     $splitRows = [];
     $expectedEffectiveAmount = 0;
     $expectedPostingCount = 10_000;
+    $expectedByCategory = $categories->mapWithKeys(fn (Category $category): array => [$category->id => 0])->all();
+    $rootByCategory = $categories->mapWithKeys(fn (Category $category): array => [
+        $category->id => $category->parent_id ?? $category->id,
+    ])->all();
 
     $flushTransactions = function () use (&$transactionRows): void {
         if ($transactionRows !== []) {
@@ -107,18 +128,20 @@ it('measures representative effective split posting volume with exact accounting
 
     for ($index = 0; $index < 10_000; $index++) {
         $amount = $index % 20 === 0 ? 500 : -(1_000 + ($index % 400));
+        $categoryId = $categories[$index % $categories->count()]->id;
         $expectedEffectiveAmount += $amount;
+        $expectedByCategory[$categoryId] += $amount;
         $transactionRows[] = [
             'id' => (string) Str::uuid(),
             'user_id' => $user->id,
             'space_id' => $user->current_space_id,
             'account_id' => $index % 5 === 0 ? $secondaryAccount->id : $account->id,
-            'category_id' => $categories[$index % $categories->count()]->id,
+            'category_id' => $categoryId,
             'description' => "Benchmark unsplit {$index}",
             'description_iv' => null,
             'transaction_date' => $timestamp->toDateString(),
             'amount' => $amount,
-            'currency_code' => $index % 5 === 0 ? 'USD' : 'EUR',
+            'currency_code' => 'EUR',
             'source' => TransactionSource::ManuallyCreated->value,
             'created_at' => $timestamp,
             'updated_at' => $timestamp,
@@ -146,7 +169,7 @@ it('measures representative effective split posting volume with exact accounting
             'description_iv' => null,
             'transaction_date' => $timestamp->toDateString(),
             'amount' => $amount,
-            'currency_code' => $index % 5 === 0 ? 'USD' : 'EUR',
+            'currency_code' => 'EUR',
             'source' => TransactionSource::ManuallyCreated->value,
             'created_at' => $timestamp,
             'updated_at' => $timestamp,
@@ -158,11 +181,13 @@ it('measures representative effective split posting volume with exact accounting
             $lineAmount = $position === $lineCount - 1
                 ? $amount - $allocated
                 : $baseAmount;
+            $categoryId = $categories[($index + $position) % $categories->count()]->id;
             $allocated += $lineAmount;
+            $expectedByCategory[$categoryId] += $lineAmount;
             $splitRows[] = [
                 'id' => (string) Str::uuid(),
                 'transaction_id' => $transactionId,
-                'category_id' => $categories[($index + $position) % $categories->count()]->id,
+                'category_id' => $categoryId,
                 'amount' => $lineAmount,
                 'position' => $position,
                 'created_at' => $timestamp,
@@ -198,9 +223,15 @@ it('measures representative effective split posting volume with exact accounting
         'currency_code' => 'EUR',
     ]);
 
-    $categorySpending = measureSplitVolumePath(fn () => app(CategorySpendingService::class)
+    $expectedByRoot = collect($expectedByCategory)
+        ->groupBy(fn (int $amount, string $categoryId): string => $rootByCategory[$categoryId])
+        ->map(fn ($amounts): int => -$amounts->sum())
+        ->sortKeys()
+        ->all();
+
+    $categorySpending = measureRepeatedSplitVolumePath(fn () => app(CategorySpendingService::class)
         ->forPeriod($user->id, $from, $to));
-    $dashboardPostings = measureSplitVolumePath(function () use ($user, $from, $to) {
+    $dashboardPostings = measureRepeatedSplitVolumePath(function () use ($user, $from, $to) {
         $transactions = Transaction::query()
             ->where('user_id', $user->id)
             ->whereBetween('transaction_date', [$from, $to])
@@ -210,10 +241,22 @@ it('measures representative effective split posting volume with exact accounting
         return app(EffectiveTransactionPostings::class)->forTransactions($transactions);
     });
 
+    $actualByCategory = $dashboardPostings['result']
+        ->groupBy('categoryId')
+        ->map(fn ($postings): int => $postings->sum('amount'))
+        ->sortKeys()
+        ->all();
+    $actualByRoot = $categorySpending['result']
+        ->mapWithKeys(fn (array $item): array => [$item['category_id'] => $item['amount']])
+        ->sortKeys()
+        ->all();
+
     expect(Transaction::query()->where('user_id', $user->id)->whereBetween('transaction_date', [$from, $to])->count())->toBe(12_000)
         ->and($dashboardPostings['result'])->toHaveCount($expectedPostingCount)
         ->and($dashboardPostings['result']->sum('amount'))->toBe($expectedEffectiveAmount)
+        ->and($actualByCategory)->toBe(collect($expectedByCategory)->sortKeys()->all())
         ->and($categorySpending['result']->sum('amount'))->toBe(-$expectedEffectiveAmount)
+        ->and($actualByRoot)->toBe($expectedByRoot)
         ->and($categorySpending['queries'])->toBeLessThanOrEqual(6)
         ->and($dashboardPostings['queries'])->toBeLessThanOrEqual(4);
 
