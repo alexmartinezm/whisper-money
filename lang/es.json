@@ -10,6 +10,7 @@
     "Remove split": "Eliminar división",
     "Remove split line :number": "Eliminar línea :number de la división",
     "Remove split transaction?": "¿Eliminar la división de la transacción?",
+    "Rest": "Resto",
     "Select category": "Seleccionar categoría",
     "Split": "Dividir",
     "Split amounts must equal the transaction amount.": "Los importes divididos deben sumar el importe de la transacción.",
