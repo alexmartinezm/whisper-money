@@ -33,6 +33,7 @@ import { getStoredKey } from '@/lib/key-storage';
 import { evaluateRulesForNewTransaction } from '@/lib/rule-engine';
 import { appendNoteIfNotPresent } from '@/lib/utils';
 import { transactionSyncService } from '@/services/transaction-sync';
+import { type SharedData } from '@/types';
 import {
     filterTransactionalAccounts,
     type Account,
@@ -48,7 +49,7 @@ import {
 } from '@/types/transaction';
 import { formatDate } from '@/utils/date';
 import { __ } from '@/utils/i18n';
-import { router } from '@inertiajs/react';
+import { router, usePage } from '@inertiajs/react';
 import axios from 'axios';
 import { getYear, parseISO } from 'date-fns';
 import { Trash2 } from 'lucide-react';
@@ -120,6 +121,8 @@ export function EditTransactionDialog({
         'whisper_money_update_balance_on_transaction';
 
     const { sync } = useSyncContext();
+    const transactionSplittingEnabled =
+        usePage<SharedData>().props.features.transactionSplitting;
     const [transactionDate, setTransactionDate] = useState('');
     const [description, setDescription] = useState('');
     const [amount, setAmount] = useState<number>(0);
@@ -941,31 +944,33 @@ export function EditTransactionDialog({
                                     showUncategorized={true}
                                     data-testid="category-select"
                                 />
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => {
-                                        setRemoveSplits(false);
-                                        setSplits([
-                                            {
-                                                category_id:
-                                                    categoryId === 'null'
-                                                        ? ''
-                                                        : categoryId,
-                                                amount,
-                                                position: 0,
-                                            },
-                                            {
-                                                category_id: '',
-                                                amount: 0,
-                                                position: 1,
-                                            },
-                                        ]);
-                                    }}
-                                >
-                                    {__('Split transaction')}
-                                </Button>
+                                {transactionSplittingEnabled && (
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                            setRemoveSplits(false);
+                                            setSplits([
+                                                {
+                                                    category_id:
+                                                        categoryId === 'null'
+                                                            ? ''
+                                                            : categoryId,
+                                                    amount,
+                                                    position: 0,
+                                                },
+                                                {
+                                                    category_id: '',
+                                                    amount: 0,
+                                                    position: 1,
+                                                },
+                                            ]);
+                                        }}
+                                    >
+                                        {__('Split transaction')}
+                                    </Button>
+                                )}
                             </div>
                         ) : (
                             <div className="space-y-2">
@@ -979,7 +984,10 @@ export function EditTransactionDialog({
                                     categories={categories}
                                     value={splits}
                                     onChange={setSplits}
-                                    disabled={isSubmitting}
+                                    disabled={
+                                        isSubmitting ||
+                                        !transactionSplittingEnabled
+                                    }
                                 />
                                 <Button
                                     type="button"

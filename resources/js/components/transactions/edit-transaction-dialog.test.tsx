@@ -9,6 +9,15 @@ import {
     haveSplitLinesChanged,
 } from './edit-transaction-dialog';
 
+const inertiaProps = vi.hoisted(() => ({
+    features: { transactionSplitting: true },
+}));
+
+vi.mock('@inertiajs/react', () => ({
+    router: { delete: vi.fn() },
+    usePage: () => ({ props: inertiaProps }),
+}));
+
 vi.mock('@/components/shared/label-combobox', () => ({
     LabelCombobox: () => <div />,
 }));
@@ -154,6 +163,7 @@ describe('split line dirty checking', () => {
 
 describe('EditTransactionDialog', () => {
     beforeEach(() => {
+        inertiaProps.features.transactionSplitting = true;
         vi.clearAllMocks();
         globalThis.ResizeObserver = class {
             observe() {}
@@ -484,6 +494,73 @@ describe('EditTransactionDialog', () => {
         decryptedNotes: null,
         label_ids: [],
     };
+
+    it('hides the start split control while transaction splitting is disabled', () => {
+        inertiaProps.features.transactionSplitting = false;
+
+        render(
+            <EditTransactionDialog
+                transaction={null}
+                categories={[]}
+                accounts={[checkingAccount]}
+                banks={[]}
+                labels={[]}
+                open
+                onOpenChange={vi.fn()}
+                onSuccess={vi.fn()}
+                mode="create"
+            />,
+        );
+
+        expect(
+            screen.queryByRole('button', { name: 'Split transaction' }),
+        ).not.toBeInTheDocument();
+    });
+
+    it('shows existing split lines and the remove action while transaction splitting is disabled', () => {
+        inertiaProps.features.transactionSplitting = false;
+        const transaction = {
+            ...manualTransaction,
+            is_split: true,
+            split_count: 2,
+            splits: [
+                {
+                    id: 'split-1',
+                    transaction_id: manualTransaction.id,
+                    category_id: 'food',
+                    category: null,
+                    amount: -700,
+                    position: 0,
+                },
+                {
+                    id: 'split-2',
+                    transaction_id: manualTransaction.id,
+                    category_id: 'home',
+                    category: null,
+                    amount: -500,
+                    position: 1,
+                },
+            ],
+        } as DecryptedTransaction;
+
+        render(
+            <EditTransactionDialog
+                transaction={transaction}
+                categories={[]}
+                accounts={[checkingAccount]}
+                banks={[]}
+                labels={[]}
+                open
+                onOpenChange={vi.fn()}
+                onSuccess={vi.fn()}
+                mode="edit"
+            />,
+        );
+
+        expect(
+            screen.getByRole('button', { name: 'Remove split' }),
+        ).toBeInTheDocument();
+    });
 
     it('closes the dialog and asks the parent to delete when Delete is clicked', () => {
         const onDelete = vi.fn();

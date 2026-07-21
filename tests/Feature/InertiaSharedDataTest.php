@@ -1,11 +1,13 @@
 <?php
 
 use App\Enums\BankingConnectionStatus;
+use App\Features\TransactionSplitting;
 use App\Jobs\PurgeResidualEncryptionArtifactsJob;
 use App\Models\BankingConnection;
 use App\Models\User;
 use Illuminate\Support\Facades\Queue;
 use Inertia\Testing\AssertableInertia as Assert;
+use Laravel\Pennant\Feature;
 
 use function Pest\Laravel\actingAs;
 
@@ -100,7 +102,19 @@ test('shared feature flags do not include coinbase flag', function () {
         'cashflow' => true,
         'calculateBalancesOnImport' => false,
         'mcp' => false,
+        'transactionSplitting' => true,
     ]);
+});
+
+test('authenticated users receive their transaction splitting flag value', function () {
+    $user = User::factory()->onboarded()->create();
+    Feature::for($user)->deactivate(TransactionSplitting::class);
+
+    $response = actingAs($user)->withoutVite()->get(route('dashboard'));
+
+    $response->assertInertia(fn (Assert $page) => $page
+        ->where('features.transactionSplitting', false)
+    );
 });
 
 test('authenticated users receive subscription payment issue when subscription is past due', function () {
