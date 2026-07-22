@@ -143,6 +143,7 @@ class AccountMetricsService
                 'bank' => $account->bank,
                 'banking_connection_id' => $account->banking_connection_id,
                 'hidden_on_dashboard' => $account->hidden_on_dashboard,
+                'include_in_net_worth' => $account->include_in_net_worth,
             ];
 
             if ($account->type === AccountType::RealEstate && $account->relationLoaded('realEstateDetail') && $account->realEstateDetail?->linked_loan_account_id) {
@@ -221,6 +222,7 @@ class AccountMetricsService
                     'type' => $account->type,
                     'currency_code' => $account->currency_code,
                     'bank' => $account->bank,
+                    'include_in_net_worth' => $account->include_in_net_worth,
                 ],
             ];
         });

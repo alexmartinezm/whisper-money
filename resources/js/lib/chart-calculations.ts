@@ -69,6 +69,7 @@ export interface AccountInfo {
     id: string;
     type: AccountType;
     currency_code: string;
+    include_in_net_worth?: boolean;
 }
 
 export interface NetWorthSeriesOptions {
@@ -93,6 +94,7 @@ export function computeNetWorthSeries(
     const includeRealEstateAccounts = options.includeRealEstateAccounts ?? true;
 
     const accountIds = Object.entries(accounts)
+        .filter(([, account]) => account.include_in_net_worth !== false)
         .filter(([, account]) => includeLoanAccounts || account.type !== 'loan')
         .filter(
             ([, account]) =>

@@ -136,6 +136,41 @@ test('users can toggle dashboard visibility of their accounts', function () {
     expect($account->fresh()->hidden_on_dashboard)->toBeFalse();
 });
 
+test('users can toggle net worth inclusion independently of dashboard visibility', function () {
+    $account = Account::factory()->create([
+        'user_id' => $this->user->id,
+        'hidden_on_dashboard' => true,
+        'include_in_net_worth' => true,
+    ]);
+
+    $this->patch(route('accounts.net-worth-inclusion', $account), [
+        'include_in_net_worth' => false,
+    ])->assertRedirect();
+
+    expect($account->fresh())
+        ->include_in_net_worth->toBeFalse()
+        ->hidden_on_dashboard->toBeTrue();
+
+    $this->patch(route('accounts.net-worth-inclusion', $account), [
+        'include_in_net_worth' => true,
+    ])->assertRedirect();
+
+    expect($account->fresh()->include_in_net_worth)->toBeTrue();
+});
+
+test('users cannot toggle net worth inclusion for another users account', function () {
+    $account = Account::factory()->create([
+        'user_id' => User::factory()->create()->id,
+        'include_in_net_worth' => true,
+    ]);
+
+    $this->patch(route('accounts.net-worth-inclusion', $account), [
+        'include_in_net_worth' => false,
+    ])->assertForbidden();
+
+    expect($account->fresh()->include_in_net_worth)->toBeTrue();
+});
+
 test('the hidden flag is required when toggling visibility', function () {
     $account = Account::factory()->create(['user_id' => $this->user->id]);
 

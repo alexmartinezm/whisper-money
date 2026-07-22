@@ -36,7 +36,7 @@ import { formatDayFromDate } from '@/utils/date';
 import { __ } from '@/utils/i18n';
 import { router, usePage } from '@inertiajs/react';
 import { format, subDays } from 'date-fns';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PercentageTrendIndicator } from './percentage-trend-indicator';
 
 interface NetWorthChartProps {
@@ -142,12 +142,14 @@ export function NetWorthChart({
         null,
     );
     const [isDailyLoading, setIsDailyLoading] = useState(false);
+    const dailyRequestId = useRef(0);
     const includeLoansInNetWorthChart =
         props.includeLoansInNetWorthChart ?? true;
     const includeRealEstateInNetWorthChart =
         props.includeRealEstateInNetWorthChart ?? true;
 
     const fetchDailyData = useCallback(async () => {
+        const requestId = ++dailyRequestId.current;
         setIsDailyLoading(true);
         try {
             const now = new Date();
@@ -168,15 +170,19 @@ export function NetWorthChart({
                 return { ...rest, month: date };
             }) as Array<Record<string, string | number | OriginalAmount>>;
 
-            setDailyData({
-                data: normalizedData,
-                accounts: data.accounts,
-                currency_code: data.currency_code,
-            });
+            if (requestId === dailyRequestId.current) {
+                setDailyData({
+                    data: normalizedData,
+                    accounts: data.accounts,
+                    currency_code: data.currency_code,
+                });
+            }
         } catch (error) {
             console.error('Failed to fetch daily net worth data:', error);
         } finally {
-            setIsDailyLoading(false);
+            if (requestId === dailyRequestId.current) {
+                setIsDailyLoading(false);
+            }
         }
     }, []);
 
@@ -185,6 +191,11 @@ export function NetWorthChart({
             fetchDailyData();
         }
     }, [granularity, dailyData, fetchDailyData]);
+
+    useEffect(() => {
+        dailyRequestId.current += 1;
+        setDailyData(null);
+    }, [monthlyData]);
 
     const activeData =
         granularity === 'daily' && dailyData ? dailyData : monthlyData;
@@ -211,6 +222,9 @@ export function NetWorthChart({
             Object.entries(accounts).filter(([, account]) => {
                 // Credit cards are spending accounts, never part of net worth.
                 if (account.type === 'credit_card') {
+                    return false;
+                }
+                if (account.include_in_net_worth === false) {
                     return false;
                 }
                 if (!includeLoansInNetWorthChart && account.type === 'loan') {
@@ -277,6 +291,7 @@ export function NetWorthChart({
                     id: account.id,
                     type: account.type,
                     currency_code: account.currency_code,
+                    include_in_net_worth: account.include_in_net_worth,
                 };
             }
         });
@@ -295,6 +310,7 @@ export function NetWorthChart({
                         id: account.id,
                         type: account.type,
                         currency_code: account.currency_code,
+                        include_in_net_worth: account.include_in_net_worth,
                     };
                 }
             }
