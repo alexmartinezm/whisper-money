@@ -66,6 +66,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { TableCell, TableRow } from '@/components/ui/table';
 import { consoleDebug } from '@/lib/debug';
 import { captureEvent } from '@/lib/posthog';
+import { mergeAuthoritativeTransactions } from '@/lib/transaction-bulk-update';
 import { mergeReEvaluatedTransaction } from '@/lib/transaction-re-evaluation';
 import { transactionSyncService } from '@/services/transaction-sync';
 import { type Account, type Bank } from '@/types/account';
@@ -847,7 +848,7 @@ export function TransactionList({
         }
     }
 
-    async function handleBulkCategoryChange(categoryId: number | null) {
+    async function handleBulkCategoryChange(categoryId: string | null) {
         const selectedIds = Object.keys(rowSelection);
         if (selectedIds.length === 0) {
             return;
@@ -855,28 +856,27 @@ export function TransactionList({
 
         setIsBulkUpdating(true);
         try {
-            await transactionSyncService.updateMany(selectedIds, {
-                category_id: categoryId,
-            });
-
-            const categoriesMap = new Map(
-                categories.map((category) => [category.id, category]),
+            const result = await transactionSyncService.updateMany(
+                selectedIds,
+                { category_id: categoryId },
             );
-            const selectedCategory = categoryId
-                ? categoriesMap.get(categoryId) || null
-                : null;
 
             setTransactions((previous) =>
-                previous.map((transaction) => {
-                    if (selectedIds.includes(transaction.id.toString())) {
-                        return {
-                            ...transaction,
-                            category_id: categoryId,
-                            category: selectedCategory,
-                        };
-                    }
-                    return transaction;
-                }),
+                mergeAuthoritativeTransactions(previous, result.transactions),
+            );
+
+            toast.success(
+                result.skipped_split_count > 0
+                    ? __(
+                          'Updated :updated transactions; skipped :skipped split transactions',
+                          {
+                              updated: result.updated_count,
+                              skipped: result.skipped_split_count,
+                          },
+                      )
+                    : __('Updated :count transactions', {
+                          count: result.updated_count,
+                      }),
             );
 
             setRowSelection({});
@@ -895,26 +895,13 @@ export function TransactionList({
 
         setIsBulkUpdating(true);
         try {
-            await transactionSyncService.updateMany(selectedIds, {
-                label_ids: labelIds,
-            });
-
-            const selectedLabels = labels.filter((label) =>
-                labelIds.includes(label.id),
+            const result = await transactionSyncService.updateMany(
+                selectedIds,
+                { label_ids: labelIds },
             );
 
             setTransactions((previous) =>
-                previous.map((transaction) => {
-                    if (!selectedIds.includes(transaction.id.toString())) {
-                        return transaction;
-                    }
-
-                    return {
-                        ...transaction,
-                        label_ids: labelIds,
-                        labels: selectedLabels,
-                    };
-                }),
+                mergeAuthoritativeTransactions(previous, result.transactions),
             );
 
             setRowSelection({});

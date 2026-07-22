@@ -2,6 +2,9 @@
 
 use App\Contracts\BankingProviderInterface;
 use App\Enums\CategoryType;
+use App\Events\TransactionUpdated;
+use App\Features\TransactionSplitting;
+use App\Listeners\AssignTransactionToBudget;
 use App\Mcp\Servers\WhisperMoneyServer;
 use App\Mcp\Tools\CategorizeTransaction;
 use App\Mcp\Tools\SearchTransactions;
@@ -11,6 +14,7 @@ use App\Models\BankingConnection;
 use App\Models\Budget;
 use App\Models\BudgetPeriod;
 use App\Models\Category;
+use App\Models\Label;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Ai\UncategorizedTransactionMatcher;
@@ -21,7 +25,11 @@ use App\Services\BudgetTransactionService;
 use App\Services\Transactions\EffectiveTransactionPostings;
 use App\Services\Transactions\ReplaceTransactionSplits;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
+use Laravel\Pennant\Feature;
 
 uses(RefreshDatabase::class);
 
@@ -114,6 +122,66 @@ it('creates, serializes, replaces, and removes splits through transaction CRUD',
         ->assertJsonPath('data.is_split', false);
 });
 
+it('emits one coherent update event after parent and split changes are complete', function () {
+    [$user, , $transaction, $food, $home] = splitIntegrationFixture();
+    makeIntegrationSplit($transaction, $food, $home);
+    $observedStates = [];
+    Event::listen(TransactionUpdated::class, function (TransactionUpdated $event) use (&$observedStates): void {
+        $fresh = $event->transaction->fresh('splits');
+        $observedStates[] = [
+            'amount' => $fresh->amount,
+            'split_sum' => (int) $fresh->splits->sum('amount'),
+            'split_count' => $fresh->splits->count(),
+        ];
+    });
+
+    $this->actingAs($user)->patchJson(route('transactions.update', $transaction), [
+        'amount' => -12000,
+        'splits' => [
+            ['category_id' => $food->id, 'amount' => -7000],
+            ['category_id' => $home->id, 'amount' => -5000],
+        ],
+    ])->assertOk();
+
+    expect($observedStates)->toBe([[
+        'amount' => -12000,
+        'split_sum' => -12000,
+        'split_count' => 2,
+    ]]);
+});
+
+it('blocks split creation and replacement while the flag is off but still allows unsplit', function () {
+    [$user, $account, $transaction, $food, $home] = splitIntegrationFixture();
+    Feature::for($user)->deactivate(TransactionSplitting::class);
+
+    $this->actingAs($user)->postJson(route('transactions.store'), [
+        'account_id' => $account->id,
+        'description' => 'Blocked split purchase',
+        'transaction_date' => '2026-07-18',
+        'amount' => -10000,
+        'currency_code' => 'EUR',
+        'source' => 'manually_created',
+        'splits' => [
+            ['category_id' => $food->id, 'amount' => -6000],
+            ['category_id' => $home->id, 'amount' => -4000],
+        ],
+    ])->assertForbidden();
+
+    makeIntegrationSplit($transaction, $food, $home);
+
+    $this->actingAs($user)->patchJson(route('transactions.update', $transaction), [
+        'splits' => [
+            ['category_id' => $food->id, 'amount' => -2500],
+            ['category_id' => $home->id, 'amount' => -7500],
+        ],
+    ])->assertForbidden();
+
+    $this->actingAs($user)->patchJson(route('transactions.update', $transaction), [
+        'category_id' => $food->id,
+        'splits' => [],
+    ])->assertOk()->assertJsonPath('data.is_split', false);
+});
+
 it('rejects implicit category or amount mutations on split parents', function () {
     [$user, , $transaction, $food, $home] = splitIntegrationFixture();
     makeIntegrationSplit($transaction, $food, $home);
@@ -129,6 +197,19 @@ it('rejects implicit category or amount mutations on split parents', function ()
     expect($transaction->refresh()->amount)->toBe(-10000)
         ->and($transaction->category_id)->toBeNull()
         ->and((int) $transaction->splits()->sum('amount'))->toBe(-10000);
+});
+
+it('rejects non-list split payloads at the HTTP boundary', function () {
+    [$user, , $transaction, $food, $home] = splitIntegrationFixture();
+
+    $this->actingAs($user)->patchJson(route('transactions.update', $transaction), [
+        'splits' => [
+            2 => ['category_id' => $food->id, 'amount' => -6000],
+            4 => ['category_id' => $home->id, 'amount' => -4000],
+        ],
+    ])->assertUnprocessable()->assertJsonValidationErrors('splits');
+
+    expect($transaction->fresh()->splits()->count())->toBe(0);
 });
 
 it('filters split parents once and excludes them from uncategorized and bulk category updates', function () {
@@ -152,6 +233,84 @@ it('filters split parents once and excludes them from uncategorized and bulk cat
 
     expect($transaction->refresh()->category_id)->toBeNull()
         ->and($transaction->splits()->count())->toBe(2);
+});
+
+it('reports only rows actually changed by a bulk category update', function () {
+    [$user, , $transaction, $food] = splitIntegrationFixture([
+        'category_id' => null,
+    ]);
+    $transaction->update([
+        'category_id' => $food->id,
+        'category_source' => 'manual',
+    ]);
+
+    $this->actingAs($user)->patchJson('/transactions/bulk', [
+        'transaction_ids' => [$transaction->id],
+        'category_id' => $food->id,
+    ])->assertOk()
+        ->assertJsonPath('updated_count', 0)
+        ->assertJsonPath('skipped_split_count', 0);
+});
+
+it('builds authoritative bulk records before releasing row locks', function () {
+    [$user, , $transaction, $food] = splitIntegrationFixture();
+    $baselineTransactionLevel = DB::transactionLevel();
+    $authoritativeQueryLevels = [];
+
+    DB::listen(function (QueryExecuted $query) use ($transaction, &$authoritativeQueryLevels): void {
+        if (
+            str_contains($query->sql, 'from `transactions`')
+            && ! str_contains($query->sql, 'for update')
+            && in_array($transaction->id, $query->bindings, true)
+        ) {
+            $authoritativeQueryLevels[] = DB::transactionLevel();
+        }
+    });
+
+    $this->actingAs($user)->patchJson('/transactions/bulk', [
+        'transaction_ids' => [$transaction->id],
+        'category_id' => $food->id,
+    ])->assertOk()->assertJsonCount(1, 'transactions');
+
+    expect($authoritativeQueryLevels)->not->toBeEmpty()
+        ->and(collect($authoritativeQueryLevels)->every(
+            fn (int $level): bool => $level > $baselineTransactionLevel,
+        ))->toBeTrue();
+});
+
+it('counts notes and label changes while skipping split category changes', function () {
+    [$user, $account, $splitTransaction, $food, $home] = splitIntegrationFixture();
+    makeIntegrationSplit($splitTransaction, $food, $home);
+    $regularTransaction = Transaction::factory()->plaintext()->create([
+        'user_id' => $user->id,
+        'space_id' => $account->space_id,
+        'account_id' => $account->id,
+        'category_id' => $food->id,
+    ]);
+    $label = Label::factory()->create(['user_id' => $user->id]);
+
+    $response = $this->actingAs($user)->patchJson('/transactions/bulk', [
+        'transaction_ids' => [$splitTransaction->id, $regularTransaction->id],
+        'category_id' => $home->id,
+        'notes' => 'Shared note',
+        'label_ids' => [$label->id],
+    ])->assertOk()
+        ->assertJsonPath('updated_count', 2)
+        ->assertJsonPath('skipped_split_count', 1)
+        ->assertJsonPath('skipped_split_ids.0', $splitTransaction->id)
+        ->assertJsonCount(2, 'updated_ids')
+        ->assertJsonCount(2, 'transactions');
+
+    $expectedIds = collect([$splitTransaction->id, $regularTransaction->id])->sort()->values()->all();
+    expect(collect($response->json('updated_ids'))->sort()->values()->all())->toBe($expectedIds)
+        ->and(collect($response->json('transactions'))->pluck('id')->sort()->values()->all())->toBe($expectedIds);
+
+    expect($splitTransaction->refresh()->category_id)->toBeNull()
+        ->and($splitTransaction->notes)->toBe('Shared note')
+        ->and($splitTransaction->labels()->pluck('labels.id')->all())->toBe([$label->id])
+        ->and($regularTransaction->refresh()->category_id)->toBe($home->id)
+        ->and($regularTransaction->notes)->toBe('Shared note')
+        ->and($regularTransaction->labels()->pluck('labels.id')->all())->toBe([$label->id]);
 });
 
 it('exposes split details in incremental sync and excludes split parents from AI candidates', function () {
@@ -317,4 +476,49 @@ it('exposes split reads through MCP and blocks MCP categorization', function () 
 
     expect($transaction->refresh()->category_id)->toBeNull()
         ->and($transaction->splits()->count())->toBe(2);
+});
+
+it('returns replaced split details through delta sync', function () {
+    [$user, , $transaction, $food, $home] = splitIntegrationFixture();
+    makeIntegrationSplit($transaction, $food, $home);
+    $cursor = now()->subDay();
+    Transaction::withoutEvents(fn () => $transaction->forceFill(['updated_at' => $cursor])->saveQuietly());
+
+    $this->actingAs($user)->patchJson(route('transactions.update', $transaction), [
+        'splits' => [
+            ['category_id' => $food->id, 'amount' => -2500],
+            ['category_id' => $home->id, 'amount' => -7500],
+        ],
+    ])->assertOk();
+
+    $this->actingAs($user)->getJson('/api/sync/transactions?since='.urlencode($cursor->toISOString()))
+        ->assertOk()
+        ->assertJsonPath('data.0.id', $transaction->id)
+        ->assertJsonPath('data.0.is_split', true)
+        ->assertJsonPath('data.0.split_count', 2)
+        ->assertJsonPath('data.0.splits.0.amount', -2500)
+        ->assertJsonPath('data.0.splits.1.amount', -7500);
+});
+
+it('reassigns budgets without stale or duplicate rows after split replacement', function () {
+    [$user, , $transaction, $food, $home] = splitIntegrationFixture(['transaction_date' => now()]);
+    makeIntegrationSplit($transaction, $food, $home);
+    $foodBudget = Budget::factory()->forCategories($food)->create(['user_id' => $user->id]);
+    $homeBudget = Budget::factory()->forCategories($home)->create(['user_id' => $user->id]);
+    $foodPeriod = BudgetPeriod::factory()->create(['budget_id' => $foodBudget->id, 'start_date' => now()->subDay(), 'end_date' => now()->addDay()]);
+    $homePeriod = BudgetPeriod::factory()->create(['budget_id' => $homeBudget->id, 'start_date' => now()->subDay(), 'end_date' => now()->addDay()]);
+    app(BudgetTransactionService::class)->assignTransaction($transaction);
+
+    $this->actingAs($user)->patchJson(route('transactions.update', $transaction), [
+        'splits' => [
+            ['category_id' => $food->id, 'amount' => -2500],
+            ['category_id' => $home->id, 'amount' => -7500],
+        ],
+    ])->assertOk();
+
+    app(AssignTransactionToBudget::class)->handle(new TransactionUpdated($transaction->fresh()));
+
+    expect($foodPeriod->budgetTransactions()->sole()->amount)->toBe(2500)
+        ->and($homePeriod->budgetTransactions()->sole()->amount)->toBe(7500)
+        ->and($transaction->budgetTransactions()->count())->toBe(2);
 });

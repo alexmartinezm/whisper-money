@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\CategorySource;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\Label;
@@ -40,6 +41,26 @@ it('can bulk update transactions by IDs', function () {
     foreach ($transactions as $transaction) {
         expect($transaction->fresh()->category_id)->toBe($newCategory->id);
     }
+});
+
+it('returns cleared AI provenance after manual bulk categorization', function () {
+    $aiCategory = Category::factory()->create(['user_id' => $this->user->id]);
+    $manualCategory = Category::factory()->create(['user_id' => $this->user->id]);
+    $transaction = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'category_id' => $aiCategory->id,
+        'category_source' => CategorySource::Ai,
+        'ai_confidence' => 0.95,
+    ]);
+
+    $this->actingAs($this->user)->patchJson('/transactions/bulk', [
+        'transaction_ids' => [$transaction->id],
+        'category_id' => $manualCategory->id,
+    ])->assertSuccessful()
+        ->assertJsonPath('transactions.0.category_source', CategorySource::Manual->value)
+        ->assertJsonPath('transactions.0.ai_confidence', null)
+        ->assertJsonPath('transactions.0.ai_categorized', false);
 });
 
 it('can bulk update transactions by filters with date range', function () {

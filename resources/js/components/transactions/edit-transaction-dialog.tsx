@@ -33,6 +33,7 @@ import { getStoredKey } from '@/lib/key-storage';
 import { evaluateRulesForNewTransaction } from '@/lib/rule-engine';
 import { appendNoteIfNotPresent } from '@/lib/utils';
 import { transactionSyncService } from '@/services/transaction-sync';
+import { type SharedData } from '@/types';
 import {
     filterTransactionalAccounts,
     type Account,
@@ -43,16 +44,40 @@ import { type Category } from '@/types/category';
 import { type Label } from '@/types/label';
 import {
     type DecryptedTransaction,
+    type SplitLineInput,
     type TransactionSplit,
 } from '@/types/transaction';
 import { formatDate } from '@/utils/date';
 import { __ } from '@/utils/i18n';
-import { router } from '@inertiajs/react';
+import { router, usePage } from '@inertiajs/react';
 import axios from 'axios';
 import { getYear, parseISO } from 'date-fns';
 import { Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
+
+function splitLineSignature(
+    splits: ReadonlyArray<
+        Pick<TransactionSplit, 'category_id' | 'amount' | 'position'>
+    >,
+): string {
+    return JSON.stringify(
+        splits.map(({ category_id, amount, position }) => ({
+            category_id,
+            amount,
+            position,
+        })),
+    );
+}
+
+export function haveSplitLinesChanged(
+    persisted: ReadonlyArray<
+        Pick<TransactionSplit, 'category_id' | 'amount' | 'position'>
+    >,
+    draft: readonly SplitLineInput[],
+): boolean {
+    return splitLineSignature(persisted) !== splitLineSignature(draft);
+}
 
 interface EditTransactionDialogProps {
     transaction: DecryptedTransaction | null;
@@ -96,12 +121,14 @@ export function EditTransactionDialog({
         'whisper_money_update_balance_on_transaction';
 
     const { sync } = useSyncContext();
+    const transactionSplittingEnabled =
+        usePage<SharedData>().props.features.transactionSplitting;
     const [transactionDate, setTransactionDate] = useState('');
     const [description, setDescription] = useState('');
     const [amount, setAmount] = useState<number>(0);
     const [accountId, setAccountId] = useState<string>('');
     const [categoryId, setCategoryId] = useState<string>('null');
-    const [splits, setSplits] = useState<TransactionSplit[] | null>(null);
+    const [splits, setSplits] = useState<SplitLineInput[] | null>(null);
     const [removeSplits, setRemoveSplits] = useState(false);
     const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>([]);
     const [notes, setNotes] = useState('');
@@ -133,7 +160,8 @@ export function EditTransactionDialog({
             setSplits(
                 transaction.splits?.length
                     ? transaction.splits.map((split, position) => ({
-                          ...split,
+                          category_id: split.category_id,
+                          amount: split.amount,
                           position,
                       }))
                     : null,
@@ -452,7 +480,7 @@ export function EditTransactionDialog({
                 notesIv = null;
 
                 const updateData: {
-                    category_id: string | null;
+                    category_id?: string | null;
                     notes: string | null;
                     notes_iv: string | null;
                     description?: string;
@@ -462,13 +490,18 @@ export function EditTransactionDialog({
                     transaction_date?: string;
                     account_id?: string;
                     currency_code?: string;
-                    splits?: TransactionSplit[];
+                    splits?: SplitLineInput[];
                 } = {
-                    category_id: selectedCategoryId,
                     notes: encryptedNotes,
                     notes_iv: notesIv,
                     label_ids: selectedLabelIds,
-                    ...(splits !== null
+                    ...(splits === null &&
+                    (removeSplits ||
+                        selectedCategoryId !== transaction.category_id)
+                        ? { category_id: selectedCategoryId }
+                        : {}),
+                    ...(splits !== null &&
+                    haveSplitLinesChanged(transaction.splits ?? [], splits)
                         ? { splits }
                         : removeSplits
                           ? { splits: [] }
@@ -485,13 +518,26 @@ export function EditTransactionDialog({
                     editedAccount?.currency_code ?? transaction.currency_code;
 
                 if (canEditAllFields) {
-                    updateData.description = trimmedDescription;
-                    updateData.description_iv = null;
-                    finalDecryptedDescription = trimmedDescription;
-                    updateData.amount = amount;
-                    updateData.transaction_date = transactionDate;
-                    updateData.account_id = accountId;
-                    updateData.currency_code = editedCurrencyCode;
+                    if (
+                        trimmedDescription !== transaction.decryptedDescription
+                    ) {
+                        updateData.description = trimmedDescription;
+                        updateData.description_iv = null;
+                        finalDecryptedDescription = trimmedDescription;
+                    }
+                    if (amount !== transaction.amount) {
+                        updateData.amount = amount;
+                    }
+                    if (
+                        transactionDate !==
+                        transaction.transaction_date.split('T')[0]
+                    ) {
+                        updateData.transaction_date = transactionDate;
+                    }
+                    if (accountId !== transaction.account_id) {
+                        updateData.account_id = accountId;
+                        updateData.currency_code = editedCurrencyCode;
+                    }
                 }
 
                 const result = await transactionSyncService.update(
@@ -508,64 +554,56 @@ export function EditTransactionDialog({
                     },
                 );
 
-                const updatedRecord = await transactionSyncService.getById(
-                    transaction.id,
-                );
+                const { learned_rule: learnedRule, ...serverTransaction } =
+                    result;
+                const savedSplits = serverTransaction.splits ?? [];
+                const authoritativeCategoryId =
+                    serverTransaction.category_id ?? null;
                 const updatedCategory =
-                    splits === null && selectedCategoryId
+                    savedSplits.length === 0 && authoritativeCategoryId
                         ? categories.find(
-                              (category) => category.id === selectedCategoryId,
+                              (category) =>
+                                  category.id === authoritativeCategoryId,
                           ) || null
                         : null;
-
+                const authoritativeLabelIds = serverTransaction.label_ids ?? [];
                 const selectedLabels = labels.filter((label) =>
-                    selectedLabelIds.includes(label.id),
+                    authoritativeLabelIds.includes(label.id),
+                );
+                const authoritativeAccount = accounts.find(
+                    (candidate) =>
+                        candidate.id === serverTransaction.account_id,
                 );
 
                 const updatedTransaction: DecryptedTransaction = {
                     ...transaction,
-                    category_id: splits === null ? selectedCategoryId : null,
+                    ...serverTransaction,
                     category: updatedCategory,
-                    splits: result.splits ?? splits ?? [],
-                    is_split: (result.splits ?? splits ?? []).length > 0,
-                    split_count: (result.splits ?? splits ?? []).length,
+                    label_ids: authoritativeLabelIds,
+                    splits: savedSplits,
+                    is_split: savedSplits.length > 0,
+                    split_count: savedSplits.length,
                     decryptedDescription: finalDecryptedDescription,
-                    description:
-                        updateData.description ?? transaction.description,
-                    description_iv:
-                        updateData.description_iv ?? transaction.description_iv,
                     decryptedNotes: trimmedNotes || null,
-                    notes: encryptedNotes,
-                    notes_iv: notesIv,
-                    label_ids: selectedLabelIds,
                     labels: selectedLabels,
-                    updated_at:
-                        updatedRecord?.updated_at ?? transaction.updated_at,
-                    ...(canEditAllFields
-                        ? {
-                              amount,
-                              transaction_date: transactionDate,
-                              account_id: accountId,
-                              currency_code: editedCurrencyCode,
-                              account: editedAccount ?? transaction.account,
-                              bank: editedAccount?.bank?.id
-                                  ? banks.find(
-                                        (b) => b.id === editedAccount.bank?.id,
-                                    )
-                                  : transaction.bank,
-                          }
-                        : {}),
+                    account: authoritativeAccount ?? transaction.account,
+                    bank: authoritativeAccount?.bank?.id
+                        ? banks.find(
+                              (bank) =>
+                                  bank.id === authoritativeAccount.bank?.id,
+                          )
+                        : transaction.bank,
                 };
 
                 toast.success(__('Transaction updated successfully'));
                 onSuccess(updatedTransaction);
 
-                if (result.learned_rule) {
+                if (learnedRule) {
                     // The correction already taught the system a forward rule, so
                     // confirm that and offer an instant undo — and skip the
                     // "Automatize" prompt, which would only offer to create a rule
                     // that now exists. Mirrors the transaction-table flow.
-                    const ruleId = result.learned_rule.id;
+                    const ruleId = learnedRule.id;
 
                     toast.success(
                         __(
@@ -895,31 +933,33 @@ export function EditTransactionDialog({
                                     showUncategorized={true}
                                     data-testid="category-select"
                                 />
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => {
-                                        setRemoveSplits(false);
-                                        setSplits([
-                                            {
-                                                category_id:
-                                                    categoryId === 'null'
-                                                        ? ''
-                                                        : categoryId,
-                                                amount,
-                                                position: 0,
-                                            },
-                                            {
-                                                category_id: '',
-                                                amount: 0,
-                                                position: 1,
-                                            },
-                                        ]);
-                                    }}
-                                >
-                                    {__('Split transaction')}
-                                </Button>
+                                {transactionSplittingEnabled && (
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                            setRemoveSplits(false);
+                                            setSplits([
+                                                {
+                                                    category_id:
+                                                        categoryId === 'null'
+                                                            ? ''
+                                                            : categoryId,
+                                                    amount,
+                                                    position: 0,
+                                                },
+                                                {
+                                                    category_id: '',
+                                                    amount: 0,
+                                                    position: 1,
+                                                },
+                                            ]);
+                                        }}
+                                    >
+                                        {__('Split transaction')}
+                                    </Button>
+                                )}
                             </div>
                         ) : (
                             <div className="space-y-2">
@@ -933,7 +973,10 @@ export function EditTransactionDialog({
                                     categories={categories}
                                     value={splits}
                                     onChange={setSplits}
-                                    disabled={isSubmitting}
+                                    disabled={
+                                        isSubmitting ||
+                                        !transactionSplittingEnabled
+                                    }
                                 />
                                 <Button
                                     type="button"

@@ -1,11 +1,15 @@
 <?php
 
 use App\Enums\AccountType;
+use App\Enums\CategoryType;
 use App\Models\Account;
 use App\Models\Bank;
+use App\Models\Category;
 use App\Models\RealEstateDetail;
 use App\Models\Transaction;
+use App\Models\TransactionSplit;
 use App\Models\User;
+use App\Services\Transactions\ReplaceTransactionSplits;
 
 use function Pest\Laravel\actingAs;
 use function Pest\Laravel\assertDatabaseHas;
@@ -369,6 +373,47 @@ it('deletes all transactions when deleting account', function () {
     expect(Account::withTrashed()->find($account->id))->not->toBeNull();
     expect(Transaction::find($transaction1->id))->toBeNull();
     expect(Transaction::find($transaction2->id))->toBeNull();
+});
+
+it('preserves split lines through soft delete and restore and cascades them on force delete', function () {
+    actingAs($this->user);
+
+    $account = Account::factory()->create([
+        'user_id' => $this->user->id,
+        'bank_id' => $this->bank->id,
+    ]);
+    $transaction = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'space_id' => $account->space_id,
+        'account_id' => $account->id,
+        'amount' => -10000,
+    ]);
+    $categories = collect([1, 2])->map(fn () => Category::factory()->create([
+        'user_id' => $this->user->id,
+        'space_id' => $account->space_id,
+        'type' => CategoryType::Expense,
+    ]));
+    app(ReplaceTransactionSplits::class)->replace($transaction, [
+        ['category_id' => $categories[0]->id, 'amount' => -6000],
+        ['category_id' => $categories[1]->id, 'amount' => -4000],
+    ]);
+    $splitIds = $transaction->splits()->pluck('id')->all();
+
+    $this->delete(route('accounts.destroy', $account))->assertRedirect(route('accounts.index'));
+
+    expect(Transaction::withTrashed()->find($transaction->id)?->trashed())->toBeTrue()
+        ->and(TransactionSplit::query()->whereIn('id', $splitIds)->count())->toBe(2);
+
+    $deletedAccount = Account::withTrashed()->findOrFail($account->id);
+    $deletedTransaction = Transaction::withTrashed()->findOrFail($transaction->id);
+    $deletedAccount->restore();
+    $deletedTransaction->restore();
+
+    expect($deletedTransaction->fresh('splits')->splits->pluck('id')->all())->toBe($splitIds);
+
+    $deletedTransaction->forceDeleteQuietly();
+
+    expect(TransactionSplit::query()->whereIn('id', $splitIds)->count())->toBe(0);
 });
 
 it('prevents deleting another users account', function () {

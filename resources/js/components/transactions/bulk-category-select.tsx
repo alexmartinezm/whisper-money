@@ -5,7 +5,7 @@ import { useState } from 'react';
 
 interface BulkCategorySelectProps {
     categories: Category[];
-    onCategoryChange: (categoryId: number | null) => void;
+    onCategoryChange: (categoryId: string | null) => void;
     disabled?: boolean;
 }
 
