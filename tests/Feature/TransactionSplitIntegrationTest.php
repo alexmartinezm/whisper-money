@@ -25,7 +25,9 @@ use App\Services\BudgetTransactionService;
 use App\Services\Transactions\EffectiveTransactionPostings;
 use App\Services\Transactions\ReplaceTransactionSplits;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Laravel\Pennant\Feature;
 
@@ -197,6 +199,19 @@ it('rejects implicit category or amount mutations on split parents', function ()
         ->and((int) $transaction->splits()->sum('amount'))->toBe(-10000);
 });
 
+it('rejects non-list split payloads at the HTTP boundary', function () {
+    [$user, , $transaction, $food, $home] = splitIntegrationFixture();
+
+    $this->actingAs($user)->patchJson(route('transactions.update', $transaction), [
+        'splits' => [
+            2 => ['category_id' => $food->id, 'amount' => -6000],
+            4 => ['category_id' => $home->id, 'amount' => -4000],
+        ],
+    ])->assertUnprocessable()->assertJsonValidationErrors('splits');
+
+    expect($transaction->fresh()->splits()->count())->toBe(0);
+});
+
 it('filters split parents once and excludes them from uncategorized and bulk category updates', function () {
     [$user, , $transaction, $food, $home] = splitIntegrationFixture();
     makeIntegrationSplit($transaction, $food, $home);
@@ -237,6 +252,32 @@ it('reports only rows actually changed by a bulk category update', function () {
         ->assertJsonPath('skipped_split_count', 0);
 });
 
+it('builds authoritative bulk records before releasing row locks', function () {
+    [$user, , $transaction, $food] = splitIntegrationFixture();
+    $baselineTransactionLevel = DB::transactionLevel();
+    $authoritativeQueryLevels = [];
+
+    DB::listen(function (QueryExecuted $query) use ($transaction, &$authoritativeQueryLevels): void {
+        if (
+            str_contains($query->sql, 'from `transactions`')
+            && ! str_contains($query->sql, 'for update')
+            && in_array($transaction->id, $query->bindings, true)
+        ) {
+            $authoritativeQueryLevels[] = DB::transactionLevel();
+        }
+    });
+
+    $this->actingAs($user)->patchJson('/transactions/bulk', [
+        'transaction_ids' => [$transaction->id],
+        'category_id' => $food->id,
+    ])->assertOk()->assertJsonCount(1, 'transactions');
+
+    expect($authoritativeQueryLevels)->not->toBeEmpty()
+        ->and(collect($authoritativeQueryLevels)->every(
+            fn (int $level): bool => $level > $baselineTransactionLevel,
+        ))->toBeTrue();
+});
+
 it('counts notes and label changes while skipping split category changes', function () {
     [$user, $account, $splitTransaction, $food, $home] = splitIntegrationFixture();
     makeIntegrationSplit($splitTransaction, $food, $home);
@@ -248,14 +289,21 @@ it('counts notes and label changes while skipping split category changes', funct
     ]);
     $label = Label::factory()->create(['user_id' => $user->id]);
 
-    $this->actingAs($user)->patchJson('/transactions/bulk', [
+    $response = $this->actingAs($user)->patchJson('/transactions/bulk', [
         'transaction_ids' => [$splitTransaction->id, $regularTransaction->id],
         'category_id' => $home->id,
         'notes' => 'Shared note',
         'label_ids' => [$label->id],
     ])->assertOk()
         ->assertJsonPath('updated_count', 2)
-        ->assertJsonPath('skipped_split_count', 1);
+        ->assertJsonPath('skipped_split_count', 1)
+        ->assertJsonPath('skipped_split_ids.0', $splitTransaction->id)
+        ->assertJsonCount(2, 'updated_ids')
+        ->assertJsonCount(2, 'transactions');
+
+    $expectedIds = collect([$splitTransaction->id, $regularTransaction->id])->sort()->values()->all();
+    expect(collect($response->json('updated_ids'))->sort()->values()->all())->toBe($expectedIds)
+        ->and(collect($response->json('transactions'))->pluck('id')->sort()->values()->all())->toBe($expectedIds);
 
     expect($splitTransaction->refresh()->category_id)->toBeNull()
         ->and($splitTransaction->notes)->toBe('Shared note')

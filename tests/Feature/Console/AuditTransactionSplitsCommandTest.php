@@ -38,7 +38,7 @@ it('audits valid splits without writing', function () {
     $this->artisan('transactions:audit-splits', ['--json' => true])->assertSuccessful();
 
     expect($transaction->fresh()->updated_at->toISOString())->toBe($before['parent'])
-        ->and(TransactionSplit::query()->orderBy('position')->get()->map->getRawOriginal()->all())->toEqual($before['lines']);
+        ->and(TransactionSplit::query()->where('transaction_id', $transaction->id)->orderBy('position')->get()->map->getRawOriginal()->all())->toEqual($before['lines']);
 });
 
 it('reports stable anomaly codes and fails only when requested', function () {
@@ -50,6 +50,21 @@ it('reports stable anomaly codes and fails only when requested', function () {
     expect(Artisan::output())->toContain('parent_classification_present', 'split_amount_zero', 'split_sum_mismatch');
 
     $this->artisan('transactions:audit-splits', ['--fail-on-invalid' => true])->assertFailed();
+});
+
+it('reports AI suggestion provenance left on split parents', function () {
+    [$transaction] = auditSplitFixture();
+    DB::table('transactions')->where('id', $transaction->id)->update([
+        'ai_suggested_category_id' => Category::factory()->create([
+            'user_id' => $transaction->user_id,
+            'space_id' => $transaction->space_id,
+            'type' => CategoryType::Expense,
+        ])->id,
+        'ai_suggested_category_at' => now(),
+    ]);
+
+    expect(Artisan::call('transactions:audit-splits', ['--json' => true]))->toBe(0)
+        ->and(Artisan::output())->toContain('parent_classification_present');
 });
 
 it('audits restorable soft-deleted split parents', function () {

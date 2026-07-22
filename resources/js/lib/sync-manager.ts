@@ -20,6 +20,35 @@ interface SyncOptions {
 
 const LAST_SYNC_KEY = 'last_sync_transactions';
 
+function timestampToMicroseconds(timestamp: string): bigint | null {
+    const match = timestamp.match(
+        /^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})?$/,
+    );
+    if (!match) {
+        return null;
+    }
+
+    const milliseconds = Date.parse(`${match[1]}${match[3] ?? ''}`);
+    if (Number.isNaN(milliseconds)) {
+        return null;
+    }
+
+    const fraction = (match[2] ?? '').padEnd(6, '0').slice(0, 6);
+
+    return BigInt(milliseconds) * 1000n + BigInt(fraction || '0');
+}
+
+function isTimestampNewer(candidate: string, current: string): boolean {
+    const candidateMicroseconds = timestampToMicroseconds(candidate);
+    const currentMicroseconds = timestampToMicroseconds(current);
+
+    if (candidateMicroseconds !== null && currentMicroseconds !== null) {
+        return candidateMicroseconds > currentMicroseconds;
+    }
+
+    return Date.parse(candidate) > Date.parse(current);
+}
+
 export class TransactionSyncManager {
     private syncInProgress = false;
     private options: SyncOptions;
@@ -118,13 +147,10 @@ export class TransactionSyncManager {
 
             if (!localRecord) {
                 toInsert.push(transformed);
-            } else {
-                const serverDate = new Date(transformed.updated_at);
-                const localDate = new Date(localRecord.updated_at);
-
-                if (serverDate > localDate) {
-                    toUpdate.push(transformed);
-                }
+            } else if (
+                isTimestampNewer(transformed.updated_at, localRecord.updated_at)
+            ) {
+                toUpdate.push(transformed);
             }
         }
 

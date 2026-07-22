@@ -46,11 +46,11 @@ class ReconcileTransactionSplitsCommand extends Command
                             $locked = Transaction::query()->whereKey($transaction->id)->lockForUpdate()->firstOrFail();
                             $this->budgets->assignTransaction($locked);
                             $nextTimestamp = now();
-                            if ($locked->updated_at !== null && $nextTimestamp->lte($locked->updated_at->copy()->addSecond())) {
-                                $nextTimestamp = $locked->updated_at->copy()->addSecond();
+                            if ($locked->updated_at === null || $nextTimestamp->gt($locked->updated_at)) {
+                                DB::table('transactions')
+                                    ->where('id', $locked->id)
+                                    ->update(['updated_at' => $nextTimestamp->format('Y-m-d H:i:s.u')]);
                             }
-                            $locked->timestamps = false;
-                            $locked->forceFill(['updated_at' => $nextTimestamp])->saveQuietly();
                         }, attempts: 5);
                         $reconciled++;
                     } catch (Throwable $exception) {

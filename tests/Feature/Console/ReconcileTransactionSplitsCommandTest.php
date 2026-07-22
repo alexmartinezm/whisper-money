@@ -42,22 +42,25 @@ it('defaults to a write free dry run', function () {
     expect([DB::table('transactions')->where('id', $transaction->id)->first(), DB::table('transaction_splits')->orderBy('position')->get()->all(), DB::table('budget_transactions')->get()->all()])->toEqual($before);
 });
 
-it('reconciles budgets touches parent once and remains idempotent without changing lines', function () {
+it('reconciles budgets without advancing the parent cursor into the future', function () {
     [$transaction, $period] = reconciliationFixture();
-    $oldTimestamp = $transaction->updated_at;
+    $oldTimestamp = $transaction->fresh()->updated_at;
+    $this->travelTo($oldTimestamp->copy()->addMilliseconds(500));
+    expect(now()->gt($oldTimestamp))->toBeTrue();
     $lines = DB::table('transaction_splits')->orderBy('position')->get()->all();
 
     $this->artisan('transactions:reconcile-splits', ['--execute' => true, '--chunk' => 1])->assertSuccessful();
 
+    $firstTimestamp = $transaction->fresh()->updated_at;
     expect(BudgetTransaction::query()->where('budget_period_id', $period->id)->sole()->amount)->toBe(6000)
-        ->and($transaction->fresh()->updated_at->gt($oldTimestamp))->toBeTrue()
+        ->and($firstTimestamp->gte($oldTimestamp))->toBeTrue()
+        ->and($firstTimestamp->lte(now()))->toBeTrue()
         ->and(DB::table('transaction_splits')->orderBy('position')->get()->all())->toEqual($lines);
 
-    $firstTimestamp = $transaction->fresh()->updated_at;
     $this->artisan('transactions:reconcile-splits', ['--execute' => true])->assertSuccessful();
     expect(BudgetTransaction::query()->where('budget_period_id', $period->id)->count())->toBe(1)
         ->and(BudgetTransaction::query()->where('budget_period_id', $period->id)->sole()->amount)->toBe(6000)
-        ->and($transaction->fresh()->updated_at->gt($firstTimestamp))->toBeTrue();
+        ->and($transaction->fresh()->updated_at->equalTo($firstTimestamp))->toBeTrue();
 });
 
 it('blocks execute when audit finds invalid data', function () {

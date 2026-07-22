@@ -113,15 +113,81 @@ describe('transactionSyncService bulk updates', () => {
         vi.clearAllMocks();
     });
 
+    it('persists authoritative bulk records before returning them', async () => {
+        vi.stubGlobal('indexedDB', {} as IDBFactory);
+        axiosMock.patch.mockResolvedValueOnce({
+            data: {
+                updated_count: 1,
+                skipped_split_count: 1,
+                updated_ids: ['tx-1'],
+                skipped_split_ids: ['tx-2'],
+                transactions: [
+                    {
+                        id: 'tx-1',
+                        transaction_date: '2026-07-21T00:00:00.000Z',
+                        updated_at: '2026-07-21T18:00:00.123456Z',
+                        labels: [{ id: 'label-1' }],
+                        splits: [],
+                    },
+                ],
+            },
+        });
+
+        const result = await transactionSyncService.updateMany(
+            ['tx-1', 'tx-2'],
+            { category_id: 'category-1' },
+        );
+
+        expect(result.transactions[0]).toMatchObject({
+            id: 'tx-1',
+            transaction_date: '2026-07-21',
+            label_ids: ['label-1'],
+        });
+        expect(dbMock.transactions.put).toHaveBeenCalledWith(
+            expect.objectContaining({ id: 'tx-1', label_ids: ['label-1'] }),
+        );
+    });
+
     it('returns updated and skipped split counts for explicit ids', async () => {
         await expect(
             transactionSyncService.updateMany(['tx-1', 'tx-2', 'tx-3'], {
                 category_id: 'category-1',
             }),
-        ).resolves.toEqual({
+        ).resolves.toMatchObject({
             updated_count: 2,
             skipped_split_count: 1,
         });
+    });
+
+    it('serializes filter dates as local calendar dates', async () => {
+        const previousTimezone = process.env.TZ;
+        process.env.TZ = 'Pacific/Kiritimati';
+
+        try {
+            const dateFrom = new Date(2026, 6, 1);
+            const dateTo = new Date(2026, 6, 31);
+
+            await transactionSyncService.updateByFilters(
+                { dateFrom, dateTo },
+                { category_id: 'category-1' },
+            );
+
+            expect(axiosMock.patch).toHaveBeenLastCalledWith(
+                '/transactions/bulk',
+                expect.objectContaining({
+                    filters: expect.objectContaining({
+                        date_from: '2026-07-01',
+                        date_to: '2026-07-31',
+                    }),
+                }),
+            );
+        } finally {
+            if (previousTimezone === undefined) {
+                delete process.env.TZ;
+            } else {
+                process.env.TZ = previousTimezone;
+            }
+        }
     });
 
     it('returns updated and skipped split counts for filters', async () => {
@@ -130,7 +196,7 @@ describe('transactionSyncService bulk updates', () => {
                 { dateFrom: new Date('2026-07-01T00:00:00Z') },
                 { category_id: 'category-1' },
             ),
-        ).resolves.toEqual({
+        ).resolves.toMatchObject({
             updated_count: 2,
             skipped_split_count: 1,
         });

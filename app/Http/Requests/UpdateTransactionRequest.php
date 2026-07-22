@@ -28,7 +28,7 @@ class UpdateTransactionRequest extends FormRequest
             'debtor_name' => ['nullable', 'string', 'max:255'],
             'label_ids' => ['nullable', 'array'],
             'label_ids.*' => ['required', 'string', 'uuid', $this->userOwned('labels')],
-            'splits' => ['sometimes', 'array'],
+            'splits' => ['sometimes', 'array', 'list'],
             'splits.*.category_id' => ['required', 'uuid', $this->userOwned('categories')],
             'splits.*.amount' => ['required', 'integer', 'not_in:0'],
         ];

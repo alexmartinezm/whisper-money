@@ -1,12 +1,17 @@
 import { db, withDb } from '@/lib/dexie-db';
 import { TransactionSyncManager } from '@/lib/sync-manager';
 import type { LearnedRuleNotice } from '@/types/automation-rule';
-import type { SplitLineInput, Transaction } from '@/types/transaction';
+import type {
+    ServerTransaction,
+    SplitLineInput,
+    Transaction,
+} from '@/types/transaction';
 import type { UUID } from '@/types/uuid';
 import axios from 'axios';
+import { format } from 'date-fns';
 
 /** A transaction update plus any rule the correction just taught the system. */
-export type UpdatedTransaction = Transaction & {
+export type UpdatedTransaction = ServerTransaction & {
     learned_rule?: LearnedRuleNotice | null;
 };
 
@@ -28,6 +33,9 @@ export type TransactionCreateData = Omit<
 export interface BulkUpdateResult {
     updated_count: number;
     skipped_split_count: number;
+    updated_ids: string[];
+    skipped_split_ids: string[];
+    transactions: ServerTransaction[];
 }
 
 interface TransactionFilters {
@@ -35,12 +43,13 @@ interface TransactionFilters {
     dateTo?: Date | null;
     amountMin?: number | null;
     amountMax?: number | null;
-    categoryIds?: number[];
+    categoryIds?: UUID[];
     accountIds?: string[];
     labelIds?: string[];
     creditorName?: string;
     debtorName?: string;
     searchText?: string;
+    aiCategorizedOnly?: boolean;
 }
 
 export function transformTransactionFromServer(
@@ -154,6 +163,7 @@ class TransactionSyncService {
 
         return {
             ...updatedTransaction,
+            labels: Array.isArray(serverData.labels) ? serverData.labels : [],
             learned_rule: response.data.learned_rule ?? null,
         } as UpdatedTransaction;
     }
@@ -170,7 +180,7 @@ class TransactionSyncService {
             ...transactionData,
         });
 
-        return response.data as BulkUpdateResult;
+        return await this.persistBulkResult(response.data);
     }
 
     async updateByFilters(
@@ -181,12 +191,10 @@ class TransactionSyncService {
 
         const requestFilters: Record<string, unknown> = {};
         if (filters.dateFrom) {
-            requestFilters.date_from = filters.dateFrom
-                .toISOString()
-                .split('T')[0];
+            requestFilters.date_from = format(filters.dateFrom, 'yyyy-MM-dd');
         }
         if (filters.dateTo) {
-            requestFilters.date_to = filters.dateTo.toISOString().split('T')[0];
+            requestFilters.date_to = format(filters.dateTo, 'yyyy-MM-dd');
         }
         if (filters.amountMin !== null && filters.amountMin !== undefined) {
             requestFilters.amount_min = filters.amountMin;
@@ -209,6 +217,12 @@ class TransactionSyncService {
         if (filters.debtorName) {
             requestFilters.debtor_name = filters.debtorName;
         }
+        if (filters.searchText) {
+            requestFilters.search = filters.searchText;
+        }
+        if (filters.aiCategorizedOnly) {
+            requestFilters.category_source = 'ai';
+        }
 
         const response = await axios.patch('/transactions/bulk', {
             filters: requestFilters,
@@ -216,7 +230,44 @@ class TransactionSyncService {
             ...transactionData,
         });
 
-        return response.data as BulkUpdateResult;
+        return await this.persistBulkResult(response.data);
+    }
+
+    private async persistBulkResult(
+        data: Record<string, unknown>,
+    ): Promise<BulkUpdateResult> {
+        const sourceTransactions = Array.isArray(data.transactions)
+            ? (data.transactions as Record<string, unknown>[])
+            : [];
+        const storedTransactions = sourceTransactions.map((transaction) =>
+            transformTransactionFromServer(transaction),
+        );
+        const transactions = storedTransactions.map((transaction, index) => ({
+            ...transaction,
+            labels: Array.isArray(sourceTransactions[index].labels)
+                ? (sourceTransactions[index]
+                      .labels as ServerTransaction['labels'])
+                : [],
+        })) as unknown as ServerTransaction[];
+
+        await withDb<void>(async () => {
+            for (const transaction of storedTransactions) {
+                await db.transactions.put(
+                    transaction as unknown as Transaction,
+                );
+            }
+        }, undefined);
+
+        return {
+            ...(data as unknown as BulkUpdateResult),
+            updated_ids: Array.isArray(data.updated_ids)
+                ? data.updated_ids.map(String)
+                : [],
+            skipped_split_ids: Array.isArray(data.skipped_split_ids)
+                ? data.skipped_split_ids.map(String)
+                : [],
+            transactions,
+        };
     }
 
     async delete(

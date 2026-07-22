@@ -201,6 +201,57 @@ it('keeps a complete state when replace competes with unsplit', function () {
     assertCompleteSplitState($transaction);
 });
 
+it('rechecks split references with a current read before deleting a subtree', function () {
+    [$transaction, $categories] = concurrencyFixture();
+    DB::commit();
+    DB::disconnect();
+    $barrier = sys_get_temp_dir().'/split-delete-'.bin2hex(random_bytes(8));
+    mkdir($barrier, 0700);
+
+    $pid = pcntl_fork();
+    if ($pid === 0) {
+        DB::purge();
+        DB::beginTransaction();
+        Category::query()->where('user_id', $transaction->user_id)->count();
+        touch("{$barrier}/snapshot-ready");
+        while (! file_exists("{$barrier}/replacement-done")) {
+            usleep(1000);
+        }
+
+        try {
+            $category = Category::query()->findOrFail($categories[2]->id);
+            $locked = app(CategoryTree::class)->lockSubtreeForMutation($category);
+            app(CategoryTree::class)->deleteSubtree($locked);
+            DB::commit();
+            exit(0);
+        } catch (ValidationException $exception) {
+            DB::rollBack();
+            file_put_contents("{$barrier}/message", collect($exception->errors())->flatten()->first());
+            exit(2);
+        }
+    }
+
+    while (! file_exists("{$barrier}/snapshot-ready")) {
+        usleep(1000);
+    }
+    app(ReplaceTransactionSplits::class)->replace(Transaction::findOrFail($transaction->id), [
+        ['category_id' => $categories[2]->id, 'amount' => -2500],
+        ['category_id' => $categories[3]->id, 'amount' => -7500],
+    ]);
+    touch("{$barrier}/replacement-done");
+    pcntl_waitpid($pid, $status);
+
+    expect(pcntl_wexitstatus($status))->toBe(2)
+        ->and((string) file_get_contents("{$barrier}/message"))->toBe('Categories used by split transactions cannot be deleted.')
+        ->and(Category::withTrashed()->findOrFail($categories[2]->id)->trashed())->toBeFalse();
+
+    foreach (glob("{$barrier}/*") ?: [] as $file) {
+        unlink($file);
+    }
+    rmdir($barrier);
+    DB::purge();
+});
+
 it('never references a deleted category when replace competes with delete', function () {
     [$transaction, $categories] = concurrencyFixture();
     $payload = [['category_id' => $categories[2]->id, 'amount' => -2500], ['category_id' => $categories[3]->id, 'amount' => -7500]];

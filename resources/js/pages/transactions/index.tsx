@@ -86,6 +86,7 @@ import {
 import { consoleDebug } from '@/lib/debug';
 import { isNewSince } from '@/lib/new-transactions';
 import { captureEvent } from '@/lib/posthog';
+import { mergeAuthoritativeTransactions } from '@/lib/transaction-bulk-update';
 import { getBulkDeleteConfirmationText } from '@/lib/transaction-delete-confirmation';
 import { mergeReEvaluatedTransaction } from '@/lib/transaction-re-evaluation';
 import { cn } from '@/lib/utils';
@@ -94,10 +95,7 @@ import {
     dismiss as dismissConsent,
     store as storeConsent,
 } from '@/routes/ai/consent';
-import {
-    transactionSyncService,
-    type BulkUpdateResult,
-} from '@/services/transaction-sync';
+import { transactionSyncService } from '@/services/transaction-sync';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { type Account, type Bank } from '@/types/account';
 import { type AutomationRule } from '@/types/automation-rule';
@@ -1139,26 +1137,29 @@ export default function Transactions({
         try {
             if (isSelectingAll) {
                 const toastId = toast.loading(__('Updating transactions...'));
-                const response = await axios.patch<BulkUpdateResult>(
-                    '/transactions/bulk',
-                    {
-                        filters: clientFiltersToBackendFilters(filters),
-                        category_id: categoryId,
-                    },
+                const result = await transactionSyncService.updateByFilters(
+                    filters,
+                    { category_id: categoryId },
                 );
                 toast.dismiss(toastId);
                 toast.success(
-                    response.data.skipped_split_count > 0
+                    result.skipped_split_count > 0
                         ? __(
                               'Updated :updated transactions; skipped :skipped split transactions',
                               {
-                                  updated: response.data.updated_count,
-                                  skipped: response.data.skipped_split_count,
+                                  updated: result.updated_count,
+                                  skipped: result.skipped_split_count,
                               },
                           )
                         : __('Updated :count transactions', {
-                              count: response.data.updated_count,
+                              count: result.updated_count,
                           }),
+                );
+                setAllTransactions((previous) =>
+                    mergeAuthoritativeTransactions(
+                        previous,
+                        result.transactions,
+                    ),
                 );
                 setRowSelection({});
                 setIsSelectingAll(false);
@@ -1169,26 +1170,11 @@ export default function Transactions({
                     { category_id: categoryId },
                 );
 
-                const selectedCategory = categoryId
-                    ? (categories.find(
-                          (category) => category.id === categoryId,
-                      ) ?? null)
-                    : null;
-
                 setAllTransactions((previous) =>
-                    previous.map((transaction) => {
-                        if (
-                            selectedIds.includes(transaction.id.toString()) &&
-                            !transaction.is_split
-                        ) {
-                            return {
-                                ...transaction,
-                                category_id: categoryId,
-                                category: selectedCategory,
-                            };
-                        }
-                        return transaction;
-                    }),
+                    mergeAuthoritativeTransactions(
+                        previous,
+                        result.transactions,
+                    ),
                 );
 
                 toast.success(
@@ -1299,64 +1285,41 @@ export default function Transactions({
         try {
             if (isSelectingAll) {
                 const toastId = toast.loading(__('Updating transactions...'));
-                const response = await axios.patch<{ count: number }>(
-                    '/transactions/bulk',
-                    {
-                        filters: clientFiltersToBackendFilters(filters),
-                        label_ids: labelIds,
-                    },
+                const result = await transactionSyncService.updateByFilters(
+                    filters,
+                    { label_ids: labelIds },
                 );
                 toast.dismiss(toastId);
                 toast.success(
                     __(`Updated :count transactions`, {
-                        count: response.data.count,
+                        count: result.updated_count,
                     }),
+                );
+                setAllTransactions((previous) =>
+                    mergeAuthoritativeTransactions(
+                        previous,
+                        result.transactions,
+                    ),
                 );
                 setRowSelection({});
                 setIsSelectingAll(false);
                 refreshTransactions();
             } else {
-                const selectedLabels = labels.filter((l) =>
-                    labelIds.includes(l.id),
+                const result = await transactionSyncService.updateMany(
+                    selectedIds,
+                    { label_ids: labelIds },
                 );
 
-                await transactionSyncService.updateMany(selectedIds, {
-                    label_ids: labelIds,
-                });
-
                 setAllTransactions((previous) =>
-                    previous.map((transaction) => {
-                        if (selectedIds.includes(transaction.id.toString())) {
-                            if (labelIds.length === 0) {
-                                return {
-                                    ...transaction,
-                                    labels: [],
-                                };
-                            }
-
-                            const existingLabels = transaction.labels || [];
-                            const mergedLabels = [
-                                ...existingLabels,
-                                ...selectedLabels.filter(
-                                    (l) =>
-                                        !existingLabels.some(
-                                            (el) => el.id === l.id,
-                                        ),
-                                ),
-                            ];
-
-                            return {
-                                ...transaction,
-                                labels: mergedLabels,
-                            };
-                        }
-                        return transaction;
-                    }),
+                    mergeAuthoritativeTransactions(
+                        previous,
+                        result.transactions,
+                    ),
                 );
 
                 toast.success(
                     __(`Updated :count transactions`, {
-                        count: selectedIds.length,
+                        count: result.updated_count,
                     }),
                 );
 

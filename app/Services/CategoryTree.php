@@ -394,7 +394,14 @@ class CategoryTree
     {
         $ids = [$category->id, ...$this->descendantIds($category)];
 
-        if (TransactionSplit::query()->whereIn('category_id', $ids)->exists()) {
+        $referencedSplit = TransactionSplit::query()
+            ->whereIn('category_id', $ids)
+            ->orderBy('transaction_id')
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->first();
+
+        if ($referencedSplit !== null) {
             throw ValidationException::withMessages([
                 'category' => 'Categories used by split transactions cannot be deleted.',
             ]);

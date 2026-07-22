@@ -61,7 +61,18 @@ class AuditTransactionSplitsCommand extends Command
                     $validTypes = [CategoryType::Expense->value, CategoryType::Income->value];
                     $this->check($types->count() !== 1 || ! in_array($types->first(), $validTypes, true), 'category_type_invalid_or_mixed', $transaction->id, $anomalies);
 
-                    $this->check($transaction->category_id !== null || $transaction->category_source !== null || $transaction->categorized_by_rule_id !== null || $transaction->ai_model !== null || $transaction->ai_confidence !== null, 'parent_classification_present', $transaction->id, $anomalies);
+                    $this->check(
+                        $transaction->category_id !== null
+                            || $transaction->category_source !== null
+                            || $transaction->categorized_by_rule_id !== null
+                            || $transaction->ai_suggested_category_id !== null
+                            || $transaction->ai_suggested_category_at !== null
+                            || $transaction->ai_model !== null
+                            || $transaction->ai_confidence !== null,
+                        'parent_classification_present',
+                        $transaction->id,
+                        $anomalies,
+                    );
                 }
             });
 

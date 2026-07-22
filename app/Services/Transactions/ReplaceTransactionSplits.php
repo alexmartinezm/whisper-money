@@ -16,6 +16,8 @@ class ReplaceTransactionSplits
      */
     public function replace(Transaction $transaction, array $splits, ?string $fallbackCategoryId = null, array $parentAttributes = []): Transaction
     {
+        $splits = array_values($splits);
+
         return DB::transaction(function () use ($transaction, $splits, $fallbackCategoryId, $parentAttributes): Transaction {
             $locked = Transaction::query()->whereKey($transaction->id)->lockForUpdate()->firstOrFail();
             $locked->fill($parentAttributes);
@@ -47,7 +49,12 @@ class ReplaceTransactionSplits
                 ]);
             }
 
-            $locked->setUpdatedAt($locked->freshTimestamp());
+            $nextTimestamp = $locked->freshTimestamp();
+            if ($locked->updated_at !== null && $nextTimestamp->lte($locked->updated_at)) {
+                $nextTimestamp = $locked->updated_at->copy()->addMicrosecond();
+            }
+
+            $locked->setUpdatedAt($nextTimestamp);
             $locked->save();
 
             return $locked->fresh(['splits.category']);

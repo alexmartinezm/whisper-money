@@ -325,7 +325,7 @@ class TransactionController extends Controller
         }, attempts: 5);
 
         return response()->json([
-            'data' => $transaction->fresh()->load(['labels', 'splits.category'])->append(['is_split', 'split_count']),
+            'data' => $transaction->fresh()->load(['category', 'account.bank', 'labels', 'categorizedByRule:id,origin', 'splits.category'])->append(['ai_categorized', 'is_split', 'split_count']),
             'learned_rule' => $learnedRule === null ? null : [
                 'id' => $learnedRule->id,
                 'title' => $learnedRule->title,
@@ -369,24 +369,6 @@ class TransactionController extends Controller
         $transactionIds = $request->input('transaction_ids');
         $filters = $request->input('filters');
 
-        $query = Transaction::query()->where('user_id', $user->id);
-
-        if ($transactionIds && count($transactionIds) > 0) {
-            $query->whereIn('id', $transactionIds);
-            $transactions = $query->get();
-
-            if ($transactions->count() !== count($transactionIds)) {
-                return response()->json([
-                    'message' => 'Some transactions were not found or do not belong to you.',
-                ], 403);
-            }
-        } elseif ($filters !== null) {
-            $query->applyFilters($filters);
-            $transactions = $query->get();
-        } else {
-            $transactions = $query->get();
-        }
-
         $updateData = [];
         if ($request->has('category_id')) {
             $newCategoryId = $request->input('category_id');
@@ -411,19 +393,23 @@ class TransactionController extends Controller
             ], 400);
         }
 
-        $selectedIds = $transactions->pluck('id');
         $result = DB::transaction(function () use (
             $user,
             $transactionIds,
-            $selectedIds,
+            $filters,
             $request,
             $updateData,
             $hasLabelUpdate,
             $labelIds,
         ): array {
-            $lockedTransactions = Transaction::query()
-                ->where('user_id', $user->id)
-                ->whereIn('id', $selectedIds)
+            $lockedQuery = Transaction::query()->where('user_id', $user->id);
+            if ($transactionIds && count($transactionIds) > 0) {
+                $lockedQuery->whereIn('id', $transactionIds);
+            } elseif ($filters !== null) {
+                $lockedQuery->applyFilters($filters);
+            }
+
+            $lockedTransactions = $lockedQuery
                 ->orderBy('id')
                 ->lockForUpdate()
                 ->get()
@@ -492,10 +478,22 @@ class TransactionController extends Controller
                 }
             }
 
+            $updatedIds = $changedIds->unique()->values();
+            $updatedTransactions = Transaction::query()
+                ->where('user_id', $user->id)
+                ->whereIn('id', $updatedIds)
+                ->with(['category', 'account.bank', 'labels', 'categorizedByRule:id,origin', 'splits.category'])
+                ->orderBy('id')
+                ->get();
+            $updatedTransactions->each->append(['ai_categorized', 'is_split', 'split_count']);
+
             return [
                 'count' => $lockedTransactions->count(),
-                'updated_count' => $changedIds->unique()->count(),
+                'updated_count' => $updatedIds->count(),
                 'skipped_split_count' => $splitIds->count(),
+                'updated_ids' => $updatedIds->all(),
+                'skipped_split_ids' => $splitIds->values()->all(),
+                'transactions' => $updatedTransactions,
             ];
         }, attempts: 5);
 

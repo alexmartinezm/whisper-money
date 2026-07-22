@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\CategorySource;
 use App\Models\Account;
 use App\Models\AutomationRule;
 use App\Models\Budget;
@@ -103,6 +104,27 @@ test('users can update their own transaction category', function () {
         'id' => $transaction->id,
         'category_id' => $category->id,
     ]);
+});
+
+test('manual category updates return cleared AI provenance', function () {
+    $user = User::factory()->onboarded()->create();
+    $account = Account::factory()->create(['user_id' => $user->id]);
+    $aiCategory = Category::factory()->create(['user_id' => $user->id]);
+    $manualCategory = Category::factory()->create(['user_id' => $user->id]);
+    $transaction = Transaction::factory()->create([
+        'user_id' => $user->id,
+        'account_id' => $account->id,
+        'category_id' => $aiCategory->id,
+        'category_source' => CategorySource::Ai,
+        'ai_confidence' => 0.95,
+    ]);
+
+    actingAs($user)->patchJson(route('transactions.update', $transaction), [
+        'category_id' => $manualCategory->id,
+    ])->assertSuccessful()
+        ->assertJsonPath('data.category_source', CategorySource::Manual->value)
+        ->assertJsonPath('data.ai_confidence', null)
+        ->assertJsonPath('data.ai_categorized', false);
 });
 
 test('users can update transaction notes', function () {

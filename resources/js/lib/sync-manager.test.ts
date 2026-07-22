@@ -100,4 +100,24 @@ describe('TransactionSyncManager with IndexedDB', () => {
 
         await expect(makeManager().getAll()).resolves.toBe(stored);
     });
+
+    it('updates records whose timestamps differ only by microseconds', async () => {
+        const axios = (await import('axios')).default;
+        dbMock.sync_metadata.get.mockResolvedValueOnce(null);
+        dbMock.transactions.toArray.mockResolvedValueOnce([
+            { id: 'tx-1', updated_at: '2026-07-22T12:00:00.123455Z' },
+        ]);
+        vi.mocked(axios.get).mockResolvedValueOnce({
+            data: [{ id: 'tx-1', updated_at: '2026-07-22T12:00:00.123456Z' }],
+        });
+
+        await makeManager().sync();
+
+        expect(dbMock.transactions.bulkPut).toHaveBeenCalledWith([
+            expect.objectContaining({
+                id: 'tx-1',
+                updated_at: '2026-07-22T12:00:00.123456Z',
+            }),
+        ]);
+    });
 });

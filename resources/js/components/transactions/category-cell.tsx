@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/tooltip';
 import { useLocale } from '@/hooks/use-locale';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { mergeAuthoritativeTransactions } from '@/lib/transaction-bulk-update';
 import { cn } from '@/lib/utils';
 import { billing } from '@/routes/settings';
 import { transactionSyncService } from '@/services/transaction-sync';
@@ -96,8 +97,6 @@ interface CategoryCellProps {
 export function CategoryCell({
     transaction,
     categories,
-    accounts,
-    banks,
     onUpdate,
     onCategorized,
     className,
@@ -137,27 +136,11 @@ export function CategoryCell({
                 updateData,
             );
 
-            const updatedCategory = categoryId
-                ? categories.find((c) => c.id === categoryId) || null
-                : null;
-
-            const account = accounts.find(
-                (a) => a.id === transaction.account_id,
-            );
-            const bank = account?.bank?.id
-                ? banks.find((b) => b.id === account.bank!.id)
-                : undefined;
-
-            const updatedTransaction: DecryptedTransaction = {
-                ...transaction,
-                category_id: categoryId,
-                category: updatedCategory,
-                category_source: categoryId ? 'manual' : null,
-                ai_confidence: null,
-                ai_categorized: false,
-                account,
-                bank,
-            };
+            const updatedTransaction = mergeAuthoritativeTransactions(
+                [transaction],
+                [result],
+            )[0];
+            const updatedCategory = updatedTransaction.category ?? null;
 
             onUpdate(updatedTransaction);
 

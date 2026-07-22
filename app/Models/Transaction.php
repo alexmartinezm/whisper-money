@@ -39,6 +39,9 @@ class Transaction extends Model
     /** @use HasFactory<TransactionFactory> */
     use BelongsToSpace, HasFactory, HasUuids, SoftDeletes;
 
+    /** Preserve microsecond cursor precision for transaction delta sync. */
+    protected $dateFormat = 'Y-m-d H:i:s.u';
+
     /** @var array<string, class-string> */
     protected $dispatchesEvents = [
         'created' => TransactionCreated::class,

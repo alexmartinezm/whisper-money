@@ -66,6 +66,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { TableCell, TableRow } from '@/components/ui/table';
 import { consoleDebug } from '@/lib/debug';
 import { captureEvent } from '@/lib/posthog';
+import { mergeAuthoritativeTransactions } from '@/lib/transaction-bulk-update';
 import { mergeReEvaluatedTransaction } from '@/lib/transaction-re-evaluation';
 import { transactionSyncService } from '@/services/transaction-sync';
 import { type Account, type Bank } from '@/types/account';
@@ -860,25 +861,8 @@ export function TransactionList({
                 { category_id: categoryId },
             );
 
-            const selectedCategory = categoryId
-                ? (categories.find((category) => category.id === categoryId) ??
-                  null)
-                : null;
-
             setTransactions((previous) =>
-                previous.map((transaction) => {
-                    if (
-                        selectedIds.includes(transaction.id.toString()) &&
-                        !transaction.is_split
-                    ) {
-                        return {
-                            ...transaction,
-                            category_id: categoryId,
-                            category: selectedCategory,
-                        };
-                    }
-                    return transaction;
-                }),
+                mergeAuthoritativeTransactions(previous, result.transactions),
             );
 
             toast.success(
@@ -911,26 +895,13 @@ export function TransactionList({
 
         setIsBulkUpdating(true);
         try {
-            await transactionSyncService.updateMany(selectedIds, {
-                label_ids: labelIds,
-            });
-
-            const selectedLabels = labels.filter((label) =>
-                labelIds.includes(label.id),
+            const result = await transactionSyncService.updateMany(
+                selectedIds,
+                { label_ids: labelIds },
             );
 
             setTransactions((previous) =>
-                previous.map((transaction) => {
-                    if (!selectedIds.includes(transaction.id.toString())) {
-                        return transaction;
-                    }
-
-                    return {
-                        ...transaction,
-                        label_ids: labelIds,
-                        labels: selectedLabels,
-                    };
-                }),
+                mergeAuthoritativeTransactions(previous, result.transactions),
             );
 
             setRowSelection({});

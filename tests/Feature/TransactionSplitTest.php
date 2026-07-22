@@ -150,6 +150,18 @@ it('rejects fallback categories outside the owner space or soft deleted', functi
     }
 });
 
+it('normalizes sparse input keys into contiguous split positions', function () {
+    $transaction = Transaction::factory()->create(['amount' => -10000]);
+    $categories = [splitCategory($transaction), splitCategory($transaction)];
+
+    app(ReplaceTransactionSplits::class)->replace($transaction, [
+        5 => ['category_id' => $categories[0]->id, 'amount' => -6000],
+        9 => ['category_id' => $categories[1]->id, 'amount' => -4000],
+    ]);
+
+    expect($transaction->fresh('splits')->splits->pluck('position')->all())->toBe([0, 1]);
+});
+
 it('protects split categories from deletion and type changes', function () {
     $transaction = Transaction::factory()->create(['amount' => -10000]);
     $first = splitCategory($transaction);
@@ -167,15 +179,15 @@ it('protects split categories from deletion and type changes', function () {
         ->and($transaction->splits()->count())->toBe(2);
 });
 
-it('touches the parent once after replacing lines and the event sees final lines', function () {
+it('advances the parent cursor within the same timestamp tick and emits the final lines once', function () {
     $transaction = Transaction::factory()->create(['amount' => -10000]);
     $categories = [splitCategory($transaction), splitCategory($transaction)];
     app(ReplaceTransactionSplits::class)->replace($transaction, [
         ['category_id' => $categories[0]->id, 'amount' => -6000],
         ['category_id' => $categories[1]->id, 'amount' => -4000],
     ]);
-    $oldTimestamp = now()->subDay();
-    Transaction::withoutEvents(fn () => $transaction->forceFill(['updated_at' => $oldTimestamp])->saveQuietly());
+    $oldTimestamp = $transaction->fresh()->updated_at;
+    $this->travelTo($oldTimestamp);
     $observed = [];
     Event::listen(TransactionUpdated::class, function (TransactionUpdated $event) use (&$observed): void {
         $observed[] = $event->transaction->fresh('splits')->splits->pluck('amount')->all();
