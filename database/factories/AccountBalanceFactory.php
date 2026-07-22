@@ -20,7 +20,7 @@ class AccountBalanceFactory extends Factory
     {
         return [
             'account_id' => Account::factory(),
-            'balance_date' => fake()->date(),
+            'balance_date' => fake()->unique()->date(),
             'balance' => fake()->numberBetween(100000, 10000000),
         ];
     }
