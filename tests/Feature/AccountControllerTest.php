@@ -736,7 +736,7 @@ test('accounts index serializes the standard account field set without sensitive
     expect(array_keys($account))->toEqualCanonicalizing([
         'id', 'name', 'name_iv', 'encrypted', 'type', 'currency_code',
         'banking_connection_id', 'external_account_id', 'linked_at',
-        'bank', 'linked_loan_account_id',
+        'bank', 'linked_loan_account_id', 'include_in_net_worth',
     ]);
     expect($account)->not->toHaveKeys(['user_id', 'bank_id', 'iban', 'created_at', 'updated_at', 'deleted_at']);
 });

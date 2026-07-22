@@ -131,7 +131,7 @@ export function useDashboardData(): DashboardData & { refetch: () => void } {
             const params12Months = new URLSearchParams({
                 from: from12Months,
                 to,
-                include_excluded: 'true',
+                include_excluded: '1',
             });
             const query12Months = `?${params12Months.toString()}`;
 

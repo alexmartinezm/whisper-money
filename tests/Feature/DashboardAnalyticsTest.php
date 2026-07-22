@@ -149,7 +149,7 @@ test('net worth evolution endpoints exclude accounts with net worth inclusion di
         expect($payload['data'][0])->toHaveKey($included->id)->not->toHaveKey($excluded->id);
     }
 
-    $response = $this->getJson("/api/dashboard/net-worth-evolution?{$query}&include_excluded=true");
+    $response = $this->getJson("/api/dashboard/net-worth-evolution?{$query}&include_excluded=1");
     $response->assertOk();
     expect($response->json('accounts'))->toHaveKey($excluded->id);
 });
