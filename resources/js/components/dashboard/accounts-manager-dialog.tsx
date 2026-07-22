@@ -74,27 +74,29 @@ export function AccountsManagerDialog({
                                         hidden && 'text-muted-foreground',
                                     )}
                                 />
-                                <button
-                                    type="button"
-                                    onClick={() =>
-                                        onToggleNetWorth(
-                                            account.id,
-                                            !includedInNetWorth,
-                                        )
-                                    }
-                                    aria-label={
-                                        includedInNetWorth
-                                            ? __('Exclude from net worth')
-                                            : __('Include in net worth')
-                                    }
-                                    aria-pressed={includedInNetWorth}
-                                    className={cn(
-                                        'text-muted-foreground transition-colors hover:text-foreground',
-                                        !includedInNetWorth && 'opacity-40',
-                                    )}
-                                >
-                                    <ChartColumnBig className="size-5" />
-                                </button>
+                                {account.type !== 'credit_card' && (
+                                    <button
+                                        type="button"
+                                        onClick={() =>
+                                            onToggleNetWorth(
+                                                account.id,
+                                                !includedInNetWorth,
+                                            )
+                                        }
+                                        aria-label={
+                                            includedInNetWorth
+                                                ? __('Exclude from net worth')
+                                                : __('Include in net worth')
+                                        }
+                                        aria-pressed={includedInNetWorth}
+                                        className={cn(
+                                            'text-muted-foreground transition-colors hover:text-foreground',
+                                            !includedInNetWorth && 'opacity-40',
+                                        )}
+                                    >
+                                        <ChartColumnBig className="size-5" />
+                                    </button>
+                                )}
                                 <button
                                     type="button"
                                     onClick={() =>
