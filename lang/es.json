@@ -1772,6 +1772,7 @@
     "Update your budget settings. To change the allocated\\n                            amount or tracking, use the budget page directly.": "Actualiza la configuración de tu presupuesto. Para cambiar el monto asignado o el seguimiento, usa la página de presupuesto directamente.",
     "Update your name and email address": "Actualiza tu nombre y dirección de correo electrónico",
     "Updated :count transactions": "Se actualizaron :count transacciones",
+    "Updated :updated transactions; skipped :skipped split transactions": "Se actualizaron :updated transacciones; se omitieron :skipped transacciones divididas",
     "Updating transactions...": "Actualizando transacciones...",
     "Updating...": "Actualizando...",
     "Upgrade to Standard Plan": "Actualizar al Plan Standard",
