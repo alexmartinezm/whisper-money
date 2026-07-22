@@ -26,7 +26,7 @@ import { Category } from '@/types/category';
 import { __ } from '@/utils/i18n';
 import { Deferred, Head, router, usePage } from '@inertiajs/react';
 import { Pencil } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 interface CashflowSummary {
     income: number;
@@ -119,6 +119,7 @@ export default function Dashboard() {
     const [netWorthOverrides, setNetWorthOverrides] = useState<
         Record<string, boolean>
     >({});
+    const netWorthToggleVersions = useRef<Record<string, number>>({});
     const isHidden = useCallback(
         (account: AccountWithMetrics) =>
             hiddenOverrides[account.id] ?? account.hidden_on_dashboard,
@@ -173,33 +174,40 @@ export default function Dashboard() {
 
     const handleToggleNetWorth = useCallback(
         (id: string, included: boolean) => {
+            // The property and its linked loan are separate net-worth entries.
+            // Keep their inclusion settings independent so changing one does not
+            // silently mutate the other.
             const account = accountMetrics.find((item) => item.id === id);
-            const ids = [
-                id,
-                ...(account?.type === 'real_estate' &&
-                account.linked_loan_account_id
-                    ? [account.linked_loan_account_id]
-                    : []),
-            ];
-
-            setNetWorthOverrides((prev) =>
-                ids.reduce(
-                    (next, accountId) => ({ ...next, [accountId]: included }),
-                    { ...prev },
-                ),
-            );
-
-            ids.forEach((accountId) => {
-                router.patch(
-                    updateNetWorthInclusion.url(accountId),
-                    { include_in_net_worth: included },
-                    {
-                        preserveScroll: true,
-                        preserveState: true,
-                        only: ['netWorthEvolution'],
+            const previousIncluded = account?.include_in_net_worth ?? true;
+            const version = (netWorthToggleVersions.current[id] ?? 0) + 1;
+            netWorthToggleVersions.current[id] = version;
+            setNetWorthOverrides((prev) => ({ ...prev, [id]: included }));
+            router.patch(
+                updateNetWorthInclusion.url(id),
+                { include_in_net_worth: included },
+                {
+                    preserveScroll: true,
+                    preserveState: true,
+                    only: ['netWorthEvolution'],
+                    onSuccess: () => {
+                        if (netWorthToggleVersions.current[id] === version) {
+                            setNetWorthOverrides((prev) => {
+                                const next = { ...prev };
+                                delete next[id];
+                                return next;
+                            });
+                        }
                     },
-                );
-            });
+                    onError: () => {
+                        if (netWorthToggleVersions.current[id] === version) {
+                            setNetWorthOverrides((prev) => ({
+                                ...prev,
+                                [id]: previousIncluded,
+                            }));
+                        }
+                    },
+                },
+            );
         },
         [accountMetrics],
     );

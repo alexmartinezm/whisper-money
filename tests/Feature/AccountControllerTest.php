@@ -158,6 +158,36 @@ test('users can toggle net worth inclusion independently of dashboard visibility
     expect($account->fresh()->include_in_net_worth)->toBeTrue();
 });
 
+test('linked property and loan accounts can be toggled independently', function () {
+    $loan = Account::factory()->create([
+        'user_id' => $this->user->id,
+        'type' => AccountType::Loan,
+        'include_in_net_worth' => true,
+    ]);
+    $property = Account::factory()->create([
+        'user_id' => $this->user->id,
+        'type' => AccountType::RealEstate,
+        'include_in_net_worth' => true,
+    ]);
+    RealEstateDetail::factory()
+        ->withLinkedLoan($loan)
+        ->create(['account_id' => $property->id]);
+
+    $this->patch(route('accounts.net-worth-inclusion', $property), [
+        'include_in_net_worth' => false,
+    ])->assertRedirect();
+
+    expect($property->fresh()->include_in_net_worth)->toBeFalse()
+        ->and($loan->fresh()->include_in_net_worth)->toBeTrue();
+
+    $this->patch(route('accounts.net-worth-inclusion', $loan), [
+        'include_in_net_worth' => false,
+    ])->assertRedirect();
+
+    expect($property->fresh()->include_in_net_worth)->toBeFalse()
+        ->and($loan->fresh()->include_in_net_worth)->toBeFalse();
+});
+
 test('users cannot toggle net worth inclusion for another users account', function () {
     $account = Account::factory()->create([
         'user_id' => User::factory()->create()->id,
