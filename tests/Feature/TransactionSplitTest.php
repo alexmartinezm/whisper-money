@@ -33,7 +33,7 @@ it('persists ordered splits and cascades them with the parent', function () {
         ->and($transaction->splits->first()->amount)->toBeInt();
 
     Transaction::withoutEvents(fn () => $transaction->forceDelete());
-    expect(TransactionSplit::query()->count())->toBe(0);
+    expect(TransactionSplit::query()->where('transaction_id', $transaction->id)->count())->toBe(0);
 });
 
 it('atomically replaces valid splits and clears parent classification provenance', function () {
