@@ -136,6 +136,71 @@ test('users can toggle dashboard visibility of their accounts', function () {
     expect($account->fresh()->hidden_on_dashboard)->toBeFalse();
 });
 
+test('users can toggle net worth inclusion independently of dashboard visibility', function () {
+    $account = Account::factory()->create([
+        'user_id' => $this->user->id,
+        'hidden_on_dashboard' => true,
+        'include_in_net_worth' => true,
+    ]);
+
+    $this->patch(route('accounts.net-worth-inclusion', $account), [
+        'include_in_net_worth' => false,
+    ])->assertRedirect();
+
+    expect($account->fresh())
+        ->include_in_net_worth->toBeFalse()
+        ->hidden_on_dashboard->toBeTrue();
+
+    $this->patch(route('accounts.net-worth-inclusion', $account), [
+        'include_in_net_worth' => true,
+    ])->assertRedirect();
+
+    expect($account->fresh()->include_in_net_worth)->toBeTrue();
+});
+
+test('linked property and loan accounts can be toggled independently', function () {
+    $loan = Account::factory()->create([
+        'user_id' => $this->user->id,
+        'type' => AccountType::Loan,
+        'include_in_net_worth' => true,
+    ]);
+    $property = Account::factory()->create([
+        'user_id' => $this->user->id,
+        'type' => AccountType::RealEstate,
+        'include_in_net_worth' => true,
+    ]);
+    RealEstateDetail::factory()
+        ->withLinkedLoan($loan)
+        ->create(['account_id' => $property->id]);
+
+    $this->patch(route('accounts.net-worth-inclusion', $property), [
+        'include_in_net_worth' => false,
+    ])->assertRedirect();
+
+    expect($property->fresh()->include_in_net_worth)->toBeFalse()
+        ->and($loan->fresh()->include_in_net_worth)->toBeTrue();
+
+    $this->patch(route('accounts.net-worth-inclusion', $loan), [
+        'include_in_net_worth' => false,
+    ])->assertRedirect();
+
+    expect($property->fresh()->include_in_net_worth)->toBeFalse()
+        ->and($loan->fresh()->include_in_net_worth)->toBeFalse();
+});
+
+test('users cannot toggle net worth inclusion for another users account', function () {
+    $account = Account::factory()->create([
+        'user_id' => User::factory()->create()->id,
+        'include_in_net_worth' => true,
+    ]);
+
+    $this->patch(route('accounts.net-worth-inclusion', $account), [
+        'include_in_net_worth' => false,
+    ])->assertForbidden();
+
+    expect($account->fresh()->include_in_net_worth)->toBeTrue();
+});
+
 test('the hidden flag is required when toggling visibility', function () {
     $account = Account::factory()->create(['user_id' => $this->user->id]);
 
@@ -701,7 +766,7 @@ test('accounts index serializes the standard account field set without sensitive
     expect(array_keys($account))->toEqualCanonicalizing([
         'id', 'name', 'name_iv', 'encrypted', 'type', 'currency_code',
         'banking_connection_id', 'external_account_id', 'linked_at',
-        'bank', 'linked_loan_account_id',
+        'bank', 'linked_loan_account_id', 'include_in_net_worth',
     ]);
     expect($account)->not->toHaveKeys(['user_id', 'bank_id', 'iban', 'created_at', 'updated_at', 'deleted_at']);
 });

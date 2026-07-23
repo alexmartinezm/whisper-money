@@ -1,5 +1,6 @@
 import {
     reorder,
+    updateNetWorthInclusion,
     updateVisibility,
 } from '@/actions/App/Http/Controllers/AccountController';
 import { AccountBalanceCard } from '@/components/dashboard/account-balance-card';
@@ -25,7 +26,7 @@ import { Category } from '@/types/category';
 import { __ } from '@/utils/i18n';
 import { Deferred, Head, router, usePage } from '@inertiajs/react';
 import { Pencil } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 interface CashflowSummary {
     income: number;
@@ -78,7 +79,9 @@ export default function Dashboard() {
         [netWorthEvolution, locale],
     );
 
-    // Identify linked loan account IDs and filter them out
+    // Linked loans remain in the manager so their net-worth inclusion can be
+    // changed independently. They stay hidden from the dashboard grid because
+    // their balance is displayed on the linked real-estate card.
     const linkedLoanAccountIds = useMemo(() => {
         const ids = new Set<string>();
         accountMetrics.forEach((a) => {
@@ -89,10 +92,7 @@ export default function Dashboard() {
         return ids;
     }, [accountMetrics]);
 
-    const manageableAccounts = useMemo(
-        () => accountMetrics.filter((a) => !linkedLoanAccountIds.has(a.id)),
-        [accountMetrics, linkedLoanAccountIds],
-    );
+    const manageableAccounts = accountMetrics;
 
     const [editOpen, setEditOpen] = useState(false);
 
@@ -116,15 +116,29 @@ export default function Dashboard() {
     const [hiddenOverrides, setHiddenOverrides] = useState<
         Record<string, boolean>
     >({});
+    const [netWorthOverrides, setNetWorthOverrides] = useState<
+        Record<string, boolean>
+    >({});
+    const netWorthToggleVersions = useRef<Record<string, number>>({});
     const isHidden = useCallback(
         (account: AccountWithMetrics) =>
             hiddenOverrides[account.id] ?? account.hidden_on_dashboard,
         [hiddenOverrides],
     );
+    const isIncludedInNetWorth = useCallback(
+        (account: AccountWithMetrics) =>
+            netWorthOverrides[account.id] ??
+            account.include_in_net_worth ??
+            true,
+        [netWorthOverrides],
+    );
 
     const gridAccounts = useMemo(
-        () => orderedAccounts.filter((a) => !isHidden(a)),
-        [orderedAccounts, isHidden],
+        () =>
+            orderedAccounts.filter(
+                (a) => !linkedLoanAccountIds.has(a.id) && !isHidden(a),
+            ),
+        [orderedAccounts, linkedLoanAccountIds, isHidden],
     );
 
     const handleReorder = useCallback((ids: string[]) => {
@@ -156,6 +170,46 @@ export default function Dashboard() {
             );
         },
         [],
+    );
+
+    const handleToggleNetWorth = useCallback(
+        (id: string, included: boolean) => {
+            // The property and its linked loan are separate net-worth entries.
+            // Keep their inclusion settings independent so changing one does not
+            // silently mutate the other.
+            const account = accountMetrics.find((item) => item.id === id);
+            const previousIncluded = account?.include_in_net_worth ?? true;
+            const version = (netWorthToggleVersions.current[id] ?? 0) + 1;
+            netWorthToggleVersions.current[id] = version;
+            setNetWorthOverrides((prev) => ({ ...prev, [id]: included }));
+            router.patch(
+                updateNetWorthInclusion.url(id),
+                { include_in_net_worth: included },
+                {
+                    preserveScroll: true,
+                    preserveState: true,
+                    only: ['netWorthEvolution'],
+                    onSuccess: () => {
+                        if (netWorthToggleVersions.current[id] === version) {
+                            setNetWorthOverrides((prev) => {
+                                const next = { ...prev };
+                                delete next[id];
+                                return next;
+                            });
+                        }
+                    },
+                    onError: () => {
+                        if (netWorthToggleVersions.current[id] === version) {
+                            setNetWorthOverrides((prev) => ({
+                                ...prev,
+                                [id]: previousIncluded,
+                            }));
+                        }
+                    },
+                },
+            );
+        },
+        [accountMetrics],
     );
 
     // Build linked loan metrics map keyed by real estate account ID
@@ -332,8 +386,10 @@ export default function Dashboard() {
                         onOpenChange={setEditOpen}
                         accounts={orderedAccounts}
                         isHidden={isHidden}
+                        isIncludedInNetWorth={isIncludedInNetWorth}
                         onReorder={handleReorder}
                         onToggleVisibility={handleToggleVisibility}
+                        onToggleNetWorth={handleToggleNetWorth}
                     />
                 </Deferred>
 

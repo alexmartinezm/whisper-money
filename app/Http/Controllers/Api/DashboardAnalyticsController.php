@@ -96,6 +96,7 @@ class DashboardAnalyticsController extends Controller
         $validated = $request->validate([
             'from' => 'required|date',
             'to' => 'required|date',
+            'include_excluded' => 'sometimes|boolean',
         ]);
 
         $start = Carbon::parse($validated['from']);
@@ -105,6 +106,12 @@ class DashboardAnalyticsController extends Controller
 
         $accounts = Account::query()
             ->where('user_id', $request->user()->id)
+            ->when(! $request->boolean('include_excluded'), function ($query) {
+                $query->where(function ($query) {
+                    $query->whereNull('include_in_net_worth')
+                        ->orWhere('include_in_net_worth', true);
+                });
+            })
             ->with(['bank:id,name,logo'])
             ->get();
 
@@ -421,6 +428,7 @@ class DashboardAnalyticsController extends Controller
         $validated = $request->validate([
             'from' => 'required|date',
             'to' => 'required|date',
+            'include_excluded' => 'sometimes|boolean',
         ]);
 
         $start = Carbon::parse($validated['from']);
@@ -430,6 +438,12 @@ class DashboardAnalyticsController extends Controller
 
         $accounts = Account::query()
             ->where('user_id', $request->user()->id)
+            ->when(! $request->boolean('include_excluded'), function ($query) {
+                $query->where(function ($query) {
+                    $query->whereNull('include_in_net_worth')
+                        ->orWhere('include_in_net_worth', true);
+                });
+            })
             ->with(['bank:id,name,logo'])
             ->get();
 
@@ -484,7 +498,7 @@ class DashboardAnalyticsController extends Controller
         $total = 0;
 
         foreach ($accounts as $account) {
-            if (! $account->type->countsInNetWorth()) {
+            if ($account->include_in_net_worth === false || ! $account->type->countsInNetWorth()) {
                 continue;
             }
 

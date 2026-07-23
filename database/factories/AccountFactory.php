@@ -29,6 +29,7 @@ class AccountFactory extends Factory
             'bank_id' => Bank::factory(),
             'currency_code' => fake()->randomElement(['USD', 'EUR', 'GBP', 'JPY']),
             'type' => fake()->randomElement(AccountType::cases()),
+            'include_in_net_worth' => true,
         ];
     }
 

@@ -71,6 +71,89 @@ test('net worth excludes credit card balances entirely', function () {
         ]);
 });
 
+test('net worth excludes accounts with net worth inclusion disabled', function () {
+    $included = Account::factory()->create([
+        'user_id' => $this->user->id,
+        'type' => AccountType::Checking,
+        'currency_code' => 'USD',
+        'include_in_net_worth' => true,
+    ]);
+    $excluded = Account::factory()->create([
+        'user_id' => $this->user->id,
+        'type' => AccountType::Savings,
+        'currency_code' => 'USD',
+        'include_in_net_worth' => false,
+    ]);
+
+    foreach ([[$included, 500000, 400000], [$excluded, 250000, 200000]] as [$account, $current, $previous]) {
+        AccountBalance::factory()->create([
+            'account_id' => $account->id,
+            'balance_date' => now(),
+            'balance' => $current,
+        ]);
+        AccountBalance::factory()->create([
+            'account_id' => $account->id,
+            'balance_date' => now()->subDays(30),
+            'balance' => $previous,
+        ]);
+    }
+
+    $response = $this->getJson('/api/dashboard/net-worth?'.http_build_query([
+        'from' => now()->subDays(29)->toDateString(),
+        'to' => now()->toDateString(),
+    ]));
+
+    $response->assertOk()->assertJson([
+        'current' => 500000,
+        'previous' => 400000,
+        'currency_code' => 'USD',
+    ]);
+});
+
+test('net worth evolution endpoints exclude accounts with net worth inclusion disabled', function () {
+    $included = Account::factory()->create([
+        'user_id' => $this->user->id,
+        'type' => AccountType::Checking,
+        'currency_code' => 'USD',
+        'include_in_net_worth' => true,
+    ]);
+    $excluded = Account::factory()->create([
+        'user_id' => $this->user->id,
+        'type' => AccountType::Savings,
+        'currency_code' => 'USD',
+        'include_in_net_worth' => false,
+    ]);
+
+    foreach ([$included, $excluded] as $account) {
+        AccountBalance::factory()->create([
+            'account_id' => $account->id,
+            'balance_date' => now(),
+            'balance' => 100000,
+        ]);
+    }
+
+    $query = http_build_query([
+        'from' => now()->subMonth()->toDateString(),
+        'to' => now()->toDateString(),
+    ]);
+
+    foreach (['net-worth-evolution', 'net-worth-daily-evolution'] as $endpoint) {
+        $response = $this->getJson("/api/dashboard/{$endpoint}?{$query}");
+
+        $response->assertOk();
+        $payload = $response->json();
+
+        expect($payload['accounts'])
+            ->toHaveKey($included->id)
+            ->not->toHaveKey($excluded->id);
+        expect($payload['data'][0])->toHaveKey($included->id)->not->toHaveKey($excluded->id);
+    }
+
+    $response = $this->getJson("/api/dashboard/net-worth-evolution?{$query}&include_excluded=1");
+    $response->assertOk();
+    expect($response->json('accounts'))->toHaveKey($excluded->id);
+});
+
 test('net worth queries account balances a fixed number of times regardless of account count', function () {
     // Six accounts, each with a current and a prior-period balance. The old
     // implementation ran one balance query per account per compared period,

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\AccountType;
 use App\Http\Requests\ReorderAccountsRequest;
+use App\Http\Requests\UpdateAccountNetWorthRequest;
 use App\Http\Requests\UpdateAccountVisibilityRequest;
 use App\Models\Account;
 use App\Models\AccountBalance;
@@ -63,6 +64,13 @@ class AccountController extends Controller
     public function updateVisibility(UpdateAccountVisibilityRequest $request, Account $account): RedirectResponse
     {
         $account->update(['hidden_on_dashboard' => $request->validated('hidden')]);
+
+        return back();
+    }
+
+    public function updateNetWorthInclusion(UpdateAccountNetWorthRequest $request, Account $account): RedirectResponse
+    {
+        $account->update(['include_in_net_worth' => $request->validated('include_in_net_worth')]);
 
         return back();
     }

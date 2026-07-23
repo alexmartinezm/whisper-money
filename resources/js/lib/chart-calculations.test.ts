@@ -164,6 +164,19 @@ describe('computeNetWorthSeries', () => {
         expect(result[0].value).toBe(10000);
     });
 
+    it('excludes accounts opted out of net worth', () => {
+        const data = [{ month: '2025-01', checking: 10000, savings: 25000 }];
+        const accounts = createAccounts({
+            checking: 'checking',
+            savings: 'savings',
+        });
+        accounts.savings.include_in_net_worth = false;
+
+        const result = computeNetWorthSeries(data, accounts);
+
+        expect(result[0].value).toBe(10000);
+    });
+
     it('preserves timestamp if present', () => {
         const data = [{ month: '2025-01', timestamp: 1704067200, acc1: 10000 }];
         const accounts = createAccounts({ acc1: 'checking' });

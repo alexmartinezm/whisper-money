@@ -52,6 +52,7 @@ export interface Account {
     external_account_id: string | null;
     linked_at: string | null;
     linked_loan_account_id?: UUID | null;
+    include_in_net_worth?: boolean;
 }
 
 export interface AccountBalance {

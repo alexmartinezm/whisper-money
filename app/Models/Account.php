@@ -37,6 +37,7 @@ class Account extends Model
         'linked_at',
         'position',
         'hidden_on_dashboard',
+        'include_in_net_worth',
     ];
 
     /** @var list<string> */
@@ -65,6 +66,7 @@ class Account extends Model
             'linked_at' => 'datetime',
             'position' => 'integer',
             'hidden_on_dashboard' => 'boolean',
+            'include_in_net_worth' => 'boolean',
         ];
     }
 
