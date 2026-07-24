@@ -161,7 +161,7 @@ it('removes a split with a fallback category through MCP', function () {
         'splits' => [],
         'fallback_category_id' => $food->id,
     ]);
-    dump($response->getContent());
+    $response->dump();
     $response->assertOk()
         ->assertSee('"is_split":false', false)
         ->assertSee('"category_id":"'.$food->id.'"', false)
@@ -213,7 +213,7 @@ it('allows only unsplitting while transaction splitting is disabled', function (
         'splits' => [],
         'fallback_category_id' => $food->id,
     ]);
-    dump($response->getContent());
+    $response->dump();
     $response->assertOk();
 
     expect($transaction->fresh()->splits()->count())->toBe(0)
