@@ -161,7 +161,9 @@ it('removes a split with a fallback category through MCP', function () {
         'splits' => [],
         'fallback_category_id' => $food->id,
     ]);
-    $response->dump();
+    $reflection = new ReflectionProperty(TestResponse::class, 'response');
+    $reflection->setAccessible(true);
+    throw new RuntimeException(json_encode($reflection->getValue($response)->toArray(), JSON_THROW_ON_ERROR));
     $response->assertOk()
         ->assertSee('"is_split":false', false)
         ->assertSee('"category_id":"'.$food->id.'"', false)
@@ -213,7 +215,9 @@ it('allows only unsplitting while transaction splitting is disabled', function (
         'splits' => [],
         'fallback_category_id' => $food->id,
     ]);
-    $response->dump();
+    $reflection = new ReflectionProperty(TestResponse::class, 'response');
+    $reflection->setAccessible(true);
+    throw new RuntimeException(json_encode($reflection->getValue($response)->toArray(), JSON_THROW_ON_ERROR));
     $response->assertOk();
 
     expect($transaction->fresh()->splits()->count())->toBe(0)
