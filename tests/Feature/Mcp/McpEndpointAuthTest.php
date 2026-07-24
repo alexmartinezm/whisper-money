@@ -30,3 +30,19 @@ it('accepts a token carrying the mcp:read ability', function () use ($rpc) {
         ->postJson('/mcp', $rpc)
         ->assertOk();
 });
+
+it('lists the transaction split write tool with its required schema', function () use ($rpc) {
+    $user = User::factory()->create();
+    $plain = $user->createToken('mcp', ['mcp:read'])->plainTextToken;
+
+    $tools = withHeaders(['Authorization' => "Bearer {$plain}"])
+        ->postJson('/mcp', $rpc)
+        ->assertOk()
+        ->json('result.tools');
+    $splitTool = collect($tools)->firstWhere('name', 'split_transaction');
+
+    expect($splitTool)->not->toBeNull()
+        ->and($splitTool['inputSchema']['required'])->toContain('transaction_id', 'splits')
+        ->and($splitTool['inputSchema']['properties']['splits']['type'])->toBe('array')
+        ->and($splitTool['annotations']['destructiveHint'] ?? null)->toBeTrue();
+});

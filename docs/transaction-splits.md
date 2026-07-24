@@ -50,6 +50,41 @@ Responses and incremental transaction sync include ordered `splits`, `is_split`,
 
 Bulk category changes, automation rules, and AI categorization skip split transactions. MCP category and amount writes reject split transactions; MCP reads expose their lines. Notes and labels remain parent fields and may still be changed.
 
+## MCP writes
+
+MCP reads are split-aware. `categorize_transaction` and direct `category_id` or
+`amount` changes through `update_transaction` continue to reject split parents.
+Use `split_transaction` for a complete replacement of category postings:
+
+```json
+{
+  "transaction_id": "transaction-uuid",
+  "splits": [
+    { "category_id": "food-uuid", "amount": -6000 },
+    { "category_id": "home-uuid", "amount": -4000 }
+  ],
+  "space": "optional-space-uuid"
+}
+```
+
+The tool may classify any accessible transaction, including imported ones, but
+never changes the parent ledger amount or bank data. The array is a full
+replacement, must sum exactly to the parent amount, and labels remain attached
+to the parent. Remove a split with an explicit fallback category:
+
+```json
+{
+  "transaction_id": "transaction-uuid",
+  "splits": [],
+  "fallback_category_id": "food-uuid"
+}
+```
+
+Non-empty creation and replacement follow the `TransactionSplitting` feature
+flag. Removal with `splits: []` remains available while that flag is disabled.
+OAuth connections can use write tools under the current MCP policy; Sanctum
+tokens need the `mcp:write` ability.
+
 Bank importers do not create or modify splits. Deleting a parent cascades to its lines. Account soft-delete and restore preserve the parent and its lines; force-deleting the parent removes the lines through the foreign-key cascade. Categories referenced by split lines cannot be deleted, and their type cannot be changed while they participate in a split.
 
 Split replacement follows one mutation boundary and a stable lock order: parent transaction, referenced categories ordered by ID, then existing split rows. Deadlock retries wrap the complete outer mutation rather than individual statements. A replacement or unsplit operation touches the parent once after the final line state exists so model observers, budget reassignment, and delta-sync clients see one coherent update. Split lines do not carry labels, provenance, or mixed category types.

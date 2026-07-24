@@ -456,7 +456,7 @@ it('keeps descendant split postings when analysis filters by a parent category',
         ->assertJsonPath('by_category.0.amount', 6000);
 });
 
-it('exposes split reads through MCP and blocks MCP categorization', function () {
+it('exposes split-aware MCP reads and directs direct category writes to split_transaction', function () {
     [$user, , $transaction, $food, $home] = splitIntegrationFixture();
     makeIntegrationSplit($transaction, $food, $home);
     $user->withAccessToken($user->createToken('mcp', ['mcp:read', 'mcp:write'])->accessToken);
@@ -465,14 +465,22 @@ it('exposes split reads through MCP and blocks MCP categorization', function () 
         ->tool(SearchTransactions::class, ['category_id' => $food->id])
         ->assertOk()
         ->assertSee($transaction->id)
-        ->assertSee('is_split');
+        ->assertSee('"is_split":true', false)
+        ->assertSee('"id":"'.$transaction->splits()->orderBy('position')->firstOrFail()->id.'"', false)
+        ->assertSee('"category_id":"'.$food->id.'"', false)
+        ->assertSee('"amount":-6000', false)
+        ->assertSee('"position":0', false)
+        ->assertSee('"category_id":"'.$home->id.'"', false)
+        ->assertSee('"amount":-4000', false)
+        ->assertSee('"position":1', false);
 
     WhisperMoneyServer::actingAs($user)
         ->tool(CategorizeTransaction::class, [
             'transaction_id' => $transaction->id,
             'category_id' => $food->id,
         ])
-        ->assertHasErrors(['split']);
+        ->assertHasErrors(['split'])
+        ->assertSee('split_transaction');
 
     expect($transaction->refresh()->category_id)->toBeNull()
         ->and($transaction->splits()->count())->toBe(2);

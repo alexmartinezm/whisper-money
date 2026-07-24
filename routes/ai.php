@@ -20,10 +20,10 @@ use Laravel\Mcp\Facades\Mcp;
 |   scope; the package's AddWwwAuthenticateHeader middleware then turns an
 |   unauthenticated request into the mandatory 401 bootstrap challenge.
 |
-| OAuth connections carry only the single `mcp:use` scope, so `tokenCan`
-| reports no `mcp:write` ability and the write tools stay read-only for them
-| (see WriteTool). The Pro-plan gate is enforced inside each tool under either
-| guard, so a lapsed subscription stops working without revoking access.
+| OAuth connections carry the `mcp:use` scope and are allowed to use write
+| tools by the current WriteTool policy. Sanctum tokens still need the
+| `mcp:write` ability. The Pro-plan gate is enforced inside each tool under
+| either guard, so a lapsed subscription stops working without revoking access.
 |
 */
 

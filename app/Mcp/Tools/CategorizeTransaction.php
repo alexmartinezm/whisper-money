@@ -45,7 +45,7 @@ class CategorizeTransaction extends WriteTool
             $locked = Transaction::query()->whereKey($transaction->id)->lockForUpdate()->firstOrFail();
 
             if ($locked->splits()->exists()) {
-                return Response::error('This transaction is split. Category changes are blocked; edit its split lines in Whisper Money.');
+                return Response::error('This transaction is split. Direct category changes are blocked; use split_transaction to replace or remove its split lines.');
             }
 
             $locked->category_id = $categoryId;
