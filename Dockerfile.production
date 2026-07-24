@@ -62,9 +62,9 @@ RUN composer dump-autoload --no-dev --optimize
 # Create necessary directories
 RUN mkdir -p /var/log/nginx && mkdir -p /var/cache/nginx
 
-# Build assets with HIDE_AUTH_BUTTONS=false so Wayfinder generates all routes
-# (HIDE_AUTH_BUTTONS will be set to true at runtime via .env)
-RUN HIDE_AUTH_BUTTONS=false bun run build:ssr
+# Build assets with registration enabled so Wayfinder generates all routes.
+# Runtime registration policy is controlled via REGISTRATION_ENABLED in .env.
+RUN REGISTRATION_ENABLED=true bun run build:ssr
 
 # Copy supervisor configuration
 COPY docker/supervisor/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
