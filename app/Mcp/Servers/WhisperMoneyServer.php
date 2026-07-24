@@ -33,7 +33,7 @@ use Laravel\Mcp\Server\Attributes\Version;
 use Laravel\Mcp\Server\Tool;
 
 #[Name('Whisper Money')]
-#[Version('1.0.0')]
+#[Version('1.1.0')]
 #[Instructions(<<<'MARKDOWN'
 Access to the authenticated user's Whisper Money finance data, for analysing
 spending, cashflow and net worth — and, with write access, for editing that
