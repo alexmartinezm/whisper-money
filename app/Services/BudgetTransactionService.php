@@ -15,6 +15,7 @@ class BudgetTransactionService
     public function __construct(
         private readonly CategoryTree $tree = new CategoryTree,
         private readonly EffectiveTransactionPostings $postings = new EffectiveTransactionPostings,
+        private readonly BudgetNotificationService $notifications = new BudgetNotificationService,
     ) {}
 
     public function assignTransaction(Transaction $transaction): void
@@ -23,7 +24,14 @@ class BudgetTransactionService
             return;
         }
 
-        DB::transaction(function () use ($transaction): void {
+        $matchingPeriodIds = [];
+        $createdPeriodIds = [];
+
+        DB::transaction(function () use ($transaction, &$matchingPeriodIds, &$createdPeriodIds): void {
+            // Reset per attempt: a deadlock retry re-runs the closure.
+            $matchingPeriodIds = [];
+            $createdPeriodIds = [];
+
             $locked = Transaction::query()
                 ->whereKey($transaction->id)
                 ->lockForUpdate()
@@ -35,7 +43,6 @@ class BudgetTransactionService
                 ->where('end_date', '>=', $locked->transaction_date)
                 ->with(['budget.categories:id', 'budget.labels:id'])
                 ->get();
-            $kept = [];
 
             foreach ($periods as $period) {
                 $amount = $this->amountForBudget($locked, $period->budget);
@@ -43,18 +50,24 @@ class BudgetTransactionService
                     continue;
                 }
 
-                $kept[] = $period->id;
-                BudgetTransaction::updateOrCreate(
+                $matchingPeriodIds[] = $period->id;
+                $assignment = BudgetTransaction::updateOrCreate(
                     ['transaction_id' => $transaction->id, 'budget_period_id' => $period->id],
                     ['amount' => $amount],
                 );
+
+                if ($assignment->wasRecentlyCreated) {
+                    $createdPeriodIds[] = $period->id;
+                }
             }
 
             BudgetTransaction::query()
                 ->where('transaction_id', $transaction->id)
-                ->when($kept !== [], fn ($query) => $query->whereNotIn('budget_period_id', $kept))
+                ->when($matchingPeriodIds !== [], fn ($query) => $query->whereNotIn('budget_period_id', $matchingPeriodIds))
                 ->delete();
         }, attempts: 5);
+
+        $this->notifications->handleAssignment($transaction, $matchingPeriodIds, $createdPeriodIds);
     }
 
     public function unassignTransaction(Transaction $transaction): void

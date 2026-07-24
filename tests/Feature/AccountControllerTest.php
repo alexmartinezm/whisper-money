@@ -14,8 +14,6 @@ use App\Models\User;
 use App\Services\Transactions\ReplaceTransactionSplits;
 
 beforeEach(function () {
-    config(['landing.hide_auth_buttons' => false]);
-
     // The balance-evolution endpoint converts account currency via the external
     // currency-rate provider; fake it so these tests stay hermetic under the
     // stray-request guard instead of hitting the CDN.

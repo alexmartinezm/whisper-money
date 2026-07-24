@@ -5,59 +5,10 @@ use App\Notifications\VerifyEmailNotification;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Queue;
 
-beforeEach(function () {
-    config(['landing.hide_auth_buttons' => false]);
-});
-
 test('registration screen can be rendered', function () {
     $response = $this->withoutVite()->get(route('register'));
 
     $response->assertSuccessful();
-});
-
-test('registration screen is blocked when auth buttons are hidden', function () {
-    config(['landing.hide_auth_buttons' => true]);
-
-    $response = $this->withoutVite()->get(route('register'));
-
-    $response->assertNotFound();
-});
-
-test('registration screen is blocked with force query when auth buttons are hidden', function () {
-    config(['landing.hide_auth_buttons' => true]);
-
-    $response = $this->withoutVite()->get(route('register', ['force' => 1]));
-
-    $response->assertNotFound();
-});
-
-test('registration is blocked when auth buttons are hidden without force query', function () {
-    config(['landing.hide_auth_buttons' => true]);
-
-    $response = $this->post(route('register.store'), [
-        'name' => 'Test User',
-        'email' => 'test@example.com',
-        'password' => 'password',
-        'password_confirmation' => 'password',
-    ]);
-
-    $response->assertNotFound();
-});
-
-test('new users cannot register with force query when auth buttons are hidden', function () {
-    Queue::fake();
-
-    config(['landing.hide_auth_buttons' => true]);
-
-    $response = $this->post(route('register.store', ['force' => 1]), [
-        'name' => 'Test User',
-        'email' => 'test@example.com',
-        'password' => 'password',
-        'password_confirmation' => 'password',
-    ]);
-
-    $this->assertGuest();
-    $response->assertNotFound();
 });
 
 test('new users can register', function () {

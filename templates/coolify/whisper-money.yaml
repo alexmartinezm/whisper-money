@@ -24,7 +24,7 @@ services:
             - SESSION_DRIVER=redis
             - QUEUE_CONNECTION=database
             - REDIS_HOST=127.0.0.1
-            - HIDE_AUTH_BUTTONS=${HIDE_AUTH_BUTTONS:-false}
+            - REGISTRATION_ENABLED=${REGISTRATION_ENABLED:-true}
             - MAIL_MAILER=${MAIL_MAILER:-log}
             - MAIL_HOST=${MAIL_HOST:-}
             - MAIL_PORT=${MAIL_PORT:-587}
