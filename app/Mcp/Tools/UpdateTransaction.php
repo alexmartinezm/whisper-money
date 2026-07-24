@@ -52,7 +52,7 @@ class UpdateTransaction extends WriteTool
             }
 
             if ($transaction->splits()->exists() && $request->hasAny(['category_id', 'amount'])) {
-                return Response::error('This transaction is split. Category and amount changes are blocked; edit its split lines in Whisper Money.');
+                return Response::error('This transaction is split. Direct category and amount changes are blocked; use split_transaction for category postings. It does not change the parent ledger amount.');
             }
 
             $request->validate([

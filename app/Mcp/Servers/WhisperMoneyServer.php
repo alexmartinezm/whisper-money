@@ -21,6 +21,7 @@ use App\Mcp\Tools\ListLabels;
 use App\Mcp\Tools\ListSpaces;
 use App\Mcp\Tools\SearchTransactions;
 use App\Mcp\Tools\SpendingByCategory;
+use App\Mcp\Tools\SplitTransaction;
 use App\Mcp\Tools\UpdateAutomationRule;
 use App\Mcp\Tools\UpdateCategory;
 use App\Mcp\Tools\UpdateLabel;
@@ -46,13 +47,14 @@ data.
 - To find recurring charges (subscriptions), use `search_transactions` and group
   the results by merchant and cadence yourself.
 
-Write tools (create_transaction, update_transaction, delete_transaction,
-categorize_transaction, label_transaction, create_balance and full CRUD for
-categories, labels and automation rules) require a read & write token; a
-read-only token can analyse data but never change it. Bank-connected accounts
+Write tools ... require a read & write Sanctum token; OAuth connections follow the current
+WriteTool policy. A read-only Sanctum token can analyse data but never change it. Bank-connected accounts
 and bank/imported transactions are protected: you can only create, edit or
 delete manual transactions and manual-account balances, but you can categorize
-and label any transaction.
+and label any transaction, and split any accessible transaction without changing
+its ledger fields. `split_transaction` replaces all category postings at once;
+the amounts must sum exactly to the parent amount. Use `splits: []` with a
+`fallback_category_id` to remove a split. Labels remain fields of the parent.
 MARKDOWN)]
 class WhisperMoneyServer extends Server
 {
@@ -73,6 +75,7 @@ class WhisperMoneyServer extends Server
         UpdateTransaction::class,
         DeleteTransaction::class,
         CategorizeTransaction::class,
+        SplitTransaction::class,
         LabelTransaction::class,
         CreateBalance::class,
         CreateCategory::class,
