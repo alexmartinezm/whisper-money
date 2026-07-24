@@ -45,7 +45,7 @@ class SplitTransaction extends WriteTool
     {
         $data = $request->validate([
             'transaction_id' => ['required', 'uuid'],
-            'splits' => ['required', 'array', 'list'],
+            'splits' => ['present', 'array', 'list'],
             'splits.*' => ['array:category_id,amount'],
             'splits.*.category_id' => ['required', 'uuid'],
             'splits.*.amount' => ['required', 'integer', 'not_in:0'],
