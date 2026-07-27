@@ -120,6 +120,82 @@ test('matches endpoint skips already categorized when only_uncategorized is true
     $allResponse->assertOk()->assertJsonPath('total', 2);
 });
 
+test('automation rule matches exclude split parents even when showing all matches', function () {
+    $otherCategory = Category::factory()->create(['user_id' => $this->user->id]);
+    $transaction = Transaction::factory()->enableBanking()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'category_id' => null,
+        'description' => 'Grocery Store',
+        'amount' => -1000,
+    ]);
+
+    $transaction->splits()->createMany([
+        ['category_id' => $this->category->id, 'amount' => -700, 'position' => 0],
+        ['category_id' => $otherCategory->id, 'amount' => -300, 'position' => 1],
+    ]);
+
+    $this->actingAs($this->user)
+        ->getJson(route('automation-rules.matches', $this->rule).'?only_uncategorized=0')
+        ->assertOk()
+        ->assertJsonPath('total', 0)
+        ->assertJsonCount(0, 'data');
+});
+
+test('cached automation rule matches exclude split parents', function () {
+    $otherCategory = Category::factory()->create(['user_id' => $this->user->id]);
+    $transaction = Transaction::factory()->enableBanking()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'category_id' => null,
+        'description' => 'Grocery Store',
+        'amount' => -1000,
+    ]);
+    $transaction->splits()->createMany([
+        ['category_id' => $this->category->id, 'amount' => -700, 'position' => 0],
+        ['category_id' => $otherCategory->id, 'amount' => -300, 'position' => 1],
+    ]);
+
+    $stamp = $this->rule->updated_at?->getTimestamp() ?? 0;
+    Cache::put(
+        "automation_rule_matches:{$this->user->id}:{$this->rule->id}:0:{$stamp}",
+        [$transaction->id],
+        now()->addMinutes(15),
+    );
+
+    $this->actingAs($this->user)
+        ->getJson(route('automation-rules.matches', $this->rule).'?only_uncategorized=0')
+        ->assertOk()
+        ->assertJsonPath('total', 0)
+        ->assertJsonCount(0, 'data');
+});
+
+test('automation never mutates split parents', function () {
+    $otherCategory = Category::factory()->create(['user_id' => $this->user->id]);
+    $label = Label::factory()->create(['user_id' => $this->user->id]);
+    $this->rule->update(['action_note' => 'Automation note']);
+    $this->rule->labels()->attach($label);
+    $transaction = Transaction::factory()->enableBanking()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'category_id' => null,
+        'description' => 'Grocery Store',
+        'amount' => -1000,
+        'notes' => null,
+    ]);
+
+    $transaction->splits()->createMany([
+        ['category_id' => $this->category->id, 'amount' => -700, 'position' => 0],
+        ['category_id' => $otherCategory->id, 'amount' => -300, 'position' => 1],
+    ]);
+
+    app(AutomationRuleService::class)->applyRules($transaction);
+
+    expect($transaction->fresh()->category_id)->toBeNull()
+        ->and($transaction->fresh()->notes)->toBeNull()
+        ->and($transaction->fresh()->labels)->toHaveCount(0);
+});
+
 test('matches endpoint avoids repeated relationship queries for description-only rules', function () {
     Transaction::factory()->enableBanking()->create([
         'id' => '00000000-0000-0000-0000-000000000001',
