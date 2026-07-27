@@ -6,6 +6,7 @@ import { CreateButton } from '@/components/ui/create-button';
 import AppSidebarLayout from '@/layouts/app/app-sidebar-layout';
 import { BreadcrumbItem } from '@/types';
 import { Budget } from '@/types/budget';
+import { sortBudgetsByAllocatedAmount } from '@/utils/budget';
 import { __ } from '@/utils/i18n';
 import { Head } from '@inertiajs/react';
 
@@ -22,6 +23,8 @@ interface Props {
 }
 
 export default function BudgetsIndex({ budgets, currencyCode }: Props) {
+    const sortedBudgets = sortBudgetsByAllocatedAmount(budgets);
+
     return (
         <AppSidebarLayout breadcrumbs={breadcrumbs}>
             <Head title={__('Budgets')} />
@@ -42,9 +45,9 @@ export default function BudgetsIndex({ budgets, currencyCode }: Props) {
                     />
                 </div>
 
-                {budgets.length > 0 ? (
+                {sortedBudgets.length > 0 ? (
                     <div className="grid gap-4 lg:grid-cols-2">
-                        {budgets.map((budget) => (
+                        {sortedBudgets.map((budget) => (
                             <BudgetListCard
                                 key={budget.id}
                                 budget={budget}
