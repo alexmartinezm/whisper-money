@@ -129,8 +129,8 @@ class BudgetController extends Controller
                 'rollover_type' => $request->rollover_type,
                 'is_catch_all' => $request->boolean('is_catch_all'),
                 'notify_on_new_transaction' => $setting->budget_notify_on_new_transaction ?? false,
-                'notify_on_close_to_limit' => $setting->budget_notify_on_close_to_limit ?? false,
-                'notify_on_over_limit' => $setting->budget_notify_on_over_limit ?? false,
+                'notify_on_close_to_limit' => $setting->budget_notify_on_close_to_limit ?? true,
+                'notify_on_over_limit' => $setting->budget_notify_on_over_limit ?? true,
             ]);
 
             $budget->categories()->sync($request->category_ids ?? []);
