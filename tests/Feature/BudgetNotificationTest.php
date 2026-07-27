@@ -17,7 +17,7 @@ beforeEach(function () {
     $this->category = Category::factory()->create(['user_id' => $this->user->id]);
 });
 
-function budgetPeriodFor(User $user, Category $category, int $allocated, array $toggles): BudgetPeriod
+function budgetPeriodFor(User $user, Category $category, int $allocated, array $toggles, int $carriedOver = 0): BudgetPeriod
 {
     $budget = Budget::factory()->forCategories($category)->create(array_merge(
         ['user_id' => $user->id],
@@ -29,6 +29,7 @@ function budgetPeriodFor(User $user, Category $category, int $allocated, array $
         'start_date' => now()->subDays(10),
         'end_date' => now()->addDays(20),
         'allocated_amount' => $allocated,
+        'carried_over_amount' => $carriedOver,
     ]);
 }
 
@@ -86,6 +87,23 @@ test('sends a close to limit email at 90 percent of the limit', function () {
 
     assignExpense($this->service, $this->user, $this->category, 900);
 
+    Mail::assertQueued(
+        BudgetNotificationEmail::class,
+        fn (BudgetNotificationEmail $mail) => $mail->type === BudgetNotificationType::CloseToLimit,
+    );
+});
+
+test('uses the available balance including carry-over for close to limit emails', function () {
+    Mail::fake();
+    budgetPeriodFor($this->user, $this->category, 1000, ['notify_on_close_to_limit' => true], 500);
+
+    assignExpense($this->service, $this->user, $this->category, 1349);
+    Mail::assertNotQueued(
+        BudgetNotificationEmail::class,
+        fn (BudgetNotificationEmail $mail) => $mail->type === BudgetNotificationType::CloseToLimit,
+    );
+
+    assignExpense($this->service, $this->user, $this->category, 1);
     Mail::assertQueued(
         BudgetNotificationEmail::class,
         fn (BudgetNotificationEmail $mail) => $mail->type === BudgetNotificationType::CloseToLimit,
