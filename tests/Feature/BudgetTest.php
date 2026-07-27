@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Account;
 use App\Models\Budget;
 use App\Models\BudgetPeriod;
 use App\Models\BudgetTransaction;
@@ -254,6 +255,45 @@ test('user can view a specific budget', function () {
         ->has('budget')
         ->has('currentPeriod')
     );
+});
+
+test('budget show serializes split details for assigned transactions', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $food = Category::factory()->create(['user_id' => $user->id]);
+    $gifts = Category::factory()->create(['user_id' => $user->id]);
+    $budget = Budget::factory()->monthly()->forCategories($food)->create(['user_id' => $user->id]);
+    $account = Account::factory()->create(['user_id' => $user->id]);
+    $period = BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => now()->startOfMonth(),
+        'end_date' => now()->endOfMonth(),
+    ]);
+    $transaction = Transaction::factory()->create([
+        'user_id' => $user->id,
+        'account_id' => $account->id,
+        'category_id' => null,
+        'amount' => -1000,
+    ]);
+
+    $transaction->splits()->createMany([
+        ['category_id' => $food->id, 'amount' => -700, 'position' => 0],
+        ['category_id' => $gifts->id, 'amount' => -300, 'position' => 1],
+    ]);
+    BudgetTransaction::create([
+        'budget_period_id' => $period->id,
+        'transaction_id' => $transaction->id,
+        'amount' => -700,
+    ]);
+
+    $this->actingAs($user)
+        ->get(route('budgets.show', $budget))
+        ->assertInertia(fn ($page) => $page
+            ->where('currentPeriod.budget_transactions.0.transaction.id', $transaction->id)
+            ->where('currentPeriod.budget_transactions.0.transaction.category_id', null)
+            ->has('currentPeriod.budget_transactions.0.transaction.splits', 2)
+            ->where('currentPeriod.budget_transactions.0.transaction.splits.0.category.id', $food->id)
+            ->where('currentPeriod.budget_transactions.0.transaction.splits.1.category.id', $gifts->id)
+        );
 });
 
 test('user cannot view another users budget', function () {

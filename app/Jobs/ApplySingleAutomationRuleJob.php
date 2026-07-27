@@ -34,18 +34,20 @@ class ApplySingleAutomationRuleJob implements ShouldQueue
     {
         $rule = $this->rule->loadMissing('labels');
 
-        $total = count($this->transactionIds);
+        $query = Transaction::query()
+            ->where('user_id', $rule->user_id)
+            ->whereIn('id', $this->transactionIds)
+            ->whereNull('description_iv')
+            ->whereDoesntHave('splits');
+
+        $total = $query->count();
         $this->updateProgress(status: 'processing', processed: 0, total: $total, applied: 0, updated: 0);
 
         $processed = 0;
         $applied = 0;
         $changed = 0;
 
-        Transaction::query()
-            ->where('user_id', $rule->user_id)
-            ->whereIn('id', $this->transactionIds)
-            ->whereNull('description_iv')
-            ->with(['account.bank', 'category', 'labels'])
+        $query->with(['account.bank', 'category', 'labels', 'splits'])
             ->chunkById(100, function ($transactions) use ($service, $rule, $total, &$processed, &$applied, &$changed) {
                 $changed += $service->applyRuleActionsToTransactions($transactions, $rule, $this->onlyUncategorized);
                 $applied += $transactions->count();

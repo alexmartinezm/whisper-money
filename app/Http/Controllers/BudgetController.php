@@ -162,6 +162,7 @@ class BudgetController extends Controller
             'budgetTransactions.transaction.account.bank',
             'budgetTransactions.transaction.category',
             'budgetTransactions.transaction.labels',
+            'budgetTransactions.transaction.splits.category',
         ]);
 
         $previousPeriod = $budget->periods()

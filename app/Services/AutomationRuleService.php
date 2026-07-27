@@ -28,7 +28,7 @@ class AutomationRuleService
 
     public function applyRules(Transaction $transaction): void
     {
-        if ($transaction->description_iv !== null) {
+        if ($transaction->description_iv !== null || $this->isSplit($transaction)) {
             return;
         }
 
@@ -54,7 +54,7 @@ class AutomationRuleService
      */
     public function ruleMatches(AutomationRule $rule, Transaction $transaction): bool
     {
-        if ($transaction->description_iv !== null) {
+        if ($transaction->description_iv !== null || $this->isSplit($transaction)) {
             return false;
         }
 
@@ -87,7 +87,14 @@ class AutomationRuleService
         }
 
         $rule->loadMissing('labels');
-        $transactions->loadMissing('labels');
+        $transactions->loadMissing(['labels', 'splits']);
+        $transactions = $transactions->reject(
+            fn (Transaction $transaction): bool => $transaction->splits->isNotEmpty(),
+        );
+
+        if ($transactions->isEmpty()) {
+            return 0;
+        }
 
         if ($onlyUncategorized) {
             $transactions = $transactions->reject(
@@ -190,7 +197,7 @@ class AutomationRuleService
     public function shouldSkipForOnlyUncategorized(AutomationRule $rule, Transaction $transaction): bool
     {
         if ($rule->action_category_id !== null) {
-            return $transaction->category_id !== null || $transaction->splits()->exists();
+            return $transaction->category_id !== null || $this->isSplit($transaction);
         }
 
         $ruleLabelIds = $rule->labels->pluck('id')->all();
@@ -202,6 +209,13 @@ class AutomationRuleService
         $transactionLabelIds = $transaction->labels->pluck('id')->all();
 
         return empty(array_diff($ruleLabelIds, $transactionLabelIds));
+    }
+
+    private function isSplit(Transaction $transaction): bool
+    {
+        return $transaction->relationLoaded('splits')
+            ? $transaction->splits->isNotEmpty()
+            : $transaction->splits()->exists();
     }
 
     /**

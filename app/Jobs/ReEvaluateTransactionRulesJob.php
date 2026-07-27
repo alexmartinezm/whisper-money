@@ -31,7 +31,8 @@ class ReEvaluateTransactionRulesJob implements ShouldQueue
     {
         $query = Transaction::query()
             ->where('user_id', $this->user->id)
-            ->whereNull('description_iv');
+            ->whereNull('description_iv')
+            ->whereDoesntHave('splits');
 
         if ($this->transactionIds !== null) {
             $query->whereIn('id', $this->transactionIds);
@@ -46,7 +47,7 @@ class ReEvaluateTransactionRulesJob implements ShouldQueue
         $processed = 0;
         $updated = 0;
 
-        $query->with(['account.bank', 'category', 'labels'])->chunkById(100, function ($transactions) use ($service, $total, &$processed, &$updated) {
+        $query->with(['account.bank', 'category', 'labels', 'splits'])->chunkById(100, function ($transactions) use ($service, $total, &$processed, &$updated) {
             foreach ($transactions as $transaction) {
                 $categoryBefore = $transaction->category_id;
                 $labelsBefore = $transaction->labels->pluck('id')->sort()->values()->all();

@@ -164,7 +164,10 @@ class AutomationRuleApplicationController extends Controller
 
         $cached = Cache::get($cacheKey);
         if (is_array($cached)) {
-            return array_values(array_unique($cached));
+            $ids = $this->withoutSplitParents($rule, $cached);
+            Cache::put($cacheKey, $ids, now()->addMinutes(self::MATCHES_CACHE_TTL_MINUTES));
+
+            return $ids;
         }
 
         $rule->loadMissing('labels');
@@ -172,6 +175,7 @@ class AutomationRuleApplicationController extends Controller
         $ids = [];
 
         $eagerLoads = $service->eagerLoadsForRuleEvaluation($rule);
+        $eagerLoads[] = 'splits';
         if ($onlyUncategorized && $rule->action_category_id === null) {
             $eagerLoads[] = 'labels';
         }
@@ -179,6 +183,7 @@ class AutomationRuleApplicationController extends Controller
         Transaction::query()
             ->where('user_id', $rule->user_id)
             ->whereNull('description_iv')
+            ->whereDoesntHave('splits')
             ->with(array_values(array_unique($eagerLoads)))
             ->orderByDesc('transaction_date')
             ->orderByDesc('created_at')
@@ -194,11 +199,33 @@ class AutomationRuleApplicationController extends Controller
                 }
             });
 
-        $ids = array_values(array_unique($ids));
+        $ids = $this->withoutSplitParents($rule, $ids);
 
         Cache::put($cacheKey, $ids, now()->addMinutes(self::MATCHES_CACHE_TTL_MINUTES));
 
         return $ids;
+    }
+
+    /**
+     * @param  array<int, string>  $transactionIds
+     * @return array<int, string>
+     */
+    private function withoutSplitParents(AutomationRule $rule, array $transactionIds): array
+    {
+        $transactionIds = array_values(array_unique($transactionIds));
+
+        if ($transactionIds === []) {
+            return [];
+        }
+
+        return Transaction::query()
+            ->where('user_id', $rule->user_id)
+            ->whereIn('id', $transactionIds)
+            ->whereDoesntHave('splits')
+            ->orderByDesc('transaction_date')
+            ->orderByDesc('created_at')
+            ->pluck('id')
+            ->all();
     }
 
     private function matchesCacheKey(AutomationRule $rule, bool $onlyUncategorized): string
