@@ -173,6 +173,58 @@ describe('BudgetOverviewCard', () => {
         ).toBe('25.0%');
     });
 
+    it('renders a compact status summary when specific budgets need attention', () => {
+        const overLimitSummary: BudgetSummary = {
+            ...summary,
+            total_spent: 129_147,
+            total_remaining: -9_147,
+            percentage_used: 107.6,
+            status: 'over_limit',
+            over_limit_count: 5,
+            close_to_limit_count: 3,
+        };
+
+        render(
+            <BudgetOverviewCard
+                budgets={[
+                    makeBudget({
+                        id: 'specific-budget',
+                        name: 'Groceries',
+                        allocatedAmount: 100_000,
+                        carriedOverAmount: 20_000,
+                        spentAmount: 129_147,
+                    }),
+                ]}
+                budgetSummary={overLimitSummary}
+                currencyCode="EUR"
+            />,
+        );
+
+        expect(screen.getByText('Over budget')).not.toBeNull();
+        expect(
+            screen.getByText('5 over limit · 3 close to limit'),
+        ).not.toBeNull();
+        const budgetProgress = screen.getByRole('progressbar', {
+            name: 'Budget progress: Groceries',
+        });
+        expect(budgetProgress.firstElementChild?.className).toContain(
+            'bg-destructive',
+        );
+        expect(screen.getAllByText('Specific budgets')).toHaveLength(1);
+        expect(
+            screen
+                .getByTestId('budget-overview-hero')
+                .getAttribute('data-status'),
+        ).toBe('over_limit');
+        expect(
+            screen
+                .getByRole('progressbar', {
+                    name: 'Overall budget progress',
+                })
+                .getAttribute('data-status'),
+        ).toBe('over_limit');
+    });
+
     it('scopes the header status to specific budgets when catch-all is over limit', () => {
         const catchAllOverLimit: BudgetSummary = {
             ...summary,
@@ -210,8 +262,7 @@ describe('BudgetOverviewCard', () => {
             />,
         );
 
-        const headerStatus =
-            screen.getAllByText('Specific budgets')[0]?.parentElement;
+        const headerStatus = screen.getByLabelText('Specific budget status');
         expect(headerStatus?.textContent).toContain('On track');
     });
 
