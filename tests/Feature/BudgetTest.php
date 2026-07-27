@@ -1,8 +1,11 @@
 <?php
 
 use App\Models\Budget;
+use App\Models\BudgetPeriod;
+use App\Models\BudgetTransaction;
 use App\Models\Category;
 use App\Models\Label;
+use App\Models\Transaction;
 use App\Models\User;
 
 test('user can create a budget', function () {
@@ -71,6 +74,168 @@ test('user can view their budgets', function () {
         ->component('budgets/index')
         ->has('budgets', 1)
     );
+});
+
+test('budget index returns an aggregate summary with catch-all separated', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+
+    $budget = Budget::factory()->monthly()->create(['user_id' => $user->id]);
+    $period = BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => now()->subDay(),
+        'end_date' => now()->addDay(),
+        'allocated_amount' => 100000,
+        'carried_over_amount' => 20000,
+    ]);
+
+    BudgetTransaction::create([
+        'transaction_id' => Transaction::factory()->create(['user_id' => $user->id])->id,
+        'budget_period_id' => $period->id,
+        'amount' => 30000,
+    ]);
+
+    $catchAll = Budget::factory()->monthly()->catchAll()->create(['user_id' => $user->id]);
+    BudgetPeriod::factory()->create([
+        'budget_id' => $catchAll->id,
+        'start_date' => now()->subDay(),
+        'end_date' => now()->addDay(),
+        'allocated_amount' => 50000,
+        'carried_over_amount' => 0,
+    ]);
+
+    $response = $this->actingAs($user)->get(route('budgets.index'));
+
+    $response->assertOk();
+    $response->assertInertia(fn ($page) => $page
+        ->component('budgets/index')
+        ->where('budgetSummary.budgets_count', 1)
+        ->where('budgetSummary.total_allocated', 100000)
+        ->where('budgetSummary.total_carried_over', 20000)
+        ->where('budgetSummary.total_available', 120000)
+        ->where('budgetSummary.total_spent', 30000)
+        ->where('budgetSummary.total_remaining', 90000)
+        ->where('budgetSummary.over_limit_count', 0)
+        ->where('budgetSummary.groups.0.total_available', 120000)
+        ->where('budgetSummary.catch_all.budgets_count', 1)
+        ->where('budgetSummary.catch_all.total_available', 50000)
+    );
+});
+
+test('overlapping budget assignments are summed as budget consumption', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $transaction = Transaction::factory()->create(['user_id' => $user->id]);
+
+    foreach ([60000, 40000] as $allocatedAmount) {
+        $budget = Budget::factory()->monthly()->create(['user_id' => $user->id]);
+        $period = BudgetPeriod::factory()->create([
+            'budget_id' => $budget->id,
+            'start_date' => now()->subDay(),
+            'end_date' => now()->addDay(),
+            'allocated_amount' => $allocatedAmount,
+            'carried_over_amount' => 0,
+        ]);
+
+        BudgetTransaction::create([
+            'transaction_id' => $transaction->id,
+            'budget_period_id' => $period->id,
+            'amount' => 20000,
+        ]);
+    }
+
+    $response = $this->actingAs($user)->get(route('budgets.index'));
+
+    $response->assertOk();
+    $response->assertInertia(fn ($page) => $page
+        ->component('budgets/index')
+        ->where('budgetSummary.budgets_count', 2)
+        ->where('budgetSummary.total_available', 100000)
+        ->where('budgetSummary.total_spent', 40000)
+        ->where('budgetSummary.total_remaining', 60000)
+        ->where('budgetSummary.groups.0.total_spent', 40000)
+        ->where('budgetSummary.catch_all', null)
+    );
+});
+
+test('budget status thresholds use exact amounts instead of rounded percentages', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+
+    $nearBudget = Budget::factory()->monthly()->create(['user_id' => $user->id]);
+    $nearPeriod = BudgetPeriod::factory()->create([
+        'budget_id' => $nearBudget->id,
+        'start_date' => today()->startOfMonth(),
+        'end_date' => today()->endOfMonth(),
+        'allocated_amount' => 10000,
+        'carried_over_amount' => 0,
+    ]);
+    BudgetTransaction::create([
+        'budget_period_id' => $nearPeriod->id,
+        'transaction_id' => Transaction::factory()->create(['user_id' => $user->id])->id,
+        'amount' => 8999,
+    ]);
+
+    $almostFullBudget = Budget::factory()->monthly()->create(['user_id' => $user->id]);
+    $almostFullPeriod = BudgetPeriod::factory()->create([
+        'budget_id' => $almostFullBudget->id,
+        'start_date' => today()->startOfMonth(),
+        'end_date' => today()->endOfMonth(),
+        'allocated_amount' => 10000,
+        'carried_over_amount' => 0,
+    ]);
+    BudgetTransaction::create([
+        'budget_period_id' => $almostFullPeriod->id,
+        'transaction_id' => Transaction::factory()->create(['user_id' => $user->id])->id,
+        'amount' => 9000,
+    ]);
+
+    $rolloverBudget = Budget::factory()->monthly()->create(['user_id' => $user->id]);
+    $rolloverPeriod = BudgetPeriod::factory()->create([
+        'budget_id' => $rolloverBudget->id,
+        'start_date' => today()->startOfMonth(),
+        'end_date' => today()->endOfMonth(),
+        'allocated_amount' => 10000,
+        'carried_over_amount' => 5000,
+    ]);
+    BudgetTransaction::create([
+        'budget_period_id' => $rolloverPeriod->id,
+        'transaction_id' => Transaction::factory()->create(['user_id' => $user->id])->id,
+        'amount' => 13500,
+    ]);
+
+    $this->actingAs($user)
+        ->get(route('budgets.index'))
+        ->assertInertia(fn ($page) => $page
+            ->where('budgetSummary.over_limit_count', 0)
+            ->where('budgetSummary.close_to_limit_count', 2)
+            ->where('budgetSummary.status', 'on_track')
+            ->where('budgetSummary.groups.0.over_limit_count', 0)
+            ->where('budgetSummary.groups.0.close_to_limit_count', 2)
+        );
+});
+
+test('budget summary groups use a stable cadence order', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+
+    $weeklyBudget = Budget::factory()->weekly()->create(['user_id' => $user->id]);
+    BudgetPeriod::factory()->create([
+        'budget_id' => $weeklyBudget->id,
+        'start_date' => today()->startOfWeek(),
+        'end_date' => today()->endOfWeek(),
+    ]);
+
+    $monthlyBudget = Budget::factory()->monthly()->create(['user_id' => $user->id]);
+    BudgetPeriod::factory()->create([
+        'budget_id' => $monthlyBudget->id,
+        'start_date' => today()->startOfMonth(),
+        'end_date' => today()->endOfMonth(),
+    ]);
+
+    $this->actingAs($user)
+        ->get(route('budgets.index'))
+        ->assertInertia(fn ($page) => $page
+            ->has('budgetSummary.groups', 2)
+            ->where('budgetSummary.groups.0.period_type', 'monthly')
+            ->where('budgetSummary.groups.1.period_type', 'weekly')
+        );
 });
 
 test('user can view a specific budget', function () {

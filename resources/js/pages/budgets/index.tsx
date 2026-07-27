@@ -1,11 +1,12 @@
 import { index } from '@/actions/App/Http/Controllers/BudgetController';
 import { BudgetListCard } from '@/components/budgets/budget-list-card';
+import { BudgetOverviewCard } from '@/components/budgets/budget-overview-card';
 import { CreateBudgetDialog } from '@/components/budgets/create-budget-dialog';
 import HeadingSmall from '@/components/heading-small';
 import { CreateButton } from '@/components/ui/create-button';
 import AppSidebarLayout from '@/layouts/app/app-sidebar-layout';
 import { BreadcrumbItem } from '@/types';
-import { Budget } from '@/types/budget';
+import type { Budget, BudgetSummary } from '@/types/budget';
 import { sortBudgetsByAllocatedAmount } from '@/utils/budget';
 import { __ } from '@/utils/i18n';
 import { Head } from '@inertiajs/react';
@@ -19,10 +20,15 @@ const breadcrumbs: BreadcrumbItem[] = [
 
 interface Props {
     budgets: Budget[];
+    budgetSummary: BudgetSummary;
     currencyCode: string;
 }
 
-export default function BudgetsIndex({ budgets, currencyCode }: Props) {
+export default function BudgetsIndex({
+    budgets,
+    budgetSummary,
+    currencyCode,
+}: Props) {
     const sortedBudgets = sortBudgetsByAllocatedAmount(budgets);
 
     return (
@@ -44,6 +50,14 @@ export default function BudgetsIndex({ budgets, currencyCode }: Props) {
                         }
                     />
                 </div>
+
+                {sortedBudgets.length > 0 && (
+                    <BudgetOverviewCard
+                        budgets={sortedBudgets}
+                        budgetSummary={budgetSummary}
+                        currencyCode={currencyCode}
+                    />
+                )}
 
                 {sortedBudgets.length > 0 ? (
                     <div className="grid gap-4 lg:grid-cols-2">

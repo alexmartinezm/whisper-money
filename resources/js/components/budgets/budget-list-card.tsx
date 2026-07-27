@@ -11,7 +11,9 @@ import {
 } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { useLocale } from '@/hooks/use-locale';
-import { Budget, getBudgetPeriodTypeLabel } from '@/types/budget';
+import type { Budget } from '@/types/budget';
+import { getBudgetPeriodTypeLabel } from '@/types/budget';
+import { getBudgetPeriodStats } from '@/utils/budget';
 import { formatDate } from '@/utils/date';
 import { __ } from '@/utils/i18n';
 import { Link } from '@inertiajs/react';
@@ -27,34 +29,10 @@ export function BudgetListCard({ budget, currencyCode }: Props) {
     const locale = useLocale();
     const currentPeriod = budget.periods?.[0];
 
-    const stats = useMemo(() => {
-        if (!currentPeriod) {
-            return {
-                totalAllocated: 0,
-                totalSpent: 0,
-                remaining: 0,
-                percentageUsed: 0,
-            };
-        }
-
-        const totalAllocated = currentPeriod.allocated_amount;
-        const totalSpent =
-            currentPeriod.budget_transactions?.reduce(
-                (sum, t) => sum + t.amount,
-                0,
-            ) ?? 0;
-
-        const remaining = totalAllocated - totalSpent;
-        const percentageUsed =
-            totalAllocated > 0 ? (totalSpent / totalAllocated) * 100 : 0;
-
-        return {
-            totalAllocated,
-            totalSpent,
-            remaining,
-            percentageUsed,
-        };
-    }, [currentPeriod]);
+    const stats = useMemo(
+        () => getBudgetPeriodStats(currentPeriod),
+        [currentPeriod],
+    );
 
     const periodLabel = useMemo(() => {
         if (!currentPeriod) return __('No active period');
@@ -66,12 +44,13 @@ export function BudgetListCard({ budget, currencyCode }: Props) {
     }, [currentPeriod, locale]);
 
     const statusColor = useMemo(() => {
-        if (stats.percentageUsed >= 100)
+        if (stats.status === 'over_limit')
             return 'text-red-600 dark:text-red-400';
-        if (stats.percentageUsed >= 80)
-            return 'text-yellow-600 dark:text-yellow-400';
+        if (stats.status === 'close_to_limit') {
+            return 'text-amber-700 dark:text-amber-300';
+        }
         return 'text-green-600 dark:text-green-400';
-    }, [stats.percentageUsed]);
+    }, [stats.status]);
 
     const trackingNames = useMemo(() => {
         return [
@@ -116,7 +95,7 @@ export function BudgetListCard({ budget, currencyCode }: Props) {
                             />{' '}
                             {__('of')}{' '}
                             <AmountDisplay
-                                amountInCents={stats.totalAllocated}
+                                amountInCents={stats.totalAvailable}
                                 currencyCode={currencyCode}
                             />
                         </span>

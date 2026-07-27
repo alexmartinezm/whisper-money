@@ -2339,5 +2339,17 @@
     "over :count whole months": "sobre :count meses completos",
     "vs. average": "vs. media",
     "Income & expenses per month": "Ingresos y gastos por mes",
-    "Monthly trend needs at least one whole calendar month.": "La tendencia mensual necesita al menos un mes natural completo."
+    "Monthly trend needs at least one whole calendar month.": "La tendencia mensual necesita al menos un mes natural completo.",
+    "Active budget totals for the current period": "Totales de presupuestos activos del periodo actual",
+    "Budget overview": "Resumen de presupuestos",
+    "Budget progress": "Progreso del presupuesto",
+    "Budgeted": "Presupuestado",
+    "carried over": "arrastrado",
+    "close to limit": "cerca del límite",
+    "Consumed in budgets": "Consumido en presupuestos",
+    "Excluded from specific budget totals": "Excluido de los totales de presupuestos específicos",
+    "Overall budget progress": "Progreso general de los presupuestos",
+    "On track": "Dentro de lo previsto",
+    "over limit": "por encima del límite",
+    "Specific budgets": "Presupuestos específicos"
 }

@@ -17,6 +17,8 @@ class BudgetPeriod extends Model
 {
     use HasFactory, HasUuids;
 
+    private const CLOSE_TO_LIMIT_THRESHOLD_PERCENTAGE = 90;
+
     protected $fillable = [
         'budget_id',
         'start_date',
@@ -35,6 +37,7 @@ class BudgetPeriod extends Model
             'end_date' => 'date',
             'allocated_amount' => 'integer',
             'carried_over_amount' => 'integer',
+            'spent_amount' => 'integer',
             'processing_historical' => 'boolean',
             'close_to_limit_notified' => 'boolean',
             'over_limit_notified' => 'boolean',
@@ -54,6 +57,37 @@ class BudgetPeriod extends Model
     public function spentAmount(): int
     {
         return (int) $this->budgetTransactions()->sum('amount');
+    }
+
+    public function availableAmount(): int
+    {
+        return (int) $this->allocated_amount + (int) ($this->carried_over_amount ?? 0);
+    }
+
+    /**
+     * Canonical status for UI warnings and email notifications.
+     *
+     * The limit is the period's allocation plus any carried-over balance.
+     */
+    public function limitStatus(?int $spentAmount = null): string
+    {
+        return self::limitStatusFor(
+            $spentAmount ?? $this->spentAmount(),
+            $this->availableAmount(),
+        );
+    }
+
+    public static function limitStatusFor(int $spent, int $available): string
+    {
+        if ($available > 0 && $spent >= $available) {
+            return 'over_limit';
+        }
+
+        if ($available > 0 && $spent * 100 >= $available * self::CLOSE_TO_LIMIT_THRESHOLD_PERCENTAGE) {
+            return 'close_to_limit';
+        }
+
+        return 'on_track';
     }
 
     /** @return HasMany<BudgetTransaction, $this> */

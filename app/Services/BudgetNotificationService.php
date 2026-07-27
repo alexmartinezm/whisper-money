@@ -12,13 +12,6 @@ use Illuminate\Support\Facades\Mail;
 class BudgetNotificationService
 {
     /**
-     * Share of the limit that counts as "close to limit".
-     *
-     * ponytail: fixed 90%; make it a per-budget setting only if users ask.
-     */
-    private const CLOSE_TO_LIMIT_THRESHOLD = 0.9;
-
-    /**
      * React to a transaction being (re)assigned to its matching budget periods.
      *
      * @param  array<int, string>  $matchingPeriodIds  every period the transaction now belongs to
@@ -59,39 +52,34 @@ class BudgetNotificationService
     private function processPeriod(User $user, Transaction $transaction, BudgetPeriod $period, bool $isNewlyAssigned): void
     {
         $budget = $period->budget;
-        $allocated = $period->allocated_amount;
+        $status = $period->limitStatus();
 
         // A single incoming transaction must raise at most one email per budget.
         // A limit alert outranks the plain "new transaction" notice, so try the
         // most severe applicable event first and stop once one is sent. The
-        // triggering transaction rides along so the email still shows what pushed
-        // the budget over. A budget with no limit can't be "close" or "over".
-        if ($allocated > 0) {
-            $ratio = $period->spentAmount() / $allocated;
+        // canonical period status includes carried-over balance, matching the UI.
+        if ($status === 'over_limit') {
+            // Claim the over-limit slot atomically so concurrent workers can't
+            // both send. Also claim "close" so a later dip into the close range
+            // doesn't raise a second, lower-severity alarm for the same period.
+            if ($budget->notify_on_over_limit && $this->claim($period, ['over_limit_notified', 'close_to_limit_notified'])) {
+                $this->send($user, $period, BudgetNotificationType::OverLimit, $transaction);
 
-            if ($ratio >= 1.0) {
-                // Claim the over-limit slot atomically so concurrent workers can't
-                // both send. Also claim "close" so a later dip into the close range
-                // doesn't raise a second, lower-severity alarm for the same period.
-                if ($budget->notify_on_over_limit && $this->claim($period, ['over_limit_notified', 'close_to_limit_notified'])) {
-                    $this->send($user, $period, BudgetNotificationType::OverLimit, $transaction);
-
-                    return;
-                }
-            } elseif ($ratio >= self::CLOSE_TO_LIMIT_THRESHOLD) {
-                if ($budget->notify_on_close_to_limit && $this->claim($period, ['close_to_limit_notified'])) {
-                    $this->send($user, $period, BudgetNotificationType::CloseToLimit, $transaction);
-
-                    return;
-                }
-            } else {
-                // Dropped back below both thresholds (e.g. a refund) — allow the
-                // next crossing to notify again.
-                BudgetPeriod::query()
-                    ->whereKey($period->id)
-                    ->where(fn ($query) => $query->where('close_to_limit_notified', true)->orWhere('over_limit_notified', true))
-                    ->update(['close_to_limit_notified' => false, 'over_limit_notified' => false]);
+                return;
             }
+        } elseif ($status === 'close_to_limit') {
+            if ($budget->notify_on_close_to_limit && $this->claim($period, ['close_to_limit_notified'])) {
+                $this->send($user, $period, BudgetNotificationType::CloseToLimit, $transaction);
+
+                return;
+            }
+        } else {
+            // Dropped back below both thresholds (e.g. a refund) — allow the
+            // next crossing to notify again.
+            BudgetPeriod::query()
+                ->whereKey($period->id)
+                ->where(fn ($query) => $query->where('close_to_limit_notified', true)->orWhere('over_limit_notified', true))
+                ->update(['close_to_limit_notified' => false, 'over_limit_notified' => false]);
         }
 
         // No limit alert fired (no limit, opted out, or already notified this

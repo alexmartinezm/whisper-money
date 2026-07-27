@@ -50,6 +50,8 @@ export interface BudgetLabel {
     updated_at: string;
 }
 
+export type BudgetStatus = 'on_track' | 'close_to_limit' | 'over_limit';
+
 export interface BudgetPeriod {
     id: UUID;
     budget_id: UUID;
@@ -57,10 +59,31 @@ export interface BudgetPeriod {
     end_date: string;
     allocated_amount: number;
     carried_over_amount: number;
+    spent_amount?: number | null;
+    status?: BudgetStatus;
     processing_historical: boolean;
     created_at: string;
     updated_at: string;
     budget_transactions?: BudgetTransaction[];
+}
+
+export interface BudgetSummaryGroup {
+    period_type?: BudgetPeriodType;
+    budgets_count: number;
+    total_allocated: number;
+    total_carried_over: number;
+    total_available: number;
+    total_spent: number;
+    total_remaining: number;
+    percentage_used: number;
+    status: BudgetStatus;
+    over_limit_count: number;
+    close_to_limit_count: number;
+}
+
+export interface BudgetSummary extends BudgetSummaryGroup {
+    groups: BudgetSummaryGroup[];
+    catch_all: BudgetSummaryGroup | null;
 }
 
 export interface BudgetTransaction {
