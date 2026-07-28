@@ -36,6 +36,19 @@ class StoreBudgetRequest extends FormRequest
     public function withValidator($validator): void
     {
         $validator->after(function ($validator) {
+            $periodType = $this->enum('period_type', BudgetPeriodType::class);
+            $startDay = $this->input('period_start_day');
+
+            $validStartDay = $periodType === null || match ($periodType) {
+                BudgetPeriodType::Monthly => $startDay === null || ((int) $startDay >= 1 && (int) $startDay <= 31),
+                BudgetPeriodType::Weekly, BudgetPeriodType::Biweekly => $startDay !== null && (int) $startDay >= 0 && (int) $startDay <= 6,
+                BudgetPeriodType::Yearly => $startDay === null || (int) $startDay === 1,
+            };
+
+            if (! $validStartDay) {
+                $validator->errors()->add('period_start_day', 'The start day is invalid for the selected cadence.');
+            }
+
             $isCatchAll = $this->boolean('is_catch_all');
             $hasCategories = ! empty($this->category_ids);
             $hasLabels = ! empty($this->label_ids);
