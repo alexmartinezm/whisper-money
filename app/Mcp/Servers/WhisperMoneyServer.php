@@ -84,11 +84,8 @@ class WhisperMoneyServer extends Server
 
         // Write
         CreateTransaction::class,
-        CreateBudget::class,
         UpdateTransaction::class,
-        UpdateBudget::class,
         DeleteTransaction::class,
-        DeleteBudget::class,
         CategorizeTransaction::class,
         SplitTransaction::class,
         LabelTransaction::class,
@@ -102,5 +99,8 @@ class WhisperMoneyServer extends Server
         CreateAutomationRule::class,
         UpdateAutomationRule::class,
         DeleteAutomationRule::class,
+        CreateBudget::class,
+        UpdateBudget::class,
+        DeleteBudget::class,
     ];
 }
