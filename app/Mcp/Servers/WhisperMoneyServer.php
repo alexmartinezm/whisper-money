@@ -5,10 +5,12 @@ namespace App\Mcp\Servers;
 use App\Mcp\Tools\CategorizeTransaction;
 use App\Mcp\Tools\CreateAutomationRule;
 use App\Mcp\Tools\CreateBalance;
+use App\Mcp\Tools\CreateBudget;
 use App\Mcp\Tools\CreateCategory;
 use App\Mcp\Tools\CreateLabel;
 use App\Mcp\Tools\CreateTransaction;
 use App\Mcp\Tools\DeleteAutomationRule;
+use App\Mcp\Tools\DeleteBudget;
 use App\Mcp\Tools\DeleteCategory;
 use App\Mcp\Tools\DeleteLabel;
 use App\Mcp\Tools\DeleteTransaction;
@@ -16,6 +18,7 @@ use App\Mcp\Tools\GetCashflow;
 use App\Mcp\Tools\GetNetWorth;
 use App\Mcp\Tools\LabelTransaction;
 use App\Mcp\Tools\ListAccounts;
+use App\Mcp\Tools\ListBudgets;
 use App\Mcp\Tools\ListCategories;
 use App\Mcp\Tools\ListLabels;
 use App\Mcp\Tools\ListSpaces;
@@ -23,6 +26,7 @@ use App\Mcp\Tools\SearchTransactions;
 use App\Mcp\Tools\SpendingByCategory;
 use App\Mcp\Tools\SplitTransaction;
 use App\Mcp\Tools\UpdateAutomationRule;
+use App\Mcp\Tools\UpdateBudget;
 use App\Mcp\Tools\UpdateCategory;
 use App\Mcp\Tools\UpdateLabel;
 use App\Mcp\Tools\UpdateTransaction;
@@ -33,7 +37,7 @@ use Laravel\Mcp\Server\Attributes\Version;
 use Laravel\Mcp\Server\Tool;
 
 #[Name('Whisper Money')]
-#[Version('1.1.0')]
+#[Version('1.2.0')]
 #[Instructions(<<<'MARKDOWN'
 Access to the authenticated user's Whisper Money finance data, for analysing
 spending, cashflow and net worth — and, with write access, for editing that
@@ -41,9 +45,16 @@ data.
 
 - All amounts are integers in minor units (cents). Divide by 100 for a display value.
 - Data is organised into "spaces" (the personal space and any shared spaces).
-  Transaction, account, category and label tools accept an optional `space` id and
+  Transaction, account, category, label and budget tools accept an optional `space` id and
   default to the personal space; call `list_spaces` to discover ids. The cashflow,
   net-worth and spending tools cover the user's whole account.
+- Budgets are owner-scoped inside a space. `create_budget` creates the cadence and
+  tracking configuration; `update_budget` only changes the name and allocation.
+  Cadence, start day, rollover and tracking are immutable after creation. Historical
+  assignment may still be processing after creation.
+- For monthly budgets, allocation changes use the server application date. A change
+  on the first day includes the current period; after that it affects periods whose
+  start date is on or after the application date, plus future periods.
 - To find recurring charges (subscriptions), use `search_transactions` and group
   the results by merchant and cadence yourself.
 
@@ -66,6 +77,7 @@ class WhisperMoneyServer extends Server
         GetCashflow::class,
         GetNetWorth::class,
         ListAccounts::class,
+        ListBudgets::class,
         ListCategories::class,
         ListLabels::class,
         ListSpaces::class,
@@ -87,5 +99,8 @@ class WhisperMoneyServer extends Server
         CreateAutomationRule::class,
         UpdateAutomationRule::class,
         DeleteAutomationRule::class,
+        CreateBudget::class,
+        UpdateBudget::class,
+        DeleteBudget::class,
     ];
 }

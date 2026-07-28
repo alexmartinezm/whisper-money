@@ -5,11 +5,11 @@ namespace App\Services;
 use App\Enums\BudgetPeriodType;
 use App\Models\Budget;
 use App\Models\BudgetPeriod;
-use Carbon\Carbon;
+use Carbon\CarbonInterface;
 
 class BudgetPeriodService
 {
-    public function generatePeriod(Budget $budget, ?int $allocatedAmount = null, ?Carbon $startDate = null, bool $processHistorical = false): BudgetPeriod
+    public function generatePeriod(Budget $budget, ?int $allocatedAmount = null, ?CarbonInterface $startDate = null, bool $processHistorical = false): BudgetPeriod
     {
         if ($startDate === null) {
             $startDate = $this->calculateNextPeriodStartDate($budget);
@@ -68,23 +68,26 @@ class BudgetPeriodService
         $nextPeriod->update(['carried_over_amount' => $carriedOverAmount]);
     }
 
-    public function calculatePeriodDates(Budget $budget, Carbon $referenceDate): array
+    public function calculatePeriodDates(Budget $budget, CarbonInterface $referenceDate): array
     {
         $startDate = $referenceDate->copy();
 
         switch ($budget->period_type) {
             case BudgetPeriodType::Monthly:
-                $startDate->day($budget->period_start_day ?? 1);
+                $configuredDay = $budget->period_start_day ?? 1;
+                $monthStart = $referenceDate->copy()->startOfMonth();
+                $startDate = $this->monthlyBoundary($monthStart, $configuredDay);
                 if ($startDate > $referenceDate) {
-                    $startDate->subMonth();
+                    $startDate = $this->monthlyBoundary($monthStart->subMonth(), $configuredDay);
                 }
-                $endDate = $startDate->copy()->addMonth()->subDay();
+                $nextStart = $this->monthlyBoundary($startDate->copy()->startOfMonth()->addMonthNoOverflow(), $configuredDay);
+                $endDate = $nextStart->copy()->subDay();
                 break;
 
             case BudgetPeriodType::Weekly:
                 $dayOfWeek = $budget->period_start_day ?? 0;
                 while ($startDate->dayOfWeek !== $dayOfWeek) {
-                    $startDate->subDay();
+                    $startDate = $startDate->subDay();
                 }
                 $endDate = $startDate->copy()->addWeek()->subDay();
                 break;
@@ -92,13 +95,13 @@ class BudgetPeriodService
             case BudgetPeriodType::Biweekly:
                 $dayOfWeek = $budget->period_start_day ?? 0;
                 while ($startDate->dayOfWeek !== $dayOfWeek) {
-                    $startDate->subDay();
+                    $startDate = $startDate->subDay();
                 }
                 $endDate = $startDate->copy()->addWeeks(2)->subDay();
                 break;
 
             case BudgetPeriodType::Yearly:
-                $startDate->startOfYear();
+                $startDate = $startDate->startOfYear();
                 $endDate = $startDate->copy()->addYear()->subDay();
                 break;
         }
@@ -106,7 +109,7 @@ class BudgetPeriodService
         return [$startDate, $endDate];
     }
 
-    protected function calculateNextPeriodStartDate(Budget $budget): Carbon
+    protected function calculateNextPeriodStartDate(Budget $budget): CarbonInterface
     {
         $lastPeriod = $budget->periods()->orderBy('end_date', 'desc')->first();
 
@@ -115,5 +118,10 @@ class BudgetPeriodService
         }
 
         return now();
+    }
+
+    private function monthlyBoundary(CarbonInterface $monthStart, int $configuredDay): CarbonInterface
+    {
+        return $monthStart->copy()->day(min($configuredDay, $monthStart->daysInMonth))->startOfDay();
     }
 }

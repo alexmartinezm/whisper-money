@@ -135,3 +135,39 @@ test('generatePeriod creates current calendar year when yearly budget has no pri
     expect($period->start_date->toDateString())->toBe('2026-01-01');
     expect($period->end_date->toDateString())->toBe('2026-12-31');
 });
+
+test('monthly day 31 clamps to the last day of short months without gaps or overlap', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $budget = Budget::factory()->create([
+        'user_id' => $user->id,
+        'period_type' => BudgetPeriodType::Monthly,
+        'period_start_day' => 31,
+    ]);
+
+    $service = app(BudgetPeriodService::class);
+    [$januaryStart, $januaryEnd] = $service->calculatePeriodDates($budget, Carbon::parse('2026-01-15'));
+    [$februaryStart, $februaryEnd] = $service->calculatePeriodDates($budget, Carbon::parse('2026-02-15'));
+
+    expect($januaryStart->toDateString())->toBe('2025-12-31')
+        ->and($januaryEnd->toDateString())->toBe('2026-01-30')
+        ->and($februaryStart->toDateString())->toBe('2026-01-31')
+        ->and($februaryEnd->toDateString())->toBe('2026-02-27');
+});
+
+test('monthly day 30 clamps February in leap and non-leap years', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $budget = Budget::factory()->create([
+        'user_id' => $user->id,
+        'period_type' => BudgetPeriodType::Monthly,
+        'period_start_day' => 30,
+    ]);
+
+    $service = app(BudgetPeriodService::class);
+    [$leapStart, $leapEnd] = $service->calculatePeriodDates($budget, Carbon::parse('2028-02-15'));
+    [$nonLeapStart, $nonLeapEnd] = $service->calculatePeriodDates($budget, Carbon::parse('2027-02-15'));
+
+    expect($leapStart->toDateString())->toBe('2028-01-30')
+        ->and($leapEnd->toDateString())->toBe('2028-02-28')
+        ->and($nonLeapStart->toDateString())->toBe('2027-01-30')
+        ->and($nonLeapEnd->toDateString())->toBe('2027-02-27');
+});

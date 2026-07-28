@@ -5,19 +5,19 @@ namespace App\Http\Controllers;
 use App\Enums\BudgetPeriodType;
 use App\Http\Requests\StoreBudgetRequest;
 use App\Http\Requests\UpdateBudgetRequest;
-use App\Jobs\AssignHistoricalTransactionsToBudget;
 use App\Models\Account;
 use App\Models\Bank;
 use App\Models\Budget;
 use App\Models\BudgetPeriod;
 use App\Models\Category;
 use App\Models\Label;
+use App\Services\BudgetManagementService;
 use App\Services\BudgetPeriodService;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -25,7 +25,10 @@ class BudgetController extends Controller
 {
     use AuthorizesRequests;
 
-    public function __construct(protected BudgetPeriodService $budgetPeriodService) {}
+    public function __construct(
+        protected BudgetPeriodService $budgetPeriodService,
+        protected BudgetManagementService $budgetManagementService,
+    ) {}
 
     public function index(Request $request): Response
     {
@@ -215,32 +218,20 @@ class BudgetController extends Controller
 
     public function store(StoreBudgetRequest $request): RedirectResponse
     {
-        $result = DB::transaction(function () use ($request) {
-            $setting = $request->user()->setting;
-
-            $budget = $request->user()->budgets()->create([
+        $result = $this->budgetManagementService->create(
+            $request->user(),
+            $request->user()->activeSpace(),
+            [
                 'name' => $request->name,
                 'period_type' => $request->period_type,
                 'period_start_day' => $request->period_start_day,
                 'rollover_type' => $request->rollover_type,
                 'is_catch_all' => $request->boolean('is_catch_all'),
-                'notify_on_new_transaction' => $setting->budget_notify_on_new_transaction ?? false,
-                'notify_on_close_to_limit' => $setting->budget_notify_on_close_to_limit ?? true,
-                'notify_on_over_limit' => $setting->budget_notify_on_over_limit ?? true,
-            ]);
-
-            $budget->categories()->sync($request->category_ids ?? []);
-            $budget->labels()->sync($request->label_ids ?? []);
-
-            $period = $this->budgetPeriodService->generatePeriod($budget, $request->allocated_amount, null, true);
-            $previousPeriod = $this->budgetPeriodService->generatePreviousPeriod($budget, $period, $request->allocated_amount, true);
-
-            return ['budget' => $budget, 'period' => $period, 'previousPeriod' => $previousPeriod];
-        });
-
-        // Dispatch jobs to assign historical transactions for the current and previous periods
-        AssignHistoricalTransactionsToBudget::dispatch($result['budget'], $result['period']);
-        AssignHistoricalTransactionsToBudget::dispatch($result['budget'], $result['previousPeriod']);
+                'allocated_amount' => $request->integer('allocated_amount'),
+            ],
+            $request->category_ids ?? [],
+            $request->label_ids ?? [],
+        );
 
         return redirect()->route('budgets.show', $result['budget']);
     }
@@ -249,21 +240,13 @@ class BudgetController extends Controller
     {
         $this->authorize('update', $budget);
 
-        DB::transaction(function () use ($request, $budget) {
-            $budget->update($request->only([
-                'name',
-                'period_type',
-                'period_start_day',
-                'rollover_type',
-            ]));
-
-            // If allocated_amount is provided, update current and future periods
-            if ($request->has('allocated_amount')) {
-                $budget->periods()
-                    ->where('start_date', '>=', now()->startOfDay())
-                    ->update(['allocated_amount' => $request->allocated_amount]);
-            }
-        });
+        $this->budgetManagementService->update(
+            $request->user(),
+            $request->user()->activeSpace(),
+            $budget->id,
+            $request->only(['name', 'allocated_amount']),
+            CarbonImmutable::today(),
+        );
 
         return redirect()->route('budgets.show', $budget);
     }
@@ -272,7 +255,11 @@ class BudgetController extends Controller
     {
         $this->authorize('delete', $budget);
 
-        $budget->delete();
+        $this->budgetManagementService->delete(
+            $request->user(),
+            $request->user()->activeSpace(),
+            $budget->id,
+        );
 
         return redirect()->route('budgets.index');
     }
