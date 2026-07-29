@@ -53,7 +53,6 @@ export default function BudgetsIndex({
 
                 {sortedBudgets.length > 0 && (
                     <BudgetOverviewCard
-                        budgets={sortedBudgets}
                         budgetSummary={budgetSummary}
                         currencyCode={currencyCode}
                     />

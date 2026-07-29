@@ -1,22 +1,10 @@
-import { show } from '@/actions/App/Http/Controllers/BudgetController';
 import { AmountDisplay } from '@/components/ui/amount-display';
 import { Progress } from '@/components/ui/progress';
-import { useLocale } from '@/hooks/use-locale';
-import type {
-    Budget,
-    BudgetStatus,
-    BudgetSummary,
-    BudgetSummaryGroup,
-} from '@/types/budget';
-import { getBudgetPeriodTypeLabel } from '@/types/budget';
-import { getBudgetPeriodStats } from '@/utils/budget';
-import { formatDate } from '@/utils/date';
+import type { BudgetStatus, BudgetSummary } from '@/types/budget';
 import { __ } from '@/utils/i18n';
-import { Link } from '@inertiajs/react';
 import { CheckCircle2 } from 'lucide-react';
 
 interface Props {
-    budgets: Budget[];
     budgetSummary: BudgetSummary;
     currencyCode: string;
 }
@@ -37,123 +25,7 @@ function progressIndicatorClass(status: BudgetStatus): string {
     return 'bg-green-600 dark:bg-green-400';
 }
 
-function getGroupLabel(group: BudgetSummaryGroup): string {
-    return group.period_type
-        ? __(getBudgetPeriodTypeLabel(group.period_type))
-        : __('All untracked expenses');
-}
-
-export function BudgetOverviewCard({
-    budgets,
-    budgetSummary,
-    currencyCode,
-}: Props) {
-    const locale = useLocale();
-    const activeBudgets = budgets.filter(
-        (budget) => budget.periods?.[0] !== undefined,
-    );
-    const standardBudgets = activeBudgets.filter(
-        (budget) => !budget.is_catch_all,
-    );
-    const catchAllBudgets = activeBudgets.filter(
-        (budget) => budget.is_catch_all,
-    );
-    const hasMixedPeriods = budgetSummary.groups.length > 1;
-
-    const renderBudgetRow = (budget: Budget) => {
-        const currentPeriod = budget.periods?.[0];
-        const stats = getBudgetPeriodStats(currentPeriod);
-        const percentageUsed = stats.percentageUsed;
-        const periodLabel = currentPeriod
-            ? `${formatDate(currentPeriod.start_date, 'MMM d', locale)} - ${formatDate(currentPeriod.end_date, 'MMM d', locale)}`
-            : __('No active period');
-
-        return (
-            <div key={budget.id} className="space-y-2 rounded-lg border p-3">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="min-w-0">
-                        <Link
-                            href={show({ budget: budget.id }).url}
-                            className="font-medium underline-offset-4 hover:underline"
-                        >
-                            {budget.name}
-                        </Link>
-                        <p className="text-xs text-muted-foreground">
-                            {periodLabel}
-                        </p>
-                    </div>
-                    <div className="text-right text-sm">
-                        <span className={statusClass(stats.status)}>
-                            <AmountDisplay
-                                amountInCents={stats.totalSpent}
-                                currencyCode={currencyCode}
-                                weight="semibold"
-                            />
-                        </span>{' '}
-                        <span className="text-muted-foreground">
-                            {__('of')}{' '}
-                            <AmountDisplay
-                                amountInCents={stats.totalAvailable}
-                                currencyCode={currencyCode}
-                            />
-                        </span>
-                    </div>
-                </div>
-                <Progress
-                    value={Math.min(Math.max(percentageUsed, 0), 100)}
-                    className="h-2"
-                    indicatorClassName={progressIndicatorClass(stats.status)}
-                    aria-label={`${__('Budget progress')}: ${budget.name}`}
-                    aria-valuetext={`${percentageUsed.toFixed(1)}%`}
-                />
-                <div className="flex items-center justify-between gap-2 text-xs">
-                    <span className="text-muted-foreground">
-                        {__(getBudgetPeriodTypeLabel(budget.period_type))}
-                    </span>
-                    <span className={statusClass(stats.status)}>
-                        {__('Remaining')}:{' '}
-                        <AmountDisplay
-                            amountInCents={stats.remaining}
-                            currencyCode={currencyCode}
-                            weight="medium"
-                        />
-                    </span>
-                </div>
-            </div>
-        );
-    };
-
-    const renderGroupSummary = (group: BudgetSummaryGroup) => (
-        <div
-            key={group.period_type ?? 'catch-all'}
-            className="rounded-lg border p-3"
-        >
-            <h3
-                id={`budget-overview-group-${group.period_type ?? 'catch-all'}`}
-                className="text-sm font-medium"
-            >
-                {getGroupLabel(group)}
-            </h3>
-            <div className="mt-2 flex items-baseline justify-between gap-2">
-                <span className="text-muted-foreground">
-                    <AmountDisplay
-                        amountInCents={group.total_spent}
-                        currencyCode={currencyCode}
-                        weight="semibold"
-                    />{' '}
-                    {__('of')}{' '}
-                    <AmountDisplay
-                        amountInCents={group.total_available}
-                        currencyCode={currencyCode}
-                    />
-                </span>
-                <span className={statusClass(group.status)}>
-                    {group.percentage_used.toFixed(1)}%
-                </span>
-            </div>
-        </div>
-    );
-
+export function BudgetOverviewCard({ budgetSummary, currencyCode }: Props) {
     const attentionSummary = [
         budgetSummary.over_limit_count > 0 &&
             `${budgetSummary.over_limit_count} ${__('over limit')}`,
@@ -178,12 +50,12 @@ export function BudgetOverviewCard({
                         {__('Budget overview')}
                     </h2>
                     <p className="text-sm text-muted-foreground">
-                        {__('Specific budget totals for the current period')}
+                        {__('Active budget totals for the current period')}
                     </p>
                 </div>
                 <div
                     className="flex items-center gap-2 text-sm"
-                    aria-label={__('Specific budget status')}
+                    aria-label={__('Budget status')}
                     aria-live="polite"
                 >
                     {attentionSummary ? (
@@ -199,7 +71,7 @@ export function BudgetOverviewCard({
                 </div>
             </div>
 
-            <section
+            <div
                 data-testid="budget-overview-hero"
                 data-status={budgetSummary.status}
                 className="rounded-xl bg-muted/50 p-4 sm:p-5"
@@ -260,69 +132,6 @@ export function BudgetOverviewCard({
                     aria-valuetext={`${budgetSummary.percentage_used.toFixed(1)}%`}
                     data-status={budgetSummary.status}
                 />
-            </section>
-
-            <div className="space-y-4">
-                {standardBudgets.length > 0 &&
-                    (hasMixedPeriods ? (
-                        <div className="space-y-4">
-                            {budgetSummary.groups.map((group) => {
-                                const groupBudgets = standardBudgets.filter(
-                                    (budget) =>
-                                        budget.period_type ===
-                                        group.period_type,
-                                );
-
-                                return (
-                                    <section
-                                        key={group.period_type}
-                                        aria-labelledby={`budget-overview-group-${group.period_type}`}
-                                    >
-                                        {renderGroupSummary(group)}
-                                        <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                                            {groupBudgets.map(renderBudgetRow)}
-                                        </div>
-                                    </section>
-                                );
-                            })}
-                        </div>
-                    ) : (
-                        <section aria-labelledby="budget-overview-specific">
-                            <h3
-                                id="budget-overview-specific"
-                                className="mb-2 text-sm font-medium"
-                            >
-                                {__('Specific budgets')}
-                            </h3>
-                            <div className="grid gap-3 lg:grid-cols-2">
-                                {standardBudgets.map(renderBudgetRow)}
-                            </div>
-                        </section>
-                    ))}
-
-                {catchAllBudgets.length > 0 && (
-                    <section
-                        aria-labelledby="budget-overview-catch-all"
-                        className="border-t pt-4"
-                    >
-                        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                            <h3
-                                id="budget-overview-catch-all"
-                                className="text-sm font-medium"
-                            >
-                                {__('Catch-all budget')}
-                            </h3>
-                            {budgetSummary.catch_all && (
-                                <span className="text-xs text-muted-foreground">
-                                    {__('Excluded from specific budget totals')}
-                                </span>
-                            )}
-                        </div>
-                        <div className="grid gap-3 lg:grid-cols-2">
-                            {catchAllBudgets.map(renderBudgetRow)}
-                        </div>
-                    </section>
-                )}
             </div>
         </section>
     );
