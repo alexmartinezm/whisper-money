@@ -427,7 +427,7 @@ export function CreateBudgetDialog({
                                 (!isCatchAll &&
                                     selectedCategoryIds.length === 0 &&
                                     selectedLabelIds.length === 0) ||
-                                allocatedAmount <= 0
+                                allocatedAmount < 0
                             }
                         >
                             {isSubmitting
