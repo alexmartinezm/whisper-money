@@ -31,6 +31,7 @@ import {
     flattenCategoryTree,
     toggleCategorySelection,
 } from '@/lib/category-tree';
+import { UNCATEGORIZED_CATEGORY_ID } from '@/lib/transaction-category-filter';
 import { cn } from '@/lib/utils';
 import { type Account } from '@/types/account';
 import { type Category, getCategoryColorClasses } from '@/types/category';
@@ -831,5 +832,3 @@ export function TransactionFilters({
         </div>
     );
 }
-
-const UNCATEGORIZED_CATEGORY_ID = 'uncategorized';

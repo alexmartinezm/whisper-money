@@ -67,6 +67,7 @@ import { TableCell, TableRow } from '@/components/ui/table';
 import { consoleDebug } from '@/lib/debug';
 import { captureEvent } from '@/lib/posthog';
 import { mergeAuthoritativeTransactions } from '@/lib/transaction-bulk-update';
+import { createTransactionCategoryFilter } from '@/lib/transaction-category-filter';
 import { mergeReEvaluatedTransaction } from '@/lib/transaction-re-evaluation';
 import { transactionSyncService } from '@/services/transaction-sync';
 import { type Account, type Bank } from '@/types/account';
@@ -468,6 +469,11 @@ export function TransactionList({
         [accounts],
     );
 
+    const categoryFilter = useMemo(
+        () => createTransactionCategoryFilter(filters.categoryIds, categories),
+        [filters.categoryIds, categories],
+    );
+
     const filteredTransactions = useMemo(() => {
         return transactions.filter((transaction) => {
             // When scoped to a single account, drop rows that were reassigned to
@@ -514,10 +520,7 @@ export function TransactionList({
                 return false;
             }
 
-            if (
-                filters.categoryIds.length > 0 &&
-                !filters.categoryIds.includes(transaction.category_id || -1)
-            ) {
+            if (!categoryFilter(transaction)) {
                 return false;
             }
 
@@ -549,7 +552,7 @@ export function TransactionList({
 
             return true;
         });
-    }, [transactions, filters, accountId, searchMatchedIds]);
+    }, [transactions, filters, accountId, searchMatchedIds, categoryFilter]);
 
     const sortedTransactions = useMemo(() => {
         if (sorting.length === 0) {
