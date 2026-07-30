@@ -3,6 +3,8 @@ import { BudgetPeriodNavigation } from '@/components/budgets/budget-period-navig
 import { BudgetSpendingChart } from '@/components/budgets/budget-spending-chart';
 import { DeleteBudgetDialog } from '@/components/budgets/delete-budget-dialog';
 import { EditBudgetDialog } from '@/components/budgets/edit-budget-dialog';
+import { PlanningPeriodAllocation } from '@/components/budgets/planning-period-allocation';
+import { PlanningPeriodNotice } from '@/components/budgets/planning-period-notice';
 import HeadingSmall from '@/components/heading-small';
 import { MobileBackButton } from '@/components/mobile-back-button';
 import { CategoryBadge } from '@/components/shared/category-combobox';
@@ -33,6 +35,7 @@ interface Props {
     currentPeriod: BudgetPeriod;
     previousPeriod: BudgetPeriod | null;
     nextPeriod: BudgetPeriod | null;
+    is_planning_period: boolean;
     categories: Category[];
     accounts: Account[];
     banks: Bank[];
@@ -45,6 +48,7 @@ export default function BudgetShow({
     currentPeriod,
     previousPeriod,
     nextPeriod,
+    is_planning_period,
     categories,
     accounts,
     banks,
@@ -53,10 +57,9 @@ export default function BudgetShow({
 }: Props) {
     const [editOpen, setEditOpen] = useState(false);
     const [deleteOpen, setDeleteOpen] = useState(false);
-
     // Poll for updates when processing historical transactions
     useEffect(() => {
-        if (!currentPeriod.processing_historical) {
+        if (is_planning_period || !currentPeriod.processing_historical) {
             return;
         }
 
@@ -67,7 +70,7 @@ export default function BudgetShow({
         }, 3000); // Poll every 3 seconds
 
         return () => clearInterval(interval);
-    }, [currentPeriod.processing_historical]);
+    }, [is_planning_period, currentPeriod.processing_historical]);
 
     const breadcrumbs: BreadcrumbItem[] = [
         {
@@ -174,53 +177,67 @@ export default function BudgetShow({
                     </div>
                 </div>
 
-                <BudgetSpendingChart
-                    currentPeriod={currentPeriod}
-                    previousPeriod={previousPeriod}
-                    budgetName={budget.name}
-                    currencyCode={currencyCode}
-                />
-
-                {currentPeriod.processing_historical ? (
-                    <div className="space-y-4 rounded-lg border border-border bg-card p-6">
-                        <div className="flex items-center gap-3">
-                            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                            <div>
-                                <h3 className="text-sm font-medium">
-                                    {__('Finding historical transactions')}
-                                </h3>
-                                <p className="text-sm text-muted-foreground">
-                                    {__(
-                                        "We're looking through your transaction\n                                    history to find expenses that match this\n                                    budget. This usually takes a few seconds.",
-                                    )}
-                                </p>
-                            </div>
-                        </div>
-
-                        <div className="space-y-3">
-                            <Skeleton className="h-16 w-full" />
-                            <Skeleton className="h-16 w-full" />
-                            <Skeleton className="h-16 w-full" />
-                        </div>
+                {is_planning_period ? (
+                    <div className="space-y-4">
+                        <PlanningPeriodNotice />
+                        <PlanningPeriodAllocation
+                            budgetId={budget.id}
+                            periodId={currentPeriod.id}
+                            allocatedAmount={currentPeriod.allocated_amount}
+                            currencyCode={currencyCode}
+                        />
                     </div>
                 ) : (
-                    <TransactionList
-                        categories={categories}
-                        accounts={accounts}
-                        banks={banks}
-                        labels={labels}
-                        transactions={periodTransactions}
-                        pageSize={10}
-                        showActionsMenu={false}
-                        maxHeight={600}
-                    />
+                    <>
+                        <BudgetSpendingChart
+                            currentPeriod={currentPeriod}
+                            previousPeriod={previousPeriod}
+                            budgetName={budget.name}
+                            currencyCode={currencyCode}
+                        />
+
+                        {currentPeriod.processing_historical ? (
+                            <div className="space-y-4 rounded-lg border border-border bg-card p-6">
+                                <div className="flex items-center gap-3">
+                                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                                    <div>
+                                        <h3 className="text-sm font-medium">
+                                            {__(
+                                                'Finding historical transactions',
+                                            )}
+                                        </h3>
+                                        <p className="text-sm text-muted-foreground">
+                                            {__(
+                                                "We're looking through your transaction\n                                            history to find expenses that match this\n                                            budget. This usually takes a few seconds.",
+                                            )}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-3">
+                                    <Skeleton className="h-16 w-full" />
+                                    <Skeleton className="h-16 w-full" />
+                                    <Skeleton className="h-16 w-full" />
+                                </div>
+                            </div>
+                        ) : (
+                            <TransactionList
+                                categories={categories}
+                                accounts={accounts}
+                                banks={banks}
+                                labels={labels}
+                                transactions={periodTransactions}
+                                pageSize={10}
+                                showActionsMenu={false}
+                                maxHeight={600}
+                            />
+                        )}
+                    </>
                 )}
             </div>
 
             <EditBudgetDialog
                 budget={budget}
-                currentPeriod={currentPeriod}
-                currencyCode={currencyCode}
                 open={editOpen}
                 onOpenChange={setEditOpen}
             />

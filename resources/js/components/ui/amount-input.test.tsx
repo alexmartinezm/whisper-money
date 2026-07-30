@@ -49,6 +49,24 @@ describe('AmountInput sign toggle', () => {
         expect(onChange).toHaveBeenLastCalledWith(2500);
     });
 
+    it('can emit the parsed amount while the user is typing', () => {
+        const onInputChange = vi.fn();
+        render(
+            <AmountInput
+                value={0}
+                onChange={vi.fn()}
+                onInputChange={onInputChange}
+                currencyCode="USD"
+            />,
+        );
+
+        const input = screen.getByRole('textbox');
+        fireEvent.focus(input);
+        fireEvent.change(input, { target: { value: '25' } });
+
+        expect(onInputChange).toHaveBeenCalledWith(2500);
+    });
+
     it('keeps the negative sign when focusing after toggling an empty field', () => {
         render(
             <AmountInput value={0} onChange={vi.fn()} currencyCode="USD" allowNegative />,

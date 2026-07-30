@@ -64,8 +64,15 @@ class BudgetPeriodService
             }
         }
 
-        $nextPeriod = $this->generatePeriod($budget, $period->allocated_amount);
+        $nextPeriod = $this->ensureSuccessor($budget, $period, $period->allocated_amount);
         $nextPeriod->update(['carried_over_amount' => $carriedOverAmount]);
+    }
+
+    public function ensureSuccessor(Budget $budget, BudgetPeriod $precedingPeriod, int $seedAllocatedAmount): BudgetPeriod
+    {
+        $successorStart = $precedingPeriod->end_date->copy()->addDay();
+
+        return $this->generatePeriod($budget, $seedAllocatedAmount, $successorStart);
     }
 
     public function calculatePeriodDates(Budget $budget, CarbonInterface $referenceDate): array

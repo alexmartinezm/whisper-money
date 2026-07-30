@@ -125,10 +125,8 @@ test('user cannot access another users budget', function () {
     $user1 = User::factory()->create(['onboarded_at' => now()]);
     $user2 = User::factory()->create(['onboarded_at' => now()]);
 
-    $category = Category::factory()->create(['user_id' => $user1->id]);
     $budget = Budget::factory()->create([
         'user_id' => $user1->id,
-        'category_id' => $category->id,
     ]);
 
     $response = $this->actingAs($user2)->get("/budgets/{$budget->id}");
@@ -153,4 +151,40 @@ test('budgets page shows correct feature flag state', function () {
     $page->assertSee('Budgets')
         ->assertNoJavascriptErrors()
         ->assertNoConsoleLogs();
+});
+
+test('user can open the direct successor and plan its allocation', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $budget = Budget::factory()->monthly()->create([
+        'user_id' => $user->id,
+        'name' => 'Planning Budget',
+        'period_start_day' => 1,
+    ]);
+
+    $currentPeriod = $budget->periods()->create([
+        'start_date' => now()->startOfMonth(),
+        'end_date' => now()->endOfMonth(),
+        'allocated_amount' => 10000,
+        'carried_over_amount' => 0,
+    ]);
+    $nextPeriod = $budget->periods()->create([
+        'start_date' => $currentPeriod->end_date->addDay(),
+        'end_date' => $currentPeriod->end_date->addMonthNoOverflow()->endOfMonth(),
+        'allocated_amount' => 10000,
+        'carried_over_amount' => 0,
+    ]);
+
+    $page = $this->actingAs($user)->visit('/budgets');
+
+    $page->waitForText('Planning Budget', 10)
+        ->click('Plan next period')
+        ->waitForText('Planning next period', 10)
+        ->assertSee('Allocated Amount')
+        ->fill('#planning-allocated-amount', '250')
+        ->click('Save allocation')
+        ->wait(1)
+        ->assertValue('#planning-allocated-amount', '250.00')
+        ->assertNoJavascriptErrors();
+
+    expect($nextPeriod->fresh()->allocated_amount)->toBe(25000);
 });

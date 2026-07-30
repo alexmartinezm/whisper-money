@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\BudgetPeriodType;
 use App\Enums\RolloverType;
 use App\Models\Concerns\BelongsToSpace;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -77,11 +78,25 @@ class Budget extends Model
         return $this->hasMany(BudgetPeriod::class);
     }
 
-    public function getCurrentPeriod(): ?BudgetPeriod
+    public function getCurrentPeriod(?CarbonInterface $applicationDate = null): ?BudgetPeriod
     {
+        $applicationDate ??= today();
+
         return $this->periods()
-            ->where('start_date', '<=', today())
-            ->where('end_date', '>=', today())
+            ->whereDate('start_date', '<=', $applicationDate->toDateString())
+            ->whereDate('end_date', '>=', $applicationDate->toDateString())
+            ->first();
+    }
+
+    public function getNextPlanningPeriod(CarbonInterface $applicationDate, ?BudgetPeriod $currentPeriod = null): ?BudgetPeriod
+    {
+        $currentPeriod ??= $this->getCurrentPeriod($applicationDate);
+        if ($currentPeriod === null) {
+            return null;
+        }
+
+        return $this->periods()
+            ->whereDate('start_date', $currentPeriod->end_date->copy()->addDay()->toDateString())
             ->first();
     }
 }

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\BudgetPeriodType;
 use App\Http\Requests\StoreBudgetRequest;
+use App\Http\Requests\UpdateBudgetPeriodRequest;
 use App\Http\Requests\UpdateBudgetRequest;
 use App\Models\Account;
 use App\Models\Bank;
@@ -33,14 +34,32 @@ class BudgetController extends Controller
     public function index(Request $request): Response
     {
         $user = $request->user();
+        $applicationDate = CarbonImmutable::today();
+        $activeSpaceId = $user->activeSpace()?->id;
         $budgets = $user
             ->budgets()
-            ->with(['categories', 'labels', 'periods' => function ($query) {
-                $query->where('start_date', '<=', today())
-                    ->where('end_date', '>=', today())
+            ->with(['categories', 'labels', 'periods' => function ($query) use ($applicationDate) {
+                $query->whereDate('start_date', '<=', $applicationDate->toDateString())
+                    ->whereDate('end_date', '>=', $applicationDate->toDateString())
                     ->withSum('budgetTransactions as spent_amount', 'amount');
             }])
             ->get();
+
+        $budgets->each(function (Budget $budget) use ($applicationDate, $activeSpaceId): void {
+            if ($budget->space_id !== $activeSpaceId) {
+                $budget->setAttribute('next_planning_period', null);
+
+                return;
+            }
+
+            $nextPlanningPeriod = $budget->getNextPlanningPeriod($applicationDate, $budget->periods->first());
+            $budget->setAttribute('next_planning_period', $nextPlanningPeriod === null ? null : [
+                'id' => $nextPlanningPeriod->id,
+                'start_date' => $nextPlanningPeriod->start_date,
+                'end_date' => $nextPlanningPeriod->end_date,
+                'allocated_amount' => $nextPlanningPeriod->allocated_amount,
+            ]);
+        });
 
         return Inertia::render('budgets/index', [
             'budgets' => $budgets,
@@ -145,28 +164,37 @@ class BudgetController extends Controller
         $this->authorize('view', $budget);
 
         $user = $request->user();
+        $applicationDate = CarbonImmutable::today();
+        $activePeriod = $budget->getCurrentPeriod($applicationDate);
+        if ($activePeriod === null) {
+            $activePeriod = $this->budgetPeriodService->generatePeriod($budget, null, $applicationDate);
+        }
+        $directSuccessor = $budget->getNextPlanningPeriod($applicationDate, $activePeriod);
 
-        // If a specific period UUID is requested, load it (scoped to this budget, past/current only)
         $periodId = $request->query('period');
+        $isPlanningPeriod = false;
+        $canPlanThisBudget = $budget->space_id === $user->activeSpace()?->id;
         if ($periodId) {
-            $viewedPeriod = $budget->periods()
-                ->where('id', $periodId)
-                ->where('start_date', '<=', today())
-                ->firstOrFail();
-        } else {
-            $viewedPeriod = $budget->getCurrentPeriod();
+            $viewedPeriod = $budget->periods()->whereKey($periodId)->firstOrFail();
+            $isPlanningPeriod = $canPlanThisBudget
+                && $directSuccessor !== null
+                && $viewedPeriod->id === $directSuccessor->id;
 
-            if (! $viewedPeriod) {
-                $viewedPeriod = $this->budgetPeriodService->generatePeriod($budget);
+            if ($viewedPeriod->start_date->greaterThan($applicationDate) && ! $isPlanningPeriod) {
+                abort(404);
             }
+        } else {
+            $viewedPeriod = $activePeriod;
         }
 
-        $viewedPeriod->load([
-            'budgetTransactions.transaction.account.bank',
-            'budgetTransactions.transaction.category',
-            'budgetTransactions.transaction.labels',
-            'budgetTransactions.transaction.splits.category',
-        ]);
+        if (! $isPlanningPeriod) {
+            $viewedPeriod->load([
+                'budgetTransactions.transaction.account.bank',
+                'budgetTransactions.transaction.category',
+                'budgetTransactions.transaction.labels',
+                'budgetTransactions.transaction.splits.category',
+            ]);
+        }
 
         $previousPeriod = $budget->periods()
             ->where('end_date', '<', $viewedPeriod->start_date)
@@ -174,11 +202,17 @@ class BudgetController extends Controller
             ->with(['budgetTransactions.transaction'])
             ->first();
 
-        $nextPeriod = $budget->periods()
-            ->where('start_date', '>', $viewedPeriod->end_date)
-            ->where('start_date', '<=', today())
-            ->orderBy('start_date', 'asc')
-            ->first();
+        if ($isPlanningPeriod) {
+            $nextPeriod = null;
+        } elseif ($viewedPeriod->id === $activePeriod->id) {
+            $nextPeriod = $directSuccessor;
+        } else {
+            $nextPeriod = $budget->periods()
+                ->where('start_date', '>', $viewedPeriod->end_date)
+                ->whereDate('start_date', '<=', $applicationDate->toDateString())
+                ->orderBy('start_date', 'asc')
+                ->first();
+        }
 
         $budget->load(['categories', 'labels']);
 
@@ -208,6 +242,8 @@ class BudgetController extends Controller
             'currentPeriod' => $viewedPeriod,
             'previousPeriod' => $previousPeriod,
             'nextPeriod' => $nextPeriod,
+            'nextPlanningPeriod' => $isPlanningPeriod ? null : $directSuccessor,
+            'is_planning_period' => $isPlanningPeriod,
             'categories' => $categories,
             'accounts' => $accounts,
             'banks' => $banks,
@@ -249,6 +285,22 @@ class BudgetController extends Controller
         );
 
         return redirect()->route('budgets.show', $budget);
+    }
+
+    public function updatePeriod(UpdateBudgetPeriodRequest $request, Budget $budget, BudgetPeriod $period): RedirectResponse
+    {
+        $this->authorize('update', $budget);
+
+        $this->budgetManagementService->updateNextPeriodAllocation(
+            $request->user(),
+            $request->user()->activeSpace(),
+            $budget->id,
+            $period->id,
+            $request->integer('allocated_amount'),
+            CarbonImmutable::today(),
+        );
+
+        return redirect()->route('budgets.show', ['budget' => $budget, 'period' => $period]);
     }
 
     public function destroy(Request $request, Budget $budget): RedirectResponse

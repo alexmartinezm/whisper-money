@@ -2,7 +2,6 @@ import { update } from '@/actions/App/Http/Controllers/BudgetController';
 import { CategoryBadge } from '@/components/shared/category-combobox';
 import { LabelBadge } from '@/components/shared/label-combobox';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { AmountInput } from '@/components/ui/amount-input';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -38,28 +37,17 @@ import { useEffect, useState } from 'react';
 
 interface Props {
     budget: Budget;
-    currentPeriod: { allocated_amount: number };
-    currencyCode?: string;
     open: boolean;
     onOpenChange: (open: boolean) => void;
 }
 
-export function EditBudgetDialog({
-    budget,
-    currentPeriod,
-    currencyCode = 'USD',
-    open,
-    onOpenChange,
-}: Props) {
+export function EditBudgetDialog({ budget, open, onOpenChange }: Props) {
     const [name, setName] = useState(budget.name);
     const [periodType, setPeriodType] = useState<BudgetPeriodType>(
         budget.period_type as BudgetPeriodType,
     );
     const [periodStartDay, setPeriodStartDay] = useState<number>(
         budget.period_start_day || 1,
-    );
-    const [allocatedAmount, setAllocatedAmount] = useState<number>(
-        currentPeriod.allocated_amount,
     );
     const [rolloverType, setRolloverType] = useState<RolloverType>(
         budget.rollover_type as RolloverType,
@@ -71,10 +59,9 @@ export function EditBudgetDialog({
             setName(budget.name);
             setPeriodType(budget.period_type as BudgetPeriodType);
             setPeriodStartDay(budget.period_start_day || 1);
-            setAllocatedAmount(currentPeriod.allocated_amount);
             setRolloverType(budget.rollover_type as RolloverType);
         }
-    }, [open, budget, currentPeriod]);
+    }, [open, budget]);
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -86,7 +73,6 @@ export function EditBudgetDialog({
                 name,
                 period_type: periodType,
                 period_start_day: periodType === 'yearly' ? 1 : periodStartDay,
-                allocated_amount: allocatedAmount,
                 rollover_type: rolloverType,
             },
             {
@@ -235,26 +221,6 @@ export function EditBudgetDialog({
                                 </p>
                             </div>
                         )}
-
-                        <div className="space-y-2">
-                            <Label htmlFor="allocated-amount">
-                                {__('Allocated Amount')}
-                            </Label>
-                            <AmountInput
-                                id="allocated-amount"
-                                value={allocatedAmount}
-                                onChange={setAllocatedAmount}
-                                currencyCode={currencyCode}
-                                placeholder="0.00"
-                                required
-                            />
-
-                            <p className="text-sm text-muted-foreground">
-                                {__(
-                                    'This will update the allocated amount for the\n                                current and future periods.',
-                                )}
-                            </p>
-                        </div>
 
                         <div className="space-y-2">
                             <Label htmlFor="rollover">

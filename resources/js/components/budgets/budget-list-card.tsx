@@ -76,6 +76,24 @@ export function BudgetListCard({ budget, currencyCode }: Props) {
                             <Calendar className="h-3 w-3" />
                             {periodLabel}
                         </CardDescription>
+                        {budget.next_planning_period && (
+                            <Link
+                                href={
+                                    show(
+                                        { budget: budget.id },
+                                        {
+                                            query: {
+                                                period: budget
+                                                    .next_planning_period.id,
+                                            },
+                                        },
+                                    ).url
+                                }
+                                className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                            >
+                                {__('Plan next period')}
+                            </Link>
+                        )}
                     </div>
                     <Badge variant="outline">
                         {__(getBudgetPeriodTypeLabel(budget.period_type))}

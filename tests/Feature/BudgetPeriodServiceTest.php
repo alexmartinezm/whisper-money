@@ -171,3 +171,77 @@ test('monthly day 30 clamps February in leap and non-leap years', function () {
         ->and($nonLeapStart->toDateString())->toBe('2027-01-30')
         ->and($nonLeapEnd->toDateString())->toBe('2027-02-27');
 });
+
+test('ensureSuccessor materializes the direct next monthly period from its preceding allocation', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $budget = Budget::factory()->monthly()->create([
+        'user_id' => $user->id,
+        'period_start_day' => 1,
+    ]);
+    $july = BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => '2026-07-01',
+        'end_date' => '2026-07-31',
+        'allocated_amount' => 40000,
+    ]);
+
+    $successor = app(BudgetPeriodService::class)->ensureSuccessor($budget, $july, 40000);
+
+    expect($successor->start_date->toDateString())->toBe('2026-08-01')
+        ->and($successor->end_date->toDateString())->toBe('2026-08-31')
+        ->and($successor->allocated_amount)->toBe(40000);
+});
+
+test('ensureSuccessor is idempotent for the direct next period', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $budget = Budget::factory()->monthly()->create([
+        'user_id' => $user->id,
+        'period_start_day' => 1,
+    ]);
+    $july = BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => '2026-07-01',
+        'end_date' => '2026-07-31',
+        'allocated_amount' => 40000,
+    ]);
+
+    $service = app(BudgetPeriodService::class);
+    $first = $service->ensureSuccessor($budget, $july, 40000);
+    $second = $service->ensureSuccessor($budget, $july, 50000);
+
+    expect($second->id)->toBe($first->id)
+        ->and($second->allocated_amount)->toBe(40000)
+        ->and(BudgetPeriod::query()
+            ->where('budget_id', $budget->id)
+            ->whereDate('start_date', '2026-08-01')
+            ->count())->toBe(1);
+});
+
+test('ensureSuccessor fills the immediate gap even when a distant future period exists', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $budget = Budget::factory()->monthly()->create([
+        'user_id' => $user->id,
+        'period_start_day' => 1,
+    ]);
+    $july = BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => '2026-07-01',
+        'end_date' => '2026-07-31',
+        'allocated_amount' => 40000,
+    ]);
+    BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => '2026-10-01',
+        'end_date' => '2026-10-31',
+        'allocated_amount' => 90000,
+    ]);
+
+    $successor = app(BudgetPeriodService::class)->ensureSuccessor($budget, $july, 40000);
+
+    expect($successor->start_date->toDateString())->toBe('2026-08-01')
+        ->and($successor->allocated_amount)->toBe(40000)
+        ->and(BudgetPeriod::query()
+            ->where('budget_id', $budget->id)
+            ->whereDate('start_date', '2026-10-01')
+            ->value('allocated_amount'))->toBe(90000);
+});
