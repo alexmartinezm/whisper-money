@@ -208,7 +208,7 @@ export default function BudgetShow({
                                         </h3>
                                         <p className="text-sm text-muted-foreground">
                                             {__(
-                                                "We're looking through your transaction\n                                            history to find expenses that match this\n                                            budget. This usually takes a few seconds.",
+                                                "We're looking through your transaction history to find expenses that match this budget. This usually takes a few seconds.",
                                             )}
                                         </p>
                                     </div>
