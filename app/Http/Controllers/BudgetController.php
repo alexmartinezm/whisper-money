@@ -35,7 +35,7 @@ class BudgetController extends Controller
     {
         $user = $request->user();
         $applicationDate = CarbonImmutable::today();
-        $activeSpaceId = $user->activeSpace()?->id;
+        $activeSpaceId = $user->activeSpace()->id;
         $budgets = $user
             ->budgets()
             ->with(['categories', 'labels', 'periods' => function ($query) use ($applicationDate) {
@@ -173,7 +173,7 @@ class BudgetController extends Controller
 
         $periodId = $request->query('period');
         $isPlanningPeriod = false;
-        $canPlanThisBudget = $budget->space_id === $user->activeSpace()?->id;
+        $canPlanThisBudget = $budget->space_id === $user->activeSpace()->id;
         if ($periodId) {
             $viewedPeriod = $budget->periods()->whereKey($periodId)->firstOrFail();
             $isPlanningPeriod = $canPlanThisBudget
