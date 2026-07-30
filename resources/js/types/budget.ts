@@ -34,6 +34,14 @@ export interface Budget {
     categories?: Category[];
     labels?: Label[];
     periods?: BudgetPeriod[];
+    next_planning_period?: BudgetPlanningPeriod | null;
+}
+
+export interface BudgetPlanningPeriod {
+    id: UUID;
+    start_date: string;
+    end_date: string;
+    allocated_amount: number;
 }
 
 export interface BudgetCategory {

@@ -2198,5 +2198,11 @@
     "Overall budget progress": "Progression globale des budgets",
     "On track": "Dans les limites prévues",
     "over limit": "au-dessus de la limite",
-    "Specific budgets": "Budgets spécifiques"
+    "Specific budgets": "Budgets spécifiques",
+    "Plan next period": "Planifier la prochaine période",
+    "Planning next period": "Planification de la prochaine période",
+    "Planning allocation": "Planification de l'allocation",
+    "Save allocation": "Enregistrer l'allocation",
+    "This period is ready for planning. Spending and transactions will appear when it starts.": "Cette période est prête à être planifiée. Les dépenses et les transactions apparaîtront lorsqu'elle commencera.",
+    "We're looking through your transaction history to find expenses that match this budget. This usually takes a few seconds.": "Nous examinons votre historique de transactions pour trouver les dépenses correspondant à ce budget. Cela prend généralement quelques secondes."
 }

@@ -6,8 +6,10 @@ use App\Models\BudgetPeriod;
 use App\Models\BudgetTransaction;
 use App\Models\Category;
 use App\Models\Label;
+use App\Models\Space;
 use App\Models\Transaction;
 use App\Models\User;
+use Carbon\Carbon;
 
 test('user can create a budget', function () {
     $user = User::factory()->create(['onboarded_at' => now()]);
@@ -667,4 +669,129 @@ test('budget index hides period_duration and category pivot', function () {
 
     expect($budgetData)->not->toHaveKey('period_duration');
     expect($budgetData['categories'][0])->not->toHaveKey('pivot');
+});
+
+test('budget index exposes only the direct next planning period', function () {
+    Carbon::setTestNow('2026-07-30');
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $budget = Budget::factory()->monthly()->create(['user_id' => $user->id, 'period_start_day' => 1]);
+    $active = BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => '2026-07-01',
+        'end_date' => '2026-07-31',
+        'allocated_amount' => 40000,
+    ]);
+    $august = BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => '2026-08-01',
+        'end_date' => '2026-08-31',
+        'allocated_amount' => 40000,
+    ]);
+    BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => '2026-09-01',
+        'end_date' => '2026-09-30',
+        'allocated_amount' => 40000,
+    ]);
+
+    $this->actingAs($user)->get(route('budgets.index'))
+        ->assertInertia(fn ($page) => $page
+            ->has('budgets.0.periods', 1)
+            ->where('budgets.0.periods.0.id', $active->id)
+            ->where('budgets.0.next_planning_period.id', $august->id)
+            ->where('budgets.0.next_planning_period.allocated_amount', 40000)
+            ->missing('budgets.0.next_planning_period.carried_over_amount')
+        );
+});
+
+test('budget planning is unavailable outside the active space', function () {
+    Carbon::setTestNow('2026-07-30');
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $otherSpace = Space::factory()->create(['owner_id' => $user->id]);
+    $budget = Budget::factory()->monthly()->create([
+        'user_id' => $user->id,
+        'space_id' => $otherSpace->id,
+        'period_start_day' => 1,
+    ]);
+    BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => '2026-07-01',
+        'end_date' => '2026-07-31',
+        'allocated_amount' => 40000,
+    ]);
+    $august = BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => '2026-08-01',
+        'end_date' => '2026-08-31',
+        'allocated_amount' => 40000,
+    ]);
+
+    $this->actingAs($user)->get(route('budgets.index'))
+        ->assertInertia(fn ($page) => $page
+            ->where('budgets.0.next_planning_period', null)
+        );
+    $this->actingAs($user)->get("/budgets/{$budget->id}?period={$august->id}")->assertNotFound();
+});
+
+test('budget show permits only the direct next period as planning', function () {
+    Carbon::setTestNow('2026-07-30');
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $budget = Budget::factory()->monthly()->create(['user_id' => $user->id, 'period_start_day' => 1]);
+    BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => '2026-07-01',
+        'end_date' => '2026-07-31',
+        'allocated_amount' => 40000,
+    ]);
+    $august = BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => '2026-08-01',
+        'end_date' => '2026-08-31',
+        'allocated_amount' => 40000,
+    ]);
+    $september = BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => '2026-09-01',
+        'end_date' => '2026-09-30',
+        'allocated_amount' => 40000,
+    ]);
+
+    $this->actingAs($user)->get("/budgets/{$budget->id}?period={$august->id}")
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('is_planning_period', true)
+            ->where('currentPeriod.id', $august->id)
+        );
+    $this->actingAs($user)->get("/budgets/{$budget->id}?period={$september->id}")->assertNotFound();
+});
+
+test('budget period planning patch updates only the direct successor', function () {
+    Carbon::setTestNow('2026-07-30');
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $budget = Budget::factory()->monthly()->create(['user_id' => $user->id, 'period_start_day' => 1]);
+    BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => '2026-07-01',
+        'end_date' => '2026-07-31',
+        'allocated_amount' => 40000,
+    ]);
+    $august = BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => '2026-08-01',
+        'end_date' => '2026-08-31',
+        'allocated_amount' => 40000,
+    ]);
+    $september = BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => '2026-09-01',
+        'end_date' => '2026-09-30',
+        'allocated_amount' => 40000,
+    ]);
+
+    $this->actingAs($user)->patch("/budgets/{$budget->id}/periods/{$august->id}", ['allocated_amount' => 45000])
+        ->assertRedirect("/budgets/{$budget->id}?period={$august->id}");
+    expect($august->fresh()->allocated_amount)->toBe(45000)
+        ->and($september->fresh()->allocated_amount)->toBe(40000);
+    $this->actingAs($user)->patch("/budgets/{$budget->id}/periods/{$august->id}", ['allocated_amount' => -1])
+        ->assertSessionHasErrors('allocated_amount');
 });

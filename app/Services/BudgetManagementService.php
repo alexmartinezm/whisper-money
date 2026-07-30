@@ -12,6 +12,7 @@ use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -167,6 +168,46 @@ class BudgetManagementService
                 'budget' => $budget->fresh()->load(['categories', 'labels']),
                 'adjustment' => $adjustment,
             ];
+        }, attempts: 5);
+    }
+
+    public function updateNextPeriodAllocation(
+        User $user,
+        Space $space,
+        string $budgetId,
+        string $periodId,
+        int $allocatedAmount,
+        CarbonImmutable $applicationDate,
+    ): BudgetPeriod {
+        return DB::transaction(function () use ($user, $space, $budgetId, $periodId, $allocatedAmount, $applicationDate): BudgetPeriod {
+            $this->assertSpaceAccess($user, $space);
+            $budget = $this->ownedBudget($user, $space, $budgetId, lock: true);
+            $planningPeriod = $budget->periods()->whereKey($periodId)->lockForUpdate()->firstOrFail();
+            $currentPeriod = $budget->getCurrentPeriod($applicationDate);
+
+            if ($currentPeriod === null) {
+                throw (new ModelNotFoundException)->setModel(BudgetPeriod::class);
+            }
+
+            $directSuccessor = $this->periods->ensureSuccessor(
+                $budget,
+                $currentPeriod,
+                $currentPeriod->allocated_amount,
+            );
+
+            if ($directSuccessor->id !== $planningPeriod->id) {
+                throw (new ModelNotFoundException)->setModel(BudgetPeriod::class, [$periodId]);
+            }
+
+            $this->periods->ensureSuccessor(
+                $budget,
+                $planningPeriod,
+                $planningPeriod->allocated_amount,
+            );
+
+            $planningPeriod->update(['allocated_amount' => $allocatedAmount]);
+
+            return $planningPeriod->fresh();
         }, attempts: 5);
     }
 

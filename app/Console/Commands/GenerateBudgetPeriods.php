@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\Budget;
 use App\Models\BudgetPeriod;
 use App\Services\BudgetPeriodService;
+use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
 
 class GenerateBudgetPeriods extends Command
@@ -22,37 +23,39 @@ class GenerateBudgetPeriods extends Command
     {
         $this->info('Generating budget periods...');
 
-        $budgets = Budget::with('periods')->get();
+        $applicationDate = CarbonImmutable::today();
+        $budgets = Budget::query()->get();
         $generatedCount = 0;
         $closedCount = 0;
 
         foreach ($budgets as $budget) {
-            $currentPeriod = $budget->getCurrentPeriod();
+            $currentPeriod = $budget->getCurrentPeriod($applicationDate);
 
-            if (! $currentPeriod) {
-                $this->budgetPeriodService->generatePeriod($budget);
+            if ($currentPeriod === null) {
+                $currentPeriod = $this->budgetPeriodService->generatePeriod($budget, null, $applicationDate);
                 $generatedCount++;
                 $this->info("Generated initial period for budget: {$budget->name}");
             }
 
-            $completedPeriods = BudgetPeriod::where('budget_id', $budget->id)
-                ->where('end_date', '<', today())
+            $cursor = $currentPeriod;
+            for ($i = 0; $i < 2; $i++) {
+                $successor = $this->budgetPeriodService->ensureSuccessor(
+                    $budget,
+                    $cursor,
+                    $cursor->allocated_amount,
+                );
+                $generatedCount += $successor->wasRecentlyCreated ? 1 : 0;
+                $cursor = $successor;
+            }
+
+            $completedPeriods = BudgetPeriod::query()
+                ->where('budget_id', $budget->id)
+                ->whereDate('end_date', '<', $applicationDate->toDateString())
                 ->get();
 
             foreach ($completedPeriods as $period) {
-                if ($period->end_date < today()) {
-                    $this->budgetPeriodService->closePeriod($period);
-                    $closedCount++;
-                }
-            }
-
-            $futurePeriods = $budget->periods()
-                ->where('start_date', '>', today())
-                ->count();
-
-            if ($futurePeriods < 2) {
-                $this->budgetPeriodService->generatePeriod($budget);
-                $generatedCount++;
+                $this->budgetPeriodService->closePeriod($period);
+                $closedCount++;
             }
         }
 

@@ -27,6 +27,9 @@ function makeBudget(): Budget {
         categories: [],
         labels: [],
         rollover_type: 'carry_over',
+        notify_on_new_transaction: false,
+        notify_on_close_to_limit: false,
+        notify_on_over_limit: false,
         is_catch_all: false,
         created_at: '2026-05-26T00:00:00.000000Z',
         updated_at: '2026-05-26T00:00:00.000000Z',
@@ -39,7 +42,6 @@ describe('EditBudgetDialog', () => {
         render(
             <EditBudgetDialog
                 budget={makeBudget()}
-                currentPeriod={{ allocated_amount: 10000 }}
                 open={true}
                 onOpenChange={vi.fn()}
             />,
@@ -50,5 +52,8 @@ describe('EditBudgetDialog', () => {
                 'Period and carry-over settings cannot be changed after a budget is created because budgets are calculated historically. If you need different settings, delete this budget and create a new one.',
             ),
         ).toBeInTheDocument();
+        expect(
+            screen.queryByLabelText('Allocated Amount'),
+        ).not.toBeInTheDocument();
     });
 });

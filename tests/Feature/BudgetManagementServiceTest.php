@@ -7,6 +7,7 @@ use App\Models\Category;
 use App\Models\User;
 use App\Services\BudgetManagementService;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Validation\ValidationException;
 
@@ -129,4 +130,96 @@ it('rejects a budget update without a mutable field', function () {
         [],
         CarbonImmutable::parse('2026-08-01'),
     ))->toThrow(ValidationException::class);
+});
+
+it('updates only the direct successor allocation', function () {
+    $user = User::factory()->create();
+    $budget = managedBudgetWithPeriods($user, $user->personalSpace->id);
+    $july = addManagedPeriod($budget, '2026-07-01', '2026-07-31', 40000);
+    $august = addManagedPeriod($budget, '2026-08-01', '2026-08-31', 40000);
+    $september = addManagedPeriod($budget, '2026-09-01', '2026-09-30', 40000);
+
+    app(BudgetManagementService::class)->updateNextPeriodAllocation(
+        $user,
+        $user->personalSpace,
+        $budget->id,
+        $august->id,
+        45000,
+        CarbonImmutable::parse('2026-07-30'),
+    );
+
+    expect($august->fresh()->allocated_amount)->toBe(45000)
+        ->and($july->fresh()->allocated_amount)->toBe(40000)
+        ->and($september->fresh()->allocated_amount)->toBe(40000);
+});
+
+it('seeds the following period with the pre-edit planning allocation', function () {
+    $user = User::factory()->create();
+    $budget = managedBudgetWithPeriods($user, $user->personalSpace->id);
+    addManagedPeriod($budget, '2026-07-01', '2026-07-31', 40000);
+    $august = addManagedPeriod($budget, '2026-08-01', '2026-08-31', 40000);
+
+    app(BudgetManagementService::class)->updateNextPeriodAllocation(
+        $user,
+        $user->personalSpace,
+        $budget->id,
+        $august->id,
+        45000,
+        CarbonImmutable::parse('2026-07-30'),
+    );
+
+    expect($budget->periods()->whereDate('start_date', '2026-09-01')->value('allocated_amount'))->toBe(40000);
+});
+
+it('rejects planning updates for any period except the direct successor', function () {
+    $user = User::factory()->create();
+    $budget = managedBudgetWithPeriods($user, $user->personalSpace->id);
+    $july = addManagedPeriod($budget, '2026-07-01', '2026-07-31', 40000);
+    addManagedPeriod($budget, '2026-08-01', '2026-08-31', 40000);
+    $september = addManagedPeriod($budget, '2026-09-01', '2026-09-30', 40000);
+
+    foreach ([$july->id, $september->id] as $periodId) {
+        expect(fn () => app(BudgetManagementService::class)->updateNextPeriodAllocation(
+            $user,
+            $user->personalSpace,
+            $budget->id,
+            $periodId,
+            45000,
+            CarbonImmutable::parse('2026-07-30'),
+        ))->toThrow(ModelNotFoundException::class);
+    }
+});
+
+it('rejects planning updates for a budget belonging to another user', function () {
+    $user = User::factory()->create();
+    $otherUser = User::factory()->create();
+    $otherBudget = managedBudgetWithPeriods($otherUser, $otherUser->personalSpace->id);
+    addManagedPeriod($otherBudget, '2026-07-01', '2026-07-31', 40000);
+    $otherPeriod = addManagedPeriod($otherBudget, '2026-08-01', '2026-08-31', 40000);
+
+    expect(fn () => app(BudgetManagementService::class)->updateNextPeriodAllocation(
+        $user,
+        $user->personalSpace,
+        $otherBudget->id,
+        $otherPeriod->id,
+        45000,
+        CarbonImmutable::parse('2026-07-30'),
+    ))->toThrow(ValidationException::class);
+});
+
+it('rejects planning updates for a period belonging to another budget', function () {
+    $user = User::factory()->create();
+    $budget = managedBudgetWithPeriods($user, $user->personalSpace->id);
+    addManagedPeriod($budget, '2026-07-01', '2026-07-31', 40000);
+    $otherBudget = managedBudgetWithPeriods($user, $user->personalSpace->id);
+    $otherPeriod = addManagedPeriod($otherBudget, '2026-08-01', '2026-08-31', 40000);
+
+    expect(fn () => app(BudgetManagementService::class)->updateNextPeriodAllocation(
+        $user,
+        $user->personalSpace,
+        $budget->id,
+        $otherPeriod->id,
+        45000,
+        CarbonImmutable::parse('2026-07-30'),
+    ))->toThrow(ModelNotFoundException::class);
 });

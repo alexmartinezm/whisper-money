@@ -171,6 +171,7 @@ Route::middleware(['auth', 'verified', 'onboarded', 'subscribed'])->group(functi
     Route::get('budgets', [BudgetController::class, 'index'])->name('budgets.index');
     Route::post('budgets', [BudgetController::class, 'store'])->name('budgets.store');
     Route::get('budgets/{budget}', [BudgetController::class, 'show'])->name('budgets.show');
+    Route::patch('budgets/{budget}/periods/{period}', [BudgetController::class, 'updatePeriod'])->name('budgets.periods.update');
     Route::patch('budgets/{budget}', [BudgetController::class, 'update'])->name('budgets.update');
     Route::delete('budgets/{budget}', [BudgetController::class, 'destroy'])->name('budgets.destroy');
 });

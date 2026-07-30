@@ -75,8 +75,6 @@ test('user can update budget name', function () {
         ->assertSee('Edit Budget')
         ->wait(1) // Wait for form to be ready
         ->fill('name', 'New Budget Name')
-        ->wait(1)
-        ->fill('#allocated-amount', '500')
         ->wait(2)
         ->click('button:has-text("Save Changes")')
         ->waitForText('Saving...', 5)

@@ -8,6 +8,7 @@ import { __ } from '@/utils/i18n';
 interface AmountInputProps {
     value: number;
     onChange: (valueInCents: number) => void;
+    onInputChange?: (valueInCents: number) => void;
     currencyCode: string;
     disabled?: boolean;
     required?: boolean;
@@ -163,6 +164,7 @@ export const AmountInput = React.forwardRef<HTMLInputElement, AmountInputProps>(
         {
             value,
             onChange,
+            onInputChange,
             currencyCode,
             disabled = false,
             required = false,
@@ -205,6 +207,7 @@ export const AmountInput = React.forwardRef<HTMLInputElement, AmountInputProps>(
 
         const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
             setDisplayValue(e.target.value);
+            onInputChange?.(resolveCents(e.target.value));
         };
 
         const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
