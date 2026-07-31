@@ -124,7 +124,10 @@ test('a vote cast in a previous month cannot be removed', function () {
     $request = IntegrationRequest::factory()->approved()->create();
 
     $vote = $request->votes()->create(['user_id' => $user->id]);
-    $vote->forceFill(['created_at' => now()->subMonth()])->saveQuietly();
+    // subMonth() overflows on a 31st whose previous month is shorter — from
+    // 31 July it lands on 1 July, back inside the current month, and the vote
+    // the test means to be old becomes removable again.
+    $vote->forceFill(['created_at' => now()->subMonthNoOverflow()])->saveQuietly();
 
     $this->actingAs($user)
         ->getJson('/integration-requests/data')

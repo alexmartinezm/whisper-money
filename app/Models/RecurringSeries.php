@@ -6,6 +6,7 @@ use App\Enums\RecurringCadence;
 use App\Enums\RecurringSeriesStatus;
 use App\Enums\RecurringSeriesUserState;
 use App\Models\Concerns\BelongsToSpace;
+use Carbon\Carbon;
 use Database\Factories\RecurringSeriesFactory;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
@@ -23,6 +24,9 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property RecurringCadence $cadence
  * @property RecurringSeriesStatus $status
  * @property RecurringSeriesUserState $user_state
+ * @property Carbon $first_occurred_on
+ * @property Carbon $last_occurred_on
+ * @property Carbon $next_expected_on
  */
 class RecurringSeries extends Model
 {
