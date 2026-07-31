@@ -6,6 +6,7 @@ use App\Enums\BankingConnectionStatus;
 use App\Enums\BankingProvider;
 use App\Features\CalculateBalancesOnImport;
 use App\Features\Mcp;
+use App\Features\RecurringTransactions;
 use App\Features\TransactionSplitting;
 use App\Jobs\PurgeResidualEncryptionArtifactsJob;
 use App\Models\BankingConnection;
@@ -183,6 +184,7 @@ class HandleInertiaRequests extends Middleware
                 'calculateBalancesOnImport' => false,
                 'mcp' => false,
                 'transactionSplitting' => true,
+                'recurringTransactions' => false,
             ];
         }
 
@@ -190,6 +192,7 @@ class HandleInertiaRequests extends Middleware
             CalculateBalancesOnImport::class,
             Mcp::class,
             TransactionSplitting::class,
+            RecurringTransactions::class,
         ]);
 
         return [
@@ -197,6 +200,7 @@ class HandleInertiaRequests extends Middleware
             'calculateBalancesOnImport' => $features[CalculateBalancesOnImport::class] !== false,
             'mcp' => $features[Mcp::class] !== false,
             'transactionSplitting' => $features[TransactionSplitting::class] !== false,
+            'recurringTransactions' => $features[RecurringTransactions::class] !== false,
         ];
     }
 

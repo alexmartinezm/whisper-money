@@ -22,6 +22,8 @@ use App\Http\Controllers\OpenBanking\InstitutionController;
 use App\Http\Controllers\OpenBanking\InteractiveBrokersController;
 use App\Http\Controllers\OpenBanking\WiseController;
 use App\Http\Controllers\RealEstateDetailController;
+use App\Http\Controllers\RecurringDetectionController;
+use App\Http\Controllers\RecurringSeriesController;
 use App\Http\Controllers\ReEvaluateTransactionRulesController;
 use App\Http\Controllers\RobotsController;
 use App\Http\Controllers\SitemapController;
@@ -174,6 +176,14 @@ Route::middleware(['auth', 'verified', 'onboarded', 'subscribed'])->group(functi
     Route::patch('budgets/{budget}/periods/{period}', [BudgetController::class, 'updatePeriod'])->name('budgets.periods.update');
     Route::patch('budgets/{budget}', [BudgetController::class, 'update'])->name('budgets.update');
     Route::delete('budgets/{budget}', [BudgetController::class, 'destroy'])->name('budgets.destroy');
+});
+
+Route::middleware(['auth', 'verified', 'onboarded', 'subscribed'])->group(function () {
+    Route::get('recurring', [RecurringSeriesController::class, 'index'])->name('recurring.index');
+    Route::patch('recurring/{recurringSeries}', [RecurringSeriesController::class, 'update'])->name('recurring.update');
+    Route::delete('recurring/{recurringSeries}', [RecurringSeriesController::class, 'destroy'])->name('recurring.destroy');
+    Route::post('recurring/detect', [RecurringDetectionController::class, 'store'])->name('recurring.detect');
+    Route::get('recurring/detect/status/{jobId}', [RecurringDetectionController::class, 'status'])->name('recurring.detect.status');
 });
 
 require __DIR__.'/settings.php';

@@ -103,6 +103,7 @@ test('shared feature flags do not include coinbase flag', function () {
         'calculateBalancesOnImport' => false,
         'mcp' => false,
         'transactionSplitting' => true,
+        'recurringTransactions' => false,
     ]);
 });
 

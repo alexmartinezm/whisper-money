@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Schedule;
 
 Schedule::command('budgets:generate-periods')->daily();
+Schedule::command('recurring:detect')->dailyAt('04:00');
 Schedule::command('banking:sync')->everySixHours();
 Schedule::command('banks:check-logos')->weekly();
 Schedule::command('banking:cancel-free-enablebanking')->lastDayOfMonth('18:00');

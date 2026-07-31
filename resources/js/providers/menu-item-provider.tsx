@@ -1,5 +1,6 @@
 import { index as accountsIndex } from '@/actions/App/Http/Controllers/AccountController';
 import { index as budgetsIndex } from '@/actions/App/Http/Controllers/BudgetController';
+import { index as recurringIndex } from '@/actions/App/Http/Controllers/RecurringSeriesController';
 import { index as transactionsIndex } from '@/actions/App/Http/Controllers/TransactionController';
 import { cashflow, dashboard } from '@/routes';
 import { Features, NavItem } from '@/types';
@@ -8,6 +9,7 @@ import {
     LayoutGrid,
     PiggyBank,
     Receipt,
+    Repeat,
     TrendingUp,
 } from 'lucide-react';
 
@@ -18,6 +20,7 @@ const mobileLabels: Record<string, Record<string, string>> = {
         accounts: 'Accounts',
         transactions: 'Movements',
         budgets: 'Budget',
+        recurring: 'Recur.',
     },
     es: {
         dashboard: 'Inicio',
@@ -25,6 +28,15 @@ const mobileLabels: Record<string, Record<string, string>> = {
         accounts: 'Cuentas',
         transactions: 'Movim.',
         budgets: 'Presup.',
+        recurring: 'Recur.',
+    },
+    fr: {
+        dashboard: 'Accueil',
+        cashflow: 'Cashflow',
+        accounts: 'Comptes',
+        transactions: 'Mouv.',
+        budgets: 'Budget',
+        recurring: 'Récur.',
     },
 };
 
@@ -76,6 +88,16 @@ export function getMainNavItems(features: Features, locale: string): NavItem[] {
             icon: PiggyBank,
         },
     );
+
+    if (features.recurringTransactions) {
+        items.push({
+            type: 'nav-item',
+            title: 'Recurring',
+            mobileTitle: getMobileLabel('recurring', locale),
+            href: recurringIndex(),
+            icon: Repeat,
+        });
+    }
 
     return items;
 }
