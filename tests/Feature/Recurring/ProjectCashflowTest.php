@@ -8,19 +8,29 @@ use App\Models\RecurringSeries;
 use App\Models\User;
 use App\Services\Recurring\ProjectCashflow;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Http;
 
 beforeEach(function () {
+    Http::fake();
     $this->project = app(ProjectCashflow::class);
     $this->user = User::factory()->create(['currency_code' => 'EUR']);
 });
 
 /** An account holding a known balance as of today. */
-function liquidAccount(User $user, int $balance, AccountType $type = AccountType::Checking, string $currency = 'EUR'): Account
-{
+function accountWithBalance(
+    User $user,
+    int $balance,
+    AccountType $type = AccountType::Checking,
+    string $currency = 'EUR',
+    bool $includeInNetWorth = true,
+    bool $hiddenOnDashboard = false,
+): Account {
     $account = Account::factory()->create([
         'user_id' => $user->id,
         'currency_code' => $currency,
         'type' => $type,
+        'include_in_net_worth' => $includeInNetWorth,
+        'hidden_on_dashboard' => $hiddenOnDashboard,
     ]);
 
     AccountBalance::factory()->create([
@@ -33,7 +43,7 @@ function liquidAccount(User $user, int $balance, AccountType $type = AccountType
 }
 
 it('walks today balance forward through the expected charges', function () {
-    liquidAccount($this->user, 100000);
+    accountWithBalance($this->user, 100000);
 
     RecurringSeries::factory()->create([
         'user_id' => $this->user->id,
@@ -56,7 +66,7 @@ it('walks today balance forward through the expected charges', function () {
 
 it('counts a weekly charge every time it lands in the window', function () {
     // The old list showed one row per series; a weekly fee hits four times.
-    liquidAccount($this->user, 50000);
+    accountWithBalance($this->user, 50000);
 
     RecurringSeries::factory()->cadence(RecurringCadence::Weekly)->create([
         'user_id' => $this->user->id,
@@ -74,7 +84,7 @@ it('counts a weekly charge every time it lands in the window', function () {
 });
 
 it('reports the lowest point, not just the ending balance', function () {
-    liquidAccount($this->user, 10000);
+    accountWithBalance($this->user, 10000);
 
     RecurringSeries::factory()->create([
         'user_id' => $this->user->id,
@@ -101,11 +111,14 @@ it('reports the lowest point, not just the ending balance', function () {
         ->and($forecast['lowest']['date'])->toBe(CarbonImmutable::today()->addDays(3)->toDateString());
 });
 
-it('counts only spendable accounts', function () {
-    liquidAccount($this->user, 30000, AccountType::Checking);
-    liquidAccount($this->user, 20000, AccountType::Savings);
-    liquidAccount($this->user, 500000, AccountType::Investment);
-    liquidAccount($this->user, 900000, AccountType::RealEstate);
+it('uses the same included accounts as net worth', function () {
+    accountWithBalance($this->user, 30000, AccountType::Checking);
+    accountWithBalance($this->user, 20000, AccountType::Savings);
+    accountWithBalance($this->user, 500000, AccountType::Investment, 'EUR', true, true);
+    accountWithBalance($this->user, 900000, AccountType::RealEstate);
+    accountWithBalance($this->user, 100000, AccountType::Loan);
+    accountWithBalance($this->user, 400000, AccountType::CreditCard);
+    accountWithBalance($this->user, 700000, AccountType::Checking, 'EUR', false);
 
     RecurringSeries::factory()->create([
         'user_id' => $this->user->id,
@@ -115,12 +128,12 @@ it('counts only spendable accounts', function () {
         'interval_days' => 30,
     ]);
 
-    expect($this->project->forUser($this->user, 30)['starting_balance'])->toBe(50000);
+    expect($this->project->forUser($this->user, 30)['starting_balance'])->toBe(1350000);
 });
 
 it('leaves other currencies out and says so', function () {
-    liquidAccount($this->user, 100000);
-    liquidAccount($this->user, 100000, AccountType::Checking, 'USD');
+    accountWithBalance($this->user, 100000);
+    accountWithBalance($this->user, 100000, AccountType::Checking, 'USD', false);
 
     RecurringSeries::factory()->create([
         'user_id' => $this->user->id,
@@ -145,7 +158,7 @@ it('leaves other currencies out and says so', function () {
 });
 
 it('ignores dismissed and lapsed series', function () {
-    liquidAccount($this->user, 100000);
+    accountWithBalance($this->user, 100000);
 
     RecurringSeries::factory()->ignored()->create([
         'user_id' => $this->user->id,
@@ -167,7 +180,7 @@ it('ignores dismissed and lapsed series', function () {
 
 it('rolls a stale expected date forward instead of reporting a past charge', function () {
     // Detection runs daily, so a series can be a few days out of date.
-    liquidAccount($this->user, 100000);
+    accountWithBalance($this->user, 100000);
 
     RecurringSeries::factory()->create([
         'user_id' => $this->user->id,
@@ -193,7 +206,7 @@ it('copes with a user who has no accounts', function () {
 
 it('surfaces a quarterly charge that never lands inside the window', function () {
     // The gap this list exists for: detected, but shown against no date before.
-    liquidAccount($this->user, 100000);
+    accountWithBalance($this->user, 100000);
 
     RecurringSeries::factory()->cadence(RecurringCadence::Quarterly)->create([
         'user_id' => $this->user->id,
@@ -221,7 +234,7 @@ it('surfaces a quarterly charge that never lands inside the window', function ()
 it('leaves out anything already billing every month', function () {
     // Twelve months of Netflix, Spotify and the gym would bury the one premium
     // this list exists for, and the projection above already shows them.
-    liquidAccount($this->user, 100000);
+    accountWithBalance($this->user, 100000);
 
     RecurringSeries::factory()->cadence(RecurringCadence::Monthly)->create([
         'user_id' => $this->user->id,
@@ -247,7 +260,7 @@ it('leaves out anything already billing every month', function () {
 });
 
 it('lists only the months that have something due', function () {
-    liquidAccount($this->user, 100000);
+    accountWithBalance($this->user, 100000);
 
     RecurringSeries::factory()->cadence(RecurringCadence::Yearly)->create([
         'user_id' => $this->user->id,
@@ -263,7 +276,7 @@ it('lists only the months that have something due', function () {
 });
 
 it('orders the charges by the day they land', function () {
-    liquidAccount($this->user, 100000);
+    accountWithBalance($this->user, 100000);
 
     foreach ([['Later', 58], ['Sooner', 40], ['Middle', 50]] as [$name, $offset]) {
         RecurringSeries::factory()->cadence(RecurringCadence::Yearly)->create([
@@ -286,7 +299,7 @@ it('orders the charges by the day they land', function () {
 });
 
 it('keeps the outlook clear of the projection window', function () {
-    liquidAccount($this->user, 100000);
+    accountWithBalance($this->user, 100000);
 
     RecurringSeries::factory()->cadence(RecurringCadence::Quarterly)->create([
         'user_id' => $this->user->id,
@@ -308,7 +321,7 @@ it('keeps the outlook clear of the projection window', function () {
 });
 
 it('totals a month rather than restating a lone charge', function () {
-    liquidAccount($this->user, 100000);
+    accountWithBalance($this->user, 100000);
 
     // Anchored to a month start so both charges are guaranteed the same month.
     $monthStart = CarbonImmutable::today()->addDays(60)->startOfMonth();

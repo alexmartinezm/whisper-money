@@ -2,30 +2,26 @@
 
 namespace App\Services\Recurring;
 
-use App\Enums\AccountType;
 use App\Enums\RecurringSeriesStatus;
 use App\Enums\RecurringSeriesUserState;
 use App\Models\Account;
 use App\Models\RecurringSeries;
 use App\Models\User;
 use App\Services\BalanceLookup;
+use App\Services\ExchangeRateService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 
 /**
  * Answers "where will my balance be at the end of the month" by walking today's
- * cash forward through the charges detection already knows about.
+ * net worth forward through the charges detection already knows about.
  *
  * The screen used to only look backwards: it could say what repeats, but not
- * what that means for the money actually in the account.
+ * what that means for the accounts included in net worth.
  */
 class ProjectCashflow
 {
-    /**
-     * Accounts that hold spendable cash. Investments, loans, property and
-     * retirement move on their own logic and would make the runway meaningless.
-     */
-    private const LIQUID_TYPES = [AccountType::Checking, AccountType::Savings];
+    public function __construct(private ExchangeRateService $exchangeRateService) {}
 
     /**
      * @return array{
@@ -58,7 +54,7 @@ class ProjectCashflow
             ->get();
 
         $occurrences = $this->expand($series->where('currency_code', $currency), $today, $horizon);
-        $balance = $this->liquidBalance($user, $spaceId, $currency, $today);
+        $balance = $this->includedNetWorthBalance($user, $spaceId, $currency, $today);
 
         $running = $balance;
         $expectedIn = 0;
@@ -199,18 +195,20 @@ class ProjectCashflow
     }
 
     /**
-     * Today's spendable cash, in the user's own currency only. Converting other
-     * currencies here would put an estimate at the head of a figure the rest of
-     * the projection reports exactly.
+     * Today's net worth for accounts included in the user's net-worth setting,
+     * converted into the user's own currency. This mirrors the dashboard's
+     * net-worth calculation, including its type and liability rules.
      */
-    private function liquidBalance(User $user, string $spaceId, string $currency, CarbonImmutable $today): int
+    private function includedNetWorthBalance(User $user, string $spaceId, string $currency, CarbonImmutable $today): int
     {
         $accounts = Account::query()
             ->where('user_id', $user->id)
             ->where('space_id', $spaceId)
-            ->where('currency_code', $currency)
-            ->whereIn('type', self::LIQUID_TYPES)
-            ->pluck('id');
+            ->where(function ($query) {
+                $query->whereNull('include_in_net_worth')
+                    ->orWhere('include_in_net_worth', true);
+            })
+            ->get();
 
         if ($accounts->isEmpty()) {
             return 0;
@@ -218,8 +216,28 @@ class ProjectCashflow
 
         // BalanceLookup works in mutable Carbon.
         $asOf = $today->toMutable();
-        $lookup = BalanceLookup::forAccounts($accounts, $today->subYear()->toMutable(), $asOf);
+        $lookup = BalanceLookup::forAccounts($accounts->pluck('id'), $today->subYear()->toMutable(), $asOf);
 
-        return (int) $accounts->sum(fn (string $id): int => $lookup->getBalanceAt($id, $asOf));
+        $total = 0;
+
+        foreach ($accounts as $account) {
+            if (! $account->type->countsInNetWorth()) {
+                continue;
+            }
+
+            $balance = $lookup->getBalanceAt($account->id, $asOf);
+            $convertedBalance = $this->exchangeRateService->convert(
+                $account->currency_code,
+                $currency,
+                $balance,
+                $today->toDateString(),
+            );
+
+            $total += $account->type->reducesNetWorth()
+                ? -abs($convertedBalance)
+                : $convertedBalance;
+        }
+
+        return $total;
     }
 }
