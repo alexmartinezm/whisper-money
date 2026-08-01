@@ -21,6 +21,7 @@ use App\Mcp\Tools\ListAccounts;
 use App\Mcp\Tools\ListBudgets;
 use App\Mcp\Tools\ListCategories;
 use App\Mcp\Tools\ListLabels;
+use App\Mcp\Tools\ListRecurringSeries;
 use App\Mcp\Tools\ListSpaces;
 use App\Mcp\Tools\SearchTransactions;
 use App\Mcp\Tools\SpendingByCategory;
@@ -37,7 +38,7 @@ use Laravel\Mcp\Server\Attributes\Version;
 use Laravel\Mcp\Server\Tool;
 
 #[Name('Whisper Money')]
-#[Version('1.2.0')]
+#[Version('1.3.0')]
 #[Instructions(<<<'MARKDOWN'
 Access to the authenticated user's Whisper Money finance data, for analysing
 spending, cashflow and net worth — and, with write access, for editing that
@@ -55,8 +56,12 @@ data.
 - For monthly budgets, allocation changes use the server application date. A change
   on the first day includes the current period; after that it affects periods whose
   start date is on or after the application date, plus future periods.
-- To find recurring charges (subscriptions), use `search_transactions` and group
-  the results by merchant and cadence yourself.
+- Recurring charges (subscriptions, bills, standing payments) are detected server-side
+  on a schedule. Read them with `list_recurring_series` instead of grouping
+  `search_transactions` results by merchant and cadence yourself. Expected amounts are
+  medians and may be marked variable; `monthly_equivalent_amount` rescales any cadence
+  to a month so series can be compared and summed. Totals are reported per currency in
+  `monthly_expense_totals`; never add amounts from different currencies together.
 
 Write tools ... require a read & write Sanctum token; OAuth connections follow the current
 WriteTool policy. A read-only Sanctum token can analyse data but never change it. Bank-connected accounts
@@ -80,6 +85,7 @@ class WhisperMoneyServer extends Server
         ListBudgets::class,
         ListCategories::class,
         ListLabels::class,
+        ListRecurringSeries::class,
         ListSpaces::class,
 
         // Write

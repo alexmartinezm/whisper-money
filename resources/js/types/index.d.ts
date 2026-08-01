@@ -44,6 +44,7 @@ export interface Features {
     calculateBalancesOnImport: boolean;
     mcp: boolean;
     transactionSplitting: boolean;
+    recurringTransactions: boolean;
 }
 
 export interface ExpiredBankingConnectionNotification {
