@@ -86,6 +86,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Outlook
+    |--------------------------------------------------------------------------
+    |
+    | How many months past the forecast window to list. A quarterly premium or
+    | an annual renewal never lands inside 30 days, so without this they are
+    | detected but shown against no date at all.
+    |
+    | Only charges that do not come round every month appear here. Listing the
+    | monthly ones too would restate the projection above twelve times over and
+    | bury the irregular charges this list exists for.
+    |
+    */
+    'outlook_months' => 12,
+
+    /*
+    |--------------------------------------------------------------------------
     | Amount stability
     |--------------------------------------------------------------------------
     |

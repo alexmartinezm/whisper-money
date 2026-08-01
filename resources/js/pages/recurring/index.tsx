@@ -5,6 +5,7 @@ import {
 import { index } from '@/actions/App/Http/Controllers/RecurringSeriesController';
 import HeadingSmall from '@/components/heading-small';
 import { CashflowForecastCard } from '@/components/recurring/cashflow-forecast';
+import { RecurringOutlook } from '@/components/recurring/recurring-outlook';
 import { RecurringSeriesRow } from '@/components/recurring/recurring-series-row';
 import { RecurringSummaryCards } from '@/components/recurring/recurring-summary-cards';
 import { Button } from '@/components/ui/button';
@@ -176,6 +177,11 @@ export default function RecurringIndex({ series, summary, forecast }: Props) {
                         <RecurringSummaryCards summary={summary} />
 
                         <CashflowForecastCard forecast={forecast} />
+
+                        <RecurringOutlook
+                            months={forecast.later}
+                            currencyCode={forecast.currency_code}
+                        />
 
                         {needsReview.length > 0 && (
                             <section
