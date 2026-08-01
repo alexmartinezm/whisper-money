@@ -136,12 +136,13 @@ it('counts only the accounts a direct debit can come out of', function () {
     expect($this->project->forUser($this->user, 30)['starting_balance'])->toBe(55000);
 });
 
-it('counts a spendable account the user left out of net worth', function () {
-    // That flag answers "am I getting richer", which is a different question
-    // from "can this account pay a bill on Thursday".
+it('does not count a spendable account left out of net worth', function () {
     accountWithBalance($this->user, 40000, AccountType::Checking, 'EUR', false);
 
-    expect($this->project->forUser($this->user, 30)['starting_balance'])->toBe(40000);
+    $forecast = $this->project->forUser($this->user, 30);
+
+    expect($forecast['starting_balance'])->toBe(0)
+        ->and($forecast['accounts'])->toBeEmpty();
 });
 
 it('names the accounts behind the figure', function () {
@@ -158,7 +159,7 @@ it('names the accounts behind the figure', function () {
 
 it('converts a second currency instead of dropping it', function () {
     accountWithBalance($this->user, 100000);
-    accountWithBalance($this->user, 100000, AccountType::Checking, 'USD', false);
+    accountWithBalance($this->user, 100000, AccountType::Checking, 'USD');
 
     RecurringSeries::factory()->create([
         'user_id' => $this->user->id,
