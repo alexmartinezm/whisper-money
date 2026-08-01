@@ -86,6 +86,27 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Everyday spending
+    |--------------------------------------------------------------------------
+    |
+    | Recurring charges are a minority of what leaves an account: groceries,
+    | restaurants, fuel and presents are not subscriptions. A runway built from
+    | detected charges alone is optimistic every single month, so it also
+    | estimates the rest from what the user actually spends.
+    |
+    | The estimate is the median of the last `spending_lookback_months` complete
+    | months of non-recurring, expense-side outflow. A median rather than a mean
+    | so one unusual month cannot set the pace; complete months only, so the one
+    | in progress does not read as a cheap month; and a minimum below which
+    | nothing is shown at all, because a confident figure drawn from two weeks
+    | of history is worse than admitting there is not enough to go on.
+    |
+    */
+    'spending_lookback_months' => 3,
+    'spending_min_months' => 3,
+
+    /*
+    |--------------------------------------------------------------------------
     | Outlook
     |--------------------------------------------------------------------------
     |

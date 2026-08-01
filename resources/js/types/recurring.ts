@@ -84,6 +84,26 @@ export interface OutlookMonth {
     charges: OutlookCharge[];
 }
 
+/** The same window walked again with everyday spending in it. */
+export interface EverydaySpending {
+    /** Median month of non-recurring outflow, negative. */
+    monthly: number;
+    months_observed: number;
+    ending_balance: number;
+    lowest: { date: string; balance: number };
+}
+
+/** A budget the current pace will overshoot before the period is out. */
+export interface BudgetPace {
+    id: UUID;
+    name: string;
+    spent: number;
+    available: number;
+    projected: number;
+    over_by: number;
+    period_end: string;
+}
+
 export interface CashflowForecast {
     currency_code: string;
     days: number;
@@ -92,6 +112,10 @@ export interface CashflowForecast {
     expected_in: number;
     expected_out: number;
     lowest: { date: string; balance: number };
+    /** The accounts behind `starting_balance`, so the figure can be checked. */
+    accounts: { id: UUID; name: string }[];
+    /** Null when there is too little history to estimate a pace. */
+    spending: EverydaySpending | null;
     /** Currencies with series that this projection deliberately leaves out. */
     other_currencies: string[];
     occurrences: ForecastOccurrence[];

@@ -27,7 +27,11 @@ it('renders the recurring page with its series', function () {
             ->where('series.0.id', $series->id)
             ->where('series.0.display_name', 'Netflix')
             ->has('summary')
-            ->has('forecast'));
+            ->has('forecast')
+            // Both of these carry an empty state, so the page has to receive
+            // them even when there is nothing to say.
+            ->has('forecast.accounts')
+            ->has('budgetPace'));
 });
 
 it('sums monthly cost across cadences in the summary', function () {

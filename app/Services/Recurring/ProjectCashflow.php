@@ -10,18 +10,28 @@ use App\Models\User;
 use App\Services\BalanceLookup;
 use App\Services\ExchangeRateService;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 
 /**
- * Answers "where will my balance be at the end of the month" by walking today's
- * net worth forward through the charges detection already knows about.
+ * Answers "will I make it to payday" by walking today's spendable cash forward
+ * through the charges detection already knows about, plus an estimate of the
+ * everyday spending it does not.
  *
- * The screen used to only look backwards: it could say what repeats, but not
- * what that means for the accounts included in net worth.
+ * Deliberately a different question from the dashboard's net worth. Property, a
+ * pension and an investment portfolio all count towards being better off and
+ * none of them pay a direct debit, so a runway that started from net worth
+ * could not dip below zero for anyone with a flat — and would sit permanently
+ * below zero for anyone early in a mortgage. Which accounts feed the figure is
+ * reported alongside it, because "it does not match my accounts" is answered by
+ * saying which ones count, not by quietly counting more.
  */
 class ProjectCashflow
 {
-    public function __construct(private ExchangeRateService $exchangeRateService) {}
+    public function __construct(
+        private ExchangeRateService $exchangeRateService,
+        private EstimateDiscretionarySpending $spending,
+    ) {}
 
     /**
      * @return array{
@@ -32,6 +42,8 @@ class ProjectCashflow
      *     expected_in: int,
      *     expected_out: int,
      *     lowest: array{date: string, balance: int},
+     *     accounts: list<array{id: string, name: string}>,
+     *     spending: null|array{monthly: int, months_observed: int, ending_balance: int, lowest: array{date: string, balance: int}},
      *     other_currencies: list<string>,
      *     occurrences: list<array{date: string, series_id: string, display_name: string, amount: int, amount_is_variable: bool, balance_after: int, category: ?string}>,
      *     later: list<array{month: string, total: int, charges: list<array{date: string, series_id: string, display_name: string, amount: int, amount_is_variable: bool, category: ?string}>}>
@@ -54,7 +66,8 @@ class ProjectCashflow
             ->get();
 
         $occurrences = $this->expand($series->where('currency_code', $currency), $today, $horizon);
-        $balance = $this->includedNetWorthBalance($user, $spaceId, $currency, $today);
+        $accounts = $this->spendableAccounts($user, $spaceId);
+        $balance = $this->spendableBalance($accounts, $currency, $today);
 
         $running = $balance;
         $expectedIn = 0;
@@ -83,6 +96,11 @@ class ProjectCashflow
             'expected_in' => $expectedIn,
             'expected_out' => $expectedOut,
             'lowest' => $lowest,
+            'accounts' => $accounts
+                ->map(fn (Account $account): array => ['id' => $account->id, 'name' => $account->name])
+                ->values()
+                ->all(),
+            'spending' => $this->everydaySpending($accounts, $currency, $today, $days, $balance, $occurrences),
             'other_currencies' => $series
                 ->pluck('currency_code')
                 ->reject(fn (string $code): bool => $code === $currency)
@@ -195,21 +213,32 @@ class ProjectCashflow
     }
 
     /**
-     * Today's net worth for accounts included in the user's net-worth setting,
-     * converted into the user's own currency. This mirrors the dashboard's
-     * net-worth calculation, including its type and liability rules.
+     * The accounts a direct debit can actually come out of.
+     *
+     * @return EloquentCollection<int, Account>
      */
-    private function includedNetWorthBalance(User $user, string $spaceId, string $currency, CarbonImmutable $today): int
+    private function spendableAccounts(User $user, string $spaceId): EloquentCollection
     {
-        $accounts = Account::query()
+        return Account::query()
             ->where('user_id', $user->id)
             ->where('space_id', $spaceId)
-            ->where(function ($query) {
-                $query->whereNull('include_in_net_worth')
-                    ->orWhere('include_in_net_worth', true);
-            })
-            ->get();
+            ->orderBy('name')
+            ->get()
+            ->filter(fn (Account $account): bool => $account->type->holdsSpendableCash())
+            ->values();
+    }
 
+    /**
+     * Today's spendable cash, converted into the user's own currency.
+     *
+     * Currencies are converted rather than dropped: money in a second currency
+     * is still money, and silently leaving an account out was what made this
+     * figure impossible to reconcile against the accounts screen.
+     *
+     * @param  EloquentCollection<int, Account>  $accounts
+     */
+    private function spendableBalance(EloquentCollection $accounts, string $currency, CarbonImmutable $today): int
+    {
         if ($accounts->isEmpty()) {
             return 0;
         }
@@ -218,26 +247,69 @@ class ProjectCashflow
         $asOf = $today->toMutable();
         $lookup = BalanceLookup::forAccounts($accounts->pluck('id'), $today->subYear()->toMutable(), $asOf);
 
-        $total = 0;
+        return (int) $accounts->sum(fn (Account $account): int => $this->exchangeRateService->convert(
+            $account->currency_code,
+            $currency,
+            $lookup->getBalanceAt($account->id, $asOf),
+            $today->toDateString(),
+        ));
+    }
 
-        foreach ($accounts as $account) {
-            if (! $account->type->countsInNetWorth()) {
-                continue;
-            }
+    /**
+     * The same window walked again, this time with everyday spending in it.
+     *
+     * Reported apart from the exact figures rather than folded into them: the
+     * four headline numbers each reconcile against the list of charges below,
+     * and an estimate mixed into an auditable total would cost that without
+     * announcing it. The estimate spreads a median month evenly across the
+     * window, which is wrong about any given Tuesday and about right by the end
+     * of the month — the horizon the number is read at.
+     *
+     * @param  EloquentCollection<int, Account>  $accounts
+     * @param  list<array{date: string, series_id: string, display_name: string, amount: int, amount_is_variable: bool, category: ?string}>  $occurrences
+     * @return null|array{monthly: int, months_observed: int, ending_balance: int, lowest: array{date: string, balance: int}}
+     */
+    private function everydaySpending(
+        EloquentCollection $accounts,
+        string $currency,
+        CarbonImmutable $today,
+        int $days,
+        int $balance,
+        array $occurrences,
+    ): ?array {
+        $estimate = $this->spending->forAccounts($accounts->pluck('id'), $currency, $today);
 
-            $balance = $lookup->getBalanceAt($account->id, $asOf);
-            $convertedBalance = $this->exchangeRateService->convert(
-                $account->currency_code,
-                $currency,
-                $balance,
-                $today->toDateString(),
-            );
-
-            $total += $account->type->reducesNetWorth()
-                ? -abs($convertedBalance)
-                : $convertedBalance;
+        if ($estimate === null || $estimate['monthly'] >= 0) {
+            return null;
         }
 
-        return $total;
+        $charges = [];
+        foreach ($occurrences as $occurrence) {
+            $charges[$occurrence['date']] = ($charges[$occurrence['date']] ?? 0) + $occurrence['amount'];
+        }
+
+        // A month of spending per thirty days of window. Rounding the running
+        // total rather than the daily slice keeps a rounded cent from
+        // compounding into euros over a long horizon.
+        $perDay = $estimate['monthly'] / 30;
+        $running = $balance;
+        $lowest = ['date' => $today->toDateString(), 'balance' => $balance];
+
+        for ($day = 1; $day <= $days; $day++) {
+            $date = $today->addDays($day)->toDateString();
+            $slice = (int) round($perDay * $day) - (int) round($perDay * ($day - 1));
+            $running += $slice + ($charges[$date] ?? 0);
+
+            if ($running < $lowest['balance']) {
+                $lowest = ['date' => $date, 'balance' => $running];
+            }
+        }
+
+        return [
+            'monthly' => $estimate['monthly'],
+            'months_observed' => $estimate['months_observed'],
+            'ending_balance' => $running,
+            'lowest' => $lowest,
+        ];
     }
 }

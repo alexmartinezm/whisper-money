@@ -1824,7 +1824,7 @@
     "We're Víctor and Álvaro, the founders of Whisper Money. Someone you invited landed in our top 10 — that makes you a Whisper Money founder too.": "Nous sommes Víctor et Álvaro, les fondateurs de Whisper Money. Une personne que vous avez invitée figure dans le top 10, ce qui fait de vous également un utilisateur de Whisper Money dès le premier jour.",
     "We're Víctor and Álvaro, the founders of Whisper Money. You joined the waitlist a while back — thanks for waiting. Whisper Money is open, and we saved a welcome gift for you.": "Nous sommes Víctor et Álvaro, les fondateurs de Whisper Money. Vous vous êtes inscrit sur la liste d'attente il y a quelque temps – merci d'avoir attendu. Vous pouvez vous inscrire maintenant et nous vous avons réservé un cadeau de bienvenue.",
     "We're Víctor and Álvaro, the founders of Whisper Money. You're one of our first 10. That makes you a Whisper Money founder user.": "Nous sommes Víctor et Álvaro, les fondateurs de Whisper Money. Vous êtes dans le top 10. Cela fait de vous un utilisateur de Whisper Money dès le premier jour.",
-    "We're looking through your transaction history to find expenses that match this budget. This usually takes a few seconds.": "Nous examinons l'historique de vos transactions pour trouver les dépenses correspondant à ce budget. Cela prend généralement quelques secondes.",
+    "We're looking through your transaction history to find expenses that match this budget. This usually takes a few seconds.": "Nous examinons votre historique de transactions pour trouver les dépenses correspondant à ce budget. Cela prend généralement quelques secondes.",
     "We're looking through your transaction\\n                                    history to find expenses that match this\\n                                    budget. This usually takes a few seconds.": "Nous recherchons dans votre historique de transactions les dépenses correspondant à ce budget. Cela prend généralement quelques secondes.",
     "We're sorry to see you go": "Nous sommes désolés de vous voir partir",
     "We're sorry to see you go, :name": "Nous sommes désolés de vous voir partir, :name",
@@ -2206,7 +2206,6 @@
     "Planning allocation": "Planification de l'allocation",
     "Save allocation": "Enregistrer l'allocation",
     "This period is ready for planning. Spending and transactions will appear when it starts.": "Cette période est prête à être planifiée. Les dépenses et les transactions apparaîtront lorsqu'elle commencera.",
-    "We're looking through your transaction history to find expenses that match this budget. This usually takes a few seconds.": "Nous examinons votre historique de transactions pour trouver les dépenses correspondant à ce budget. Cela prend généralement quelques secondes.",
     "Active": "Actives",
     "Actions for :name": "Actions pour :name",
     "Charges expected in the next 30 days": "Prélèvements prévus dans les 30 prochains jours",
@@ -2256,5 +2255,13 @@
     "When": "Quand",
     "Coming up: :count recurring charges": "À venir : :count prélèvements récurrents",
     "Further out": "Plus tard",
-    "Charges that do not come round every month, so they never land in the projection above. No running balance here — it would ignore everything you spend day to day.": "Prélèvements qui ne reviennent pas tous les mois et qui n'entrent donc jamais dans la projection ci-dessus. Pas de solde cumulé ici : il ignorerait toutes vos dépenses courantes."
+    "Charges that do not come round every month, so they never land in the projection above. No running balance here — it would ignore everything you spend day to day.": "Prélèvements qui ne reviennent pas tous les mois et qui n'entrent donc jamais dans la projection ci-dessus. Pas de solde cumulé ici : il ignorerait toutes vos dépenses courantes.",
+    "The cash you can actually spend, walked forward through the charges expected below.": "L'argent que vous pouvez réellement dépenser, projeté avec les prélèvements attendus ci-dessous.",
+    "You also spend about :monthly a month outside these charges. Counting it, you would close around :projected.": "Vous dépensez aussi environ :monthly par mois en dehors de ces prélèvements. En le comptant, vous termineriez autour de :projected.",
+    "At your usual pace you would be down to :amount around :date.": "À votre rythme habituel, vous tomberiez à :amount vers le :date.",
+    "Counting :accounts.": "Compte :accounts.",
+    "No current or savings account to count, so today reads as zero.": "Aucun compte courant ni d'épargne à compter, donc aujourd'hui affiche zéro.",
+    "Heading over budget": "En route pour dépasser le budget",
+    "At this pace :name closes at :projected, :over over its :available.": "À ce rythme :name termine à :projected, :over au-dessus de ses :available.",
+    "Review budgets": "Revoir les budgets"
 }

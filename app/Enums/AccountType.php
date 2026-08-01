@@ -27,6 +27,21 @@ enum AccountType: string
     }
 
     /**
+     * Whether this type holds cash the user can actually spend before payday.
+     *
+     * A runway is a question about liquidity, not wealth: property, pensions
+     * and investments move on their own logic, a loan is a debt schedule, and a
+     * credit card is a bill rather than a balance. The catch-all type is
+     * counted because that is where wallets and neobank balances end up, and
+     * money silently missing from the runway is worse than money it cannot
+     * fully vouch for.
+     */
+    public function holdsSpendableCash(): bool
+    {
+        return in_array($this, [self::Checking, self::Savings, self::Others], true);
+    }
+
+    /**
      * Whether this account type is part of the net worth total at all. Credit
      * cards are spending accounts, not wealth, so they are excluded entirely
      * (neither added nor subtracted) while still being tracked on their own.
