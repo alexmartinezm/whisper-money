@@ -141,8 +141,20 @@ it('does not count a spendable account left out of net worth', function () {
 
     $forecast = $this->project->forUser($this->user, 30);
 
+    // Reported apart so the screen can tell "you have none" from "you excluded
+    // them all" — both read as zero, only one is worth investigating.
     expect($forecast['starting_balance'])->toBe(0)
-        ->and($forecast['accounts'])->toBeEmpty();
+        ->and($forecast['accounts'])->toBeEmpty()
+        ->and($forecast['excluded_accounts'])->toBe(1);
+});
+
+it('does not call an excluded property a held-back spendable account', function () {
+    accountWithBalance($this->user, 900000, AccountType::RealEstate, 'EUR', false);
+    accountWithBalance($this->user, 500000, AccountType::Investment, 'EUR', false);
+
+    // A flat was never going to pay a direct debit, so excluding it changes
+    // nothing about the runway and is not worth mentioning.
+    expect($this->project->forUser($this->user, 30)['excluded_accounts'])->toBe(0);
 });
 
 it('names the accounts behind the figure', function () {
@@ -150,11 +162,12 @@ it('names the accounts behind the figure', function () {
     $checking = accountWithBalance($this->user, 30000, AccountType::Checking);
     accountWithBalance($this->user, 900000, AccountType::RealEstate);
 
-    $accounts = $this->project->forUser($this->user, 30)['accounts'];
+    $forecast = $this->project->forUser($this->user, 30);
 
-    expect($accounts)->toHaveCount(1)
-        ->and($accounts[0]['id'])->toBe($checking->id)
-        ->and($accounts[0]['name'])->toBe($checking->name);
+    expect($forecast['accounts'])->toHaveCount(1)
+        ->and($forecast['accounts'][0]['id'])->toBe($checking->id)
+        ->and($forecast['accounts'][0]['name'])->toBe($checking->name)
+        ->and($forecast['excluded_accounts'])->toBe(0);
 });
 
 it('converts a second currency instead of dropping it', function () {

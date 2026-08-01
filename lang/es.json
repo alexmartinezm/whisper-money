@@ -2415,8 +2415,9 @@
     "You also spend about :monthly a month outside these charges. Counting it, you would close around :projected.": "Además sueles gastar unos :monthly al mes fuera de estos cargos. Contándolo, cerrarías sobre :projected.",
     "At your usual pace you would be down to :amount around :date.": "A tu ritmo habitual te quedarías en :amount sobre el :date.",
     "Counting :accounts.": "Cuenta :accounts.",
-    "No current or savings account to count, so today reads as zero.": "No hay ninguna cuenta corriente ni de ahorro que contar, así que hoy sale a cero.",
     "Heading over budget": "Camino de pasarte del presupuesto",
     "At this pace :name closes at :projected, :over over its :available.": "A este ritmo :name cierra en :projected, :over por encima de sus :available.",
-    "Review budgets": "Revisar presupuestos"
+    "Review budgets": "Revisar presupuestos",
+    "No account holds spendable cash, so today reads as zero.": "No hay ninguna cuenta con dinero gastable, así que hoy sale a cero.",
+    "Your spendable accounts are all excluded from net worth, so today reads as zero.": "Todas tus cuentas con dinero gastable están excluidas del patrimonio, así que hoy sale a cero."
 }
