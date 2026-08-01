@@ -13,6 +13,7 @@ use App\Models\BankingConnection;
 use App\Services\CurrencyOptions;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Http\Request;
+use Inertia\Inertia;
 use Inertia\Middleware;
 use Laravel\Pennant\Feature;
 
@@ -163,7 +164,11 @@ class HandleInertiaRequests extends Middleware
             'hasEncryptionSetup' => $user?->encryption_salt !== null,
             'hasEncryptedTransactions' => $hasEncryptedTransactions,
             'locale' => app()->getLocale(),
-            'translations' => $this->getTranslations(),
+            // The dictionary is ~250 KB in es/fr and never changes between
+            // requests. As a "once" prop it ships on the first load and is
+            // omitted from every later visit, which also skips re-reading the
+            // file from disk.
+            'translations' => Inertia::once(fn (): array => $this->getTranslations()),
             'currencies' => [
                 'profile' => $this->currencyOptions->primaryOptions(),
                 'accounts' => $this->currencyOptions->accountOptions(),

@@ -220,12 +220,21 @@ createInertiaApp({
             (initialPageProps?.translations as Record<string, string>) ?? {},
         );
 
-        // Keep translations in sync on every Inertia navigation
+        // Keep translations in sync on every Inertia navigation.
+        //
+        // The dictionary is a "once" prop: the server sends it on the first
+        // load and omits it afterwards, so an absent value means "unchanged",
+        // not "empty". Overwriting with {} here would blank the UI on the
+        // second page.
         router.on('navigate', (event) => {
             const pageProps = event.detail.page.props as unknown as SharedData;
-            setTranslations(
-                (pageProps?.translations as Record<string, string>) ?? {},
-            );
+            const translations = pageProps?.translations as
+                | Record<string, string>
+                | undefined;
+
+            if (translations !== undefined) {
+                setTranslations(translations);
+            }
 
             showSubscriptionPaymentIssueToast(
                 pageProps.subscriptionPaymentIssue,
