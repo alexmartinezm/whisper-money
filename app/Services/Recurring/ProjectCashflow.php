@@ -222,6 +222,7 @@ class ProjectCashflow
         return Account::query()
             ->where('user_id', $user->id)
             ->where('space_id', $spaceId)
+            ->where('include_in_net_worth', true)
             ->orderBy('name')
             ->get()
             ->filter(fn (Account $account): bool => $account->type->holdsSpendableCash())
