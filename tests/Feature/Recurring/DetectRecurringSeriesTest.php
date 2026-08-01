@@ -10,6 +10,7 @@ use App\Models\RecurringSeries;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Recurring\DetectRecurringSeries;
+use App\Services\Recurring\MerchantKeyBuilder;
 use Carbon\CarbonImmutable;
 
 beforeEach(function () {
@@ -56,6 +57,49 @@ function monthlyCharges(
         ]))
         ->all();
 }
+
+it('selects the merchant field according to transaction direction', function () {
+    $builder = app(MerchantKeyBuilder::class);
+
+    $cases = [
+        [
+            'amount' => 250000,
+            'creditor_name' => 'ACCOUNT HOLDER',
+            'debtor_name' => 'LATIVE LIMITED',
+            'expected' => ['debtor_name', 'lative limited'],
+        ],
+        [
+            'amount' => -250000,
+            'creditor_name' => 'LATIVE LIMITED',
+            'debtor_name' => 'ACCOUNT HOLDER',
+            'expected' => ['creditor_name', 'lative limited'],
+        ],
+        [
+            'amount' => 250000,
+            'creditor_name' => null,
+            'debtor_name' => 'LATIVE LIMITED',
+            'expected' => ['debtor_name', 'lative limited'],
+        ],
+        [
+            'amount' => -250000,
+            'creditor_name' => 'LATIVE LIMITED',
+            'debtor_name' => null,
+            'expected' => ['creditor_name', 'lative limited'],
+        ],
+    ];
+
+    foreach ($cases as $case) {
+        $transaction = Transaction::factory()->plaintext()->create([
+            'user_id' => $this->user->id,
+            'account_id' => $this->account->id,
+            'amount' => $case['amount'],
+            'creditor_name' => $case['creditor_name'],
+            'debtor_name' => $case['debtor_name'],
+        ]);
+
+        expect($builder->keyFor($transaction, [], 0))->toBe($case['expected']);
+    }
+});
 
 it('detects a monthly subscription', function () {
     monthlyCharges($this->user, $this->account, 'Netflix', categoryId: $this->category->id);
@@ -220,6 +264,56 @@ it('keeps income and expense from the same counterparty apart', function () {
 
     expect(RecurringSeries::query()->where('direction', 'income')->sole()->expected_amount)->toBe(250000)
         ->and(RecurringSeries::query()->where('direction', 'expense')->sole()->expected_amount)->toBe(-5000);
+});
+
+it('groups income by debtor when both bank counterparty fields are populated', function () {
+    $anchor = CarbonImmutable::today()->subDays(3);
+
+    foreach (range(0, 3) as $index) {
+        Transaction::factory()->plaintext()->create([
+            'user_id' => $this->user->id,
+            'account_id' => $this->account->id,
+            'creditor_name' => 'ACCOUNT HOLDER',
+            'debtor_name' => 'LATIVE LIMITED',
+            'transaction_date' => $anchor->subMonths(3 - $index)->toDateString(),
+            'amount' => 250000,
+            'currency_code' => 'EUR',
+        ]);
+    }
+
+    expect($this->detector->forUser($this->user))->toBe(1);
+
+    $series = RecurringSeries::query()->sole();
+
+    expect($series->match_field)->toBe('debtor_name')
+        ->and($series->merchant_key)->toBe('lative limited')
+        ->and($series->display_name)->toBe('LATIVE LIMITED')
+        ->and($series->direction)->toBe('income')
+        ->and($series->expected_amount)->toBe(250000)
+        ->and($series->currency_code)->toBe('EUR')
+        ->and($series->occurrence_count)->toBe(4);
+});
+
+it('does not merge incoming counterparties that share the same creditor name', function () {
+    $anchor = CarbonImmutable::today()->subDays(3);
+
+    foreach (['LATIVE LIMITED', 'Other Payer'] as $debtor) {
+        foreach (range(0, 3) as $index) {
+            Transaction::factory()->plaintext()->create([
+                'user_id' => $this->user->id,
+                'account_id' => $this->account->id,
+                'creditor_name' => 'ACCOUNT HOLDER',
+                'debtor_name' => $debtor,
+                'transaction_date' => $anchor->subMonths(3 - $index)->toDateString(),
+                'amount' => $debtor === 'LATIVE LIMITED' ? 250000 : 120000,
+                'currency_code' => 'EUR',
+            ]);
+        }
+    }
+
+    expect($this->detector->forUser($this->user))->toBe(2);
+    expect(RecurringSeries::query()->pluck('merchant_key')->sort()->values()->all())
+        ->toBe(['lative limited', 'other payer']);
 });
 
 it('keeps the same merchant billed in two currencies apart', function () {

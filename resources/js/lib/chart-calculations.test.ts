@@ -5,6 +5,7 @@ import {
     computeMoMPercent,
     computeNetWorthBarScaling,
     computeNetWorthSeries,
+    countHiddenIncludedAccounts,
     formatPercentValue,
     getAccountSign,
     isLiabilityType,
@@ -117,6 +118,33 @@ describe('netWorthContribution', () => {
     });
 });
 
+describe('countHiddenIncludedAccounts', () => {
+    it('counts hidden accounts that still contribute to net worth', () => {
+        const accounts = {
+            visible: {
+                id: 'visible',
+                type: 'checking',
+                currency_code: 'EUR',
+            },
+            hiddenIncluded: {
+                id: 'hiddenIncluded',
+                type: 'savings',
+                currency_code: 'EUR',
+                hidden_on_dashboard: true,
+            },
+            hiddenExcluded: {
+                id: 'hiddenExcluded',
+                type: 'investment',
+                currency_code: 'EUR',
+                hidden_on_dashboard: true,
+                include_in_net_worth: false,
+            },
+        } as Record<string, AccountInfo>;
+
+        expect(countHiddenIncludedAccounts(accounts)).toBe(1);
+    });
+});
+
 describe('computeNetWorthSeries', () => {
     const createAccounts = (
         types: Record<string, 'checking' | 'savings' | 'credit_card' | 'loan'>,
@@ -220,6 +248,32 @@ describe('computeNetWorthSeries', () => {
         const result = computeNetWorthSeries(data, accounts);
 
         expect(result[0].value).toBe(10000);
+    });
+
+    it('does not let dashboard visibility alter net worth inclusion', () => {
+        const data = [
+            {
+                month: '2025-01',
+                visible: 100,
+                hidden: 50,
+                excluded: 200,
+            },
+        ];
+        const accounts = createAccounts({
+            visible: 'checking',
+            hidden: 'savings',
+            excluded: 'checking',
+        });
+        accounts.hidden.hidden_on_dashboard = true;
+        accounts.excluded.include_in_net_worth = false;
+
+        const hiddenResult = computeNetWorthSeries(data, accounts);
+
+        accounts.hidden.hidden_on_dashboard = false;
+        const visibleResult = computeNetWorthSeries(data, accounts);
+
+        expect(hiddenResult[0].value).toBe(150);
+        expect(visibleResult[0].value).toBe(150);
     });
 
     it('preserves timestamp if present', () => {

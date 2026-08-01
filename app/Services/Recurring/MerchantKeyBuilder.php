@@ -69,6 +69,17 @@ class MerchantKeyBuilder
      */
     private function signal(Transaction $transaction): array
     {
+        $amount = (int) $transaction->amount;
+
+        if ($amount > 0 && filled($transaction->debtor_name)) {
+            return ['debtor_name', (string) $transaction->debtor_name];
+        }
+
+        if ($amount < 0 && filled($transaction->creditor_name)) {
+            return ['creditor_name', (string) $transaction->creditor_name];
+        }
+
+        // Preserve a useful counterparty fallback for incomplete bank rows.
         if (filled($transaction->creditor_name)) {
             return ['creditor_name', (string) $transaction->creditor_name];
         }
