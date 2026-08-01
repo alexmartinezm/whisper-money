@@ -4,9 +4,9 @@ import {
 } from '@/actions/App/Http/Controllers/RecurringDetectionController';
 import { index } from '@/actions/App/Http/Controllers/RecurringSeriesController';
 import HeadingSmall from '@/components/heading-small';
+import { CashflowForecastCard } from '@/components/recurring/cashflow-forecast';
 import { RecurringSeriesRow } from '@/components/recurring/recurring-series-row';
 import { RecurringSummaryCards } from '@/components/recurring/recurring-summary-cards';
-import { UpcomingRecurringList } from '@/components/recurring/upcoming-recurring-list';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Spinner } from '@/components/ui/spinner';
@@ -14,9 +14,9 @@ import AppSidebarLayout from '@/layouts/app/app-sidebar-layout';
 import { getCsrfToken } from '@/lib/csrf';
 import { type BreadcrumbItem } from '@/types';
 import {
+    type CashflowForecast,
     type RecurringCurrencySummary,
     type RecurringSeries,
-    type UpcomingRecurringCharge,
 } from '@/types/recurring';
 import { __ } from '@/utils/i18n';
 import { Head, router } from '@inertiajs/react';
@@ -42,10 +42,10 @@ const MAX_POLL_ATTEMPTS = 60;
 interface Props {
     series: RecurringSeries[];
     summary: RecurringCurrencySummary[];
-    upcoming: UpcomingRecurringCharge[];
+    forecast: CashflowForecast;
 }
 
-export default function RecurringIndex({ series, summary, upcoming }: Props) {
+export default function RecurringIndex({ series, summary, forecast }: Props) {
     const [scanning, setScanning] = useState(false);
     const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -70,7 +70,7 @@ export default function RecurringIndex({ series, summary, upcoming }: Props) {
 
         if (progress.status === 'completed') {
             setScanning(false);
-            router.reload({ only: ['series', 'summary', 'upcoming'] });
+            router.reload({ only: ['series', 'summary', 'forecast'] });
             toast.success(__('Scan complete.'));
             return;
         }
@@ -83,7 +83,7 @@ export default function RecurringIndex({ series, summary, upcoming }: Props) {
 
         if (attempt >= MAX_POLL_ATTEMPTS) {
             setScanning(false);
-            router.reload({ only: ['series', 'summary', 'upcoming'] });
+            router.reload({ only: ['series', 'summary', 'forecast'] });
             return;
         }
 
@@ -175,7 +175,7 @@ export default function RecurringIndex({ series, summary, upcoming }: Props) {
                     <>
                         <RecurringSummaryCards summary={summary} />
 
-                        <UpcomingRecurringList upcoming={upcoming} />
+                        <CashflowForecastCard forecast={forecast} />
 
                         {needsReview.length > 0 && (
                             <section

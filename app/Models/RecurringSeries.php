@@ -27,6 +27,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property Carbon $first_occurred_on
  * @property Carbon $last_occurred_on
  * @property Carbon $next_expected_on
+ * @property ?Carbon $last_reminded_on
  */
 class RecurringSeries extends Model
 {
@@ -55,6 +56,7 @@ class RecurringSeries extends Model
         'occurrence_count',
         'status',
         'user_state',
+        'last_reminded_on',
     ];
 
     /** @var list<string> */
@@ -73,6 +75,7 @@ class RecurringSeries extends Model
             'first_occurred_on' => 'date',
             'last_occurred_on' => 'date',
             'next_expected_on' => 'date',
+            'last_reminded_on' => 'date',
         ];
     }
 

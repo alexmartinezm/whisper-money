@@ -2236,5 +2236,21 @@
     "approx.": "env.",
     "Needs review": "À vérifier",
     "Ignored": "Ignorées",
-    "Confirm the ones that are real commitments, ignore the rest. Confirmed series are given longer before they count as cancelled.": "Confirmez celles qui sont de vrais engagements et ignorez les autres. Les séries confirmées bénéficient d'un délai plus long avant d'être considérées comme annulées."
+    "Confirm the ones that are real commitments, ignore the rest. Confirmed series are given longer before they count as cancelled.": "Confirmez celles qui sont de vrais engagements et ignorez les autres. Les séries confirmées bénéficient d'un délai plus long avant d'être considérées comme annulées.",
+    "Next :days days": "Les :days prochains jours",
+    "Your current balance walked forward through the charges expected below.": "Votre solde actuel projeté avec les prélèvements prévus ci-dessous.",
+    "Expected in": "Entrées prévues",
+    "Expected out": "Sorties prévues",
+    "Runs out around :date, down to :amount.": "À sec vers le :date, jusqu'à :amount.",
+    "Series in :currencies are not included; amounts are never converted.": "Les séries en :currencies ne sont pas incluses ; les montants ne sont jamais convertis.",
+    "Upcoming recurring charges": "Prélèvements récurrents à venir",
+    "Receive one email listing the subscriptions and bills due in the next few days.": "Recevez un seul e-mail listant les abonnements et factures dus dans les prochains jours.",
+    "Coming up in the next few days": "Dans les prochains jours",
+    "Hi :name, these recurring charges are due shortly.": "Bonjour :name, ces prélèvements récurrents arrivent bientôt.",
+    "Amounts are estimates based on what these charges have cost before.": "Les montants sont estimés d'après leurs prélèvements précédents.",
+    "View recurring": "Voir les récurrents",
+    "You can turn these reminders off in your notification settings.": "Vous pouvez désactiver ces rappels dans vos paramètres de notifications.",
+    "What": "Quoi",
+    "When": "Quand",
+    "Coming up: :count recurring charges": "À venir : :count prélèvements récurrents"
 }

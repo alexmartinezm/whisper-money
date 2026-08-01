@@ -28,6 +28,7 @@ class NotificationPreferenceController extends Controller
         'budget_new_transaction' => 'budget_notify_on_new_transaction',
         'budget_close_to_limit' => 'budget_notify_on_close_to_limit',
         'budget_over_limit' => 'budget_notify_on_over_limit',
+        'upcoming_recurring' => 'notify_upcoming_recurring',
     ];
 
     public function index(Request $request): Response
@@ -37,6 +38,7 @@ class NotificationPreferenceController extends Controller
 
         return Inertia::render('settings/notifications', [
             'notifyOnBankTransactionsSynced' => $user->wantsBankTransactionsSyncedEmail(),
+            'notifyUpcomingRecurring' => (bool) ($setting->notify_upcoming_recurring ?? false),
             'budgetDefaults' => [
                 'notify_on_new_transaction' => (bool) ($setting->budget_notify_on_new_transaction ?? false),
                 'notify_on_close_to_limit' => (bool) ($setting->budget_notify_on_close_to_limit ?? true),
