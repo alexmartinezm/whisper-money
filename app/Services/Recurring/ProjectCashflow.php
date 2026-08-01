@@ -151,7 +151,7 @@ class ProjectCashflow
             ->map(fn (array $charges, string $month): array => [
                 'month' => $month,
                 'total' => (int) collect($charges)->sum('amount'),
-                'charges' => array_values($charges),
+                'charges' => $charges,
             ])
             ->values()
             ->all();
