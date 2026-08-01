@@ -1,10 +1,12 @@
 <?php
 
+use App\Features\RecurringTransactions;
 use App\Models\Account;
 use App\Models\RecurringSeries;
 use App\Models\Transaction;
 use App\Models\User;
 use Carbon\CarbonImmutable;
+use Laravel\Pennant\Feature;
 
 /**
  * Four monthly charges from one counterparty, the most recent a few days ago.
@@ -51,6 +53,30 @@ it('can be restricted to a single user', function () {
 
     expect(RecurringSeries::query()->where('user_id', $target->id)->count())->toBe(1)
         ->and(RecurringSeries::query()->where('user_id', $other->id)->count())->toBe(0);
+});
+
+it('writes nothing while the feature is switched off', function () {
+    config()->set('recurring.enabled', false);
+    seedMonthlySubscription(User::factory()->create());
+
+    $this->artisan('recurring:detect')
+        ->expectsOutputToContain('Recurring detection is disabled')
+        ->assertSuccessful();
+
+    expect(RecurringSeries::query()->count())->toBe(0);
+});
+
+it('skips a user whose flag is off', function () {
+    $off = User::factory()->create();
+    $on = User::factory()->create();
+    seedMonthlySubscription($off, 'Netflix');
+    seedMonthlySubscription($on, 'Spotify');
+    Feature::for($off)->deactivate(RecurringTransactions::class);
+
+    $this->artisan('recurring:detect')->assertSuccessful();
+
+    expect(RecurringSeries::query()->where('user_id', $off->id)->count())->toBe(0)
+        ->and(RecurringSeries::query()->where('user_id', $on->id)->count())->toBe(1);
 });
 
 it('succeeds when a user has no transactions', function () {

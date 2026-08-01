@@ -43,10 +43,21 @@ class ListRecurringSeries extends McpTool
         return $this->json([
             'space_id' => $space->id,
             'as_of' => today()->toDateString(),
-            'monthly_expense_total' => (int) $series
+            // One total per currency. Amounts are never summed across
+            // currencies and never converted, so the model cannot mistake
+            // 50 EUR + 50 USD for 100 of anything.
+            'monthly_expense_totals' => $series
                 ->where('status', RecurringSeriesStatus::Active)
                 ->where('direction', 'expense')
-                ->sum(fn (RecurringSeries $row): int => $row->monthlyEquivalentAmount()),
+                ->groupBy('currency_code')
+                ->map(fn ($group, string $currency): array => [
+                    'currency_code' => $currency,
+                    'monthly_expense' => (int) $group->sum(
+                        fn (RecurringSeries $row): int => $row->monthlyEquivalentAmount(),
+                    ),
+                ])
+                ->values()
+                ->all(),
             'series' => $series->map(fn (RecurringSeries $row): array => [
                 'id' => $row->id,
                 'name' => $row->display_name,

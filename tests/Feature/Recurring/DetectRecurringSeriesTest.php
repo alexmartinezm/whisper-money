@@ -243,6 +243,35 @@ it('lapses a series the ledger no longer substantiates', function () {
     expect(RecurringSeries::query()->sole()->status)->toBe(RecurringSeriesStatus::Lapsed);
 });
 
+it('revisits a space whose ledger was emptied', function () {
+    // Spaces used to be derived from transactions alone, so emptying a space
+    // meant its series were never looked at again and stayed active forever.
+    $charges = monthlyCharges($this->user, $this->account, 'Netflix');
+    $this->detector->forUserEverywhere($this->user);
+
+    expect(RecurringSeries::query()->sole()->status)->toBe(RecurringSeriesStatus::Active);
+
+    Transaction::query()->whereIn('id', collect($charges)->pluck('id'))->forceDelete();
+    $this->detector->forUserEverywhere($this->user);
+
+    expect(RecurringSeries::query()->sole()->status)->toBe(RecurringSeriesStatus::Lapsed);
+});
+
+it('does not touch another user when reconciling an emptied space', function () {
+    $other = User::factory()->create();
+    $otherAccount = Account::factory()->create(['user_id' => $other->id, 'currency_code' => 'EUR']);
+    monthlyCharges($other, $otherAccount, 'Disney');
+    $this->detector->forUserEverywhere($other);
+
+    $charges = monthlyCharges($this->user, $this->account, 'Netflix');
+    $this->detector->forUserEverywhere($this->user);
+    Transaction::query()->whereIn('id', collect($charges)->pluck('id'))->forceDelete();
+    $this->detector->forUserEverywhere($this->user);
+
+    expect(RecurringSeries::query()->where('user_id', $other->id)->sole()->status)
+        ->toBe(RecurringSeriesStatus::Active);
+});
+
 it('does not resurrect a series the user deleted', function () {
     monthlyCharges($this->user, $this->account, 'Netflix');
     $this->detector->forUser($this->user);

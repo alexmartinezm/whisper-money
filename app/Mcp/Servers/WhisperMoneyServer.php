@@ -60,7 +60,8 @@ data.
   on a schedule. Read them with `list_recurring_series` instead of grouping
   `search_transactions` results by merchant and cadence yourself. Expected amounts are
   medians and may be marked variable; `monthly_equivalent_amount` rescales any cadence
-  to a month so series can be compared and summed.
+  to a month so series can be compared and summed. Totals are reported per currency in
+  `monthly_expense_totals`; never add amounts from different currencies together.
 
 Write tools ... require a read & write Sanctum token; OAuth connections follow the current
 WriteTool policy. A read-only Sanctum token can analyse data but never change it. Bank-connected accounts

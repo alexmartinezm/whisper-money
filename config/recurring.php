@@ -9,6 +9,10 @@ return [
     | The initial value of the `App\Features\RecurringTransactions` Pennant
     | flag. Per-user overrides stored by Pennant still take precedence.
     |
+    | This is a full off switch, not just a way to hide the screen: with it off
+    | the scheduled `recurring:detect` exits without writing anything, and the
+    | command also skips individual users whose Pennant flag is inactive.
+    |
     */
     'enabled' => (bool) env('RECURRING_TRANSACTIONS_ENABLED', true),
 

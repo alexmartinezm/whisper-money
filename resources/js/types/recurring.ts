@@ -44,7 +44,12 @@ export interface RecurringSeries {
     user_state: RecurringSeriesUserState;
 }
 
-export interface RecurringSummary {
+/**
+ * Totals for a single currency. The server never adds amounts across
+ * currencies, so the screen renders one of these per currency in play.
+ */
+export interface RecurringCurrencySummary {
+    currency_code: string;
     monthly_expense: number;
     monthly_income: number;
     yearly_expense: number;

@@ -41,9 +41,8 @@ class RecurringSeriesController extends Controller
 
         return Inertia::render('recurring/index', [
             'series' => $series->values(),
-            'summary' => $this->buildSummary($active),
+            'summary' => $this->buildSummary($active, $user->currency_code ?? 'USD'),
             'upcoming' => $this->buildUpcoming($active),
-            'currencyCode' => $user->currency_code ?? 'USD',
         ]);
     }
 
@@ -67,32 +66,50 @@ class RecurringSeriesController extends Controller
 
     /**
      * Totals are computed on visible series only: a dismissed series should stop
-     * counting towards what the user believes they spend every month.
+     * counting towards what the user believes they spend every month. Only
+     * active series reach this method, so a cancelled subscription stops
+     * inflating the current figures.
+     *
+     * One total per currency. Amounts in different currencies are never added
+     * together and never converted here — a made-up exchange rate would turn a
+     * factual number into an estimate without saying so.
      *
      * Expense and income are reported apart rather than netted, because a
      * salary would otherwise hide the subscriptions the screen exists to show.
      *
      * @param  Collection<int, RecurringSeries>  $series
-     * @return array{monthly_expense: int, monthly_income: int, yearly_expense: int, active_count: int}
+     * @return list<array{currency_code: string, monthly_expense: int, monthly_income: int, yearly_expense: int, active_count: int}>
      */
-    private function buildSummary(Collection $series): array
+    private function buildSummary(Collection $series, string $primaryCurrency): array
     {
-        $visible = $series->reject(fn (RecurringSeries $row): bool => $row->isIgnored());
+        return $series
+            ->reject(fn (RecurringSeries $row): bool => $row->isIgnored())
+            ->groupBy('currency_code')
+            ->map(function (Collection $group, string $currency): array {
+                $monthlyExpense = (int) $group
+                    ->where('direction', 'expense')
+                    ->sum(fn (RecurringSeries $row): int => $row->monthlyEquivalentAmount());
 
-        $monthlyExpense = $visible
-            ->where('direction', 'expense')
-            ->sum(fn (RecurringSeries $row): int => $row->monthlyEquivalentAmount());
+                $monthlyIncome = (int) $group
+                    ->where('direction', 'income')
+                    ->sum(fn (RecurringSeries $row): int => $row->monthlyEquivalentAmount());
 
-        $monthlyIncome = $visible
-            ->where('direction', 'income')
-            ->sum(fn (RecurringSeries $row): int => $row->monthlyEquivalentAmount());
-
-        return [
-            'monthly_expense' => (int) $monthlyExpense,
-            'monthly_income' => (int) $monthlyIncome,
-            'yearly_expense' => (int) $monthlyExpense * 12,
-            'active_count' => $visible->count(),
-        ];
+                return [
+                    'currency_code' => $currency,
+                    'monthly_expense' => $monthlyExpense,
+                    'monthly_income' => $monthlyIncome,
+                    'yearly_expense' => $monthlyExpense * 12,
+                    'active_count' => $group->count(),
+                ];
+            })
+            // The user's own currency leads; the rest follow by weight.
+            ->sortBy(fn (array $row): array => [
+                $row['currency_code'] === $primaryCurrency ? 0 : 1,
+                -$row['active_count'],
+                $row['currency_code'],
+            ])
+            ->values()
+            ->all();
     }
 
     /**

@@ -14,8 +14,8 @@ import AppSidebarLayout from '@/layouts/app/app-sidebar-layout';
 import { getCsrfToken } from '@/lib/csrf';
 import { type BreadcrumbItem } from '@/types';
 import {
+    type RecurringCurrencySummary,
     type RecurringSeries,
-    type RecurringSummary,
     type UpcomingRecurringCharge,
 } from '@/types/recurring';
 import { __ } from '@/utils/i18n';
@@ -41,17 +41,11 @@ const MAX_POLL_ATTEMPTS = 60;
 
 interface Props {
     series: RecurringSeries[];
-    summary: RecurringSummary;
+    summary: RecurringCurrencySummary[];
     upcoming: UpcomingRecurringCharge[];
-    currencyCode: string;
 }
 
-export default function RecurringIndex({
-    series,
-    summary,
-    upcoming,
-    currencyCode,
-}: Props) {
+export default function RecurringIndex({ series, summary, upcoming }: Props) {
     const [scanning, setScanning] = useState(false);
     const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -173,10 +167,7 @@ export default function RecurringIndex({
                     </Card>
                 ) : (
                     <>
-                        <RecurringSummaryCards
-                            summary={summary}
-                            currencyCode={currencyCode}
-                        />
+                        <RecurringSummaryCards summary={summary} />
 
                         <UpcomingRecurringList upcoming={upcoming} />
 

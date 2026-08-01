@@ -2,9 +2,11 @@
 
 namespace App\Console\Commands;
 
+use App\Features\RecurringTransactions;
 use App\Models\User;
 use App\Services\Recurring\DetectRecurringSeries;
 use Illuminate\Console\Command;
+use Laravel\Pennant\Feature;
 use Throwable;
 
 class DetectRecurringSeriesCommand extends Command
@@ -21,6 +23,14 @@ class DetectRecurringSeriesCommand extends Command
 
     public function handle(): int
     {
+        // The flag is a full off switch, not just a way to hide the screen:
+        // with it off nothing should be written that nobody can look at.
+        if (! config('recurring.enabled')) {
+            $this->components->info('Recurring detection is disabled; nothing to do.');
+
+            return self::SUCCESS;
+        }
+
         $query = User::query();
 
         if ($userId = $this->option('user')) {
@@ -34,6 +44,10 @@ class DetectRecurringSeriesCommand extends Command
         // Chunked so one large deployment does not load every user into memory.
         $query->chunkById(50, function ($chunk) use (&$users, &$series, &$failures): void {
             foreach ($chunk as $user) {
+                if (! Feature::for($user)->active(RecurringTransactions::class)) {
+                    continue;
+                }
+
                 $users++;
 
                 try {

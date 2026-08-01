@@ -27,8 +27,7 @@ it('renders the recurring page with its series', function () {
             ->where('series.0.id', $series->id)
             ->where('series.0.display_name', 'Netflix')
             ->has('summary')
-            ->has('upcoming')
-            ->where('currencyCode', 'EUR'));
+            ->has('upcoming'));
 });
 
 it('sums monthly cost across cadences in the summary', function () {
@@ -44,9 +43,11 @@ it('sums monthly cost across cadences in the summary', function () {
     $this->actingAs($this->user)
         ->get('/recurring')
         ->assertInertia(fn ($page) => $page
-            ->where('summary.monthly_expense', -2200)
-            ->where('summary.yearly_expense', -26400)
-            ->where('summary.active_count', 2));
+            ->has('summary', 1)
+            ->where('summary.0.currency_code', 'EUR')
+            ->where('summary.0.monthly_expense', -2200)
+            ->where('summary.0.yearly_expense', -26400)
+            ->where('summary.0.active_count', 2));
 });
 
 it('leaves dismissed series out of the totals', function () {
@@ -56,8 +57,49 @@ it('leaves dismissed series out of the totals', function () {
     $this->actingAs($this->user)
         ->get('/recurring')
         ->assertInertia(fn ($page) => $page
-            ->where('summary.monthly_expense', -1000)
-            ->where('summary.active_count', 1)
+            ->where('summary.0.monthly_expense', -1000)
+            ->where('summary.0.active_count', 1)
+            ->has('series', 2));
+});
+
+it('keeps each currency on its own total', function () {
+    RecurringSeries::factory()->create([
+        'user_id' => $this->user->id,
+        'currency_code' => 'EUR',
+        'expected_amount' => -5000,
+    ]);
+    RecurringSeries::factory()->create([
+        'user_id' => $this->user->id,
+        'currency_code' => 'USD',
+        'expected_amount' => -5000,
+    ]);
+
+    $this->actingAs($this->user)
+        ->get('/recurring')
+        ->assertInertia(fn ($page) => $page
+            ->has('summary', 2)
+            // The user's own currency leads.
+            ->where('summary.0.currency_code', 'EUR')
+            ->where('summary.0.monthly_expense', -5000)
+            ->where('summary.1.currency_code', 'USD')
+            ->where('summary.1.monthly_expense', -5000));
+});
+
+it('leaves lapsed series out of the current totals but keeps them listed', function () {
+    RecurringSeries::factory()->create([
+        'user_id' => $this->user->id,
+        'expected_amount' => -1000,
+    ]);
+    RecurringSeries::factory()->lapsed()->create([
+        'user_id' => $this->user->id,
+        'expected_amount' => -8000,
+    ]);
+
+    $this->actingAs($this->user)
+        ->get('/recurring')
+        ->assertInertia(fn ($page) => $page
+            ->where('summary.0.monthly_expense', -1000)
+            ->where('summary.0.active_count', 1)
             ->has('series', 2));
 });
 

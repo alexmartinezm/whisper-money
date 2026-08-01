@@ -41,11 +41,21 @@ class DetectRecurringSeries
      */
     public function forUserEverywhere(User $user): int
     {
+        // Spaces that already hold series are visited too, not just those with
+        // transactions. A space whose ledger was emptied still needs a pass, or
+        // its series would stay active forever with nothing behind them.
         $spaceIds = Transaction::query()
             ->where('user_id', $user->id)
             ->distinct()
             ->pluck('space_id')
-            ->filter();
+            ->merge(
+                RecurringSeries::query()
+                    ->where('user_id', $user->id)
+                    ->distinct()
+                    ->pluck('space_id'),
+            )
+            ->filter()
+            ->unique();
 
         if ($spaceIds->isEmpty()) {
             return 0;

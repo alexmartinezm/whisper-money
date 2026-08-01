@@ -38,9 +38,32 @@ it('rescales cadences onto a monthly total', function () {
         'user_id' => $user->id,
         'space_id' => $user->personalSpace->id,
         'expected_amount' => -12000,
+        'currency_code' => 'EUR',
     ]);
 
-    callRecurringTool($user)->assertOk()->assertSee('"monthly_expense_total":-1000');
+    callRecurringTool($user)
+        ->assertOk()
+        ->assertSee('"monthly_expense_totals":[{"currency_code":"EUR","monthly_expense":-1000}]', false);
+});
+
+it('reports one total per currency rather than adding them up', function () {
+    $user = User::factory()->create();
+
+    foreach (['EUR', 'USD'] as $currency) {
+        RecurringSeries::factory()->create([
+            'user_id' => $user->id,
+            'space_id' => $user->personalSpace->id,
+            'expected_amount' => -5000,
+            'currency_code' => $currency,
+        ]);
+    }
+
+    $response = callRecurringTool($user)->assertOk();
+
+    // 50 EUR + 50 USD must never surface as a single 100.
+    $response->assertSee('"currency_code":"EUR","monthly_expense":-5000', false);
+    $response->assertSee('"currency_code":"USD","monthly_expense":-5000', false);
+    $response->assertDontSee('"monthly_expense":-10000', false);
 });
 
 it('hides dismissed series unless asked for them', function () {
