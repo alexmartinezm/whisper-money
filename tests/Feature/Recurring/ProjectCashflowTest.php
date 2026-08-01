@@ -287,6 +287,22 @@ it('leaves out anything already billing every month', function () {
         ->and($forecast['later'])->toBeEmpty();
 });
 
+it('keeps calendar-monthly charges out of the later outlook when their gaps exceed 31 days', function () {
+    accountWithBalance($this->user, 100000);
+
+    RecurringSeries::factory()->create([
+        'user_id' => $this->user->id,
+        'display_name' => 'Vodafone',
+        'cadence' => RecurringCadence::Monthly,
+        'expected_amount' => -4137,
+        'currency_code' => 'EUR',
+        'next_expected_on' => CarbonImmutable::today()->addDays(66),
+        'interval_days' => 32,
+    ]);
+
+    expect($this->project->forUser($this->user, 30)['later'])->toBeEmpty();
+});
+
 it('lists only the months that have something due', function () {
     accountWithBalance($this->user, 100000);
 

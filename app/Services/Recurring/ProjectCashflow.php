@@ -2,6 +2,7 @@
 
 namespace App\Services\Recurring;
 
+use App\Enums\RecurringCadence;
 use App\Enums\RecurringSeriesStatus;
 use App\Enums\RecurringSeriesUserState;
 use App\Models\Account;
@@ -141,10 +142,11 @@ class ProjectCashflow
             return [];
         }
 
-        // Longer than the window, and longer than a month: a 30-day window must
-        // not drag every monthly subscription in on a technicality.
+        // Cadence is authoritative: calendar-monthly charges can have 32-day gaps
+        // when their dates cross short and long months.
         $minInterval = max($windowDays, 31);
-        $irregular = $series->filter(fn (RecurringSeries $row): bool => $row->interval_days > $minInterval);
+        $irregular = $series->filter(fn (RecurringSeries $row): bool => $row->cadence !== RecurringCadence::Monthly
+            && $row->interval_days > $minInterval);
 
         if ($irregular->isEmpty()) {
             return [];
