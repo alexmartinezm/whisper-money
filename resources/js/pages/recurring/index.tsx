@@ -124,6 +124,12 @@ export default function RecurringIndex({ series, summary, upcoming }: Props) {
     }
 
     const active = series.filter((row) => row.status === 'active');
+    // Confirming is the positive half of triage: it says "this commitment is
+    // real". Splitting the list makes that purpose visible, and the top
+    // section empties out as the user works through it.
+    const needsReview = active.filter((row) => row.user_state === 'detected');
+    const confirmed = active.filter((row) => row.user_state === 'confirmed');
+    const dismissed = active.filter((row) => row.user_state === 'ignored');
     const lapsed = series.filter((row) => row.status === 'lapsed');
 
     return (
@@ -171,20 +177,75 @@ export default function RecurringIndex({ series, summary, upcoming }: Props) {
 
                         <UpcomingRecurringList upcoming={upcoming} />
 
-                        {active.length > 0 && (
+                        {needsReview.length > 0 && (
                             <section
                                 className="space-y-3"
-                                aria-labelledby="active-recurring"
+                                aria-labelledby="needs-review-recurring"
+                            >
+                                <div>
+                                    <h2
+                                        id="needs-review-recurring"
+                                        className="text-base font-semibold"
+                                    >
+                                        {__('Needs review')}
+                                    </h2>
+                                    <p className="text-sm text-muted-foreground">
+                                        {__(
+                                            'Confirm the ones that are real commitments, ignore the rest. Confirmed series are given longer before they count as cancelled.',
+                                        )}
+                                    </p>
+                                </div>
+                                <Card>
+                                    <CardContent className="divide-y p-0">
+                                        {needsReview.map((row) => (
+                                            <RecurringSeriesRow
+                                                key={row.id}
+                                                series={row}
+                                            />
+                                        ))}
+                                    </CardContent>
+                                </Card>
+                            </section>
+                        )}
+
+                        {confirmed.length > 0 && (
+                            <section
+                                className="space-y-3"
+                                aria-labelledby="confirmed-recurring"
                             >
                                 <h2
-                                    id="active-recurring"
+                                    id="confirmed-recurring"
                                     className="text-base font-semibold"
                                 >
-                                    {__('Active')}
+                                    {__('Confirmed')}
                                 </h2>
                                 <Card>
                                     <CardContent className="divide-y p-0">
-                                        {active.map((row) => (
+                                        {confirmed.map((row) => (
+                                            <RecurringSeriesRow
+                                                key={row.id}
+                                                series={row}
+                                            />
+                                        ))}
+                                    </CardContent>
+                                </Card>
+                            </section>
+                        )}
+
+                        {dismissed.length > 0 && (
+                            <section
+                                className="space-y-3"
+                                aria-labelledby="dismissed-recurring"
+                            >
+                                <h2
+                                    id="dismissed-recurring"
+                                    className="text-base font-semibold"
+                                >
+                                    {__('Ignored')}
+                                </h2>
+                                <Card>
+                                    <CardContent className="divide-y p-0">
+                                        {dismissed.map((row) => (
                                             <RecurringSeriesRow
                                                 key={row.id}
                                                 series={row}

@@ -91,6 +91,10 @@ return [
     | A series is lapsed once this many intervals have passed since the last
     | occurrence without a new one arriving.
     |
+    | A series the user confirmed gets a longer rope: they have vouched for the
+    | commitment, so one late renewal should not be reported as a cancellation.
+    |
     */
     'lapse_interval_multiplier' => 1.5,
+    'confirmed_lapse_interval_multiplier' => 2.5,
 ];

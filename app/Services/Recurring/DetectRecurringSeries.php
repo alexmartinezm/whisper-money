@@ -172,8 +172,6 @@ class DetectRecurringSeries
     private function classify(array $groups): array
     {
         $minOccurrences = (int) config('recurring.min_occurrences');
-        $lapseMultiplier = (float) config('recurring.lapse_interval_multiplier');
-        $today = CarbonImmutable::today();
         $series = [];
 
         foreach ($groups as $group) {
@@ -197,7 +195,6 @@ class DetectRecurringSeries
             $firstOccurred = $dates[0];
             $lastOccurred = $dates[count($dates) - 1];
             $nextExpected = $lastOccurred->addDays($match->medianGapDays);
-            $lapseCutoff = $lastOccurred->addDays((int) round($match->medianGapDays * $lapseMultiplier));
 
             $series[] = [
                 'match_field' => $group['match_field'],
@@ -214,9 +211,6 @@ class DetectRecurringSeries
                 'last_occurred_on' => $lastOccurred,
                 'next_expected_on' => $nextExpected,
                 'occurrence_count' => count($occurrences),
-                'status' => $today->greaterThan($lapseCutoff)
-                    ? RecurringSeriesStatus::Lapsed
-                    : RecurringSeriesStatus::Active,
                 'transaction_ids' => array_map(fn (array $occurrence): string => $occurrence['id'], $occurrences),
             ];
         }
@@ -295,7 +289,11 @@ class DetectRecurringSeries
                     'last_occurred_on' => $candidate['last_occurred_on'],
                     'next_expected_on' => $candidate['next_expected_on'],
                     'occurrence_count' => $candidate['occurrence_count'],
-                    'status' => $candidate['status'],
+                    'status' => $this->resolveStatus(
+                        $candidate['last_occurred_on'],
+                        $candidate['interval_days'],
+                        $row->user_state === RecurringSeriesUserState::Confirmed,
+                    ),
                 ]);
 
                 $row->save();
@@ -373,6 +371,27 @@ class DetectRecurringSeries
         }
 
         return $categories;
+    }
+
+    /**
+     * Whether a series still looks current.
+     *
+     * A series the user confirmed gets a longer grace period. They have told us
+     * the commitment is real, so a bill that arrives late — a renewal that
+     * slipped, an annual policy charged a few weeks off — should not be
+     * announced as cancelled on the strength of one missed cycle.
+     */
+    private function resolveStatus(CarbonImmutable $lastOccurred, int $intervalDays, bool $isConfirmed): RecurringSeriesStatus
+    {
+        $multiplier = (float) config($isConfirmed
+            ? 'recurring.confirmed_lapse_interval_multiplier'
+            : 'recurring.lapse_interval_multiplier');
+
+        $cutoff = $lastOccurred->addDays((int) round($intervalDays * $multiplier));
+
+        return CarbonImmutable::today()->greaterThan($cutoff)
+            ? RecurringSeriesStatus::Lapsed
+            : RecurringSeriesStatus::Active;
     }
 
     private function identity(string $matchField, string $merchantKey, string $direction, string $currencyCode): string

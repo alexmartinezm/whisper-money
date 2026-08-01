@@ -2389,5 +2389,8 @@
     "Tomorrow": "Mañana",
     "A charge needs to appear at least three times on a steady cadence before it shows up here.": "Un cargo tiene que aparecer al menos tres veces con una periodicidad estable para salir aquí.",
     ":amount/mo": ":amount/mes",
-    "approx.": "aprox."
+    "approx.": "aprox.",
+    "Needs review": "Pendiente de revisar",
+    "Ignored": "Ignoradas",
+    "Confirm the ones that are real commitments, ignore the rest. Confirmed series are given longer before they count as cancelled.": "Confirma las que son compromisos reales e ignora el resto. A las confirmadas se les da más margen antes de darlas por canceladas."
 }
