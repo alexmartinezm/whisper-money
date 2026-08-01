@@ -2252,5 +2252,7 @@
     "You can turn these reminders off in your notification settings.": "Vous pouvez désactiver ces rappels dans vos paramètres de notifications.",
     "What": "Quoi",
     "When": "Quand",
-    "Coming up: :count recurring charges": "À venir : :count prélèvements récurrents"
+    "Coming up: :count recurring charges": "À venir : :count prélèvements récurrents",
+    "Further out": "Plus tard",
+    "Charges that do not come round every month, so they never land in the projection above. No running balance here — it would ignore everything you spend day to day.": "Prélèvements qui ne reviennent pas tous les mois et qui n'entrent donc jamais dans la projection ci-dessus. Pas de solde cumulé ici : il ignorerait toutes vos dépenses courantes."
 }

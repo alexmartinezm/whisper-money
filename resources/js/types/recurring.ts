@@ -67,6 +67,23 @@ export interface ForecastOccurrence {
     category: string | null;
 }
 
+/** An irregular charge due past the projection window. */
+export interface OutlookCharge {
+    date: string;
+    series_id: UUID;
+    display_name: string;
+    amount: number;
+    amount_is_variable: boolean;
+    category: string | null;
+}
+
+export interface OutlookMonth {
+    /** YYYY-MM */
+    month: string;
+    total: number;
+    charges: OutlookCharge[];
+}
+
 export interface CashflowForecast {
     currency_code: string;
     days: number;
@@ -78,4 +95,6 @@ export interface CashflowForecast {
     /** Currencies with series that this projection deliberately leaves out. */
     other_currencies: string[];
     occurrences: ForecastOccurrence[];
+    /** Months past the window: no balance out here, only what is due. */
+    later: OutlookMonth[];
 }

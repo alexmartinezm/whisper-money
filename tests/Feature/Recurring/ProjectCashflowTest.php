@@ -190,3 +190,141 @@ it('copes with a user who has no accounts', function () {
     expect($forecast['starting_balance'])->toBe(0)
         ->and($forecast['occurrences'])->toBeEmpty();
 });
+
+it('surfaces a quarterly charge that never lands inside the window', function () {
+    // The gap this list exists for: detected, but shown against no date before.
+    liquidAccount($this->user, 100000);
+
+    RecurringSeries::factory()->cadence(RecurringCadence::Quarterly)->create([
+        'user_id' => $this->user->id,
+        'display_name' => 'Seguro Coche',
+        'expected_amount' => -14550,
+        'currency_code' => 'EUR',
+        'next_expected_on' => CarbonImmutable::today()->addDays(66),
+        'interval_days' => 91,
+    ]);
+
+    $forecast = $this->project->forUser($this->user, 30);
+
+    expect($forecast['occurrences'])->toBeEmpty();
+
+    $months = collect($forecast['later']);
+    $month = $months->firstWhere('month', CarbonImmutable::today()->addDays(66)->format('Y-m'));
+
+    expect($month)->not->toBeNull()
+        ->and($month['charges'][0]['display_name'])->toBe('Seguro Coche')
+        ->and($month['charges'][0]['amount'])->toBe(-14550)
+        ->and($month['charges'][0]['date'])
+        ->toBe(CarbonImmutable::today()->addDays(66)->toDateString());
+});
+
+it('leaves out anything already billing every month', function () {
+    // Twelve months of Netflix, Spotify and the gym would bury the one premium
+    // this list exists for, and the projection above already shows them.
+    liquidAccount($this->user, 100000);
+
+    RecurringSeries::factory()->cadence(RecurringCadence::Monthly)->create([
+        'user_id' => $this->user->id,
+        'display_name' => 'Netflix',
+        'expected_amount' => -1299,
+        'currency_code' => 'EUR',
+        'next_expected_on' => CarbonImmutable::today()->addDays(5),
+        'interval_days' => 30,
+    ]);
+    RecurringSeries::factory()->cadence(RecurringCadence::Weekly)->create([
+        'user_id' => $this->user->id,
+        'display_name' => 'Gimnasio',
+        'expected_amount' => -1000,
+        'currency_code' => 'EUR',
+        'next_expected_on' => CarbonImmutable::today()->addDay(),
+        'interval_days' => 7,
+    ]);
+
+    $forecast = $this->project->forUser($this->user, 30);
+
+    expect($forecast['occurrences'])->not->toBeEmpty()
+        ->and($forecast['later'])->toBeEmpty();
+});
+
+it('lists only the months that have something due', function () {
+    liquidAccount($this->user, 100000);
+
+    RecurringSeries::factory()->cadence(RecurringCadence::Yearly)->create([
+        'user_id' => $this->user->id,
+        'display_name' => 'Dominio',
+        'expected_amount' => -1200,
+        'currency_code' => 'EUR',
+        'next_expected_on' => CarbonImmutable::today()->addDays(90),
+        'interval_days' => 365,
+    ]);
+
+    // Eleven empty cards would be chrome saying nothing.
+    expect($this->project->forUser($this->user, 30)['later'])->toHaveCount(1);
+});
+
+it('orders the charges by the day they land', function () {
+    liquidAccount($this->user, 100000);
+
+    foreach ([['Later', 58], ['Sooner', 40], ['Middle', 50]] as [$name, $offset]) {
+        RecurringSeries::factory()->cadence(RecurringCadence::Yearly)->create([
+            'user_id' => $this->user->id,
+            'display_name' => $name,
+            'expected_amount' => -1000,
+            'currency_code' => 'EUR',
+            'next_expected_on' => CarbonImmutable::today()->addDays($offset),
+            'interval_days' => 365,
+        ]);
+    }
+
+    $charges = collect($this->project->forUser($this->user, 30)['later'])
+        ->flatMap(fn (array $month): array => $month['charges']);
+
+    // A yearly charge comes round again before the outlook ends, so compare the
+    // order the names first appear in rather than the raw list.
+    expect($charges->pluck('display_name')->unique()->values()->all())
+        ->toBe(['Sooner', 'Middle', 'Later']);
+});
+
+it('keeps the outlook clear of the projection window', function () {
+    liquidAccount($this->user, 100000);
+
+    RecurringSeries::factory()->cadence(RecurringCadence::Quarterly)->create([
+        'user_id' => $this->user->id,
+        'display_name' => 'Seguro Coche',
+        'expected_amount' => -14550,
+        'currency_code' => 'EUR',
+        'next_expected_on' => CarbonImmutable::today()->addDays(5),
+        'interval_days' => 91,
+    ]);
+
+    $forecast = $this->project->forUser($this->user, 30);
+    $firstOutlookDate = collect($forecast['later'])->first()['charges'][0]['date'];
+
+    // Nothing is counted twice: the outlook starts after the window ends.
+    expect($forecast['occurrences'])->toHaveCount(1)
+        ->and($firstOutlookDate)->toBe(
+            CarbonImmutable::today()->addDays(96)->toDateString(),
+        );
+});
+
+it('totals a month rather than restating a lone charge', function () {
+    liquidAccount($this->user, 100000);
+
+    // Anchored to a month start so both charges are guaranteed the same month.
+    $monthStart = CarbonImmutable::today()->addDays(60)->startOfMonth();
+
+    foreach ([-14550, -3000] as $index => $amount) {
+        RecurringSeries::factory()->cadence(RecurringCadence::Yearly)->create([
+            'user_id' => $this->user->id,
+            'display_name' => "Anual {$index}",
+            'expected_amount' => $amount,
+            'currency_code' => 'EUR',
+            'next_expected_on' => $monthStart->addDays(5 + $index),
+            'interval_days' => 365,
+        ]);
+    }
+
+    $month = collect($this->project->forUser($this->user, 30)['later'])->first();
+
+    expect($month['total'])->toBe(-17550);
+});

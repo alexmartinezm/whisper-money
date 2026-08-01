@@ -37,7 +37,8 @@ class ProjectCashflow
      *     expected_out: int,
      *     lowest: array{date: string, balance: int},
      *     other_currencies: list<string>,
-     *     occurrences: list<array{date: string, series_id: string, display_name: string, amount: int, amount_is_variable: bool, balance_after: int, category: ?string}>
+     *     occurrences: list<array{date: string, series_id: string, display_name: string, amount: int, amount_is_variable: bool, balance_after: int, category: ?string}>,
+     *     later: list<array{month: string, total: int, charges: list<array{date: string, series_id: string, display_name: string, amount: int, amount_is_variable: bool, category: ?string}>}>
      * }
      */
     public function forUser(User $user, ?int $days = null): array
@@ -94,7 +95,66 @@ class ProjectCashflow
                 ->values()
                 ->all(),
             'occurrences' => $rows,
+            'later' => $this->outlook(
+                $series->where('currency_code', $currency),
+                $horizon->addDay(),
+                (int) config('recurring.outlook_months'),
+                $days,
+            ),
         ];
+    }
+
+    /**
+     * The irregular charges waiting past the projection window, by month.
+     *
+     * A quarterly insurance premium or an annual renewal never lands inside 30
+     * days, so until now they were detected but shown against no date at all —
+     * exactly the charges that catch people out. Anything billing monthly or
+     * faster is deliberately left out: it already appears in the projection and
+     * in the monthly total, and repeating it once a month for a year would bury
+     * the single premium this list exists to surface.
+     *
+     * No running balance out here either: projecting months ahead from recurring
+     * charges alone would ignore groceries and everything discretionary, and a
+     * reassuring wrong number is worse than none.
+     *
+     * @param  Collection<int, RecurringSeries>  $series
+     * @return list<array{month: string, total: int, charges: list<array{date: string, series_id: string, display_name: string, amount: int, amount_is_variable: bool, category: ?string}>}>
+     */
+    private function outlook(Collection $series, CarbonImmutable $from, int $months, int $windowDays): array
+    {
+        if ($months < 1) {
+            return [];
+        }
+
+        // Longer than the window, and longer than a month: a 30-day window must
+        // not drag every monthly subscription in on a technicality.
+        $minInterval = max($windowDays, 31);
+        $irregular = $series->filter(fn (RecurringSeries $row): bool => $row->interval_days > $minInterval);
+
+        if ($irregular->isEmpty()) {
+            return [];
+        }
+
+        $horizon = $from->addMonthsNoOverflow($months)->endOfMonth();
+        $byMonth = [];
+
+        // Months with nothing due are simply absent — an empty card would be a
+        // row of chrome saying nothing.
+        foreach ($this->expand($irregular, $from, $horizon) as $occurrence) {
+            $byMonth[substr($occurrence['date'], 0, 7)][] = $occurrence;
+        }
+
+        ksort($byMonth);
+
+        return collect($byMonth)
+            ->map(fn (array $charges, string $month): array => [
+                'month' => $month,
+                'total' => (int) collect($charges)->sum('amount'),
+                'charges' => array_values($charges),
+            ])
+            ->values()
+            ->all();
     }
 
     /**
