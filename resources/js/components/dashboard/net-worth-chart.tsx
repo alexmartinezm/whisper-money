@@ -29,6 +29,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import {
     AccountInfo,
     computeNetWorthBarScaling,
+    countHiddenIncludedAccounts,
     isLiabilityType,
     netWorthContribution,
 } from '@/lib/chart-calculations';
@@ -218,6 +219,7 @@ export function NetWorthChart({
         shortTrend,
         longTrend,
         totalAmount,
+        hiddenIncludedCount,
         accountCurrencies,
         accountsForHook,
         hasLiabilities,
@@ -432,6 +434,7 @@ export function NetWorthChart({
                 chartDataArray.length - 1,
             ),
             totalAmount: total,
+            hiddenIncludedCount: countHiddenIncludedAccounts(includedAccounts),
             accountCurrencies: currencies,
             accountsForHook: allHookAccounts,
             hasLiabilities: hasLiabs,
@@ -567,6 +570,20 @@ export function NetWorthChart({
                                     variant="large"
                                 />
                             </div>
+                            {hiddenIncludedCount > 0 && (
+                                <div className="text-xs text-muted-foreground">
+                                    {hiddenIncludedCount === 1
+                                        ? __('Includes :count hidden account', {
+                                              count: hiddenIncludedCount,
+                                          })
+                                        : __(
+                                              'Includes :count hidden accounts',
+                                              {
+                                                  count: hiddenIncludedCount,
+                                              },
+                                          )}
+                                </div>
+                            )}
                             <PercentageTrendIndicator
                                 trend={shortTrend?.percentage ?? null}
                                 label={shortTrendLabel}

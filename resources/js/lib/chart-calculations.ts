@@ -112,7 +112,22 @@ export interface AccountInfo {
     id: string;
     type: AccountType;
     currency_code: string;
+    hidden_on_dashboard?: boolean;
     include_in_net_worth?: boolean;
+}
+
+/**
+ * Count accounts that are hidden from dashboard cards but still included in
+ * the configured net-worth scope.
+ */
+export function countHiddenIncludedAccounts(
+    accounts: Record<string, AccountInfo>,
+): number {
+    return Object.values(accounts).filter(
+        (account) =>
+            account.hidden_on_dashboard === true &&
+            account.include_in_net_worth !== false,
+    ).length;
 }
 
 export interface NetWorthSeriesOptions {
