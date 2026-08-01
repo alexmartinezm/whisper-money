@@ -213,3 +213,34 @@ test('shared currency options split profile and account currencies', function ()
     expect(collect($props['currencies']['profile'])->pluck('code'))->not->toContain('BTC');
     expect(collect($props['currencies']['accounts'])->pluck('code'))->toContain('BTC');
 });
+
+test('the translation dictionary ships on the first load', function () {
+    $user = User::factory()->onboarded()->create(['locale' => 'es']);
+
+    $props = actingAs($user)->withoutVite()->get(route('dashboard'))->viewData('page')['props'];
+
+    expect($props['translations'])->toBeArray()->not->toBeEmpty();
+});
+
+test('the translation dictionary is omitted once the client already has it', function () {
+    // It is ~250 KB in es/fr and never changes between requests, so resending
+    // it on every navigation dominated the payload.
+    $user = User::factory()->onboarded()->create(['locale' => 'es']);
+
+    // The asset version is only known once a response has been rendered.
+    $version = actingAs($user)->withoutVite()->get(route('dashboard'))
+        ->viewData('page')['version'];
+
+    $response = actingAs($user)
+        ->withoutVite()
+        ->withHeaders([
+            'X-Inertia' => 'true',
+            'X-Inertia-Version' => $version,
+            'X-Inertia-Except-Once-Props' => 'translations',
+        ])
+        ->get(route('dashboard'));
+
+    $response->assertOk();
+
+    expect($response->json('props'))->not->toHaveKey('translations');
+});

@@ -6,7 +6,7 @@ use App\Enums\RecurringSeriesStatus;
 use App\Features\RecurringTransactions;
 use App\Http\Requests\UpdateRecurringSeriesRequest;
 use App\Models\RecurringSeries;
-use Carbon\CarbonImmutable;
+use App\Services\Recurring\ProjectCashflow;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -19,8 +19,7 @@ class RecurringSeriesController extends Controller
 {
     use AuthorizesRequests;
 
-    /** How far ahead the "upcoming" list looks. */
-    private const UPCOMING_DAYS = 30;
+    public function __construct(private readonly ProjectCashflow $projectCashflow) {}
 
     public function index(Request $request): Response
     {
@@ -42,7 +41,7 @@ class RecurringSeriesController extends Controller
         return Inertia::render('recurring/index', [
             'series' => $series->values(),
             'summary' => $this->buildSummary($active, $user->currency_code ?? 'USD'),
-            'upcoming' => $this->buildUpcoming($active),
+            'forecast' => $this->projectCashflow->forUser($user),
         ]);
     }
 
@@ -107,39 +106,6 @@ class RecurringSeriesController extends Controller
                 $row['currency_code'] === $primaryCurrency ? 0 : 1,
                 -$row['active_count'],
                 $row['currency_code'],
-            ])
-            ->values()
-            ->all();
-    }
-
-    /**
-     * @param  Collection<int, RecurringSeries>  $series
-     * @return list<array<string, mixed>>
-     */
-    private function buildUpcoming(Collection $series): array
-    {
-        $today = CarbonImmutable::today();
-        $horizon = $today->addDays(self::UPCOMING_DAYS);
-
-        return $series
-            ->reject(fn (RecurringSeries $row): bool => $row->isIgnored())
-            ->filter(fn (RecurringSeries $row): bool => $row->next_expected_on >= $today
-                && $row->next_expected_on <= $horizon)
-            ->sortBy('next_expected_on')
-            ->map(fn (RecurringSeries $row): array => [
-                'id' => $row->id,
-                'display_name' => $row->display_name,
-                'expected_amount' => $row->expected_amount,
-                'amount_is_variable' => $row->amount_is_variable,
-                'currency_code' => $row->currency_code,
-                'next_expected_on' => $row->next_expected_on->toDateString(),
-                'cadence' => $row->cadence->value,
-                'category' => $row->category === null ? null : [
-                    'id' => $row->category->id,
-                    'name' => $row->category->name,
-                    'color' => $row->category->color,
-                    'icon' => $row->category->icon,
-                ],
             ])
             ->values()
             ->all();

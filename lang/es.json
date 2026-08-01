@@ -2392,5 +2392,21 @@
     "approx.": "aprox.",
     "Needs review": "Pendiente de revisar",
     "Ignored": "Ignoradas",
-    "Confirm the ones that are real commitments, ignore the rest. Confirmed series are given longer before they count as cancelled.": "Confirma las que son compromisos reales e ignora el resto. A las confirmadas se les da más margen antes de darlas por canceladas."
+    "Confirm the ones that are real commitments, ignore the rest. Confirmed series are given longer before they count as cancelled.": "Confirma las que son compromisos reales e ignora el resto. A las confirmadas se les da más margen antes de darlas por canceladas.",
+    "Next :days days": "Próximos :days días",
+    "Your current balance walked forward through the charges expected below.": "Tu saldo actual proyectado con los cargos previstos que verás debajo.",
+    "Expected in": "Entradas previstas",
+    "Expected out": "Salidas previstas",
+    "Runs out around :date, down to :amount.": "Se queda sin fondos hacia el :date, bajando a :amount.",
+    "Series in :currencies are not included; amounts are never converted.": "No se incluyen las series en :currencies; los importes nunca se convierten.",
+    "Upcoming recurring charges": "Cargos recurrentes próximos",
+    "Receive one email listing the subscriptions and bills due in the next few days.": "Recibe un único email con las suscripciones y recibos que vencen en los próximos días.",
+    "Coming up in the next few days": "Próximos días",
+    "Hi :name, these recurring charges are due shortly.": "Hola :name, estos cargos recurrentes vencen pronto.",
+    "Amounts are estimates based on what these charges have cost before.": "Los importes son estimaciones basadas en lo que han costado antes.",
+    "View recurring": "Ver recurrentes",
+    "You can turn these reminders off in your notification settings.": "Puedes desactivar estos avisos en tus ajustes de notificaciones.",
+    "What": "Qué",
+    "When": "Cuándo",
+    "Coming up: :count recurring charges": "Próximamente: :count cargos recurrentes"
 }

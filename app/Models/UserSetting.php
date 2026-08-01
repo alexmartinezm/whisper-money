@@ -32,6 +32,7 @@ class UserSetting extends Model
         'budget_notify_on_new_transaction',
         'budget_notify_on_close_to_limit',
         'budget_notify_on_over_limit',
+        'notify_upcoming_recurring',
     ];
 
     protected function casts(): array
@@ -44,6 +45,7 @@ class UserSetting extends Model
             'budget_notify_on_new_transaction' => 'boolean',
             'budget_notify_on_close_to_limit' => 'boolean',
             'budget_notify_on_over_limit' => 'boolean',
+            'notify_upcoming_recurring' => 'boolean',
         ];
     }
 

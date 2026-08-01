@@ -56,13 +56,26 @@ export interface RecurringCurrencySummary {
     active_count: number;
 }
 
-export interface UpcomingRecurringCharge {
-    id: UUID;
+/** One expected charge, with the balance it leaves behind. */
+export interface ForecastOccurrence {
+    date: string;
+    series_id: UUID;
     display_name: string;
-    expected_amount: number;
+    amount: number;
     amount_is_variable: boolean;
+    balance_after: number;
+    category: string | null;
+}
+
+export interface CashflowForecast {
     currency_code: string;
-    next_expected_on: string;
-    cadence: RecurringCadence;
-    category: RecurringSeriesCategory | null;
+    days: number;
+    starting_balance: number;
+    ending_balance: number;
+    expected_in: number;
+    expected_out: number;
+    lowest: { date: string; balance: number };
+    /** Currencies with series that this projection deliberately leaves out. */
+    other_currencies: string[];
+    occurrences: ForecastOccurrence[];
 }

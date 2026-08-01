@@ -27,7 +27,7 @@ it('renders the recurring page with its series', function () {
             ->where('series.0.id', $series->id)
             ->where('series.0.display_name', 'Netflix')
             ->has('summary')
-            ->has('upcoming'));
+            ->has('forecast'));
 });
 
 it('sums monthly cost across cadences in the summary', function () {
@@ -103,21 +103,25 @@ it('leaves lapsed series out of the current totals but keeps them listed', funct
             ->has('series', 2));
 });
 
-it('lists only charges expected within the next 30 days', function () {
+it('forecasts only the charges expected inside the window', function () {
     $soon = RecurringSeries::factory()->create([
         'user_id' => $this->user->id,
         'next_expected_on' => CarbonImmutable::today()->addDays(9),
+        'interval_days' => 30,
     ]);
     RecurringSeries::factory()->create([
         'user_id' => $this->user->id,
         'next_expected_on' => CarbonImmutable::today()->addDays(70),
+        'interval_days' => 90,
     ]);
 
     $this->actingAs($this->user)
         ->get('/recurring')
         ->assertInertia(fn ($page) => $page
-            ->has('upcoming', 1)
-            ->where('upcoming.0.id', $soon->id));
+            ->has('forecast.occurrences', 1)
+            ->where('forecast.occurrences.0.series_id', $soon->id)
+            ->has('forecast.starting_balance')
+            ->has('forecast.lowest'));
 });
 
 it('returns 404 when the feature is disabled', function () {

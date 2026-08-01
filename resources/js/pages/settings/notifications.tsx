@@ -43,6 +43,7 @@ interface BudgetRow {
 
 interface Props {
     notifyOnBankTransactionsSynced: boolean;
+    notifyUpcomingRecurring: boolean;
     budgetDefaults: Record<BudgetToggleKey, boolean>;
     budgets: BudgetRow[];
 }
@@ -75,6 +76,7 @@ const patchOptions = { preserveScroll: true, preserveState: true } as const;
 
 export default function Notifications({
     notifyOnBankTransactionsSynced,
+    notifyUpcomingRecurring,
     budgetDefaults,
     budgets,
 }: Props) {
@@ -82,6 +84,14 @@ export default function Notifications({
         router.patch(
             update().url,
             { notifications: { bank_transactions_synced: checked } },
+            patchOptions,
+        );
+    };
+
+    const patchUpcomingRecurring = (checked: boolean) => {
+        router.patch(
+            update().url,
+            { notifications: { upcoming_recurring: checked } },
             patchOptions,
         );
     };
@@ -110,6 +120,27 @@ export default function Notifications({
                             'Manage the automatic notifications you receive',
                         )}
                     />
+
+                    <div className="flex items-start gap-3">
+                        <Checkbox
+                            id="notify-upcoming-recurring"
+                            defaultChecked={notifyUpcomingRecurring}
+                            onCheckedChange={(checked) =>
+                                patchUpcomingRecurring(checked === true)
+                            }
+                            className="mt-0.5"
+                        />
+                        <div className="grid gap-1">
+                            <Label htmlFor="notify-upcoming-recurring">
+                                {__('Upcoming recurring charges')}
+                            </Label>
+                            <p className="text-sm text-muted-foreground">
+                                {__(
+                                    'Receive one email listing the subscriptions and bills due in the next few days.',
+                                )}
+                            </p>
+                        </div>
+                    </div>
 
                     <div className="flex items-start gap-3">
                         <Checkbox
