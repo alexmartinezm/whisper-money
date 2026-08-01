@@ -17,11 +17,15 @@ return [
     | Detection window
     |--------------------------------------------------------------------------
     |
-    | How far back detection looks. Thirteen months keeps a full year plus one
-    | extra occurrence, so a yearly series can be confirmed by two charges.
+    | How far back detection looks. It has to span `min_occurrences` of the
+    | slowest cadence, so a yearly series needs two full years plus a margin —
+    | at thirteen months the yearly case could never be reached at all.
+    |
+    | The cost of the wider window is that series which stopped billing a long
+    | time ago are still detected, and land in the lapsed list.
     |
     */
-    'lookback_months' => 13,
+    'lookback_months' => 25,
 
     /*
     |--------------------------------------------------------------------------

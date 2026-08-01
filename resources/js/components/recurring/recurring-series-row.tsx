@@ -60,9 +60,11 @@ export function RecurringSeriesRow({ series }: Props) {
     }
 
     return (
+        // Below sm the metadata column would squeeze the merchant name down to
+        // a couple of characters, so the row stacks instead of sharing a line.
         <div
             className={cn(
-                'flex items-center justify-between gap-3 px-4 py-3',
+                'flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3',
                 isIgnored && 'opacity-50',
             )}
         >
@@ -90,7 +92,7 @@ export function RecurringSeriesRow({ series }: Props) {
                 </span>
             </div>
 
-            <div className="flex shrink-0 items-center gap-3">
+            <div className="flex items-center justify-between gap-3 sm:shrink-0 sm:justify-end">
                 <RecurringCadenceBadge cadence={series.cadence} />
                 <div className="flex flex-col items-end">
                     <AmountDisplay

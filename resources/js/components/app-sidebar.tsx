@@ -44,15 +44,20 @@ export function AppSidebar() {
                             href={item.href}
                             onClick={() => trigger('selection')}
                             className={cn([
-                                'flex flex-1 flex-col items-center justify-center gap-1 rounded-full px-3 py-2 transition-all duration-200',
+                                // min-w-0 lets flex-1 shrink past the label's
+                                // intrinsic width, so the pill keeps fitting as
+                                // items are added instead of overflowing.
+                                'flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-full px-2 py-2 transition-all duration-200',
                                 {
                                     'bg-primary/5 dark:bg-primary/15': isActive,
                                     'opacity-50 hover:opacity-75': !isActive,
                                 },
                             ])}
                         >
-                            {Icon && <Icon className="size-5 text-primary" />}
-                            <span className="text-[10px] leading-none font-medium text-primary">
+                            {Icon && (
+                                <Icon className="size-5 shrink-0 text-primary" />
+                            )}
+                            <span className="w-full truncate text-center text-[10px] leading-none font-medium text-primary">
                                 {label}
                             </span>
                         </Link>

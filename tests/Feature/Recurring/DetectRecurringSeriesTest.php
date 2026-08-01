@@ -87,6 +87,33 @@ it('projects the next charge from the last occurrence', function () {
         ->toBe($series->last_occurred_on->addDays($series->interval_days)->toDateString());
 });
 
+it('detects a yearly series', function () {
+    // Regression: the lookback window has to span min_occurrences of the
+    // slowest cadence. At thirteen months a yearly series needed more history
+    // than detection was allowed to read, so Yearly could never be reached.
+    $anchor = CarbonImmutable::today()->subDays(10);
+
+    foreach ([2, 1, 0] as $yearsAgo) {
+        Transaction::factory()->plaintext()->create([
+            'user_id' => $this->user->id,
+            'account_id' => $this->account->id,
+            'category_id' => $this->category->id,
+            'creditor_name' => 'Dominio Anual',
+            'transaction_date' => $anchor->subYears($yearsAgo)->toDateString(),
+            'amount' => -1200,
+            'currency_code' => 'EUR',
+        ]);
+    }
+
+    expect($this->detector->forUser($this->user))->toBe(1);
+
+    $series = RecurringSeries::query()->sole();
+
+    expect($series->cadence)->toBe(RecurringCadence::Yearly)
+        ->and($series->occurrence_count)->toBe(3)
+        ->and($series->status)->toBe(RecurringSeriesStatus::Active);
+});
+
 it('flags a series whose amount moves as variable', function () {
     monthlyCharges($this->user, $this->account, 'Endesa', amounts: [-4000, -9500, -6200, -12000]);
 
