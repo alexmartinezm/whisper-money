@@ -6,6 +6,7 @@ use App\Enums\RecurringSeriesStatus;
 use App\Features\RecurringTransactions;
 use App\Http\Requests\UpdateRecurringSeriesRequest;
 use App\Models\RecurringSeries;
+use App\Services\Budgets\ProjectBudgetPace;
 use App\Services\Recurring\ProjectCashflow;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\RedirectResponse;
@@ -19,7 +20,10 @@ class RecurringSeriesController extends Controller
 {
     use AuthorizesRequests;
 
-    public function __construct(private readonly ProjectCashflow $projectCashflow) {}
+    public function __construct(
+        private readonly ProjectCashflow $projectCashflow,
+        private readonly ProjectBudgetPace $budgetPace,
+    ) {}
 
     public function index(Request $request): Response
     {
@@ -42,6 +46,7 @@ class RecurringSeriesController extends Controller
             'series' => $series->values(),
             'summary' => $this->buildSummary($active, $user->currency_code ?? 'USD'),
             'forecast' => $this->projectCashflow->forUser($user),
+            'budgetPace' => $this->budgetPace->forUser($user),
         ]);
     }
 

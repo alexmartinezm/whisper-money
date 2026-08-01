@@ -4,6 +4,7 @@ import {
 } from '@/actions/App/Http/Controllers/RecurringDetectionController';
 import { index } from '@/actions/App/Http/Controllers/RecurringSeriesController';
 import HeadingSmall from '@/components/heading-small';
+import { BudgetPaceNotice } from '@/components/recurring/budget-pace';
 import { CashflowForecastCard } from '@/components/recurring/cashflow-forecast';
 import { RecurringOutlook } from '@/components/recurring/recurring-outlook';
 import { RecurringSeriesRow } from '@/components/recurring/recurring-series-row';
@@ -15,6 +16,7 @@ import AppSidebarLayout from '@/layouts/app/app-sidebar-layout';
 import { getCsrfToken } from '@/lib/csrf';
 import { type BreadcrumbItem } from '@/types';
 import {
+    type BudgetPace,
     type CashflowForecast,
     type RecurringCurrencySummary,
     type RecurringSeries,
@@ -44,9 +46,15 @@ interface Props {
     series: RecurringSeries[];
     summary: RecurringCurrencySummary[];
     forecast: CashflowForecast;
+    budgetPace: BudgetPace[];
 }
 
-export default function RecurringIndex({ series, summary, forecast }: Props) {
+export default function RecurringIndex({
+    series,
+    summary,
+    forecast,
+    budgetPace,
+}: Props) {
     const [scanning, setScanning] = useState(false);
     const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -71,7 +79,9 @@ export default function RecurringIndex({ series, summary, forecast }: Props) {
 
         if (progress.status === 'completed') {
             setScanning(false);
-            router.reload({ only: ['series', 'summary', 'forecast'] });
+            router.reload({
+                only: ['series', 'summary', 'forecast', 'budgetPace'],
+            });
             toast.success(__('Scan complete.'));
             return;
         }
@@ -84,7 +94,9 @@ export default function RecurringIndex({ series, summary, forecast }: Props) {
 
         if (attempt >= MAX_POLL_ATTEMPTS) {
             setScanning(false);
-            router.reload({ only: ['series', 'summary', 'forecast'] });
+            router.reload({
+                only: ['series', 'summary', 'forecast', 'budgetPace'],
+            });
             return;
         }
 
@@ -177,6 +189,11 @@ export default function RecurringIndex({ series, summary, forecast }: Props) {
                         <RecurringSummaryCards summary={summary} />
 
                         <CashflowForecastCard forecast={forecast} />
+
+                        <BudgetPaceNotice
+                            budgets={budgetPace}
+                            currencyCode={forecast.currency_code}
+                        />
 
                         <RecurringOutlook
                             months={forecast.later}

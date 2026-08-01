@@ -29,9 +29,18 @@ export function CashflowForecastCard({ forecast }: Props) {
         return null;
     }
 
-    // The number worth acting on: the projection dipping below zero means a
-    // charge lands before the money does.
-    const goesNegative = forecast.lowest.balance < 0;
+    // The warning is read off the estimate, not the exact walk. Recurring
+    // charges alone almost never empty an account — the month's shopping does,
+    // and an alert that cannot see it would stay silent through the dip it
+    // exists to catch.
+    const dip = forecast.spending?.lowest ?? forecast.lowest;
+    const goesNegative = dip.balance < 0;
+    const money = (cents: number, round = false) =>
+        new Intl.NumberFormat(locale, {
+            style: 'currency',
+            currency: forecast.currency_code,
+            ...(round ? { maximumFractionDigits: 0 } : {}),
+        }).format(cents / 100);
 
     return (
         <section className="space-y-3" aria-labelledby="cashflow-forecast">
@@ -41,7 +50,7 @@ export function CashflowForecastCard({ forecast }: Props) {
                 </h2>
                 <p className="text-sm text-muted-foreground">
                     {__(
-                        'Your current balance walked forward through the charges expected below.',
+                        'The cash you can actually spend, walked forward through the charges expected below.',
                     )}
                 </p>
             </div>
@@ -85,26 +94,70 @@ export function CashflowForecastCard({ forecast }: Props) {
                         ))}
                     </div>
 
+                    {forecast.spending && (
+                        <p className="text-sm text-muted-foreground">
+                            {__(
+                                'You also spend about :monthly a month outside these charges. Counting it, you would close around :projected.',
+                                {
+                                    monthly: money(
+                                        Math.abs(forecast.spending.monthly),
+                                        true,
+                                    ),
+                                    projected: money(
+                                        forecast.spending.ending_balance,
+                                        true,
+                                    ),
+                                },
+                            )}
+                        </p>
+                    )}
+
                     {goesNegative && (
                         <div
-                            className="flex items-start gap-2 rounded-md bg-destructive/10 p-3 text-sm text-destructive dark:bg-destructive/20"
+                            // In dark mode `--destructive` is the darker of the
+                            // pair, so red text on a red tint loses contrast;
+                            // the foreground token is the lighter one there.
+                            className="flex items-start gap-2 rounded-md bg-destructive/10 p-3 text-sm text-destructive dark:bg-destructive/20 dark:text-destructive-foreground"
                             role="alert"
                         >
                             <TriangleAlert className="mt-0.5 size-4 shrink-0" />
                             <span>
-                                {__('Runs out around :date, down to :amount.', {
-                                    date: formatDateMedium(
-                                        forecast.lowest.date,
-                                        locale,
-                                    ),
-                                    amount: new Intl.NumberFormat(locale, {
-                                        style: 'currency',
-                                        currency: forecast.currency_code,
-                                    }).format(forecast.lowest.balance / 100),
-                                })}
+                                {forecast.spending
+                                    ? __(
+                                          'At your usual pace you would be down to :amount around :date.',
+                                          {
+                                              amount: money(dip.balance),
+                                              date: formatDateMedium(
+                                                  dip.date,
+                                                  locale,
+                                              ),
+                                          },
+                                      )
+                                    : __(
+                                          'Runs out around :date, down to :amount.',
+                                          {
+                                              date: formatDateMedium(
+                                                  dip.date,
+                                                  locale,
+                                              ),
+                                              amount: money(dip.balance),
+                                          },
+                                      )}
                             </span>
                         </div>
                     )}
+
+                    <p className="text-xs text-muted-foreground">
+                        {forecast.accounts.length > 0
+                            ? __('Counting :accounts.', {
+                                  accounts: forecast.accounts
+                                      .map((account) => account.name)
+                                      .join(', '),
+                              })
+                            : __(
+                                  'No current or savings account to count, so today reads as zero.',
+                              )}
+                    </p>
 
                     {forecast.other_currencies.length > 0 && (
                         <p className="text-xs text-muted-foreground">
@@ -159,11 +212,7 @@ export function CashflowForecastCard({ forecast }: Props) {
                                             'text-destructive',
                                     )}
                                 >
-                                    {new Intl.NumberFormat(locale, {
-                                        style: 'currency',
-                                        currency: forecast.currency_code,
-                                        maximumFractionDigits: 0,
-                                    }).format(charge.balance_after / 100)}
+                                    {money(charge.balance_after, true)}
                                 </span>
                             </div>
                         </div>

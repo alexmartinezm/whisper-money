@@ -1,10 +1,13 @@
 <?php
 
 use App\Enums\AccountType;
+use App\Enums\CategoryType;
 use App\Enums\RecurringCadence;
 use App\Models\Account;
 use App\Models\AccountBalance;
+use App\Models\Category;
 use App\Models\RecurringSeries;
+use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Recurring\ProjectCashflow;
 use Carbon\CarbonImmutable;
@@ -111,14 +114,16 @@ it('reports the lowest point, not just the ending balance', function () {
         ->and($forecast['lowest']['date'])->toBe(CarbonImmutable::today()->addDays(3)->toDateString());
 });
 
-it('uses the same included accounts as net worth', function () {
+it('counts only the accounts a direct debit can come out of', function () {
+    // A runway is about liquidity, not wealth: a flat cannot pay Netflix, and
+    // a mortgage would drag the figure below zero every day of the year.
     accountWithBalance($this->user, 30000, AccountType::Checking);
     accountWithBalance($this->user, 20000, AccountType::Savings);
+    accountWithBalance($this->user, 5000, AccountType::Others);
     accountWithBalance($this->user, 500000, AccountType::Investment, 'EUR', true, true);
     accountWithBalance($this->user, 900000, AccountType::RealEstate);
     accountWithBalance($this->user, 100000, AccountType::Loan);
     accountWithBalance($this->user, 400000, AccountType::CreditCard);
-    accountWithBalance($this->user, 700000, AccountType::Checking, 'EUR', false);
 
     RecurringSeries::factory()->create([
         'user_id' => $this->user->id,
@@ -128,10 +133,30 @@ it('uses the same included accounts as net worth', function () {
         'interval_days' => 30,
     ]);
 
-    expect($this->project->forUser($this->user, 30)['starting_balance'])->toBe(1350000);
+    expect($this->project->forUser($this->user, 30)['starting_balance'])->toBe(55000);
 });
 
-it('leaves other currencies out and says so', function () {
+it('counts a spendable account the user left out of net worth', function () {
+    // That flag answers "am I getting richer", which is a different question
+    // from "can this account pay a bill on Thursday".
+    accountWithBalance($this->user, 40000, AccountType::Checking, 'EUR', false);
+
+    expect($this->project->forUser($this->user, 30)['starting_balance'])->toBe(40000);
+});
+
+it('names the accounts behind the figure', function () {
+    // "It does not match my accounts" is answered by saying which ones count.
+    $checking = accountWithBalance($this->user, 30000, AccountType::Checking);
+    accountWithBalance($this->user, 900000, AccountType::RealEstate);
+
+    $accounts = $this->project->forUser($this->user, 30)['accounts'];
+
+    expect($accounts)->toHaveCount(1)
+        ->and($accounts[0]['id'])->toBe($checking->id)
+        ->and($accounts[0]['name'])->toBe($checking->name);
+});
+
+it('converts a second currency instead of dropping it', function () {
     accountWithBalance($this->user, 100000);
     accountWithBalance($this->user, 100000, AccountType::Checking, 'USD', false);
 
@@ -152,7 +177,9 @@ it('leaves other currencies out and says so', function () {
 
     $forecast = $this->project->forUser($this->user, 30);
 
-    expect($forecast['starting_balance'])->toBe(100000)
+    // Balances are converted; series amounts still are not, so the screen says
+    // which currencies it is choosing not to project.
+    expect($forecast['starting_balance'])->toBe(200000)
         ->and($forecast['occurrences'])->toHaveCount(1)
         ->and($forecast['other_currencies'])->toBe(['USD']);
 });
@@ -340,4 +367,84 @@ it('totals a month rather than restating a lone charge', function () {
     $month = collect($this->project->forUser($this->user, 30)['later'])->first();
 
     expect($month['total'])->toBe(-17550);
+});
+
+it('walks the window again with everyday spending in it', function () {
+    $account = accountWithBalance($this->user, 300000);
+    $groceries = Category::factory()->create([
+        'user_id' => $this->user->id,
+        'type' => CategoryType::Expense,
+    ]);
+
+    foreach ([1, 2, 3] as $back) {
+        Transaction::factory()->plaintext()->create([
+            'user_id' => $this->user->id,
+            'account_id' => $account->id,
+            'category_id' => $groceries->id,
+            'transaction_date' => CarbonImmutable::today()
+                ->startOfMonth()->subMonthsNoOverflow($back)->addDays(9)->toDateString(),
+            'amount' => -60000,
+            'currency_code' => 'EUR',
+        ]);
+    }
+
+    RecurringSeries::factory()->create([
+        'user_id' => $this->user->id,
+        'expected_amount' => -1299,
+        'currency_code' => 'EUR',
+        'next_expected_on' => CarbonImmutable::today()->addDays(5),
+        'interval_days' => 30,
+    ]);
+
+    $forecast = $this->project->forUser($this->user, 30);
+
+    // The exact figures stay exact: they reconcile against the list below.
+    expect($forecast['ending_balance'])->toBe(298701)
+        ->and($forecast['spending']['monthly'])->toBe(-60000)
+        ->and($forecast['spending']['months_observed'])->toBe(3)
+        // A month of groceries on top of the subscription.
+        ->and($forecast['spending']['ending_balance'])->toBe(238701);
+});
+
+it('warns on the estimate, where the dip actually happens', function () {
+    $account = accountWithBalance($this->user, 50000);
+    $groceries = Category::factory()->create([
+        'user_id' => $this->user->id,
+        'type' => CategoryType::Expense,
+    ]);
+
+    foreach ([1, 2, 3] as $back) {
+        Transaction::factory()->plaintext()->create([
+            'user_id' => $this->user->id,
+            'account_id' => $account->id,
+            'category_id' => $groceries->id,
+            'transaction_date' => CarbonImmutable::today()
+                ->startOfMonth()->subMonthsNoOverflow($back)->addDays(9)->toDateString(),
+            'amount' => -90000,
+            'currency_code' => 'EUR',
+        ]);
+    }
+
+    $forecast = $this->project->forUser($this->user, 30);
+
+    // Nothing recurring is due, so the exact walk sees no problem at all —
+    // while the month's shopping empties the account before it is out.
+    expect($forecast['lowest']['balance'])->toBe(50000)
+        ->and($forecast['spending']['lowest']['balance'])->toBeLessThan(0)
+        ->and($forecast['spending']['lowest']['date'])
+        ->toBe(CarbonImmutable::today()->addDays(30)->toDateString());
+});
+
+it('stays quiet about spending it cannot measure', function () {
+    accountWithBalance($this->user, 100000);
+
+    RecurringSeries::factory()->create([
+        'user_id' => $this->user->id,
+        'expected_amount' => -1299,
+        'currency_code' => 'EUR',
+        'next_expected_on' => CarbonImmutable::today()->addDays(5),
+        'interval_days' => 30,
+    ]);
+
+    expect($this->project->forUser($this->user, 30)['spending'])->toBeNull();
 });
