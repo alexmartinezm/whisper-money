@@ -73,11 +73,6 @@ export function RecurringSeriesRow({ series }: Props) {
                     <span className="truncate font-medium">
                         {series.display_name}
                     </span>
-                    {series.user_state === 'confirmed' && (
-                        <Badge variant="outline" className="font-normal">
-                            {__('Confirmed')}
-                        </Badge>
-                    )}
                     {series.status === 'lapsed' && (
                         <Badge variant="outline" className="font-normal">
                             {__('Lapsed')}

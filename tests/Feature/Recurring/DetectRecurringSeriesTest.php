@@ -130,6 +130,30 @@ it('keeps a steady series marked as fixed', function () {
     expect(RecurringSeries::query()->sole()->amount_is_variable)->toBeFalse();
 });
 
+it('gives a confirmed series longer before calling it cancelled', function () {
+    // Four months since the last charge on a monthly series: past the ordinary
+    // grace period, inside the one a confirmed commitment gets.
+    monthlyCharges($this->user, $this->account, 'Seguro', monthsAgoEnd: 2);
+    $this->detector->forUser($this->user);
+
+    expect(RecurringSeries::query()->sole()->status)->toBe(RecurringSeriesStatus::Lapsed);
+
+    RecurringSeries::query()->sole()->update(['user_state' => RecurringSeriesUserState::Confirmed]);
+    $this->detector->forUser($this->user);
+
+    expect(RecurringSeries::query()->sole()->status)->toBe(RecurringSeriesStatus::Active);
+});
+
+it('still lapses a confirmed series once it is long gone', function () {
+    monthlyCharges($this->user, $this->account, 'Seguro', monthsAgoEnd: 8);
+    $this->detector->forUser($this->user);
+    RecurringSeries::query()->sole()->update(['user_state' => RecurringSeriesUserState::Confirmed]);
+
+    $this->detector->forUser($this->user);
+
+    expect(RecurringSeries::query()->sole()->status)->toBe(RecurringSeriesStatus::Lapsed);
+});
+
 it('marks a series that stopped billing as lapsed', function () {
     monthlyCharges($this->user, $this->account, 'Gym', monthsAgoEnd: 4);
 
