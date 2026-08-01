@@ -22,6 +22,56 @@ function whenLabel(isoDate: string, locale: string): string {
     return formatDateMedium(isoDate, locale);
 }
 
+/**
+ * Which accounts today's figure came from — or, when it came from none, why.
+ *
+ * Both empty cases leave today reading zero, but only one of them is a reason
+ * to go looking for a bug. Saying "you have no current or savings account" to
+ * someone who has one and excluded it sends them hunting for a fault that is
+ * really a setting.
+ */
+export function accountsNote(forecast: CashflowForecast): string {
+    if (forecast.accounts.length > 0) {
+        return __('Counting :accounts.', {
+            accounts: forecast.accounts
+                .map((account) => account.name)
+                .join(', '),
+        });
+    }
+
+    if (forecast.excluded_accounts > 0) {
+        return __(
+            'Your spendable accounts are all excluded from net worth, so today reads as zero.',
+        );
+    }
+
+    return __('No account holds spendable cash, so today reads as zero.');
+}
+
+/**
+ * The low point the card should warn about, or null when it should stay quiet.
+ *
+ * Read off the estimate rather than the exact walk: recurring charges alone
+ * almost never empty an account — the month's shopping does — so an alert
+ * blind to everyday spending would stay silent through the dip it exists to
+ * catch.
+ *
+ * Silent when nothing is counted. The walk then starts from zero, so the first
+ * charge drives it negative and the alarm goes off about an opening balance we
+ * do not have. That is an artefact of the empty state, not a warning.
+ */
+export function dipWorthWarningAbout(
+    forecast: CashflowForecast,
+): { date: string; balance: number } | null {
+    if (forecast.accounts.length === 0) {
+        return null;
+    }
+
+    const dip = forecast.spending?.lowest ?? forecast.lowest;
+
+    return dip.balance < 0 ? dip : null;
+}
+
 export function CashflowForecastCard({ forecast }: Props) {
     const locale = useLocale();
 
@@ -29,12 +79,7 @@ export function CashflowForecastCard({ forecast }: Props) {
         return null;
     }
 
-    // The warning is read off the estimate, not the exact walk. Recurring
-    // charges alone almost never empty an account — the month's shopping does,
-    // and an alert that cannot see it would stay silent through the dip it
-    // exists to catch.
-    const dip = forecast.spending?.lowest ?? forecast.lowest;
-    const goesNegative = dip.balance < 0;
+    const dip = dipWorthWarningAbout(forecast);
     const money = (cents: number, round = false) =>
         new Intl.NumberFormat(locale, {
             style: 'currency',
@@ -112,7 +157,7 @@ export function CashflowForecastCard({ forecast }: Props) {
                         </p>
                     )}
 
-                    {goesNegative && (
+                    {dip && (
                         <div
                             // In dark mode `--destructive` is the darker of the
                             // pair, so red text on a red tint loses contrast;
@@ -148,15 +193,7 @@ export function CashflowForecastCard({ forecast }: Props) {
                     )}
 
                     <p className="text-xs text-muted-foreground">
-                        {forecast.accounts.length > 0
-                            ? __('Counting :accounts.', {
-                                  accounts: forecast.accounts
-                                      .map((account) => account.name)
-                                      .join(', '),
-                              })
-                            : __(
-                                  'No current or savings account to count, so today reads as zero.',
-                              )}
+                        {accountsNote(forecast)}
                     </p>
 
                     {forecast.other_currencies.length > 0 && (

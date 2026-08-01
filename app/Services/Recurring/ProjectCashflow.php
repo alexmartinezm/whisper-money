@@ -44,6 +44,7 @@ class ProjectCashflow
      *     expected_out: int,
      *     lowest: array{date: string, balance: int},
      *     accounts: list<array{id: string, name: string}>,
+     *     excluded_accounts: int,
      *     spending: null|array{monthly: int, months_observed: int, ending_balance: int, lowest: array{date: string, balance: int}},
      *     other_currencies: list<string>,
      *     occurrences: list<array{date: string, series_id: string, display_name: string, amount: int, amount_is_variable: bool, balance_after: int, category: ?string}>,
@@ -67,7 +68,8 @@ class ProjectCashflow
             ->get();
 
         $occurrences = $this->expand($series->where('currency_code', $currency), $today, $horizon);
-        $accounts = $this->spendableAccounts($user, $spaceId);
+        $spendable = $this->spendableAccounts($user, $spaceId);
+        $accounts = $spendable['counted'];
         $balance = $this->spendableBalance($accounts, $currency, $today);
 
         $running = $balance;
@@ -101,6 +103,7 @@ class ProjectCashflow
                 ->map(fn (Account $account): array => ['id' => $account->id, 'name' => $account->name])
                 ->values()
                 ->all(),
+            'excluded_accounts' => $spendable['excluded'],
             'spending' => $this->everydaySpending($accounts, $currency, $today, $days, $balance, $occurrences),
             'other_currencies' => $series
                 ->pluck('currency_code')
@@ -215,20 +218,28 @@ class ProjectCashflow
     }
 
     /**
-     * The accounts a direct debit can actually come out of.
+     * The accounts a direct debit can actually come out of, and how many were
+     * held back by the net-worth setting.
      *
-     * @return EloquentCollection<int, Account>
+     * The count matters only for what the screen can say. "No account to count"
+     * and "every account you have is excluded" both leave today reading zero,
+     * but only one of them is a reason to go looking for a bug.
+     *
+     * @return array{counted: EloquentCollection<int, Account>, excluded: int}
      */
-    private function spendableAccounts(User $user, string $spaceId): EloquentCollection
+    private function spendableAccounts(User $user, string $spaceId): array
     {
-        return Account::query()
+        $spendable = Account::query()
             ->where('user_id', $user->id)
             ->where('space_id', $spaceId)
-            ->where('include_in_net_worth', true)
             ->orderBy('name')
             ->get()
-            ->filter(fn (Account $account): bool => $account->type->holdsSpendableCash())
-            ->values();
+            ->filter(fn (Account $account): bool => $account->type->holdsSpendableCash());
+
+        return [
+            'counted' => $spendable->where('include_in_net_worth', true)->values(),
+            'excluded' => $spendable->where('include_in_net_worth', false)->count(),
+        ];
     }
 
     /**

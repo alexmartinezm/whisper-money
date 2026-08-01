@@ -114,6 +114,8 @@ export interface CashflowForecast {
     lowest: { date: string; balance: number };
     /** The accounts behind `starting_balance`, so the figure can be checked. */
     accounts: { id: UUID; name: string }[];
+    /** Spendable accounts held back by the net-worth setting. */
+    excluded_accounts: number;
     /** Null when there is too little history to estimate a pace. */
     spending: EverydaySpending | null;
     /** Currencies with series that this projection deliberately leaves out. */
