@@ -22,7 +22,7 @@ function accountWithBalance(
     int $balance,
     AccountType $type = AccountType::Checking,
     string $currency = 'EUR',
-    ?bool $includeInNetWorth = true,
+    bool $includeInNetWorth = true,
     bool $hiddenOnDashboard = false,
 ): Account {
     $account = Account::factory()->create([
@@ -115,7 +115,7 @@ it('uses the same included accounts as net worth', function () {
     accountWithBalance($this->user, 30000, AccountType::Checking);
     accountWithBalance($this->user, 20000, AccountType::Savings);
     accountWithBalance($this->user, 500000, AccountType::Investment, 'EUR', true, true);
-    accountWithBalance($this->user, 900000, AccountType::RealEstate, 'EUR', null);
+    accountWithBalance($this->user, 900000, AccountType::RealEstate);
     accountWithBalance($this->user, 100000, AccountType::Loan);
     accountWithBalance($this->user, 400000, AccountType::CreditCard);
     accountWithBalance($this->user, 700000, AccountType::Checking, 'EUR', false);
