@@ -12,7 +12,15 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[IsReadOnly]
-#[Description('Expense spending rolled up by category for a date range. Without parent_category_id, root categories are returned; pass one to drill into its children. Amounts are in minor units (cents). Covers the user\'s whole account.')]
+#[Description(<<<'TEXT'
+Expense spending rolled up by category for a date range. Without parent_category_id, root
+categories are returned; pass one to drill into its children. Amounts are in minor units
+(cents).
+
+Unlike most tools here this one takes no `space`: it aggregates every space the user has,
+and there is no way to narrow it to one. Do not set its figures against a space-filtered
+total without saying so — the difference is the other spaces, not a discrepancy.
+TEXT)]
 class SpendingByCategory extends McpTool
 {
     /**

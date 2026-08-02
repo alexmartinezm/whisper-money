@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools;
 
+use App\Mcp\Tools\Concerns\PresentsBalances;
 use App\Models\AccountBalance;
 use App\Models\User;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
@@ -11,9 +12,11 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 
 #[IsDestructive]
-#[Description('Record an account balance snapshot on a non-connected (manual) account. Balance is an integer in minor units (cents). Replaces any existing snapshot for that date. Connected/bank accounts are read-only.')]
+#[Description('Record an account balance snapshot on a non-connected (manual) account. Balance is an integer in minor units (cents). Replaces any existing snapshot for that date; use delete_balance to remove one that should never have existed. Connected/bank accounts are read-only.')]
 class CreateBalance extends WriteTool
 {
+    use PresentsBalances;
+
     /**
      * @return array<string, mixed>
      */
@@ -53,14 +56,6 @@ class CreateBalance extends WriteTool
             ],
         );
 
-        return $this->json([
-            'balance' => [
-                'id' => $balance->id,
-                'account_id' => $balance->account_id,
-                'balance_date' => $balance->balance_date->toDateString(),
-                'balance' => $balance->balance,
-                'invested_amount' => $balance->invested_amount,
-            ],
-        ]);
+        return $this->json(['balance' => $this->presentBalance($balance)]);
     }
 }

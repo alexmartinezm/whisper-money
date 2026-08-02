@@ -276,6 +276,147 @@ it('creates, updates and deletes an automation rule', function () {
     expect(AutomationRule::query()->find($rule->id))->toBeNull();
 });
 
+it('moves a category back to the root when parent_id is null', function () {
+    $user = User::factory()->create();
+    $parent = Category::factory()->create([
+        'user_id' => $user->id,
+        'name' => 'Home',
+        'type' => 'expense',
+        'cashflow_direction' => 'outflow',
+    ]);
+    $child = Category::factory()->create([
+        'user_id' => $user->id,
+        'name' => 'Rent',
+        'parent_id' => $parent->id,
+        'type' => 'expense',
+        'cashflow_direction' => 'outflow',
+    ]);
+    $grandchild = Category::factory()->create([
+        'user_id' => $user->id,
+        'name' => 'Garage',
+        'parent_id' => $child->id,
+        'type' => 'expense',
+        'cashflow_direction' => 'outflow',
+    ]);
+
+    callWriteTool($user, UpdateCategory::class, [
+        'category_id' => $child->id,
+        'parent_id' => null,
+        'type' => 'savings',
+    ])->assertOk();
+
+    // A root re-derives its own type, and the subtree follows it down.
+    expect($child->fresh()->parent_id)->toBeNull()
+        ->and($child->fresh()->type->value)->toBe('savings')
+        ->and($child->fresh()->cashflow_direction->value)->toBe('outflow')
+        ->and($grandchild->fresh()->type->value)->toBe('savings');
+});
+
+it('clears an automation rule note when action_note is null', function () {
+    $user = User::factory()->create();
+    $category = Category::factory()->create(['user_id' => $user->id]);
+    $rule = AutomationRule::factory()->create([
+        'user_id' => $user->id,
+        'action_category_id' => $category->id,
+        'action_note' => 'Reimbursable',
+    ]);
+
+    callWriteTool($user, UpdateAutomationRule::class, [
+        'automation_rule_id' => $rule->id,
+        'action_note' => null,
+    ])->assertOk();
+
+    expect($rule->fresh()->action_note)->toBeNull();
+});
+
+it('clears an automation rule category only while a label action survives', function () {
+    $user = User::factory()->create();
+    $category = Category::factory()->create(['user_id' => $user->id]);
+    $label = Label::factory()->create(['user_id' => $user->id, 'name' => 'Reviewed']);
+    $rule = AutomationRule::factory()->create([
+        'user_id' => $user->id,
+        'action_category_id' => $category->id,
+    ]);
+
+    // With no labels attached, dropping the category would leave the rule with
+    // nothing to do, so it is refused and the rule is left alone.
+    callWriteTool($user, UpdateAutomationRule::class, [
+        'automation_rule_id' => $rule->id,
+        'action_category_id' => null,
+    ])->assertHasErrors(['at least one action']);
+
+    expect($rule->fresh()->action_category_id)->toBe($category->id);
+
+    $rule->labels()->sync([$label->id]);
+
+    callWriteTool($user, UpdateAutomationRule::class, [
+        'automation_rule_id' => $rule->id,
+        'action_category_id' => null,
+    ])->assertOk();
+
+    expect($rule->fresh()->action_category_id)->toBeNull()
+        ->and($rule->fresh()->labels)->toHaveCount(1);
+});
+
+it('refuses a cascading category delete that was not confirmed', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id]);
+    $parent = Category::factory()->create(['user_id' => $user->id, 'name' => 'Car']);
+    $child = Category::factory()->create(['user_id' => $user->id, 'name' => 'Fuel', 'parent_id' => $parent->id]);
+    $transaction = Transaction::factory()->create([
+        'user_id' => $user->id,
+        'account_id' => $account->id,
+        'category_id' => $child->id,
+    ]);
+
+    callWriteTool($user, DeleteCategory::class, [
+        'category_id' => $parent->id,
+        'strategy' => 'cascade',
+    ])->assertHasErrors(['confirm_cascade']);
+
+    expect(Category::query()->find($parent->id))->not->toBeNull()
+        ->and(Category::query()->find($child->id))->not->toBeNull()
+        ->and($transaction->fresh()->category_id)->toBe($child->id);
+});
+
+it('reports what a confirmed cascading category delete cost', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id]);
+    $parent = Category::factory()->create(['user_id' => $user->id, 'name' => 'Car']);
+    $child = Category::factory()->create(['user_id' => $user->id, 'name' => 'Fuel', 'parent_id' => $parent->id]);
+    $transaction = Transaction::factory()->create([
+        'user_id' => $user->id,
+        'account_id' => $account->id,
+        'category_id' => $child->id,
+    ]);
+
+    callWriteTool($user, DeleteCategory::class, [
+        'category_id' => $parent->id,
+        'strategy' => 'cascade',
+        'confirm_cascade' => true,
+    ])->assertOk()
+        ->assertSee('"categories_deleted":2', false)
+        ->assertSee('"transactions_uncategorized":1', false);
+
+    expect(Category::query()->find($parent->id))->toBeNull()
+        ->and(Category::query()->find($child->id))->toBeNull()
+        ->and($transaction->fresh()->category_id)->toBeNull();
+});
+
+it('reports a reparenting category delete as a single category and no transactions', function () {
+    $user = User::factory()->create();
+    $parent = Category::factory()->create(['user_id' => $user->id, 'name' => 'Car']);
+    $child = Category::factory()->create(['user_id' => $user->id, 'name' => 'Fuel', 'parent_id' => $parent->id]);
+
+    callWriteTool($user, DeleteCategory::class, [
+        'category_id' => $parent->id,
+    ])->assertOk()
+        ->assertSee('"categories_deleted":1', false)
+        ->assertSee('"transactions_uncategorized":0', false);
+
+    expect($child->fresh()->parent_id)->toBeNull();
+});
+
 it('requires an automation rule to have at least one action', function () {
     $user = User::factory()->create();
 

@@ -19,6 +19,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Laravel\Mcp\Server\Testing\TestResponse as McpTestResponse;
 use Stripe\Collection as StripeCollection;
 use Stripe\Service\SubscriptionService;
 use Stripe\StripeClient;
@@ -340,6 +341,29 @@ function fakeCurrencyApi(): void
             ],
         ]);
     });
+}
+
+/*
+ * Every Whisper Money MCP tool answers with Response::text(json_encode(...)),
+ * and the framework's TestResponse only exposes that text to assertSee, which
+ * reaches substrings. A listing's order, or a JsonLogic condition that has to
+ * survive the round trip unchanged, needs the structure back.
+ */
+McpTestResponse::macro('decodedMcpPayload', function (): array {
+    /** @var McpTestResponse $this */
+    // @phpstan-ignore-next-line — a macro closure is bound to the instance, so
+    // the framework's protected content() is in scope here.
+    return json_decode($this->content()[0] ?? '{}', true) ?? [];
+});
+
+/**
+ * The JSON payload an MCP tool returned, decoded.
+ *
+ * @return array<string, mixed>
+ */
+function mcpPayload(McpTestResponse $response): array
+{
+    return $response->decodedMcpPayload(); // @phpstan-ignore-line
 }
 
 /**

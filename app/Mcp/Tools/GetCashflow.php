@@ -11,7 +11,15 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[IsReadOnly]
-#[Description('The full cashflow picture for a date range as JSON, mirroring the app\'s cashflow screen: income/expense/savings/investment summary (current vs previous), the income-vs-expense category flow (sankey), and the monthly trend. Amounts are in minor units (cents). Covers the user\'s whole account.')]
+#[Description(<<<'TEXT'
+The full cashflow picture for a date range as JSON, mirroring the app's cashflow screen:
+income/expense/savings/investment summary (current vs previous), the income-vs-expense
+category flow (sankey), and the monthly trend. Amounts are in minor units (cents).
+
+Unlike most tools here this one takes no `space`: it aggregates every space the user has,
+and there is no way to narrow it to one. Do not set its figures against a space-filtered
+total without saying so — the difference is the other spaces, not a discrepancy.
+TEXT)]
 class GetCashflow extends McpTool
 {
     /**
