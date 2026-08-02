@@ -352,12 +352,6 @@ export default function Dashboard() {
                 >
                     <NetWorthChartComponent data={netWorthEvolution} />
 
-                    {props.netWorthProjection && (
-                        <NetWorthProjectionCard
-                            projection={props.netWorthProjection}
-                        />
-                    )}
-
                     <div className="flex items-center justify-between">
                         <h2 className="text-lg font-semibold">
                             {__('Accounts')}
@@ -389,6 +383,12 @@ export default function Dashboard() {
                             />
                         ))}
                     </div>
+
+                    {props.netWorthProjection && (
+                        <NetWorthProjectionCard
+                            projection={props.netWorthProjection}
+                        />
+                    )}
 
                     <AccountsManagerDialog
                         open={editOpen}

@@ -2288,5 +2288,21 @@
     "Per year": "Par an",
     "Prices are the typical amount of the last few charges compared with the ones before them, so a one-off surcharge will not appear here.": "Les prix sont le montant typique des derniers prélèvements comparé aux précédents : un supplément ponctuel n'apparaît donc pas ici.",
     "Review your subscriptions": "Revoir vos abonnements",
-    "You can turn these warnings off in your notification settings.": "Vous pouvez désactiver ces alertes dans vos paramètres de notifications."
+    "You can turn these warnings off in your notification settings.": "Vous pouvez désactiver ces alertes dans vos paramètres de notifications.",
+    "Where this is heading": "Vers où cela va",
+    "Your net worth in :months months if nothing changes.": "Votre patrimoine dans :months mois si rien ne change.",
+    "Committed": "Engagé",
+    "Loans, recurring charges, revaluation": "Prêts, charges récurrentes, revalorisation",
+    "With your usual spending": "Avec vos dépenses habituelles",
+    "Not enough history yet": "Pas encore assez d'historique",
+    "over the period": "sur la période",
+    "So far": "Jusqu'à aujourd'hui",
+    "Debt repaid": "Dette remboursée",
+    "Revaluation": "Revalorisation",
+    "Recurring in and out": "Récurrents, entrées et sorties",
+    "Everyday spending": "Dépenses habituelles",
+    "Investments and pensions are held at today’s value — no return is assumed.": "Les investissements et les retraites sont maintenus à leur valeur actuelle : aucun rendement n'est supposé.",
+    ":accounts revalues at the rate you set.": ":accounts se revalorise au taux que vous avez défini.",
+    "Everyday spending is the median of :months complete months.": "Les dépenses habituelles sont la médiane de :months mois complets.",
+    "Moved into savings": "Transféré vers l'épargne"
 }

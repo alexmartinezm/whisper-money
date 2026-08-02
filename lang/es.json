@@ -2443,5 +2443,21 @@
     "Per year": "Al año",
     "Prices are the typical amount of the last few charges compared with the ones before them, so a one-off surcharge will not appear here.": "Los precios son el importe típico de los últimos cargos comparado con los anteriores, así que un recargo puntual no aparece aquí.",
     "Review your subscriptions": "Revisar tus suscripciones",
-    "You can turn these warnings off in your notification settings.": "Puedes desactivar estos avisos en tus ajustes de notificaciones."
+    "You can turn these warnings off in your notification settings.": "Puedes desactivar estos avisos en tus ajustes de notificaciones.",
+    "Where this is heading": "Hacia dónde va",
+    "Your net worth in :months months if nothing changes.": "Tu patrimonio dentro de :months meses si nada cambia.",
+    "Committed": "Comprometido",
+    "Loans, recurring charges, revaluation": "Préstamos, cargos recurrentes, revalorización",
+    "With your usual spending": "Con tu gasto habitual",
+    "Not enough history yet": "Aún no hay histórico suficiente",
+    "over the period": "en el periodo",
+    "So far": "Hasta hoy",
+    "Debt repaid": "Deuda amortizada",
+    "Revaluation": "Revalorización",
+    "Recurring in and out": "Recurrentes, entradas y salidas",
+    "Everyday spending": "Gasto habitual",
+    "Investments and pensions are held at today’s value — no return is assumed.": "Las inversiones y los planes de pensiones se mantienen al valor de hoy: no se supone ninguna rentabilidad.",
+    ":accounts revalues at the rate you set.": ":accounts se revaloriza al porcentaje que configuraste.",
+    "Everyday spending is the median of :months complete months.": "El gasto habitual es la mediana de :months meses completos.",
+    "Moved into savings": "Traspasado a ahorro"
 }

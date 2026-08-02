@@ -29,14 +29,33 @@ interface Props {
     projection: NetWorthProjection;
 }
 
-const chartConfig = {
-    actual: { label: 'Real', color: 'var(--color-chart-1)' },
-    committed: { label: 'Comprometido', color: 'var(--color-chart-1)' },
-    estimated: {
-        label: 'Con tu gasto habitual',
-        color: 'var(--color-chart-3)',
-    },
-} satisfies ChartConfig;
+/**
+ * The three lines, in the order they should be read. Built inside the render
+ * rather than at module scope: `__()` needs the translations the page ships
+ * with, and a module constant is evaluated before they arrive.
+ */
+function buildLegend() {
+    return [
+        {
+            key: 'actual' as const,
+            label: __('So far'),
+            color: 'var(--color-chart-1)',
+            dash: undefined,
+        },
+        {
+            key: 'committed' as const,
+            label: __('Committed'),
+            color: 'var(--color-chart-1)',
+            dash: '6 4',
+        },
+        {
+            key: 'estimated' as const,
+            label: __('With your usual spending'),
+            color: 'var(--color-chart-3)',
+            dash: '2 4',
+        },
+    ];
+}
 
 /**
  * The band between the two forward lines. Recharts draws an `Area` from a
@@ -58,6 +77,13 @@ function withBand(projection: NetWorthProjection) {
 
 export function NetWorthProjectionCard({ projection }: Props) {
     const locale = useLocale();
+    const legend = buildLegend();
+    const chartConfig = Object.fromEntries(
+        legend.map((line) => [
+            line.key,
+            { label: line.label, color: line.color },
+        ]),
+    ) satisfies ChartConfig;
     const data = withBand(projection);
     const today = projection.points.find(
         (point) => point.actual !== null && point.committed !== null,
@@ -118,6 +144,14 @@ export function NetWorthProjectionCard({ projection }: Props) {
             key: 'recurring',
             label: __('Recurring in and out'),
             amount: projection.drivers.recurring_net,
+        },
+        {
+            // Shown so the breakdown reconciles. Without it the recurring
+            // figure looks like an unexplained hole: the transfer leaves as an
+            // outflow and comes back as wealth, and only one half is visible.
+            key: 'contributions',
+            label: __('Moved into savings'),
+            amount: projection.drivers.contributions,
         },
         {
             key: 'everyday',
@@ -313,26 +347,7 @@ export function NetWorthProjectionCard({ projection }: Props) {
                 </ChartContainer>
 
                 <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted-foreground">
-                    {[
-                        {
-                            key: 'actual',
-                            label: __('So far'),
-                            color: 'var(--color-chart-1)',
-                            dash: undefined,
-                        },
-                        {
-                            key: 'committed',
-                            label: __('Committed'),
-                            color: 'var(--color-chart-1)',
-                            dash: '6 4',
-                        },
-                        {
-                            key: 'estimated',
-                            label: __('With your usual spending'),
-                            color: 'var(--color-chart-3)',
-                            dash: '2 4',
-                        },
-                    ].map((item) => (
+                    {legend.map((item) => (
                         <span
                             key={item.key}
                             className="flex items-center gap-1.5"
