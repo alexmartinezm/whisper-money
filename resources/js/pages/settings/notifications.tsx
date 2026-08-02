@@ -44,6 +44,7 @@ interface BudgetRow {
 interface Props {
     notifyOnBankTransactionsSynced: boolean;
     notifyUpcomingRecurring: boolean;
+    notifyRunwayShortfall: boolean;
     budgetDefaults: Record<BudgetToggleKey, boolean>;
     budgets: BudgetRow[];
 }
@@ -77,6 +78,7 @@ const patchOptions = { preserveScroll: true, preserveState: true } as const;
 export default function Notifications({
     notifyOnBankTransactionsSynced,
     notifyUpcomingRecurring,
+    notifyRunwayShortfall,
     budgetDefaults,
     budgets,
 }: Props) {
@@ -92,6 +94,14 @@ export default function Notifications({
         router.patch(
             update().url,
             { notifications: { upcoming_recurring: checked } },
+            patchOptions,
+        );
+    };
+
+    const patchRunwayShortfall = (checked: boolean) => {
+        router.patch(
+            update().url,
+            { notifications: { runway_shortfall: checked } },
             patchOptions,
         );
     };
@@ -137,6 +147,27 @@ export default function Notifications({
                             <p className="text-sm text-muted-foreground">
                                 {__(
                                     'Receive one email listing the subscriptions and bills due in the next few days.',
+                                )}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="flex items-start gap-3">
+                        <Checkbox
+                            id="notify-runway-shortfall"
+                            defaultChecked={notifyRunwayShortfall}
+                            onCheckedChange={(checked) =>
+                                patchRunwayShortfall(checked === true)
+                            }
+                            className="mt-0.5"
+                        />
+                        <div className="grid gap-1">
+                            <Label htmlFor="notify-runway-shortfall">
+                                {__('Running out before payday')}
+                            </Label>
+                            <p className="text-sm text-muted-foreground">
+                                {__(
+                                    'Get warned when your projected balance dips below zero, counting your usual spending as well as your recurring charges. Sent once per dip, not every day.',
                                 )}
                             </p>
                         </div>
