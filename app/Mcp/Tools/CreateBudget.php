@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 
 #[IsDestructive]
-#[Description('Create a recurring budget. Amounts use minor units. Historical assignment runs in the background; tracking, cadence and rollover are fixed after creation.')]
+#[Description('Create a recurring budget. Amounts use minor units. Historical assignment runs in the background; tracking can be updated later, while cadence and rollover are fixed after creation.')]
 class CreateBudget extends WriteTool
 {
     use InteractsWithBudgets;

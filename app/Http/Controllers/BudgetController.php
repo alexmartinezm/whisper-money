@@ -218,6 +218,7 @@ class BudgetController extends Controller
 
         $categories = Category::query()
             ->where('user_id', $user->id)
+            ->where('space_id', $budget->space_id)
             ->forDisplay()
             ->get();
 
@@ -234,6 +235,7 @@ class BudgetController extends Controller
 
         $labels = Label::query()
             ->where('user_id', $user->id)
+            ->where('space_id', $budget->space_id)
             ->orderBy('name')
             ->get();
 
@@ -278,9 +280,9 @@ class BudgetController extends Controller
 
         $this->budgetManagementService->update(
             $request->user(),
-            $request->user()->activeSpace(),
+            $budget->space,
             $budget->id,
-            $request->only(['name', 'allocated_amount']),
+            $request->only(['name', 'allocated_amount', 'category_ids', 'label_ids']),
             CarbonImmutable::today(),
         );
 

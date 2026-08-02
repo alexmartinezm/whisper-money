@@ -10,6 +10,8 @@ use App\Mcp\Tools\ListBudgets;
 use App\Mcp\Tools\UpdateBudget;
 use App\Models\Budget;
 use App\Models\Category;
+use App\Models\Label;
+use App\Models\Space;
 use App\Models\User;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Mcp\Server\Testing\TestResponse;
@@ -92,6 +94,52 @@ it('updates only the name and future allocation and reports the adjustment', fun
     $budget->refresh();
     expect($budget->name)->toBe('Renamed')
         ->and($budget->periods()->where('allocated_amount', 750)->exists())->toBeTrue();
+});
+
+it('updates budget categories and labels through MCP', function () {
+    $user = User::factory()->create();
+    $space = $user->personalSpace;
+    $oldCategory = Category::factory()->create(['user_id' => $user->id, 'space_id' => $space->id]);
+    $newCategory = Category::factory()->create(['user_id' => $user->id, 'space_id' => $space->id]);
+    $label = Label::factory()->create(['user_id' => $user->id, 'space_id' => $space->id]);
+    $budget = Budget::factory()->monthly()->forCategories($oldCategory)->create([
+        'user_id' => $user->id,
+        'space_id' => $space->id,
+    ]);
+
+    callBudgetWriteTool($user, UpdateBudget::class, [
+        'budget_id' => $budget->id,
+        'category_ids' => [$newCategory->id],
+        'label_ids' => [$label->id],
+    ])->assertOk()->assertSee($newCategory->name)->assertSee($label->name);
+
+    expect($budget->fresh()->categories->modelKeys())->toBe([$newCategory->id])
+        ->and($budget->fresh()->labels->modelKeys())->toBe([$label->id]);
+});
+
+it('rejects budget tracking references from another space through MCP', function () {
+    $user = User::factory()->create();
+    $space = $user->personalSpace;
+    $otherSpace = Space::factory()->create(['owner_id' => $user->id]);
+    $oldCategory = Category::factory()->create([
+        'user_id' => $user->id,
+        'space_id' => $space->id,
+    ]);
+    $foreignCategory = Category::factory()->create([
+        'user_id' => $user->id,
+        'space_id' => $otherSpace->id,
+    ]);
+    $budget = Budget::factory()->monthly()->forCategories($oldCategory)->create([
+        'user_id' => $user->id,
+        'space_id' => $space->id,
+    ]);
+
+    callBudgetWriteTool($user, UpdateBudget::class, [
+        'budget_id' => $budget->id,
+        'category_ids' => [$foreignCategory->id],
+    ])->assertHasErrors();
+
+    expect($budget->fresh()->categories->modelKeys())->toBe([$oldCategory->id]);
 });
 
 it('does not materialize periods while listing budgets', function () {

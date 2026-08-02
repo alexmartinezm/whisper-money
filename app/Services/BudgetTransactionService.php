@@ -38,7 +38,9 @@ class BudgetTransactionService
                 ->with(['labels', 'category', 'splits.category'])
                 ->firstOrFail();
             $periods = BudgetPeriod::query()
-                ->whereHas('budget', fn ($query) => $query->where('user_id', $locked->user_id))
+                ->whereHas('budget', fn ($query) => $query
+                    ->where('user_id', $locked->user_id)
+                    ->where('space_id', $locked->space_id))
                 ->where('start_date', '<=', $locked->transaction_date)
                 ->where('end_date', '>=', $locked->transaction_date)
                 ->with(['budget.categories:id', 'budget.labels:id'])
@@ -85,6 +87,7 @@ class BudgetTransactionService
         $count = 0;
         Transaction::query()
             ->where('user_id', $budget->user_id)
+            ->where('space_id', $budget->space_id)
             ->whereBetween('transaction_date', [$period->start_date, $period->end_date])
             ->with(['labels', 'category', 'splits.category'])
             ->chunk(500, function ($transactions) use ($period, $budget, &$count): void {
@@ -119,7 +122,11 @@ class BudgetTransactionService
             return -$transaction->amount;
         }
 
-        $budgetCategoryIds = $this->tree->expand($budget->user_id, $budget->categories->pluck('id')->all());
+        $budgetCategoryIds = $this->tree->expand(
+            $budget->user_id,
+            $budget->categories->pluck('id')->all(),
+            $budget->space_id,
+        );
         $postings = $this->postings->forTransaction($transaction);
 
         if (! $budget->is_catch_all) {
@@ -128,6 +135,7 @@ class BudgetTransactionService
 
         $claimedByLabel = Budget::query()
             ->where('user_id', $budget->user_id)
+            ->where('space_id', $budget->space_id)
             ->where('is_catch_all', false)
             ->whereHas('labels', fn ($query) => $query->whereIn('labels.id', $transaction->labels->pluck('id')))
             ->exists();
@@ -135,14 +143,19 @@ class BudgetTransactionService
             return 0;
         }
 
-        $claimed = $this->tree->expand($budget->user_id, Budget::query()
-            ->where('user_id', $budget->user_id)
-            ->where('is_catch_all', false)
-            ->with('categories:id')
-            ->get()
-            ->flatMap(fn (Budget $other): mixed => $other->categories->pluck('id'))
-            ->unique()
-            ->all());
+        $claimed = $this->tree->expand(
+            $budget->user_id,
+            Budget::query()
+                ->where('user_id', $budget->user_id)
+                ->where('space_id', $budget->space_id)
+                ->where('is_catch_all', false)
+                ->with('categories:id')
+                ->get()
+                ->flatMap(fn (Budget $other): mixed => $other->categories->pluck('id'))
+                ->unique()
+                ->all(),
+            $budget->space_id,
+        );
 
         return -$postings
             ->filter(fn ($posting): bool => $posting->category?->type === CategoryType::Expense && ! in_array($posting->categoryId, $claimed, true))

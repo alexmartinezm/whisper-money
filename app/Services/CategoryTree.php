@@ -38,10 +38,18 @@ class CategoryTree
      * transactions assigned to any of its children. Bounded by MAX_DEPTH, so
      * this resolves in at most a couple of cheap queries.
      *
+     * Pass `$spaceId` when the caller is already scoped to one space. Nothing
+     * stops a category in one space naming a parent in another, so a budget
+     * that tracks a parent would otherwise pull in children belonging to a
+     * space it has no business reading. It stays opt-in because most callers
+     * work across the user's whole tree, and silently narrowing them here would
+     * drop subcategories from the dashboard and the cashflow report without a
+     * single test noticing.
+     *
      * @param  array<int, string>  $ids
      * @return array<int, string>
      */
-    public function expand(string $userId, array $ids): array
+    public function expand(string $userId, array $ids, ?string $spaceId = null): array
     {
         $ids = array_values(array_unique(array_filter($ids)));
 
@@ -55,6 +63,7 @@ class CategoryTree
         for ($level = 1; $level < Category::MAX_DEPTH; $level++) {
             $childIds = Category::query()
                 ->where('user_id', $userId)
+                ->when($spaceId !== null, fn ($query) => $query->where('space_id', $spaceId))
                 ->whereIn('parent_id', $frontier)
                 ->pluck('id')
                 ->all();

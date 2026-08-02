@@ -2264,5 +2264,8 @@
     "At this pace :name closes at :projected, :over over its :available.": "À ce rythme :name termine à :projected, :over au-dessus de ses :available.",
     "Review budgets": "Revoir les budgets",
     "No account holds spendable cash, so today reads as zero.": "Aucun compte ne détient d'argent disponible, donc aujourd'hui affiche zéro.",
-    "Your spendable accounts are all excluded from net worth, so today reads as zero.": "Tous vos comptes disponibles sont exclus du patrimoine, donc aujourd'hui affiche zéro."
+    "Your spendable accounts are all excluded from net worth, so today reads as zero.": "Tous vos comptes disponibles sont exclus du patrimoine, donc aujourd'hui affiche zéro.",
+    "Update the budget name and what it tracks.": "Mettez à jour le nom du budget et ce qu'il suit.",
+    "Tracking changes recalculate the active period. Closed periods stay unchanged.": "Les changements de suivi recalculent la période active. Les périodes clôturées restent inchangées.",
+    "Period and carry-over settings stay locked to preserve historical period boundaries. Categories and labels can be changed without rewriting closed periods.": "Les paramètres de période et de report restent verrouillés afin de préserver les limites historiques. Les catégories et les étiquettes peuvent être modifiées sans réécrire les périodes clôturées."
 }

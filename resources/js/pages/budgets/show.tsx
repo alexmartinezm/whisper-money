@@ -238,6 +238,8 @@ export default function BudgetShow({
 
             <EditBudgetDialog
                 budget={budget}
+                categories={categories}
+                labels={labels}
                 open={editOpen}
                 onOpenChange={setEditOpen}
             />

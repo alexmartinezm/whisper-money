@@ -21,7 +21,6 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { buildCategoryTree, flattenCategoryTree } from '@/lib/category-tree';
 import { cn } from '@/lib/utils';
 import { SharedData } from '@/types';
 import {
@@ -32,14 +31,17 @@ import {
     ROLLOVER_TYPES,
     RolloverType,
 } from '@/types/budget';
-import { Category, getCategoryColorClasses } from '@/types/category';
-import { getLabelColorClasses, Label } from '@/types/label';
+import { Category } from '@/types/category';
+import { Label } from '@/types/label';
 import { __ } from '@/utils/i18n';
 import { router, usePage } from '@inertiajs/react';
-import * as Icons from 'lucide-react';
-import { Plus, Tag } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import React, { useState } from 'react';
 import { Card, CardContent } from '../ui/card';
+import {
+    categoryTrackingOptions,
+    labelTrackingOptions,
+} from './tracking-options';
 
 interface Props {
     className?: string;
@@ -272,36 +274,9 @@ export function CreateBudgetDialog({
                                         </UILabel>
                                         <MultiSelect
                                             id="categories"
-                                            options={flattenCategoryTree(
-                                                buildCategoryTree(
-                                                    allCategories,
-                                                ),
-                                            ).map((category) => {
-                                                const colorClasses =
-                                                    getCategoryColorClasses(
-                                                        category.color,
-                                                    );
-                                                const IconComponent = Icons[
-                                                    category.icon as keyof typeof Icons
-                                                ] as
-                                                    | Icons.LucideIcon
-                                                    | undefined;
-
-                                                return {
-                                                    value: category.id,
-                                                    label: category.name,
-                                                    depth: category.depth,
-                                                    parentValue:
-                                                        category.parent_id,
-                                                    icon: IconComponent ? (
-                                                        <IconComponent className="h-3 w-3 opacity-80" />
-                                                    ) : undefined,
-                                                    badgeClassName: cn(
-                                                        colorClasses.bg,
-                                                        colorClasses.text,
-                                                    ),
-                                                };
-                                            })}
+                                            options={categoryTrackingOptions(
+                                                allCategories,
+                                            )}
                                             selected={selectedCategoryIds}
                                             onChange={setSelectedCategoryIds}
                                             placeholder={__(
@@ -322,24 +297,9 @@ export function CreateBudgetDialog({
                                         </UILabel>
                                         <MultiSelect
                                             id="labels"
-                                            options={allLabels.map((label) => {
-                                                const colorClasses =
-                                                    getLabelColorClasses(
-                                                        label.color,
-                                                    );
-
-                                                return {
-                                                    value: label.id,
-                                                    label: label.name,
-                                                    icon: (
-                                                        <Tag className="h-3 w-3 opacity-80" />
-                                                    ),
-                                                    badgeClassName: cn(
-                                                        colorClasses.bg,
-                                                        colorClasses.text,
-                                                    ),
-                                                };
-                                            })}
+                                            options={labelTrackingOptions(
+                                                allLabels,
+                                            )}
                                             selected={selectedLabelIds}
                                             onChange={setSelectedLabelIds}
                                             placeholder={__('Select labels')}

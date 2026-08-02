@@ -1,6 +1,4 @@
 import { update } from '@/actions/App/Http/Controllers/BudgetController';
-import { CategoryBadge } from '@/components/shared/category-combobox';
-import { LabelBadge } from '@/components/shared/label-combobox';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -14,6 +12,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { MultiSelect } from '@/components/ui/multi-select';
 import {
     Select,
     SelectContent,
@@ -30,18 +29,32 @@ import {
     ROLLOVER_TYPES,
     RolloverType,
 } from '@/types/budget';
+import { Category } from '@/types/category';
+import { Label as LabelType } from '@/types/label';
 import { __ } from '@/utils/i18n';
 import { router } from '@inertiajs/react';
 import { Info } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import {
+    categoryTrackingOptions,
+    labelTrackingOptions,
+} from './tracking-options';
 
 interface Props {
     budget: Budget;
+    categories: Category[];
+    labels: LabelType[];
     open: boolean;
     onOpenChange: (open: boolean) => void;
 }
 
-export function EditBudgetDialog({ budget, open, onOpenChange }: Props) {
+export function EditBudgetDialog({
+    budget,
+    categories,
+    labels,
+    open,
+    onOpenChange,
+}: Props) {
     const [name, setName] = useState(budget.name);
     const [periodType, setPeriodType] = useState<BudgetPeriodType>(
         budget.period_type as BudgetPeriodType,
@@ -52,7 +65,14 @@ export function EditBudgetDialog({ budget, open, onOpenChange }: Props) {
     const [rolloverType, setRolloverType] = useState<RolloverType>(
         budget.rollover_type as RolloverType,
     );
+    const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>(
+        budget.categories?.map((category) => category.id) ?? [],
+    );
+    const [selectedLabelIds, setSelectedLabelIds] = useState<string[]>(
+        budget.labels?.map((label) => label.id) ?? [],
+    );
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [errors, setErrors] = useState<Record<string, string>>({});
 
     useEffect(() => {
         if (open && budget) {
@@ -60,25 +80,47 @@ export function EditBudgetDialog({ budget, open, onOpenChange }: Props) {
             setPeriodType(budget.period_type as BudgetPeriodType);
             setPeriodStartDay(budget.period_start_day || 1);
             setRolloverType(budget.rollover_type as RolloverType);
+            setSelectedCategoryIds(
+                budget.categories?.map((category) => category.id) ?? [],
+            );
+            setSelectedLabelIds(budget.labels?.map((label) => label.id) ?? []);
+            setErrors({});
         }
     }, [open, budget]);
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
+        setErrors({});
+
+        if (
+            !budget.is_catch_all &&
+            selectedCategoryIds.length === 0 &&
+            selectedLabelIds.length === 0
+        ) {
+            setErrors({
+                selection: __(
+                    'You must select at least one category or label.',
+                ),
+            });
+            return;
+        }
+
         setIsSubmitting(true);
 
         router.patch(
             update({ budget: budget.id }).url,
             {
                 name,
-                period_type: periodType,
-                period_start_day: periodType === 'yearly' ? 1 : periodStartDay,
-                rollover_type: rolloverType,
+                ...(!budget.is_catch_all && {
+                    category_ids: selectedCategoryIds,
+                    label_ids: selectedLabelIds,
+                }),
             },
             {
                 onSuccess: () => {
                     onOpenChange(false);
                 },
+                onError: (responseErrors) => setErrors(responseErrors),
                 onFinish: () => setIsSubmitting(false),
             },
         );
@@ -91,9 +133,7 @@ export function EditBudgetDialog({ budget, open, onOpenChange }: Props) {
                     <DialogHeader>
                         <DialogTitle>{__('Edit Budget')}</DialogTitle>
                         <DialogDescription>
-                            {__(
-                                'Update your budget settings. To change the allocated\n                            amount or tracking, use the budget page directly.',
-                            )}
+                            {__('Update the budget name and what it tracks.')}
                         </DialogDescription>
                     </DialogHeader>
 
@@ -102,7 +142,7 @@ export function EditBudgetDialog({ budget, open, onOpenChange }: Props) {
                             <Info className="h-4 w-4 opacity-50" />
                             <AlertDescription>
                                 {__(
-                                    'Period and carry-over settings cannot be changed after a budget is created because budgets are calculated historically. If you need different settings, delete this budget and create a new one.',
+                                    'Period and carry-over settings stay locked to preserve historical period boundaries. Categories and labels can be changed without rewriting closed periods.',
                                 )}
                             </AlertDescription>
                         </Alert>
@@ -136,25 +176,58 @@ export function EditBudgetDialog({ budget, open, onOpenChange }: Props) {
                                 </>
                             ) : (
                                 <>
-                                    <div className="flex flex-wrap items-center gap-1">
-                                        {budget.categories?.map((category) => (
-                                            <CategoryBadge
-                                                key={category.id}
-                                                category={category}
-                                            />
-                                        ))}
-                                        {budget.labels?.map((label) => (
-                                            <LabelBadge
-                                                key={label.id}
-                                                label={label}
-                                            />
-                                        ))}
+                                    {errors.selection && (
+                                        <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                                            {errors.selection}
+                                        </div>
+                                    )}
+
+                                    <div className="space-y-2">
+                                        <Label htmlFor="categories">
+                                            {__('Categories')}
+                                        </Label>
+                                        <MultiSelect
+                                            id="categories"
+                                            options={categoryTrackingOptions(
+                                                categories,
+                                            )}
+                                            selected={selectedCategoryIds}
+                                            onChange={setSelectedCategoryIds}
+                                            placeholder={__(
+                                                'Select categories',
+                                            )}
+                                            searchPlaceholder={__(
+                                                'Search categories…',
+                                            )}
+                                            emptyText={__(
+                                                'No categories found.',
+                                            )}
+                                        />
                                     </div>
-                                    <p className="text-sm text-muted-foreground">
-                                        {__(
-                                            'Tracked categories and labels cannot be changed after creation.',
-                                        )}
-                                    </p>
+
+                                    <div className="space-y-2">
+                                        <Label htmlFor="labels">
+                                            {__('Labels')}
+                                        </Label>
+                                        <MultiSelect
+                                            id="labels"
+                                            options={labelTrackingOptions(
+                                                labels,
+                                            )}
+                                            selected={selectedLabelIds}
+                                            onChange={setSelectedLabelIds}
+                                            placeholder={__('Select labels')}
+                                            searchPlaceholder={__(
+                                                'Search labels…',
+                                            )}
+                                            emptyText={__('No labels found.')}
+                                        />
+                                        <p className="text-sm text-muted-foreground">
+                                            {__(
+                                                'Tracking changes recalculate the active period. Closed periods stay unchanged.',
+                                            )}
+                                        </p>
+                                    </div>
                                 </>
                             )}
                         </div>

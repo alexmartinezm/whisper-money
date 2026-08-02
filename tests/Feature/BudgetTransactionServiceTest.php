@@ -1,10 +1,12 @@
 <?php
 
+use App\Models\Account;
 use App\Models\Budget;
 use App\Models\BudgetPeriod;
 use App\Models\BudgetTransaction;
 use App\Models\Category;
 use App\Models\Label;
+use App\Models\Space;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\BudgetTransactionService;
@@ -20,7 +22,7 @@ test('assignHistoricalTransactionsToPeriod returns correct count', function () {
 
     // Create 5 historical transactions
     for ($i = 0; $i < 5; $i++) {
-        Transaction::factory()->create([
+        Transaction::factory()->forUser($this->user)->create([
             'user_id' => $this->user->id,
             'category_id' => $category->id,
             'transaction_date' => now()->subDays($i + 1),
@@ -100,14 +102,14 @@ test('assignHistoricalTransactionsToPeriod excludes transactions outside date ra
     $category = Category::factory()->create(['user_id' => $this->user->id]);
 
     // Create transactions outside period
-    Transaction::factory()->create([
+    Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => now()->subMonths(6),
         'amount' => -1000,
     ]);
 
-    Transaction::factory()->create([
+    Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => now()->addMonths(6),
@@ -115,7 +117,7 @@ test('assignHistoricalTransactionsToPeriod excludes transactions outside date ra
     ]);
 
     // Create transaction inside period
-    Transaction::factory()->create([
+    Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => now()->subDays(5),
@@ -142,7 +144,7 @@ test('assignHistoricalTransactionsToPeriod works with category-based budgets', f
     $otherCategory = Category::factory()->create(['user_id' => $this->user->id]);
 
     // Create transaction with matching category
-    Transaction::factory()->create([
+    Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => now()->subDays(5),
@@ -150,7 +152,7 @@ test('assignHistoricalTransactionsToPeriod works with category-based budgets', f
     ]);
 
     // Create transaction with non-matching category
-    Transaction::factory()->create([
+    Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $otherCategory->id,
         'transaction_date' => now()->subDays(5),
@@ -177,7 +179,7 @@ test('assignHistoricalTransactionsToPeriod works with label-based budgets', func
     $otherLabel = Label::factory()->create(['user_id' => $this->user->id]);
 
     // Create transaction with matching label
-    $transaction1 = Transaction::factory()->create([
+    $transaction1 = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'transaction_date' => now()->subDays(5),
         'amount' => -1000,
@@ -185,7 +187,7 @@ test('assignHistoricalTransactionsToPeriod works with label-based budgets', func
     $transaction1->labels()->attach($label->id);
 
     // Create transaction with non-matching label
-    $transaction2 = Transaction::factory()->create([
+    $transaction2 = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'transaction_date' => now()->subDays(5),
         'amount' => -1000,
@@ -213,7 +215,7 @@ test('assignHistoricalTransactionsToPeriod works with transactions having multip
     $otherLabel2 = Label::factory()->create(['user_id' => $this->user->id]);
 
     // Create transaction with multiple labels, including the target one
-    $transaction = Transaction::factory()->create([
+    $transaction = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'transaction_date' => now()->subDays(5),
         'amount' => -1000,
@@ -238,7 +240,7 @@ test('assignHistoricalTransactionsToPeriod works with transactions having multip
 test('assignHistoricalTransactionsToPeriod stores negated transaction amount for expenses', function () {
     $category = Category::factory()->create(['user_id' => $this->user->id]);
 
-    Transaction::factory()->create([
+    Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => now()->subDays(5),
@@ -265,7 +267,7 @@ test('assignHistoricalTransactionsToPeriod stores negated transaction amount for
 test('assignHistoricalTransactionsToPeriod stores refund as negative amount', function () {
     $category = Category::factory()->create(['user_id' => $this->user->id]);
 
-    Transaction::factory()->create([
+    Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => now()->subDays(5),
@@ -293,7 +295,7 @@ test('budget spending correctly reflects mix of expenses and refunds', function 
     $category = Category::factory()->create(['user_id' => $this->user->id]);
 
     // $50 expense
-    Transaction::factory()->create([
+    Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => now()->subDays(5),
@@ -301,7 +303,7 @@ test('budget spending correctly reflects mix of expenses and refunds', function 
     ]);
 
     // $10 refund
-    Transaction::factory()->create([
+    Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => now()->subDays(3),
@@ -340,7 +342,7 @@ test('assignTransaction stores refund as negative budget transaction amount', fu
     ]);
 
     // Create a refund transaction
-    $refund = Transaction::factory()->create([
+    $refund = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => now()->subDays(2),
@@ -360,7 +362,7 @@ test('assignHistoricalTransactionsToPeriod only assigns to correct user', functi
     $category = Category::factory()->create(['user_id' => $user1->id]);
 
     // Create transaction for user2
-    Transaction::factory()->create([
+    Transaction::factory()->forUser($user2)->create([
         'user_id' => $user2->id,
         'category_id' => $category->id,
         'transaction_date' => now()->subDays(5),
@@ -368,7 +370,7 @@ test('assignHistoricalTransactionsToPeriod only assigns to correct user', functi
     ]);
 
     // Create transaction for user1
-    Transaction::factory()->create([
+    Transaction::factory()->forUser($user1)->create([
         'user_id' => $user1->id,
         'category_id' => $category->id,
         'transaction_date' => now()->subDays(5),
@@ -404,7 +406,7 @@ test('assignTransaction is idempotent when called twice (regression for PHP-LARA
         'end_date' => now()->addDays(30),
     ]);
 
-    $transaction = Transaction::factory()->create([
+    $transaction = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => now()->subDays(2),
@@ -431,7 +433,7 @@ test('assignTransaction retries deadlocks during reconciliation (regression for 
         'end_date' => now()->addDays(30),
     ]);
 
-    $transaction = Transaction::factory()->create([
+    $transaction = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => now()->subDays(2),
@@ -473,7 +475,7 @@ test('assignTransaction removes stale rows when category changes', function () {
         'end_date' => now()->addDays(30),
     ]);
 
-    $transaction = Transaction::factory()->create([
+    $transaction = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $oldCategory->id,
         'transaction_date' => now()->subDays(5),
@@ -503,7 +505,7 @@ test('assignTransaction updates amount on existing row when transaction amount c
         'end_date' => now()->addDays(30),
     ]);
 
-    $transaction = Transaction::factory()->create([
+    $transaction = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => now()->subDays(2),
@@ -525,7 +527,7 @@ test('assignTransaction updates amount on existing row when transaction amount c
 test('assignTransaction leaves table untouched when no budgets match', function () {
     $category = Category::factory()->create(['user_id' => $this->user->id]);
 
-    $transaction = Transaction::factory()->create([
+    $transaction = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => now()->subDays(2),
@@ -550,7 +552,7 @@ test('assignTransaction survives pre-existing duplicate row (regression for PHP-
         'end_date' => now()->addDays(30),
     ]);
 
-    $transaction = Transaction::factory()->create([
+    $transaction = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => now()->subDays(5),
@@ -578,7 +580,7 @@ test('assignTransaction survives pre-existing duplicate row (regression for PHP-
 test('assignHistoricalTransactionsToPeriod reruns converge existing rows without throwing', function () {
     $category = Category::factory()->create(['user_id' => $this->user->id]);
 
-    $transaction = Transaction::factory()->create([
+    $transaction = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => now()->subDays(5),
@@ -616,7 +618,7 @@ test('assignHistoricalTransactionsToPeriod matches transactions across multiple 
     $unrelated = Category::factory()->create(['user_id' => $this->user->id]);
 
     foreach ([$food, $restaurants, $unrelated] as $category) {
-        Transaction::factory()->create([
+        Transaction::factory()->forUser($this->user)->create([
             'user_id' => $this->user->id,
             'category_id' => $category->id,
             'transaction_date' => now()->subDays(5),
@@ -644,7 +646,7 @@ test('assignHistoricalTransactionsToPeriod pools matches from categories and lab
     $label = Label::factory()->create(['user_id' => $this->user->id]);
 
     // Matches via category.
-    Transaction::factory()->create([
+    Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => now()->subDays(5),
@@ -652,7 +654,7 @@ test('assignHistoricalTransactionsToPeriod pools matches from categories and lab
     ]);
 
     // Matches via label (different category).
-    $labelled = Transaction::factory()->create([
+    $labelled = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => Category::factory()->create(['user_id' => $this->user->id])->id,
         'transaction_date' => now()->subDays(5),
@@ -690,7 +692,7 @@ test('assignTransaction matches a budget tracking multiple categories', function
         'end_date' => now()->addDays(30),
     ]);
 
-    $transaction = Transaction::factory()->create([
+    $transaction = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $restaurants->id,
         'transaction_date' => now()->subDays(5),
@@ -708,13 +710,13 @@ test('a budget tracking a parent category includes child category transactions h
     $parent = Category::factory()->create(['user_id' => $this->user->id]);
     $child = Category::factory()->childOf($parent)->create(['user_id' => $this->user->id]);
 
-    Transaction::factory()->create([
+    Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $parent->id,
         'transaction_date' => now()->subDay(),
         'amount' => -1000,
     ]);
-    Transaction::factory()->create([
+    Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $child->id,
         'transaction_date' => now()->subDay(),
@@ -745,7 +747,7 @@ test('assigning a child category transaction matches a budget tracking the paren
         'end_date' => now()->addDays(30),
     ]);
 
-    $transaction = Transaction::factory()->create([
+    $transaction = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $child->id,
         'transaction_date' => now(),
@@ -757,4 +759,64 @@ test('assigning a child category transaction matches a budget tracking the paren
     expect(BudgetTransaction::where('transaction_id', $transaction->id)
         ->where('budget_period_id', $period->id)
         ->exists())->toBeTrue();
+});
+
+test('a budget does not absorb a child category living in another space', function () {
+    // Nothing stops a category naming a parent in another space, so expanding a
+    // tracked parent must stay inside the budget's own space or the budget
+    // starts claiming spending it has no business reading.
+    $space = $this->user->personalSpace;
+    $otherSpace = Space::factory()->create(['owner_id' => $this->user->id]);
+
+    $parent = Category::factory()->create([
+        'user_id' => $this->user->id,
+        'space_id' => $space->id,
+    ]);
+    $sameSpaceChild = Category::factory()->create([
+        'user_id' => $this->user->id,
+        'space_id' => $space->id,
+        'parent_id' => $parent->id,
+    ]);
+    $otherSpaceChild = Category::factory()->create([
+        'user_id' => $this->user->id,
+        'space_id' => $otherSpace->id,
+        'parent_id' => $parent->id,
+    ]);
+
+    $budget = Budget::factory()->create([
+        'user_id' => $this->user->id,
+        'space_id' => $space->id,
+        'is_catch_all' => false,
+    ]);
+    $budget->categories()->attach($parent->id);
+    $period = BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => now()->startOfMonth(),
+        'end_date' => now()->endOfMonth(),
+        'allocated_amount' => 100000,
+    ]);
+
+    $account = Account::factory()->create([
+        'user_id' => $this->user->id,
+        'space_id' => $space->id,
+    ]);
+    $mine = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $account->id,
+        'category_id' => $sameSpaceChild->id,
+        'transaction_date' => now(),
+        'amount' => -1500,
+    ]);
+    $theirs = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $account->id,
+        'category_id' => $otherSpaceChild->id,
+        'transaction_date' => now(),
+        'amount' => -9900,
+    ]);
+
+    $this->service->assignHistoricalTransactionsToPeriod($period);
+
+    expect($period->budgetTransactions()->where('transaction_id', $mine->id)->value('amount'))->toBe(1500)
+        ->and($period->budgetTransactions()->where('transaction_id', $theirs->id)->exists())->toBeFalse();
 });

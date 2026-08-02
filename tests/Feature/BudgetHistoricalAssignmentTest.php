@@ -55,7 +55,7 @@ test('budget creation dispatches the historical assignment job for the current a
 test('historical transactions in the previous period are assigned for comparison', function () {
     $category = Category::factory()->create(['user_id' => $this->user->id]);
 
-    $previousPeriodTransaction = Transaction::factory()->create([
+    $previousPeriodTransaction = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => now()->subMonthNoOverflow()->startOfMonth(),
@@ -90,14 +90,14 @@ test('historical transactions matching by category are assigned', function () {
     $category = Category::factory()->create(['user_id' => $this->user->id]);
 
     // Create historical transactions within the current month period
-    $transaction1 = Transaction::factory()->create([
+    $transaction1 = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => now()->startOfMonth(),
         'amount' => -5000,
     ]);
 
-    $transaction2 = Transaction::factory()->create([
+    $transaction2 = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => now()->startOfMonth()->addDays(1),
@@ -133,7 +133,7 @@ test('historical transactions matching by label are assigned', function () {
     $label = Label::factory()->create(['user_id' => $this->user->id]);
 
     // Create historical transaction with label within the current month period
-    $transaction = Transaction::factory()->create([
+    $transaction = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'transaction_date' => now()->startOfMonth(),
         'amount' => -2500,
@@ -166,7 +166,7 @@ test('transactions outside the period date range are not assigned', function () 
     $category = Category::factory()->create(['user_id' => $this->user->id]);
 
     // Create transaction outside current period (way in the past)
-    $oldTransaction = Transaction::factory()->create([
+    $oldTransaction = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => now()->subMonths(6),
@@ -174,7 +174,7 @@ test('transactions outside the period date range are not assigned', function () 
     ]);
 
     // Create transaction in current period
-    $currentTransaction = Transaction::factory()->create([
+    $currentTransaction = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => now()->startOfMonth(),
@@ -215,14 +215,14 @@ test('transactions on boundary dates are assigned', function () {
     $endDate = now()->endOfMonth();
 
     // Create transactions on exact boundary dates
-    $startTransaction = Transaction::factory()->create([
+    $startTransaction = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => $startDate,
         'amount' => -1000,
     ]);
 
-    $endTransaction = Transaction::factory()->create([
+    $endTransaction = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => $endDate,
@@ -258,7 +258,7 @@ test('soft deleted transactions are not assigned', function () {
     $category = Category::factory()->create(['user_id' => $this->user->id]);
 
     // Create and soft delete a transaction within the current month period
-    $deletedTransaction = Transaction::factory()->create([
+    $deletedTransaction = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => now()->startOfMonth(),
@@ -291,7 +291,7 @@ test('soft deleted transactions are not assigned', function () {
 test('duplicate assignments are prevented', function () {
     $category = Category::factory()->create(['user_id' => $this->user->id]);
 
-    $transaction = Transaction::factory()->create([
+    $transaction = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => now()->startOfMonth(),
@@ -339,14 +339,14 @@ test('multiple budgets assign independently', function () {
     $category2 = Category::factory()->create(['user_id' => $this->user->id]);
 
     // Create transactions for each category within the current month period
-    $transaction1 = Transaction::factory()->create([
+    $transaction1 = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category1->id,
         'transaction_date' => now()->startOfMonth(),
         'amount' => -3000,
     ]);
 
-    $transaction2 = Transaction::factory()->create([
+    $transaction2 = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category2->id,
         'transaction_date' => now()->startOfMonth()->addDays(1),

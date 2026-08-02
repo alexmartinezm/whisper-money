@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class BudgetManagementService
@@ -91,12 +92,66 @@ class BudgetManagementService
      */
     public function update(User $user, Space $space, string $budgetId, array $changes, CarbonImmutable $applicationDate): array
     {
-        return DB::transaction(function () use ($user, $space, $budgetId, $changes, $applicationDate): array {
+        $result = DB::transaction(function () use ($user, $space, $budgetId, $changes, $applicationDate): array {
             $this->assertSpaceAccess($user, $space);
             $budget = $this->ownedBudget($user, $space, $budgetId, lock: true);
+            $reconciliationPeriods = new Collection;
 
             if ($changes === []) {
-                throw ValidationException::withMessages(['budget' => 'Provide a name or allocated_amount to update the budget.']);
+                throw ValidationException::withMessages(['budget' => 'Provide a mutable budget field.']);
+            }
+
+            if (array_key_exists('category_ids', $changes) || array_key_exists('label_ids', $changes)) {
+                if ($budget->is_catch_all) {
+                    throw ValidationException::withMessages(['tracking' => 'A catch-all budget cannot have categories or labels.']);
+                }
+
+                $existingCategoryIds = $budget->categories()->pluck('categories.id')->all();
+                $existingLabelIds = $budget->labels()->pluck('labels.id')->all();
+                $categoryIds = array_key_exists('category_ids', $changes)
+                    ? $this->normaliseIds($changes['category_ids'])
+                    : $existingCategoryIds;
+                $labelIds = array_key_exists('label_ids', $changes)
+                    ? $this->normaliseIds($changes['label_ids'])
+                    : $existingLabelIds;
+                $categories = $this->ownedReferences(Category::class, $user, $space, $categoryIds, 'category_ids');
+                $labels = $this->ownedReferences(Label::class, $user, $space, $labelIds, 'label_ids');
+
+                if ($categories->isEmpty() && $labels->isEmpty()) {
+                    throw ValidationException::withMessages(['selection' => 'You must select at least one category or label.']);
+                }
+
+                $trackingChanged = collect($existingCategoryIds)->sort()->values()->all()
+                    !== collect($categories->modelKeys())->sort()->values()->all()
+                    || collect($existingLabelIds)->sort()->values()->all()
+                    !== collect($labels->modelKeys())->sort()->values()->all();
+
+                if ($trackingChanged) {
+                    $budget->categories()->sync($categories->modelKeys());
+                    $budget->labels()->sync($labels->modelKeys());
+
+                    $currentPeriod = $budget->periods()
+                        ->whereDate('start_date', '<=', $applicationDate->toDateString())
+                        ->whereDate('end_date', '>=', $applicationDate->toDateString())
+                        ->lockForUpdate()
+                        ->first();
+                    if ($currentPeriod !== null) {
+                        $reconciliationPeriods->push($this->claimForReconciliation($currentPeriod));
+                    }
+
+                    $catchAllPeriod = BudgetPeriod::query()
+                        ->whereHas('budget', fn ($query) => $query
+                            ->where('user_id', $user->id)
+                            ->where('space_id', $space->id)
+                            ->where('is_catch_all', true))
+                        ->whereDate('start_date', '<=', $applicationDate->toDateString())
+                        ->whereDate('end_date', '>=', $applicationDate->toDateString())
+                        ->lockForUpdate()
+                        ->first();
+                    if ($catchAllPeriod !== null) {
+                        $reconciliationPeriods->push($this->claimForReconciliation($catchAllPeriod));
+                    }
+                }
             }
 
             if (array_key_exists('name', $changes)) {
@@ -167,8 +222,36 @@ class BudgetManagementService
             return [
                 'budget' => $budget->fresh()->load(['categories', 'labels']),
                 'adjustment' => $adjustment,
+                'reconciliation_periods' => $reconciliationPeriods,
             ];
         }, attempts: 5);
+
+        foreach ($result['reconciliation_periods'] as $period) {
+            $reconciliationBudget = $period->budget()->firstOrFail();
+            AssignHistoricalTransactionsToBudget::dispatch(
+                $reconciliationBudget,
+                $period,
+                $period->reconciliation_token,
+            )->afterCommit();
+        }
+        unset($result['reconciliation_periods']);
+
+        return $result;
+    }
+
+    /**
+     * Mark a period as awaiting reconciliation and stamp it with the token that
+     * identifies this run, so a job queued by an earlier edit can tell it has
+     * been overtaken and leave the period to the newer one.
+     */
+    private function claimForReconciliation(BudgetPeriod $period): BudgetPeriod
+    {
+        $period->update([
+            'processing_historical' => true,
+            'reconciliation_token' => (string) Str::uuid(),
+        ]);
+
+        return $period;
     }
 
     public function updateNextPeriodAllocation(

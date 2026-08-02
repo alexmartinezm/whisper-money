@@ -7,6 +7,7 @@ use App\Models\BudgetTransaction;
 use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\TransactionSplit;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 
@@ -14,7 +15,8 @@ uses(RefreshDatabase::class);
 
 function reconciliationFixture(): array
 {
-    $transaction = Transaction::factory()->create(['amount' => -10000, 'category_id' => null, 'transaction_date' => now()]);
+    $user = User::factory()->create();
+    $transaction = Transaction::factory()->forUser($user)->create(['amount' => -10000, 'category_id' => null, 'transaction_date' => now()]);
     $categories = collect([1, 2])->map(fn () => Category::factory()->create([
         'user_id' => $transaction->user_id,
         'space_id' => $transaction->space_id,

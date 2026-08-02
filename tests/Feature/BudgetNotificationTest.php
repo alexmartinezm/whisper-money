@@ -35,7 +35,7 @@ function budgetPeriodFor(User $user, Category $category, int $allocated, array $
 
 function assignExpense(BudgetTransactionService $service, User $user, Category $category, int $amountCents): Transaction
 {
-    $transaction = Transaction::factory()->create([
+    $transaction = Transaction::factory()->forUser($user)->create([
         'user_id' => $user->id,
         'category_id' => $category->id,
         'transaction_date' => now()->subDay(),
@@ -112,7 +112,7 @@ test('uses the available balance including carry-over for close to limit emails'
 
 test('renders every budget notification email variant', function () {
     $period = budgetPeriodFor($this->user, $this->category, 5000, []);
-    $transaction = Transaction::factory()->create([
+    $transaction = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $this->category->id,
         'transaction_date' => now()->subDay(),
@@ -178,7 +178,7 @@ test('re-notifies over limit after spending drops below the threshold and crosse
     assignExpense($this->service, $this->user, $this->category, 1500);
 
     // A refund pulls spending well back under the limit, resetting the flag.
-    $refund = Transaction::factory()->create([
+    $refund = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $this->category->id,
         'transaction_date' => now()->subDay(),
@@ -223,7 +223,7 @@ test('historical backfill assignment sends no emails', function () {
     // Model these as transactions that already existed before the budget: their
     // creation listener is suppressed, so only the backfill method acts on them.
     Queue::fake();
-    Transaction::factory()->count(3)->create([
+    Transaction::factory()->forUser($this->user)->count(3)->create([
         'user_id' => $this->user->id,
         'category_id' => $this->category->id,
         'transaction_date' => now()->subDays(2),
