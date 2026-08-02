@@ -38,7 +38,7 @@ use Laravel\Mcp\Server\Attributes\Version;
 use Laravel\Mcp\Server\Tool;
 
 #[Name('Whisper Money')]
-#[Version('1.3.0')]
+#[Version('1.4.0')]
 #[Instructions(<<<'MARKDOWN'
 Access to the authenticated user's Whisper Money finance data, for analysing
 spending, cashflow and net worth — and, with write access, for editing that
@@ -50,9 +50,10 @@ data.
   default to the personal space; call `list_spaces` to discover ids. The cashflow,
   net-worth and spending tools cover the user's whole account.
 - Budgets are owner-scoped inside a space. `create_budget` creates the cadence and
-  tracking configuration; `update_budget` only changes the name and allocation.
-  Cadence, start day, rollover and tracking are immutable after creation. Historical
-  assignment may still be processing after creation.
+  tracking configuration; `update_budget` changes the name, allocation, categories
+  and labels. Tracking changes preserve closed-period history and recalculate the
+  active period. Cadence, start day and rollover remain immutable. Historical
+  assignment may still be processing after creation or a tracking change.
 - For monthly budgets, allocation changes use the server application date. A change
   on the first day includes the current period; after that it affects periods whose
   start date is on or after the application date, plus future periods.

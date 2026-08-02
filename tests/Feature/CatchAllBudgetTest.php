@@ -1,10 +1,12 @@
 <?php
 
 use App\Enums\CategoryType;
+use App\Models\Account;
 use App\Models\Budget;
 use App\Models\BudgetPeriod;
 use App\Models\BudgetTransaction;
 use App\Models\Category;
+use App\Models\Space;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\BudgetTransactionService;
@@ -33,6 +35,7 @@ test('catch-all budget absorbs an expense not tracked by any other budget', func
     ]);
     $transaction = Transaction::factory()->create([
         'user_id' => $this->user->id,
+        'space_id' => $this->user->personalSpace->id,
         'category_id' => $category->id,
         'transaction_date' => now(),
         'amount' => -1000,
@@ -46,6 +49,34 @@ test('catch-all budget absorbs an expense not tracked by any other budget', func
 
     expect($budgetTransaction)->not->toBeNull();
     expect($budgetTransaction->amount)->toBe(1000);
+});
+
+test('catch-all budget does not absorb a live expense from another space', function () {
+    $period = catchAllPeriod($this->user);
+    $otherSpace = Space::factory()->create(['owner_id' => $this->user->id]);
+    $account = Account::factory()->create([
+        'user_id' => $this->user->id,
+        'space_id' => $otherSpace->id,
+    ]);
+    $category = Category::factory()->create([
+        'user_id' => $this->user->id,
+        'space_id' => $otherSpace->id,
+        'type' => CategoryType::Expense,
+    ]);
+    $transaction = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $account->id,
+        'category_id' => $category->id,
+        'transaction_date' => now(),
+        'amount' => -1000,
+    ]);
+
+    $this->service->assignTransaction($transaction);
+
+    expect(BudgetTransaction::query()
+        ->where('transaction_id', $transaction->id)
+        ->where('budget_period_id', $period->id)
+        ->exists())->toBeFalse();
 });
 
 test('catch-all budget ignores an expense already tracked by another budget', function () {
@@ -64,6 +95,7 @@ test('catch-all budget ignores an expense already tracked by another budget', fu
 
     $transaction = Transaction::factory()->create([
         'user_id' => $this->user->id,
+        'space_id' => $this->user->personalSpace->id,
         'category_id' => $category->id,
         'transaction_date' => now(),
         'amount' => -1000,
@@ -83,6 +115,7 @@ test('catch-all budget ignores income transactions', function () {
     ]);
     $transaction = Transaction::factory()->create([
         'user_id' => $this->user->id,
+        'space_id' => $this->user->personalSpace->id,
         'category_id' => $category->id,
         'transaction_date' => now(),
         'amount' => 5000,
@@ -111,6 +144,7 @@ test('catch-all budget excludes a child whose parent category is tracked', funct
 
     $transaction = Transaction::factory()->create([
         'user_id' => $this->user->id,
+        'space_id' => $this->user->personalSpace->id,
         'category_id' => $child->id,
         'transaction_date' => now(),
         'amount' => -1000,
@@ -129,10 +163,10 @@ test('historical assignment backfills only unclaimed expenses into a catch-all b
     // Transactions are created before any budget exists so they are not
     // auto-assigned on creation — the historical backfill does the work.
     // 2 unclaimed expenses (absorbed), 1 claimed expense + 1 income (ignored).
-    Transaction::factory()->create(['user_id' => $this->user->id, 'category_id' => $loose->id, 'transaction_date' => now()->subDay(), 'amount' => -1000]);
-    Transaction::factory()->create(['user_id' => $this->user->id, 'category_id' => $loose->id, 'transaction_date' => now()->subDays(2), 'amount' => -2000]);
-    Transaction::factory()->create(['user_id' => $this->user->id, 'category_id' => $claimed->id, 'transaction_date' => now()->subDay(), 'amount' => -3000]);
-    Transaction::factory()->create(['user_id' => $this->user->id, 'category_id' => $income->id, 'transaction_date' => now()->subDay(), 'amount' => 4000]);
+    Transaction::factory()->create(['user_id' => $this->user->id, 'space_id' => $this->user->personalSpace->id, 'category_id' => $loose->id, 'transaction_date' => now()->subDay(), 'amount' => -1000]);
+    Transaction::factory()->create(['user_id' => $this->user->id, 'space_id' => $this->user->personalSpace->id, 'category_id' => $loose->id, 'transaction_date' => now()->subDays(2), 'amount' => -2000]);
+    Transaction::factory()->create(['user_id' => $this->user->id, 'space_id' => $this->user->personalSpace->id, 'category_id' => $claimed->id, 'transaction_date' => now()->subDay(), 'amount' => -3000]);
+    Transaction::factory()->create(['user_id' => $this->user->id, 'space_id' => $this->user->personalSpace->id, 'category_id' => $income->id, 'transaction_date' => now()->subDay(), 'amount' => 4000]);
 
     $tracked = Budget::factory()->forCategories($claimed)->create(['user_id' => $this->user->id]);
     BudgetPeriod::factory()->create([

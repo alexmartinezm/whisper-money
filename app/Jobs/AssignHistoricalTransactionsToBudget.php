@@ -8,6 +8,7 @@ use App\Services\BudgetTransactionService;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class AssignHistoricalTransactionsToBudget implements ShouldQueue
 {
@@ -53,6 +54,19 @@ class AssignHistoricalTransactionsToBudget implements ShouldQueue
             'budget_id' => $this->budget->id,
             'budget_period_id' => $this->period->id,
             'user_id' => $this->budget->user_id,
+        ]);
+    }
+
+    public function failed(?Throwable $exception): void
+    {
+        BudgetPeriod::query()
+            ->whereKey($this->period->id)
+            ->update(['processing_historical' => false]);
+
+        Log::error('Historical transaction assignment failed', [
+            'budget_id' => $this->budget->id,
+            'budget_period_id' => $this->period->id,
+            'exception' => $exception?->getMessage(),
         ]);
     }
 }

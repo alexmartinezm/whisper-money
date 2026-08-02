@@ -13,7 +13,7 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 
 #[IsDestructive]
-#[Description('Update only a budget name and/or its allocated amount. Amount changes affect periods starting on or after the server application date; cadence, tracking and rollover are immutable.')]
+#[Description('Update a budget name, allocation, tracked categories and/or tracked labels. Tracking changes preserve closed-period history and recalculate the active period. Cadence and rollover remain immutable.')]
 class UpdateBudget extends WriteTool
 {
     use InteractsWithBudgets;
@@ -26,6 +26,8 @@ class UpdateBudget extends WriteTool
             'budget_id' => $schema->string()->description('Budget id.')->required(),
             'name' => $schema->string()->description('New budget name.'),
             'allocated_amount' => $schema->integer()->min(0)->description('New allocation in minor units.'),
+            'category_ids' => $schema->array()->items($schema->string())->description('Replacement set of tracked category ids.'),
+            'label_ids' => $schema->array()->items($schema->string())->description('Replacement set of tracked label ids.'),
             'space' => $schema->string()->description('Space id. Defaults to the personal space.'),
         ];
     }
@@ -36,10 +38,14 @@ class UpdateBudget extends WriteTool
             'budget_id' => ['required', 'string'],
             'name' => ['sometimes', 'string', 'min:1', 'max:255'],
             'allocated_amount' => ['sometimes', 'integer', 'min:0'],
+            'category_ids' => ['sometimes', 'array'],
+            'category_ids.*' => ['string'],
+            'label_ids' => ['sometimes', 'array'],
+            'label_ids.*' => ['string'],
         ]);
 
-        if (! $request->has('name') && ! $request->has('allocated_amount')) {
-            return Response::error('Provide a name or allocated_amount to update the budget.');
+        if (! $request->has('name') && ! $request->has('allocated_amount') && ! $request->has('category_ids') && ! $request->has('label_ids')) {
+            return Response::error('Provide a mutable budget field.');
         }
 
         $space = $this->resolveSpace($request, $user);
@@ -49,6 +55,12 @@ class UpdateBudget extends WriteTool
         }
         if ($request->has('allocated_amount')) {
             $changes['allocated_amount'] = $request->integer('allocated_amount');
+        }
+        if ($request->has('category_ids')) {
+            $changes['category_ids'] = $request->array('category_ids');
+        }
+        if ($request->has('label_ids')) {
+            $changes['label_ids'] = $request->array('label_ids');
         }
 
         $result = $this->budgets->update(
