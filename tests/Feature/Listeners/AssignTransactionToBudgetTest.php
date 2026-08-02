@@ -43,7 +43,7 @@ test('queued listener re-runs assignment when TransactionCreated fires', functio
         'end_date' => now()->addDays(30),
     ]);
 
-    $transaction = Transaction::factory()->create([
+    $transaction = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $category->id,
         'transaction_date' => now()->subDays(2),
@@ -73,7 +73,7 @@ test('queued listener runs when TransactionUpdated changes category', function (
         'end_date' => now()->addDays(30),
     ]);
 
-    $transaction = Transaction::factory()->create([
+    $transaction = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'category_id' => $oldCategory->id,
         'transaction_date' => now()->subDays(2),
@@ -104,7 +104,7 @@ test('queued listener runs when TransactionUpdated changes labels', function () 
         'end_date' => now()->addDays(30),
     ]);
 
-    $transaction = Transaction::factory()->create([
+    $transaction = Transaction::factory()->forUser($this->user)->create([
         'user_id' => $this->user->id,
         'transaction_date' => now()->subDays(2),
         'amount' => -1000,

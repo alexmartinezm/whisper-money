@@ -43,6 +43,17 @@ class TransactionFactory extends Factory
         ]);
     }
 
+    public function forUser(User $user): static
+    {
+        return $this->state(fn () => [
+            'user_id' => $user->id,
+            'account_id' => Account::factory()->state([
+                'user_id' => $user->id,
+                'space_id' => $user->current_space_id,
+            ]),
+        ]);
+    }
+
     public function enableBanking(): static
     {
         return $this->state(fn (array $attributes) => [
