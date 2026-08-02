@@ -92,6 +92,9 @@ class WhisperMoneyServer extends Server
      * whichever read tool a later addition happens to push over the edge. The
      * ceiling is 50, comfortably above the current count, and a larger
      * discovery payload is a better trade than tools nobody can see.
+     *
+     * @api Read by Laravel MCP's Server when it builds the tools/list page,
+     *      never by application code.
      */
     public int $defaultPaginationLength = 50;
 
