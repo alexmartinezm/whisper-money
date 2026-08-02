@@ -10,6 +10,9 @@ use App\Models\RecurringSeries;
  * Both amounts are magnitudes in minor units, not the signed ledger figures:
  * the whole point of the message is "this went up", and a comparison between
  * two negatives reads backwards everywhere it is displayed.
+ *
+ * @api The comparison figures are read by the price-change email template,
+ *      which static analysis does not follow into Blade.
  */
 final readonly class RecurringPriceRise
 {

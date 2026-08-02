@@ -5,6 +5,7 @@ use App\Features\RecurringTransactions;
 use App\Mail\RecurringPriceChangesEmail;
 use App\Models\Account;
 use App\Models\User;
+use App\Services\Recurring\DetectPriceChanges;
 use Illuminate\Support\Facades\Mail;
 use Laravel\Pennant\Feature;
 
@@ -86,4 +87,21 @@ it('skips a user whose flag is off', function () {
     $this->artisan('recurring:alert-price-changes')->assertSuccessful();
 
     Mail::assertNothingQueued();
+});
+
+it('renders the digest with both prices and the yearly impact', function () {
+    // Mail::fake() never runs the template, so without this the only things
+    // reading previousAmount, percentage() and yearlyImpact() would be Blade
+    // expressions nothing exercises until an email goes out for real.
+    $series = seriesCharging($this->user, $this->account, [1299, 1299, 1299, 1599, 1599, 1599]);
+    $rises = app(DetectPriceChanges::class)->forUser($this->user);
+
+    $html = (new RecurringPriceChangesEmail($this->user, $rises))->render();
+
+    expect($html)->toContain($series->display_name)
+        ->toContain('12.99')
+        ->toContain('15.99')
+        ->toContain('23%')
+        // 3.00 more a month is 36.00 a year.
+        ->toContain('36.00');
 });
