@@ -1,5 +1,6 @@
 <?php
 
+use App\Mcp\Servers\WhisperMoneyServer;
 use App\Models\User;
 
 use function Pest\Laravel\postJson;
@@ -29,6 +30,24 @@ it('accepts a token carrying the mcp:read ability', function () use ($rpc) {
     withHeaders(['Authorization' => "Bearer {$plain}"])
         ->postJson('/mcp', $rpc)
         ->assertOk();
+});
+
+it('serves the whole tool catalogue on one page', function () use ($rpc) {
+    // A client that does not follow nextCursor must still see every tool, so
+    // the page size has to stay ahead of the catalogue as it grows.
+    $user = User::factory()->create();
+    $plain = $user->createToken('mcp', ['mcp:read'])->plainTextToken;
+
+    $result = withHeaders(['Authorization' => "Bearer {$plain}"])
+        ->postJson('/mcp', $rpc)
+        ->assertOk()
+        ->json('result');
+
+    $registered = (new ReflectionClass(WhisperMoneyServer::class))
+        ->getDefaultProperties()['tools'];
+
+    expect($result['nextCursor'] ?? null)->toBeNull()
+        ->and($result['tools'])->toHaveCount(count($registered));
 });
 
 it('lists the transaction split write tool with its required schema', function () {

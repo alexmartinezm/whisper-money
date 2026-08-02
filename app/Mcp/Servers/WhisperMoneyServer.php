@@ -83,6 +83,18 @@ the amounts must sum exactly to the parent amount. Use `splits: []` with a
 MARKDOWN)]
 class WhisperMoneyServer extends Server
 {
+    /**
+     * Serve the whole catalogue on one page.
+     *
+     * `tools/list` is paginated and the framework default of 15 splits thirty
+     * tools across two pages, so a client that does not follow `nextCursor`
+     * silently loses everything past the fifteenth — half the write tools, and
+     * whichever read tool a later addition happens to push over the edge. The
+     * ceiling is 50, comfortably above the current count, and a larger
+     * discovery payload is a better trade than tools nobody can see.
+     */
+    public int $defaultPaginationLength = 50;
+
     /** @var array<int, class-string<Tool>> */
     protected array $tools = [
         // Read

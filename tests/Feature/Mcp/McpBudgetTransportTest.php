@@ -27,6 +27,10 @@ it('exposes budget tools through the paginated JSON-RPC transport', function () 
         $cursor = $response->json('result.nextCursor');
     } while ($cursor !== null);
 
-    expect($pageCount)->toBeGreaterThan(1)
+    // The page count is deliberately not asserted: the catalogue now fits on a
+    // single page so clients that ignore nextCursor cannot lose the write
+    // tools, and needing more than one page was the bug, not the contract.
+    // What matters is that walking the cursor terminates and surfaces them.
+    expect($pageCount)->toBeGreaterThanOrEqual(1)
         ->and($tools->pluck('name'))->toContain('list_budgets', 'create_budget', 'update_budget', 'delete_budget');
 });
