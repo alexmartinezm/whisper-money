@@ -50,13 +50,18 @@ it('serves the whole tool catalogue on one page', function () use ($rpc) {
         ->and($result['tools'])->toHaveCount(count($registered));
 });
 
-it('lists the transaction split write tool with its required schema', function () {
-    $user = User::factory()->create();
+/**
+ * Every tool the server publishes over the wire, as the client sees it.
+ *
+ * tools/list is paginated, so walk the cursor rather than assuming the tool
+ * under test happens to land on the first page — adding any tool ahead of it
+ * used to break this.
+ *
+ * @return array<int, array<string, mixed>>
+ */
+function publishedMcpToolCatalogue(User $user): array
+{
     $plain = $user->createToken('mcp', ['mcp:read'])->plainTextToken;
-
-    // tools/list is paginated, so walk the cursor rather than assuming the
-    // tool under test happens to land on the first page — adding any tool
-    // ahead of it used to break this.
     $tools = [];
     $cursor = null;
 
@@ -75,10 +80,55 @@ it('lists the transaction split write tool with its required schema', function (
         $cursor = $result['nextCursor'] ?? null;
     } while ($cursor !== null);
 
+    return $tools;
+}
+
+it('lists the transaction split write tool with its required schema', function () {
+    $tools = publishedMcpToolCatalogue(User::factory()->create());
+
     $splitTool = collect($tools)->firstWhere('name', 'split_transaction');
 
     expect($splitTool)->not->toBeNull()
         ->and($splitTool['inputSchema']['required'])->toContain('transaction_id', 'splits')
         ->and($splitTool['inputSchema']['properties']['splits']['type'])->toBe('array')
         ->and($splitTool['annotations']['destructiveHint'] ?? null)->toBeTrue();
+});
+
+it('publishes the clearable arguments as nullable in the schema', function (string $tool, string $argument) {
+    // Saying "or null to clear" in a description is not enough: a client that
+    // validates against the published schema refuses to send the documented
+    // call unless the type itself admits null.
+    $tools = publishedMcpToolCatalogue(User::factory()->create());
+
+    $property = collect($tools)->firstWhere('name', $tool)['inputSchema']['properties'][$argument] ?? null;
+
+    expect($property)->not->toBeNull()
+        ->and($property['type'])->toBe(['string', 'null']);
+})->with([
+    ['categorize_transaction', 'category_id'],
+    ['update_transaction', 'category_id'],
+    ['update_transaction', 'notes'],
+    ['update_transaction', 'creditor_name'],
+    ['update_transaction', 'debtor_name'],
+    ['update_category', 'parent_id'],
+    ['update_automation_rule', 'action_category_id'],
+    ['update_automation_rule', 'action_note'],
+]);
+
+it('keeps a nullable argument required when the call must carry it', function () {
+    // category_id is both: the key has to be present (absent means "no change
+    // requested"), and null is the documented way to remove the category.
+    $tools = publishedMcpToolCatalogue(User::factory()->create());
+
+    $schema = collect($tools)->firstWhere('name', 'categorize_transaction')['inputSchema'];
+
+    expect($schema['required'])->toContain('transaction_id', 'category_id');
+});
+
+it('restricts the recurring series status filter to the statuses that exist', function () {
+    $tools = publishedMcpToolCatalogue(User::factory()->create());
+
+    $status = collect($tools)->firstWhere('name', 'list_recurring_series')['inputSchema']['properties']['status'];
+
+    expect($status['enum'])->toBe(['active', 'lapsed']);
 });

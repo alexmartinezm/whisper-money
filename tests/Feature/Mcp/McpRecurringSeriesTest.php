@@ -95,6 +95,24 @@ it('filters by status', function () {
         ->assertOk()
         ->assertSee('Still Billing')
         ->assertDontSee('Cancelled Thing');
+
+    callRecurringTool($user, ['status' => 'lapsed'])
+        ->assertOk()
+        ->assertSee('Cancelled Thing')
+        ->assertDontSee('Still Billing');
+});
+
+it('rejects a status that is not one the detector produces', function () {
+    // Previously any string was accepted and quietly matched nothing, so an
+    // invented status read as "no subscriptions" rather than as a bad filter.
+    $user = User::factory()->create();
+    RecurringSeries::factory()->create([
+        'user_id' => $user->id,
+        'space_id' => $user->personalSpace->id,
+        'display_name' => 'Still Billing',
+    ]);
+
+    callRecurringTool($user, ['status' => 'cancelled'])->assertHasErrors(['status']);
 });
 
 it('does not expose another user series', function () {

@@ -398,8 +398,13 @@ class CategoryTree
     /**
      * Soft-delete a category together with its whole subtree, uncategorizing
      * any transactions that pointed at the removed categories.
+     *
+     * Returns what the cascade cost, so a caller can report it back rather than
+     * leave the user to discover the damage.
+     *
+     * @return array{categories: int, transactions: int}
      */
-    public function deleteSubtree(Category $category): void
+    public function deleteSubtree(Category $category): array
     {
         $ids = [$category->id, ...$this->descendantIds($category)];
 
@@ -416,14 +421,16 @@ class CategoryTree
             ]);
         }
 
-        Transaction::query()
+        $uncategorized = Transaction::query()
             ->where('user_id', $category->user_id)
             ->whereIn('category_id', $ids)
             ->update(['category_id' => null]);
 
-        Category::query()
+        $deleted = Category::query()
             ->where('user_id', $category->user_id)
             ->whereIn('id', $ids)
             ->delete();
+
+        return ['categories' => $deleted, 'transactions' => $uncategorized];
     }
 }

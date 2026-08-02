@@ -10,6 +10,7 @@ use App\Mcp\Tools\CreateCategory;
 use App\Mcp\Tools\CreateLabel;
 use App\Mcp\Tools\CreateTransaction;
 use App\Mcp\Tools\DeleteAutomationRule;
+use App\Mcp\Tools\DeleteBalance;
 use App\Mcp\Tools\DeleteBudget;
 use App\Mcp\Tools\DeleteCategory;
 use App\Mcp\Tools\DeleteLabel;
@@ -19,6 +20,8 @@ use App\Mcp\Tools\GetNetWorth;
 use App\Mcp\Tools\GetRunway;
 use App\Mcp\Tools\LabelTransaction;
 use App\Mcp\Tools\ListAccounts;
+use App\Mcp\Tools\ListAutomationRules;
+use App\Mcp\Tools\ListBalances;
 use App\Mcp\Tools\ListBudgets;
 use App\Mcp\Tools\ListCategories;
 use App\Mcp\Tools\ListLabels;
@@ -39,7 +42,7 @@ use Laravel\Mcp\Server\Attributes\Version;
 use Laravel\Mcp\Server\Tool;
 
 #[Name('Whisper Money')]
-#[Version('1.5.0')]
+#[Version('1.6.0')]
 #[Instructions(<<<'MARKDOWN'
 Access to the authenticated user's Whisper Money finance data, for analysing
 spending, cashflow and net worth — and, with write access, for editing that
@@ -47,9 +50,21 @@ data.
 
 - All amounts are integers in minor units (cents). Divide by 100 for a display value.
 - Data is organised into "spaces" (the personal space and any shared spaces).
-  Transaction, account, category, label and budget tools accept an optional `space` id and
-  default to the personal space; call `list_spaces` to discover ids. The cashflow,
-  net-worth and spending tools cover the user's whole account.
+  Transaction, account, category, label, budget, balance and automation-rule tools accept an
+  optional `space` id and default to the personal space; call `list_spaces` to discover ids.
+  `get_cashflow`, `get_net_worth` and `spending_by_category` are the exception: they take no
+  `space` and aggregate every space the user has, with no way to narrow them to one. Never
+  present their figures next to a space-filtered total as if the two were comparable — the
+  gap is the other spaces, not a discrepancy.
+- Categories form a tree, and a child never disagrees with its parent: it inherits the
+  parent's type and cashflow direction, and moving a category re-derives both and cascades
+  them to everything below it. Deleting one with `strategy: "cascade"` also needs
+  `confirm_cascade: true`, because it takes the whole subtree and uncategorizes its
+  transactions.
+- `list_automation_rules` shows the rules in evaluation order. Read it before writing a rule
+  so you do not duplicate or contradict one that exists, and after writing to confirm what
+  was stored. The `amount` variable inside `rules_json` is in major units, unlike every
+  other amount in this API.
 - Budgets are owner-scoped inside a space. `create_budget` creates the cadence and
   tracking configuration; `update_budget` changes the name, allocation, categories
   and labels. Tracking changes preserve closed-period history and recalculate the
@@ -75,7 +90,8 @@ data.
 Write tools ... require a read & write Sanctum token; OAuth connections follow the current
 WriteTool policy. A read-only Sanctum token can analyse data but never change it. Bank-connected accounts
 and bank/imported transactions are protected: you can only create, edit or
-delete manual transactions and manual-account balances, but you can categorize
+delete manual transactions and manual-account balances (`list_balances` reads any account's,
+`delete_balance` removes a manual one recorded by mistake), but you can categorize
 and label any transaction, and split any accessible transaction without changing
 its ledger fields. `split_transaction` replaces all category postings at once;
 the amounts must sum exactly to the parent amount. Use `splits: []` with a
@@ -107,6 +123,8 @@ class WhisperMoneyServer extends Server
         GetRunway::class,
         GetNetWorth::class,
         ListAccounts::class,
+        ListAutomationRules::class,
+        ListBalances::class,
         ListBudgets::class,
         ListCategories::class,
         ListLabels::class,
@@ -121,6 +139,7 @@ class WhisperMoneyServer extends Server
         SplitTransaction::class,
         LabelTransaction::class,
         CreateBalance::class,
+        DeleteBalance::class,
         CreateCategory::class,
         UpdateCategory::class,
         DeleteCategory::class,

@@ -3,6 +3,7 @@
 namespace App\Mcp\Tools;
 
 use App\Enums\PlanFeature;
+use App\Models\Account;
 use App\Models\Label;
 use App\Models\Space;
 use App\Models\User;
@@ -102,6 +103,25 @@ abstract class McpTool extends Tool
         }
 
         return $space;
+    }
+
+    /**
+     * Resolve an account the token may read: it only has to live in the space.
+     * Writing to one is narrower — see WriteTool::writableAccount().
+     */
+    protected function accountInSpace(Request $request, Space $space, string $key = 'account_id'): Account
+    {
+        $id = $request->string($key)->toString();
+
+        $account = Account::query()->forSpace($space)->whereKey($id)->first();
+
+        if ($account === null) {
+            throw ValidationException::withMessages([
+                $key => "No account with id {$id} in space {$space->id}. Call list_accounts to see valid ids.",
+            ]);
+        }
+
+        return $account;
     }
 
     /**

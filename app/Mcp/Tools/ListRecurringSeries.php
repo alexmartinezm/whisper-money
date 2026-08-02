@@ -7,17 +7,31 @@ use App\Enums\RecurringSeriesUserState;
 use App\Models\RecurringSeries;
 use App\Models\User;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Illuminate\Validation\Rule;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[IsReadOnly]
-#[Description('List detected recurring charges (subscriptions, bills, standing payments) in an accessible space. Amounts are minor units. Detection runs on a schedule; this tool reads its result and never triggers a scan.')]
+#[Description(<<<'TEXT'
+List detected recurring charges (subscriptions, bills, standing payments) in an accessible
+space. Amounts are minor units.
+
+Detection runs on a schedule; this tool reads its result and never triggers a scan. That
+lag is visible: `next_expected_on` can sit in the past for a series whose charge has
+already landed but whose detection has not caught up yet. It means the projection is stale,
+not that a payment was missed — never report an overdue expected date as a missing charge
+or an accounting error.
+TEXT)]
 class ListRecurringSeries extends McpTool
 {
     protected function respond(Request $request, User $user): Response
     {
+        $request->validate([
+            'status' => ['sometimes', Rule::enum(RecurringSeriesStatus::class)],
+        ]);
+
         $space = $this->resolveSpace($request, $user);
         $status = $request->string('status')->toString();
         $includeIgnored = $request->boolean('include_ignored');
@@ -84,7 +98,7 @@ class ListRecurringSeries extends McpTool
     {
         return [
             'space' => $schema->string()->description('Space id. Defaults to the personal space.'),
-            'status' => $schema->string()->description('Filter by status: active or lapsed. Defaults to both.'),
+            'status' => $schema->string()->enum(array_column(RecurringSeriesStatus::cases(), 'value'))->description('Filter by status. Defaults to both.'),
             'include_ignored' => $schema->boolean()->description('Include series the user dismissed. Defaults to false.'),
         ];
     }
