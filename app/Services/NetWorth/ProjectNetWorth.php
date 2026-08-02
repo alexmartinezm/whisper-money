@@ -171,7 +171,7 @@ class ProjectNetWorth
                     fn (Account $account): bool => in_array($account->type, [AccountType::Investment, AccountType::Retirement], true),
                 ),
                 'revalued_accounts' => $accounts
-                    ->filter(fn (Account $account): bool => (float) ($account->realEstateDetail?->revaluation_percentage ?? 0) !== 0.0)
+                    ->filter(fn (Account $account): bool => (float) ($account->realEstateDetail->revaluation_percentage ?? 0) !== 0.0)
                     ->map(fn (Account $account): string => $account->name)
                     ->values()
                     ->all(),
@@ -287,7 +287,7 @@ class ProjectNetWorth
             return $this->amortization->getBalanceAtDate($account->loanDetail, $date->toMutable());
         }
 
-        $rate = (float) ($account->realEstateDetail?->revaluation_percentage ?? 0);
+        $rate = (float) ($account->realEstateDetail->revaluation_percentage ?? 0);
 
         if ($account->type === AccountType::RealEstate && $rate !== 0.0) {
             $months = $today->diffInDays($date) / 30.4375;
