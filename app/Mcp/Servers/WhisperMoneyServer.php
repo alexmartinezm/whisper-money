@@ -16,6 +16,7 @@ use App\Mcp\Tools\DeleteLabel;
 use App\Mcp\Tools\DeleteTransaction;
 use App\Mcp\Tools\GetCashflow;
 use App\Mcp\Tools\GetNetWorth;
+use App\Mcp\Tools\GetRunway;
 use App\Mcp\Tools\LabelTransaction;
 use App\Mcp\Tools\ListAccounts;
 use App\Mcp\Tools\ListBudgets;
@@ -38,7 +39,7 @@ use Laravel\Mcp\Server\Attributes\Version;
 use Laravel\Mcp\Server\Tool;
 
 #[Name('Whisper Money')]
-#[Version('1.4.0')]
+#[Version('1.5.0')]
 #[Instructions(<<<'MARKDOWN'
 Access to the authenticated user's Whisper Money finance data, for analysing
 spending, cashflow and net worth — and, with write access, for editing that
@@ -63,6 +64,13 @@ data.
   medians and may be marked variable; `monthly_equivalent_amount` rescales any cadence
   to a month so series can be compared and summed. Totals are reported per currency in
   `monthly_expense_totals`; never add amounts from different currencies together.
+- For anything forward-looking — "do I make it to payday", "what is left at the end of
+  the month", "am I about to overdraw" — call `get_runway`. It already walks the balance
+  through the expected charges and adds an estimate of everyday spending, so do not
+  rebuild it from `list_recurring_series` or `get_cashflow`, which reports the past. Its
+  `everyday_spending` block is an estimate and is null when there is too little history;
+  when it is present, quote its figures rather than the exact ones, which ignore
+  groceries and everything else that never repeats on a cadence.
 
 Write tools ... require a read & write Sanctum token; OAuth connections follow the current
 WriteTool policy. A read-only Sanctum token can analyse data but never change it. Bank-connected accounts
@@ -81,6 +89,7 @@ class WhisperMoneyServer extends Server
         SearchTransactions::class,
         SpendingByCategory::class,
         GetCashflow::class,
+        GetRunway::class,
         GetNetWorth::class,
         ListAccounts::class,
         ListBudgets::class,

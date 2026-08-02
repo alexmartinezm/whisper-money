@@ -4,6 +4,7 @@ namespace App\Services\Budgets;
 
 use App\Models\Budget;
 use App\Models\BudgetPeriod;
+use App\Models\Space;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 
@@ -30,12 +31,12 @@ class ProjectBudgetPace
     /**
      * @return list<array{id: string, name: string, spent: int, available: int, projected: int, over_by: int, period_end: string}>
      */
-    public function forUser(User $user, ?CarbonImmutable $today = null): array
+    public function forUser(User $user, ?CarbonImmutable $today = null, ?Space $space = null): array
     {
         $today ??= CarbonImmutable::today();
 
         $budgets = $user->budgets()
-            ->where('space_id', $user->activeSpace()->id)
+            ->where('space_id', ($space ?? $user->activeSpace())->id)
             ->with(['periods' => function ($query) use ($today): void {
                 $query->whereDate('start_date', '<=', $today->toDateString())
                     ->whereDate('end_date', '>=', $today->toDateString())

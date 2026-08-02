@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\ChartColorScheme;
+use Carbon\Carbon;
 use Database\Factories\UserSettingFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -17,6 +18,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property bool $budget_notify_on_new_transaction
  * @property bool $budget_notify_on_close_to_limit
  * @property bool $budget_notify_on_over_limit
+ * @property bool $notify_upcoming_recurring
+ * @property bool $notify_runway_shortfall
+ * @property ?Carbon $runway_alerted_low_on
  */
 class UserSetting extends Model
 {
@@ -33,6 +37,8 @@ class UserSetting extends Model
         'budget_notify_on_close_to_limit',
         'budget_notify_on_over_limit',
         'notify_upcoming_recurring',
+        'notify_runway_shortfall',
+        'runway_alerted_low_on',
     ];
 
     protected function casts(): array
@@ -46,6 +52,8 @@ class UserSetting extends Model
             'budget_notify_on_close_to_limit' => 'boolean',
             'budget_notify_on_over_limit' => 'boolean',
             'notify_upcoming_recurring' => 'boolean',
+            'notify_runway_shortfall' => 'boolean',
+            'runway_alerted_low_on' => 'date',
         ];
     }
 

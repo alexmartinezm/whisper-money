@@ -2422,5 +2422,14 @@
     "At this pace :name closes at :projected, :over over its :available.": "A este ritmo :name cierra en :projected, :over por encima de sus :available.",
     "Review budgets": "Revisar presupuestos",
     "No account holds spendable cash, so today reads as zero.": "No hay ninguna cuenta con dinero gastable, así que hoy sale a cero.",
-    "Your spendable accounts are all excluded from net worth, so today reads as zero.": "Todas tus cuentas con dinero gastable están excluidas del patrimonio, así que hoy sale a cero."
+    "Your spendable accounts are all excluded from net worth, so today reads as zero.": "Todas tus cuentas con dinero gastable están excluidas del patrimonio, así que hoy sale a cero.",
+    "Running out before payday": "Quedarte sin saldo antes de la nómina",
+    "Get warned when your projected balance dips below zero, counting your usual spending as well as your recurring charges. Sent once per dip, not every day.": "Recibe un aviso cuando tu saldo proyectado baje de cero, contando tu gasto habitual además de los cargos recurrentes. Se envía una vez por bajón, no cada día.",
+    "Heads up: your balance runs out before payday": "Aviso: te quedas sin saldo antes de la nómina",
+    "Your balance runs out before payday": "Te quedas sin saldo antes de la nómina",
+    "Hi :name, at the current rate your spendable balance dips to :amount around :date.": "Hola :name, a este ritmo tu saldo gastable baja hasta :amount sobre el :date.",
+    "That figure counts your recurring charges plus what you usually spend on everything else, so it is an estimate rather than a certainty.": "Esa cifra cuenta tus cargos recurrentes más lo que sueles gastar en todo lo demás, así que es una estimación, no una certeza.",
+    "That figure counts only the recurring charges we know about, so the real dip is likely to come sooner.": "Esa cifra solo cuenta los cargos recurrentes que conocemos, así que el bajón real llegará probablemente antes.",
+    "See the projection": "Ver la previsión",
+    "You can turn this warning off in your notification settings.": "Puedes desactivar este aviso en tus ajustes de notificaciones."
 }

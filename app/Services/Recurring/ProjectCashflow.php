@@ -7,6 +7,7 @@ use App\Enums\RecurringSeriesStatus;
 use App\Enums\RecurringSeriesUserState;
 use App\Models\Account;
 use App\Models\RecurringSeries;
+use App\Models\Space;
 use App\Models\User;
 use App\Services\BalanceLookup;
 use App\Services\ExchangeRateService;
@@ -51,13 +52,13 @@ class ProjectCashflow
      *     later: list<array{month: string, total: int, charges: list<array{date: string, series_id: string, display_name: string, amount: int, amount_is_variable: bool, category: ?string}>}>
      * }
      */
-    public function forUser(User $user, ?int $days = null): array
+    public function forUser(User $user, ?int $days = null, ?Space $space = null): array
     {
         $days ??= (int) config('recurring.forecast_days');
         $currency = $user->currency_code ?? 'USD';
         $today = CarbonImmutable::today();
         $horizon = $today->addDays($days);
-        $spaceId = $user->activeSpace()->id;
+        $spaceId = ($space ?? $user->activeSpace())->id;
 
         $series = RecurringSeries::query()
             ->where('user_id', $user->id)
