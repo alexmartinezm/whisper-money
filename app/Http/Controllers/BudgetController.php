@@ -280,7 +280,7 @@ class BudgetController extends Controller
 
         $this->budgetManagementService->update(
             $request->user(),
-            $request->user()->activeSpace(),
+            $budget->space,
             $budget->id,
             $request->only(['name', 'allocated_amount', 'category_ids', 'label_ids']),
             CarbonImmutable::today(),

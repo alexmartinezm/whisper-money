@@ -367,6 +367,36 @@ test('user can update budget categories and labels', function () {
         ->and($budget->fresh()->labels->modelKeys())->toBe([$label->id]);
 });
 
+test('user can update a budget from a non-active owned space', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $activeSpace = $user->personalSpace;
+    $budgetSpace = Space::factory()->create(['owner_id' => $user->id]);
+    $oldCategory = Category::factory()->create([
+        'user_id' => $user->id,
+        'space_id' => $budgetSpace->id,
+    ]);
+    $newCategory = Category::factory()->create([
+        'user_id' => $user->id,
+        'space_id' => $budgetSpace->id,
+    ]);
+    $budget = Budget::factory()->forCategories($oldCategory)->create([
+        'user_id' => $user->id,
+        'space_id' => $budgetSpace->id,
+    ]);
+
+    expect($user->activeSpace()->id)->toBe($activeSpace->id);
+
+    $this->actingAs($user)
+        ->patch("/budgets/{$budget->id}", [
+            'name' => 'Updated from another space',
+            'category_ids' => [$newCategory->id],
+        ])
+        ->assertRedirect();
+
+    expect($budget->fresh()->name)->toBe('Updated from another space')
+        ->and($budget->fresh()->categories->modelKeys())->toBe([$newCategory->id]);
+});
+
 test('user can clear one tracking dimension while preserving the omitted dimension', function () {
     $user = User::factory()->create(['onboarded_at' => now()]);
     $space = $user->personalSpace;
