@@ -36,7 +36,7 @@ class UpdateCategory extends WriteTool
             'icon' => $schema->string()->description('New icon name.'),
             'color' => $schema->string()->enum(array_column(CategoryColor::cases(), 'value'))->description('New category color.'),
             'type' => $schema->string()->enum(array_column(CategoryType::cases(), 'value'))->description('New type (ignored while the category has a parent).'),
-            'parent_id' => $schema->string()->description('New parent id, or null to make it a root.'),
+            'parent_id' => $schema->string()->nullable()->description('New parent id, or null to make it a root.'),
             'cashflow_direction' => $schema->string()->enum(array_column(CategoryCashflowDirection::cases(), 'value'))->description('Only used for transfer-type roots; otherwise derived automatically.'),
             'space' => $schema->string()->description('Space id. Defaults to the personal space.'),
         ];

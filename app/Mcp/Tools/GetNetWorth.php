@@ -11,7 +11,15 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[IsReadOnly]
-#[Description('Net worth for a date range as JSON: the current total vs the previous period, plus the per-account balance evolution over time. Set granularity to "monthly" (default) or "daily". Amounts are in minor units (cents). Covers the user\'s whole account.')]
+#[Description(<<<'TEXT'
+Net worth for a date range as JSON: the current total vs the previous period, plus the
+per-account balance evolution over time. Set granularity to "monthly" (default) or "daily".
+Amounts are in minor units (cents).
+
+Unlike most tools here this one takes no `space`: it aggregates every space the user has,
+and there is no way to narrow it to one. Do not set its figures against a space-filtered
+total without saying so — the difference is the other spaces, not a discrepancy.
+TEXT)]
 class GetNetWorth extends McpTool
 {
     /**

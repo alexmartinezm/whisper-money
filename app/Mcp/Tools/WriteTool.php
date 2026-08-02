@@ -2,8 +2,8 @@
 
 namespace App\Mcp\Tools;
 
+use App\Mcp\Tools\Concerns\PresentsAutomationRules;
 use App\Models\Account;
-use App\Models\AutomationRule;
 use App\Models\Category;
 use App\Models\Label;
 use App\Models\Space;
@@ -26,6 +26,8 @@ use Laravel\Mcp\Response;
  */
 abstract class WriteTool extends McpTool
 {
+    use PresentsAutomationRules;
+
     protected function respond(Request $request, User $user): Response
     {
         // Write access is granted to OAuth connections (Claude Desktop /
@@ -49,23 +51,26 @@ abstract class WriteTool extends McpTool
      */
     protected function writableAccount(Request $request, Space $space, string $key = 'account_id'): Account
     {
-        $id = $request->string($key)->toString();
+        $account = $this->accountInSpace($request, $space, $key);
 
-        $account = Account::query()->forSpace($space)->whereKey($id)->first();
+        $this->assertWritableAccount($account, $key);
 
-        if ($account === null) {
-            throw ValidationException::withMessages([
-                $key => "No account with id {$id} in space {$space->id}. Call list_accounts to see valid ids.",
-            ]);
-        }
+        return $account;
+    }
 
+    /**
+     * Assert an already-resolved account may be written to. Reached from the
+     * other direction too: a tool given a child row's id (a balance snapshot,
+     * say) resolves the account from it and needs the same verdict, worded the
+     * same way.
+     */
+    protected function assertWritableAccount(Account $account, string $key = 'account_id'): void
+    {
         if ($account->isConnected()) {
             throw ValidationException::withMessages([
                 $key => 'That account is connected to a bank and is read-only. Only non-connected (manual) accounts can be written to.',
             ]);
         }
-
-        return $account;
     }
 
     protected function transactionInSpace(Request $request, Space $space, string $key = 'transaction_id'): Transaction
@@ -177,28 +182,6 @@ abstract class WriteTool extends McpTool
             'id' => $label->id,
             'name' => $label->name,
             'color' => $label->color,
-        ];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    protected function presentAutomationRule(AutomationRule $rule): array
-    {
-        $rule->loadMissing('labels:id,name');
-
-        return [
-            'id' => $rule->id,
-            'title' => $rule->title,
-            'priority' => $rule->priority,
-            'rules_json' => $rule->rules_json,
-            'action_category_id' => $rule->action_category_id,
-            'action_note' => $rule->action_note,
-            'origin' => $rule->origin->value,
-            'labels' => $rule->labels
-                ->map(fn (Label $label): array => ['id' => $label->id, 'name' => $label->name])
-                ->values()
-                ->all(),
         ];
     }
 }

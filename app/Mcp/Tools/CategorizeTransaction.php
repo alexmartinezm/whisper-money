@@ -23,7 +23,7 @@ class CategorizeTransaction extends WriteTool
     {
         return [
             'transaction_id' => $schema->string()->description('Id of the transaction to categorize.')->required(),
-            'category_id' => $schema->string()->description('Category id to assign, or null to remove the category.')->required(),
+            'category_id' => $schema->string()->nullable()->description('Category id to assign, or null to remove the category.')->required(),
             'space' => $schema->string()->description('Space id. Defaults to the personal space.'),
         ];
     }
