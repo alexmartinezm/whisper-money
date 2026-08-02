@@ -45,6 +45,7 @@ interface Props {
     notifyOnBankTransactionsSynced: boolean;
     notifyUpcomingRecurring: boolean;
     notifyRunwayShortfall: boolean;
+    notifyPriceChanges: boolean;
     budgetDefaults: Record<BudgetToggleKey, boolean>;
     budgets: BudgetRow[];
 }
@@ -79,6 +80,7 @@ export default function Notifications({
     notifyOnBankTransactionsSynced,
     notifyUpcomingRecurring,
     notifyRunwayShortfall,
+    notifyPriceChanges,
     budgetDefaults,
     budgets,
 }: Props) {
@@ -102,6 +104,14 @@ export default function Notifications({
         router.patch(
             update().url,
             { notifications: { runway_shortfall: checked } },
+            patchOptions,
+        );
+    };
+
+    const patchPriceChanges = (checked: boolean) => {
+        router.patch(
+            update().url,
+            { notifications: { price_changes: checked } },
             patchOptions,
         );
     };
@@ -168,6 +178,27 @@ export default function Notifications({
                             <p className="text-sm text-muted-foreground">
                                 {__(
                                     'Get warned when your projected balance dips below zero, counting your usual spending as well as your recurring charges. Sent once per dip, not every day.',
+                                )}
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="flex items-start gap-3">
+                        <Checkbox
+                            id="notify-price-changes"
+                            defaultChecked={notifyPriceChanges}
+                            onCheckedChange={(checked) =>
+                                patchPriceChanges(checked === true)
+                            }
+                            className="mt-0.5"
+                        />
+                        <div className="grid gap-1">
+                            <Label htmlFor="notify-price-changes">
+                                {__('Subscriptions going up')}
+                            </Label>
+                            <p className="text-sm text-muted-foreground">
+                                {__(
+                                    'Get told when a subscription or bill starts costing more than it used to, with what the rise adds over a year. Bills that simply vary month to month are left out.',
                                 )}
                             </p>
                         </div>

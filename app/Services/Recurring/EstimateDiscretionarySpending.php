@@ -6,6 +6,7 @@ use App\Enums\CategoryType;
 use App\Models\Transaction;
 use App\Models\TransactionSplit;
 use App\Services\ExchangeRateService;
+use App\Support\Statistics;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -76,7 +77,7 @@ class EstimateDiscretionarySpending
         }
 
         return [
-            'monthly' => $this->median($totals->values()->all()),
+            'monthly' => (int) round(Statistics::median($totals->values()->all())),
             'months_observed' => $totals->count(),
         ];
     }
@@ -161,21 +162,5 @@ class EstimateDiscretionarySpending
             fn ($sub) => $sub->from('recurring_series_transaction')
                 ->whereColumn('recurring_series_transaction.transaction_id', 'transactions.id')
         );
-    }
-
-    /**
-     * @param  list<int>  $values
-     */
-    private function median(array $values): int
-    {
-        sort($values);
-        $count = count($values);
-        $middle = intdiv($count, 2);
-
-        if ($count % 2 === 1) {
-            return $values[$middle];
-        }
-
-        return (int) round(($values[$middle - 1] + $values[$middle]) / 2);
     }
 }
