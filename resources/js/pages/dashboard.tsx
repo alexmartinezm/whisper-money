@@ -7,6 +7,7 @@ import { AccountBalanceCard } from '@/components/dashboard/account-balance-card'
 import { AccountsManagerDialog } from '@/components/dashboard/accounts-manager-dialog';
 import { CashflowSummaryCard } from '@/components/dashboard/cashflow-summary-card';
 import { NetWorthChart as NetWorthChartComponent } from '@/components/dashboard/net-worth-chart';
+import { NetWorthProjectionCard } from '@/components/dashboard/net-worth-projection';
 import { TopCategoriesCard } from '@/components/dashboard/top-categories-card';
 import HeadingSmall from '@/components/heading-small';
 import { IntegrationRequestsDrawer } from '@/components/integration-requests/integration-requests-drawer';
@@ -23,6 +24,7 @@ import AppSidebarLayout from '@/layouts/app/app-sidebar-layout';
 import { dashboard } from '@/routes';
 import { BreadcrumbItem, SharedData } from '@/types';
 import { Category } from '@/types/category';
+import { NetWorthProjection } from '@/types/net-worth';
 import { __ } from '@/utils/i18n';
 import { Deferred, Head, router, usePage } from '@inertiajs/react';
 import { Pencil } from 'lucide-react';
@@ -38,6 +40,7 @@ interface CashflowSummary {
 interface DashboardProps extends SharedData {
     showEncryptionPrompt: boolean;
     netWorthEvolution?: NetWorthEvolutionData;
+    netWorthProjection?: NetWorthProjection;
     topCategories?: Array<{
         category: Category | null;
         category_id?: string | null;
@@ -348,6 +351,12 @@ export default function Dashboard() {
                     }
                 >
                     <NetWorthChartComponent data={netWorthEvolution} />
+
+                    {props.netWorthProjection && (
+                        <NetWorthProjectionCard
+                            projection={props.netWorthProjection}
+                        />
+                    )}
 
                     <div className="flex items-center justify-between">
                         <h2 className="text-lg font-semibold">

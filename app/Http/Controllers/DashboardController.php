@@ -8,6 +8,7 @@ use App\Models\Transaction;
 use App\Services\AccountMetricsService;
 use App\Services\CashflowSummaryService;
 use App\Services\CategorySpendingService;
+use App\Services\NetWorth\ProjectNetWorth;
 use App\Services\PeriodComparator;
 use App\Services\Transactions\EffectiveTransactionPostings;
 use Carbon\Carbon;
@@ -21,6 +22,7 @@ class DashboardController extends Controller
         private AccountMetricsService $accountMetricsService,
         private CategorySpendingService $categorySpendingService,
         private EffectiveTransactionPostings $effectivePostings,
+        private ProjectNetWorth $projectNetWorth,
     ) {}
 
     public function __invoke(Request $request): Response
@@ -28,6 +30,7 @@ class DashboardController extends Controller
         return Inertia::render('dashboard', [
             'showEncryptionPrompt' => session('show_encryption_prompt', false),
             'netWorthEvolution' => Inertia::defer(fn () => $this->getNetWorthEvolution($request), 'dashboard'),
+            'netWorthProjection' => Inertia::defer(fn () => $this->projectNetWorth->forUser($request->user()), 'dashboard'),
             'topCategories' => Inertia::defer(fn () => $this->getTopCategories($request), 'dashboard'),
             'cashflowSummary' => Inertia::defer(fn () => $this->getCashflowSummary($request), 'dashboard'),
         ]);
