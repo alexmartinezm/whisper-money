@@ -50,8 +50,8 @@ class ProjectNetWorth
      *     committed: int,
      *     estimated: ?int,
      *     points: list<array{date: string, actual: ?int, committed: ?int, estimated: ?int}>,
-     *     drivers: array{debt_repaid: int, property_growth: int, recurring_net: int, contributions: int, everyday_spending: ?int},
-     *     assumptions: array{investments_flat: bool, revalued_accounts: list<string>, months_observed: ?int}
+     *     drivers: array{debt_repaid: int, property_growth: int, recurring_in: int, recurring_out: int, contributions: int, everyday_spending: ?int},
+     *     assumptions: array{investments_flat: bool, revalued_accounts: list<string>, months_observed: ?int, recurring_income: bool}
      * }
      */
     public function forUser(User $user, ?Space $space = null): array
@@ -92,11 +92,12 @@ class ProjectNetWorth
 
         $committed = $netToday;
         $estimated = $spending ? $netToday : null;
-        $drivers = ['debt_repaid' => 0, 'property_growth' => 0, 'recurring_net' => 0, 'contributions' => 0];
+        $drivers = ['debt_repaid' => 0, 'property_growth' => 0, 'recurring_in' => 0, 'recurring_out' => 0, 'contributions' => 0];
 
         foreach ($this->forwardDates($today) as $date) {
             $cash = $cashToday;
-            $recurring = 0;
+            $recurringIn = 0;
+            $recurringOut = 0;
             $contributions = 0;
 
             foreach ($forecast['occurrences'] as $occurrence) {
@@ -105,7 +106,14 @@ class ProjectNetWorth
                 }
 
                 $cash += $occurrence['amount'];
-                $recurring += $occurrence['amount'];
+
+                // Reported apart rather than netted, matching the runway's own
+                // expected-in and expected-out. A single figure buries a year
+                // of salary inside it, and a year of salary is the least
+                // certain thing holding the committed line up.
+                $occurrence['amount'] > 0
+                    ? $recurringIn += $occurrence['amount']
+                    : $recurringOut += $occurrence['amount'];
 
                 // A standing order into a pension is not money gone: it leaves
                 // the current account and arrives somewhere that still counts.
@@ -133,7 +141,8 @@ class ProjectNetWorth
             $drivers = [
                 'debt_repaid' => $this->debtRepaid($accounts, $balances, $today, $date),
                 'property_growth' => $this->propertyGrowth($accounts, $balances, $today, $date),
-                'recurring_net' => $recurring,
+                'recurring_in' => $recurringIn,
+                'recurring_out' => $recurringOut,
                 'contributions' => $contributions,
             ];
 
@@ -167,6 +176,10 @@ class ProjectNetWorth
                     ->values()
                     ->all(),
                 'months_observed' => $spending['months_observed'] ?? null,
+                // Worth saying out loud. The committed line leans on a year of
+                // salary, and the mortgage only amortises because that salary
+                // pays it -- the two stand or fall together.
+                'recurring_income' => $drivers['recurring_in'] > 0,
             ],
         ];
     }

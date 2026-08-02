@@ -141,9 +141,14 @@ export function NetWorthProjectionCard({ projection }: Props) {
             amount: projection.drivers.property_growth,
         },
         {
-            key: 'recurring',
-            label: __('Recurring in and out'),
-            amount: projection.drivers.recurring_net,
+            key: 'recurring-in',
+            label: __('Recurring income'),
+            amount: projection.drivers.recurring_in,
+        },
+        {
+            key: 'recurring-out',
+            label: __('Recurring charges'),
+            amount: projection.drivers.recurring_out,
         },
         {
             // Shown so the breakdown reconciles. Without it the recurring
@@ -394,6 +399,10 @@ export function NetWorthProjectionCard({ projection }: Props) {
                 )}
 
                 <p className="text-xs text-muted-foreground">
+                    {projection.assumptions.recurring_income &&
+                        __(
+                            'The committed figure assumes your recurring income keeps arriving — it is also what pays the loans down.',
+                        )}{' '}
                     {projection.assumptions.investments_flat &&
                         __(
                             'Investments and pensions are held at today’s value — no return is assumed.',

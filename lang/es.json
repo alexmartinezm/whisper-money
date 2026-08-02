@@ -2454,10 +2454,12 @@
     "So far": "Hasta hoy",
     "Debt repaid": "Deuda amortizada",
     "Revaluation": "Revalorización",
-    "Recurring in and out": "Recurrentes, entradas y salidas",
     "Everyday spending": "Gasto habitual",
     "Investments and pensions are held at today’s value — no return is assumed.": "Las inversiones y los planes de pensiones se mantienen al valor de hoy: no se supone ninguna rentabilidad.",
     ":accounts revalues at the rate you set.": ":accounts se revaloriza al porcentaje que configuraste.",
     "Everyday spending is the median of :months complete months.": "El gasto habitual es la mediana de :months meses completos.",
-    "Moved into savings": "Traspasado a ahorro"
+    "Moved into savings": "Traspasado a ahorro",
+    "Recurring income": "Ingresos recurrentes",
+    "Recurring charges": "Cargos recurrentes",
+    "The committed figure assumes your recurring income keeps arriving — it is also what pays the loans down.": "La cifra comprometida da por hecho que tus ingresos recurrentes siguen llegando: son también los que amortizan los préstamos."
 }

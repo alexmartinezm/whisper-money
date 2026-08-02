@@ -15,7 +15,8 @@ export interface NetWorthProjection {
     drivers: {
         debt_repaid: number;
         property_growth: number;
-        recurring_net: number;
+        recurring_in: number;
+        recurring_out: number;
         contributions: number;
         everyday_spending: number | null;
     };
@@ -23,5 +24,6 @@ export interface NetWorthProjection {
         investments_flat: boolean;
         revalued_accounts: string[];
         months_observed: number | null;
+        recurring_income: boolean;
     };
 }

@@ -2299,10 +2299,12 @@
     "So far": "Jusqu'à aujourd'hui",
     "Debt repaid": "Dette remboursée",
     "Revaluation": "Revalorisation",
-    "Recurring in and out": "Récurrents, entrées et sorties",
     "Everyday spending": "Dépenses habituelles",
     "Investments and pensions are held at today’s value — no return is assumed.": "Les investissements et les retraites sont maintenus à leur valeur actuelle : aucun rendement n'est supposé.",
     ":accounts revalues at the rate you set.": ":accounts se revalorise au taux que vous avez défini.",
     "Everyday spending is the median of :months complete months.": "Les dépenses habituelles sont la médiane de :months mois complets.",
-    "Moved into savings": "Transféré vers l'épargne"
+    "Moved into savings": "Transféré vers l'épargne",
+    "Recurring income": "Revenus récurrents",
+    "Recurring charges": "Charges récurrentes",
+    "The committed figure assumes your recurring income keeps arriving — it is also what pays the loans down.": "Le montant engagé suppose que vos revenus récurrents continuent d'arriver : ce sont aussi eux qui remboursent les prêts."
 }

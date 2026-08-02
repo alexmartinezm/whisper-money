@@ -166,8 +166,51 @@ it('walks recurring charges into the cash side', function () {
 
     $projection = $this->project->forUser($this->user);
 
-    expect($projection['drivers']['recurring_net'])->toBeLessThan(0)
+    expect($projection['drivers']['recurring_out'])->toBeLessThan(0)
+        ->and($projection['drivers']['recurring_in'])->toBe(0)
         ->and($projection['committed'])->toBeLessThan($projection['today']);
+});
+
+it('reports recurring income apart from recurring charges', function () {
+    // Netting them hides a year of salary inside a single number, and salary
+    // is the least certain thing holding the committed line up.
+    $account = accountWorth($this->user, AccountType::Checking, 500000);
+
+    RecurringSeries::factory()->cadence(RecurringCadence::Monthly)->create([
+        'user_id' => $this->user->id,
+        'space_id' => $this->user->personalSpace->id,
+        'account_id' => $account->id,
+        'display_name' => 'Nomina',
+        'direction' => 'income',
+        'expected_amount' => 265000,
+        'currency_code' => 'EUR',
+        'next_expected_on' => $this->today->addDays(2)->toDateString(),
+    ]);
+    RecurringSeries::factory()->cadence(RecurringCadence::Monthly)->create([
+        'user_id' => $this->user->id,
+        'space_id' => $this->user->personalSpace->id,
+        'account_id' => $account->id,
+        'display_name' => 'Netflix',
+        'direction' => 'expense',
+        'expected_amount' => -1299,
+        'currency_code' => 'EUR',
+        'next_expected_on' => $this->today->addDays(3)->toDateString(),
+    ]);
+
+    $drivers = $this->project->forUser($this->user)['drivers'];
+
+    expect($drivers['recurring_in'])->toBeGreaterThan(0)
+        ->and($drivers['recurring_out'])->toBeLessThan(0)
+        ->and($this->project->forUser($this->user)['assumptions']['recurring_income'])->toBeTrue();
+});
+
+it('says nothing about income the user does not have', function () {
+    accountWorth($this->user, AccountType::Checking, 500000);
+
+    $projection = $this->project->forUser($this->user);
+
+    expect($projection['drivers']['recurring_in'])->toBe(0)
+        ->and($projection['assumptions']['recurring_income'])->toBeFalse();
 });
 
 it('does not treat money moved into savings as money gone', function () {
