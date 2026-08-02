@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class BudgetManagementService
@@ -135,8 +136,7 @@ class BudgetManagementService
                         ->lockForUpdate()
                         ->first();
                     if ($currentPeriod !== null) {
-                        $currentPeriod->update(['processing_historical' => true]);
-                        $reconciliationPeriods->push($currentPeriod);
+                        $reconciliationPeriods->push($this->claimForReconciliation($currentPeriod));
                     }
 
                     $catchAllPeriod = BudgetPeriod::query()
@@ -149,8 +149,7 @@ class BudgetManagementService
                         ->lockForUpdate()
                         ->first();
                     if ($catchAllPeriod !== null) {
-                        $catchAllPeriod->update(['processing_historical' => true]);
-                        $reconciliationPeriods->push($catchAllPeriod);
+                        $reconciliationPeriods->push($this->claimForReconciliation($catchAllPeriod));
                     }
                 }
             }
@@ -229,11 +228,30 @@ class BudgetManagementService
 
         foreach ($result['reconciliation_periods'] as $period) {
             $reconciliationBudget = $period->budget()->firstOrFail();
-            AssignHistoricalTransactionsToBudget::dispatch($reconciliationBudget, $period)->afterCommit();
+            AssignHistoricalTransactionsToBudget::dispatch(
+                $reconciliationBudget,
+                $period,
+                $period->reconciliation_token,
+            )->afterCommit();
         }
         unset($result['reconciliation_periods']);
 
         return $result;
+    }
+
+    /**
+     * Mark a period as awaiting reconciliation and stamp it with the token that
+     * identifies this run, so a job queued by an earlier edit can tell it has
+     * been overtaken and leave the period to the newer one.
+     */
+    private function claimForReconciliation(BudgetPeriod $period): BudgetPeriod
+    {
+        $period->update([
+            'processing_historical' => true,
+            'reconciliation_token' => (string) Str::uuid(),
+        ]);
+
+        return $period;
     }
 
     public function updateNextPeriodAllocation(

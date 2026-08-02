@@ -122,7 +122,11 @@ class BudgetTransactionService
             return -$transaction->amount;
         }
 
-        $budgetCategoryIds = $this->tree->expand($budget->user_id, $budget->categories->pluck('id')->all());
+        $budgetCategoryIds = $this->tree->expand(
+            $budget->user_id,
+            $budget->categories->pluck('id')->all(),
+            $budget->space_id,
+        );
         $postings = $this->postings->forTransaction($transaction);
 
         if (! $budget->is_catch_all) {
@@ -139,15 +143,19 @@ class BudgetTransactionService
             return 0;
         }
 
-        $claimed = $this->tree->expand($budget->user_id, Budget::query()
-            ->where('user_id', $budget->user_id)
-            ->where('space_id', $budget->space_id)
-            ->where('is_catch_all', false)
-            ->with('categories:id')
-            ->get()
-            ->flatMap(fn (Budget $other): mixed => $other->categories->pluck('id'))
-            ->unique()
-            ->all());
+        $claimed = $this->tree->expand(
+            $budget->user_id,
+            Budget::query()
+                ->where('user_id', $budget->user_id)
+                ->where('space_id', $budget->space_id)
+                ->where('is_catch_all', false)
+                ->with('categories:id')
+                ->get()
+                ->flatMap(fn (Budget $other): mixed => $other->categories->pluck('id'))
+                ->unique()
+                ->all(),
+            $budget->space_id,
+        );
 
         return -$postings
             ->filter(fn ($posting): bool => $posting->category?->type === CategoryType::Expense && ! in_array($posting->categoryId, $claimed, true))

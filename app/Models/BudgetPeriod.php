@@ -26,6 +26,7 @@ class BudgetPeriod extends Model
         'allocated_amount',
         'carried_over_amount',
         'processing_historical',
+        'reconciliation_token',
         'close_to_limit_notified',
         'over_limit_notified',
     ];

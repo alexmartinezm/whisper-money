@@ -203,7 +203,8 @@ it('updates tracking without replacing the budget or closed-period history', fun
         fn (AssignHistoricalTransactionsToBudget $job): bool => $job->period->is($current),
     );
 
-    (new AssignHistoricalTransactionsToBudget($budget->fresh(), $current->fresh()))
+    $current = $current->fresh();
+    (new AssignHistoricalTransactionsToBudget($budget->fresh(), $current, $current->reconciliation_token))
         ->handle(app(BudgetTransactionService::class));
 
     expect($historicalAssignment->fresh())->not->toBeNull()
@@ -316,9 +317,11 @@ it('reconciles the active catch-all period without touching closed catch-all per
             && $job->budget->is($catchAll),
     );
 
-    (new AssignHistoricalTransactionsToBudget($budget->fresh(), $current->fresh()))
+    $current = $current->fresh();
+    $currentCatchAllPeriod = $currentCatchAllPeriod->fresh();
+    (new AssignHistoricalTransactionsToBudget($budget->fresh(), $current, $current->reconciliation_token))
         ->handle(app(BudgetTransactionService::class));
-    (new AssignHistoricalTransactionsToBudget($catchAll->fresh(), $currentCatchAllPeriod->fresh()))
+    (new AssignHistoricalTransactionsToBudget($catchAll->fresh(), $currentCatchAllPeriod, $currentCatchAllPeriod->reconciliation_token))
         ->handle(app(BudgetTransactionService::class));
 
     expect($current->budgetTransactions()->where('transaction_id', $oldCategoryTransaction->id)->exists())->toBeFalse()
@@ -430,4 +433,82 @@ it('rejects planning updates for a period belonging to another budget', function
         45000,
         CarbonImmutable::parse('2026-07-30'),
     ))->toThrow(ModelNotFoundException::class);
+});
+
+it('stamps the reconciled periods with a token the job can recognise', function () {
+    Queue::fake();
+    CarbonImmutable::setTestNow('2026-08-10');
+    $user = User::factory()->create();
+    $budget = managedBudgetWithPeriods($user, $user->personalSpace->id);
+    $period = addManagedPeriod($budget, '2026-08-01', '2026-08-31');
+    $replacement = Category::factory()->create([
+        'user_id' => $user->id,
+        'space_id' => $user->personalSpace->id,
+    ]);
+
+    app(BudgetManagementService::class)->update(
+        $user,
+        $user->personalSpace,
+        $budget->id,
+        ['category_ids' => [$replacement->id]],
+        CarbonImmutable::parse('2026-08-10'),
+    );
+
+    $token = $period->fresh()->reconciliation_token;
+
+    expect($token)->not->toBeNull();
+    Queue::assertPushed(
+        AssignHistoricalTransactionsToBudget::class,
+        fn (AssignHistoricalTransactionsToBudget $job): bool => $job->period->id === $period->id
+            && $job->reconciliationToken === $token,
+    );
+});
+
+it('leaves the flag raised when a superseded run finishes after a newer edit', function () {
+    // Two tracking edits in a row queue two jobs. The first to finish must not
+    // announce the period as settled while the second is still rewriting it.
+    $user = User::factory()->create();
+    $budget = managedBudgetWithPeriods($user, $user->personalSpace->id);
+    $period = addManagedPeriod($budget, '2026-08-01', '2026-08-31');
+    $period->update([
+        'processing_historical' => true,
+        'reconciliation_token' => 'newer-run',
+    ]);
+
+    (new AssignHistoricalTransactionsToBudget($budget, $period, 'older-run'))
+        ->handle(app(BudgetTransactionService::class));
+
+    expect($period->fresh()->processing_historical)->toBeTrue()
+        ->and($period->fresh()->reconciliation_token)->toBe('newer-run');
+});
+
+it('hands the period back when the run that owns it finishes', function () {
+    $user = User::factory()->create();
+    $budget = managedBudgetWithPeriods($user, $user->personalSpace->id);
+    $period = addManagedPeriod($budget, '2026-08-01', '2026-08-31');
+    $period->update([
+        'processing_historical' => true,
+        'reconciliation_token' => 'current-run',
+    ]);
+
+    (new AssignHistoricalTransactionsToBudget($budget, $period, 'current-run'))
+        ->handle(app(BudgetTransactionService::class));
+
+    expect($period->fresh()->processing_historical)->toBeFalse()
+        ->and($period->fresh()->reconciliation_token)->toBeNull();
+});
+
+it('leaves the flag to the newer run when a superseded one fails permanently', function () {
+    $user = User::factory()->create();
+    $budget = managedBudgetWithPeriods($user, $user->personalSpace->id);
+    $period = addManagedPeriod($budget, '2026-08-01', '2026-08-31');
+    $period->update([
+        'processing_historical' => true,
+        'reconciliation_token' => 'newer-run',
+    ]);
+
+    (new AssignHistoricalTransactionsToBudget($budget, $period, 'older-run'))
+        ->failed(new RuntimeException('Assignment failed'));
+
+    expect($period->fresh()->processing_historical)->toBeTrue();
 });

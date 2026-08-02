@@ -1,10 +1,12 @@
 <?php
 
+use App\Models\Account;
 use App\Models\Budget;
 use App\Models\BudgetPeriod;
 use App\Models\BudgetTransaction;
 use App\Models\Category;
 use App\Models\Label;
+use App\Models\Space;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\BudgetTransactionService;
@@ -757,4 +759,64 @@ test('assigning a child category transaction matches a budget tracking the paren
     expect(BudgetTransaction::where('transaction_id', $transaction->id)
         ->where('budget_period_id', $period->id)
         ->exists())->toBeTrue();
+});
+
+test('a budget does not absorb a child category living in another space', function () {
+    // Nothing stops a category naming a parent in another space, so expanding a
+    // tracked parent must stay inside the budget's own space or the budget
+    // starts claiming spending it has no business reading.
+    $space = $this->user->personalSpace;
+    $otherSpace = Space::factory()->create(['owner_id' => $this->user->id]);
+
+    $parent = Category::factory()->create([
+        'user_id' => $this->user->id,
+        'space_id' => $space->id,
+    ]);
+    $sameSpaceChild = Category::factory()->create([
+        'user_id' => $this->user->id,
+        'space_id' => $space->id,
+        'parent_id' => $parent->id,
+    ]);
+    $otherSpaceChild = Category::factory()->create([
+        'user_id' => $this->user->id,
+        'space_id' => $otherSpace->id,
+        'parent_id' => $parent->id,
+    ]);
+
+    $budget = Budget::factory()->create([
+        'user_id' => $this->user->id,
+        'space_id' => $space->id,
+        'is_catch_all' => false,
+    ]);
+    $budget->categories()->attach($parent->id);
+    $period = BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => now()->startOfMonth(),
+        'end_date' => now()->endOfMonth(),
+        'allocated_amount' => 100000,
+    ]);
+
+    $account = Account::factory()->create([
+        'user_id' => $this->user->id,
+        'space_id' => $space->id,
+    ]);
+    $mine = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $account->id,
+        'category_id' => $sameSpaceChild->id,
+        'transaction_date' => now(),
+        'amount' => -1500,
+    ]);
+    $theirs = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $account->id,
+        'category_id' => $otherSpaceChild->id,
+        'transaction_date' => now(),
+        'amount' => -9900,
+    ]);
+
+    $this->service->assignHistoricalTransactionsToPeriod($period);
+
+    expect($period->budgetTransactions()->where('transaction_id', $mine->id)->value('amount'))->toBe(1500)
+        ->and($period->budgetTransactions()->where('transaction_id', $theirs->id)->exists())->toBeFalse();
 });
