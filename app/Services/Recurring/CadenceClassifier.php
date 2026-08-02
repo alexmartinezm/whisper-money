@@ -4,6 +4,7 @@ namespace App\Services\Recurring;
 
 use App\Data\CadenceMatch;
 use App\Enums\RecurringCadence;
+use App\Support\Statistics;
 use Carbon\CarbonInterface;
 
 /**
@@ -28,8 +29,8 @@ class CadenceClassifier
             return null;
         }
 
-        $median = $this->median($gaps);
-        $deviation = $this->medianAbsoluteDeviation($gaps, $median);
+        $median = Statistics::median($gaps);
+        $deviation = Statistics::medianAbsoluteDeviation($gaps, $median);
 
         /** @var array<string, array{min_days: int, max_days: int, max_deviation: int}> $tolerances */
         $tolerances = config('recurring.cadences');
@@ -62,28 +63,5 @@ class CadenceClassifier
         }
 
         return $gaps;
-    }
-
-    /** @param  list<int>  $values */
-    private function median(array $values): float
-    {
-        sort($values);
-        $count = count($values);
-        $middle = intdiv($count, 2);
-
-        return $count % 2 === 1
-            ? (float) $values[$middle]
-            : ($values[$middle - 1] + $values[$middle]) / 2;
-    }
-
-    /** @param  list<int>  $values */
-    private function medianAbsoluteDeviation(array $values, float $median): float
-    {
-        $deviations = array_map(
-            fn (int $value): int => (int) round(abs($value - $median)),
-            $values,
-        );
-
-        return $this->median($deviations);
     }
 }

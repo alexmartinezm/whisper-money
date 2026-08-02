@@ -134,6 +134,29 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Price changes
+    |--------------------------------------------------------------------------
+    |
+    | A subscription that quietly goes up stays invisible: the expected amount
+    | is a median over the whole history, so a rise only drags it slowly and
+    | never announces itself. Detection compares the most recent
+    | `price_window` charges against the `price_window` before them.
+    |
+    | The hard part is telling a step change from a bill that simply varies. A
+    | rise has to clear `price_rise_threshold` and `price_rise_minimum` — the
+    | second so a few cents on a small charge stays quiet — and, crucially, both
+    | windows have to be steady in themselves: a spread wider than
+    | `price_stability` of their own median means this is an electricity bill
+    | doing what electricity bills do, not a price that moved.
+    |
+    */
+    'price_window' => 3,
+    'price_rise_threshold' => 0.10,
+    'price_rise_minimum' => 100,
+    'price_stability' => 0.10,
+
+    /*
+    |--------------------------------------------------------------------------
     | Lapse tolerance
     |--------------------------------------------------------------------------
     |

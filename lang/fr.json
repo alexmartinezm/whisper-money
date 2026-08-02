@@ -2276,5 +2276,17 @@
     "That figure counts your recurring charges plus what you usually spend on everything else, so it is an estimate rather than a certainty.": "Ce chiffre compte vos prélèvements récurrents plus ce que vous dépensez habituellement pour le reste : c'est une estimation, pas une certitude.",
     "That figure counts only the recurring charges we know about, so the real dip is likely to come sooner.": "Ce chiffre ne compte que les prélèvements récurrents connus : le creux réel arrivera sans doute plus tôt.",
     "See the projection": "Voir la projection",
-    "You can turn this warning off in your notification settings.": "Vous pouvez désactiver cette alerte dans vos paramètres de notifications."
+    "You can turn this warning off in your notification settings.": "Vous pouvez désactiver cette alerte dans vos paramètres de notifications.",
+    "Subscriptions going up": "Abonnements qui augmentent",
+    "Get told when a subscription or bill starts costing more than it used to, with what the rise adds over a year. Bills that simply vary month to month are left out.": "Soyez averti quand un abonnement ou une facture commence à coûter plus qu'avant, avec ce que la hausse ajoute sur un an. Les factures qui varient simplement d'un mois à l'autre sont exclues.",
+    ":name has gone up": ":name a augmenté",
+    ":count of your recurring charges have gone up": ":count de vos prélèvements récurrents ont augmenté",
+    "A price went up": "Un prix a augmenté",
+    "Hi :name, these recurring charges now cost more than they used to.": "Bonjour :name, ces prélèvements récurrents coûtent désormais plus qu'avant.",
+    "Was": "Avant",
+    "Now": "Maintenant",
+    "Per year": "Par an",
+    "Prices are the typical amount of the last few charges compared with the ones before them, so a one-off surcharge will not appear here.": "Les prix sont le montant typique des derniers prélèvements comparé aux précédents : un supplément ponctuel n'apparaît donc pas ici.",
+    "Review your subscriptions": "Revoir vos abonnements",
+    "You can turn these warnings off in your notification settings.": "Vous pouvez désactiver ces alertes dans vos paramètres de notifications."
 }

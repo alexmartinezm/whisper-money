@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\RecurringCadence;
 use App\Jobs\SyncBankingConnectionJob;
 use App\Models\Account;
 use App\Models\AccountBalance;
@@ -7,11 +8,13 @@ use App\Models\Budget;
 use App\Models\BudgetPeriod;
 use App\Models\Category;
 use App\Models\Label;
+use App\Models\RecurringSeries;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Banking\BalanceSyncService;
 use App\Services\Banking\Sync\BankingConnectionSyncerFactory;
 use App\Services\Banking\TransactionSyncService;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
@@ -337,4 +340,41 @@ function fakeCurrencyApi(): void
             ],
         ]);
     });
+}
+
+/**
+ * A recurring series whose linked charges are the given amounts, oldest first.
+ *
+ * Shared because price-change detection and the command that emails it need
+ * the same shape, and a series is only interesting here through the history
+ * hanging off its pivot.
+ *
+ * @param  list<int>  $amounts  positive magnitudes; stored as expenses
+ */
+function seriesCharging(User $user, Account $account, array $amounts, string $name = 'Netflix'): RecurringSeries
+{
+    $series = RecurringSeries::factory()->cadence(RecurringCadence::Monthly)->create([
+        'user_id' => $user->id,
+        'space_id' => $user->personalSpace->id,
+        'display_name' => $name,
+        'direction' => 'expense',
+        'expected_amount' => -$amounts[0],
+        'currency_code' => 'EUR',
+    ]);
+
+    foreach (array_values($amounts) as $index => $amount) {
+        $transaction = Transaction::factory()->plaintext()->create([
+            'user_id' => $user->id,
+            'space_id' => $user->personalSpace->id,
+            'account_id' => $account->id,
+            'description' => $name,
+            'transaction_date' => CarbonImmutable::today()
+                ->subMonthsNoOverflow(count($amounts) - $index)->toDateString(),
+            'amount' => -$amount,
+            'currency_code' => 'EUR',
+        ]);
+        $series->transactions()->attach($transaction->id);
+    }
+
+    return $series;
 }

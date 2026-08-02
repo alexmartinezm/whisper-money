@@ -30,6 +30,7 @@ class NotificationPreferenceController extends Controller
         'budget_over_limit' => 'budget_notify_on_over_limit',
         'upcoming_recurring' => 'notify_upcoming_recurring',
         'runway_shortfall' => 'notify_runway_shortfall',
+        'price_changes' => 'notify_price_changes',
     ];
 
     public function index(Request $request): Response
@@ -41,6 +42,7 @@ class NotificationPreferenceController extends Controller
             'notifyOnBankTransactionsSynced' => $user->wantsBankTransactionsSyncedEmail(),
             'notifyUpcomingRecurring' => (bool) ($setting->notify_upcoming_recurring ?? false),
             'notifyRunwayShortfall' => (bool) ($setting->notify_runway_shortfall ?? false),
+            'notifyPriceChanges' => (bool) ($setting->notify_price_changes ?? false),
             'budgetDefaults' => [
                 'notify_on_new_transaction' => (bool) ($setting->budget_notify_on_new_transaction ?? false),
                 'notify_on_close_to_limit' => (bool) ($setting->budget_notify_on_close_to_limit ?? true),

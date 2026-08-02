@@ -2431,5 +2431,17 @@
     "That figure counts your recurring charges plus what you usually spend on everything else, so it is an estimate rather than a certainty.": "Esa cifra cuenta tus cargos recurrentes más lo que sueles gastar en todo lo demás, así que es una estimación, no una certeza.",
     "That figure counts only the recurring charges we know about, so the real dip is likely to come sooner.": "Esa cifra solo cuenta los cargos recurrentes que conocemos, así que el bajón real llegará probablemente antes.",
     "See the projection": "Ver la previsión",
-    "You can turn this warning off in your notification settings.": "Puedes desactivar este aviso en tus ajustes de notificaciones."
+    "You can turn this warning off in your notification settings.": "Puedes desactivar este aviso en tus ajustes de notificaciones.",
+    "Subscriptions going up": "Suscripciones que suben de precio",
+    "Get told when a subscription or bill starts costing more than it used to, with what the rise adds over a year. Bills that simply vary month to month are left out.": "Entérate cuando una suscripción o recibo empieza a costar más que antes, con lo que suma la subida al año. Los recibos que simplemente varían de un mes a otro quedan fuera.",
+    ":name has gone up": ":name ha subido de precio",
+    ":count of your recurring charges have gone up": ":count de tus cargos recurrentes han subido de precio",
+    "A price went up": "Una suscripción ha subido",
+    "Hi :name, these recurring charges now cost more than they used to.": "Hola :name, estos cargos recurrentes ahora cuestan más que antes.",
+    "Was": "Antes",
+    "Now": "Ahora",
+    "Per year": "Al año",
+    "Prices are the typical amount of the last few charges compared with the ones before them, so a one-off surcharge will not appear here.": "Los precios son el importe típico de los últimos cargos comparado con los anteriores, así que un recargo puntual no aparece aquí.",
+    "Review your subscriptions": "Revisar tus suscripciones",
+    "You can turn these warnings off in your notification settings.": "Puedes desactivar estos avisos en tus ajustes de notificaciones."
 }
