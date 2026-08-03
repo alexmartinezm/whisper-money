@@ -7,6 +7,7 @@ use App\Models\Account;
 use App\Models\User;
 use App\Services\Recurring\DetectPriceChanges;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\URL;
 use Laravel\Pennant\Feature;
 
 beforeEach(function () {
@@ -100,6 +101,26 @@ it('sends in the language the user reads', function () {
     $this->artisan('recurring:alert-price-changes')->assertSuccessful();
 
     Mail::assertQueued(RecurringPriceChangesEmail::class, fn ($mail): bool => $mail->locale === 'es');
+});
+
+it('links to the app rather than wherever the worker thinks it is', function () {
+    // route() has no request to read in a queue worker, so it falls back to
+    // config('app.url'). With APP_URL missing from the worker's environment
+    // every link in the mail silently becomes http://localhost.
+    config()->set('app.url', 'https://whisper.example');
+    URL::forceRootUrl('https://whisper.example');
+    // forceRootUrl sets the host; the scheme is chosen separately and would
+    // otherwise come from the (plain http) test request.
+    URL::forceScheme('https');
+    seriesCharging($this->user, $this->account, [1299, 1299, 1299, 1599, 1599, 1599]);
+    $rises = app(DetectPriceChanges::class)->forUser($this->user);
+
+    $html = (new RecurringPriceChangesEmail($this->user, $rises))->render();
+
+    expect($html)->toContain('https://whisper.example/recurring')
+        // The unsubscribe line is a link too, as in every other mail here.
+        ->toContain('https://whisper.example/settings/notifications')
+        ->not->toContain('http://localhost');
 });
 
 it('renders the body in Spanish, not just the subject', function () {

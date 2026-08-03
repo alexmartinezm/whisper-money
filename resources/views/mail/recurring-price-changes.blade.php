@@ -17,5 +17,5 @@
 {{ __('Review your subscriptions') }}
 </x-mail::button>
 
-{{ __('You can turn these warnings off in your notification settings.') }}
+{{ __('You can turn these warnings off in your [notification settings](:url).', ['url' => route('notifications.index')]) }}
 </x-mail::message>
