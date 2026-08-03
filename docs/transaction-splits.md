@@ -116,7 +116,9 @@ Before deploying hardened split writes, run the read-only integrity gate against
 php artisan transactions:audit-splits --json --fail-on-invalid
 ```
 
-The JSON artifact contains only IDs, anomaly codes, and counts. Resolve every anomaly before deployment. Rebuild historical budget assignments and advance parent delta-sync cursors only after a clean audit:
+The JSON artifact contains only IDs, anomaly codes, and counts. Resolve every anomaly before deployment.
+
+The same command also runs nightly with `--fail-on-invalid`, where stdout goes nowhere. Whenever it finds anomalies it logs `Transaction split audit found anomalies` at error level with the counts per code and up to ten IDs per code, so the scheduler failure in the error tracker arrives with the breakdown attached instead of a bare exit code. Re-run the command with `--json` to get the complete list. Rebuild historical budget assignments and advance parent delta-sync cursors only after a clean audit:
 
 ```bash
 # Required preview; performs no writes.

@@ -5,10 +5,18 @@ namespace App\Console\Commands;
 use App\Enums\CategoryType;
 use App\Models\Transaction;
 use Illuminate\Console\Command;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class AuditTransactionSplitsCommand extends Command
 {
+    /**
+     * Ids per anomaly code kept in the logged breakdown. Enough to start
+     * investigating without shipping an unbounded id dump to the log sink.
+     */
+    private const int LOGGED_IDS_PER_CODE = 10;
+
     protected $signature = 'transactions:audit-splits {--json : Emit stable JSON} {--fail-on-invalid : Return failure when anomalies exist}';
 
     protected $description = 'Read-only integrity audit of transaction splits';
@@ -24,6 +32,10 @@ class AuditTransactionSplitsCommand extends Command
             foreach ($report['anomalies'] as $anomaly) {
                 $this->line($anomaly['code'].' '.$anomaly['id']);
             }
+        }
+
+        if ($report['anomaly_count'] > 0) {
+            $this->logAnomalies($report);
         }
 
         return $this->option('fail-on-invalid') && $report['anomaly_count'] > 0 ? self::FAILURE : self::SUCCESS;
@@ -76,12 +88,15 @@ class AuditTransactionSplitsCommand extends Command
                 }
             });
 
-        DB::table('transaction_splits as split')
+        $orphanedLineIds = DB::table('transaction_splits as split')
             ->leftJoin('transactions as parent', 'parent.id', '=', 'split.transaction_id')
             ->whereNull('parent.id')
             ->orderBy('split.id')
-            ->pluck('split.id')
-            ->each(fn (string $id) => $this->check(true, 'parent_missing', $id, $anomalies));
+            ->pluck('split.id');
+
+        foreach ($orphanedLineIds as $orphanedLineId) {
+            $this->check(true, 'parent_missing', (string) $orphanedLineId, $anomalies);
+        }
 
         usort($anomalies, fn (array $left, array $right): int => [$left['code'], $left['id']] <=> [$right['code'], $right['id']]);
 
@@ -91,6 +106,29 @@ class AuditTransactionSplitsCommand extends Command
             'anomaly_count' => count($anomalies),
             'anomalies' => $anomalies,
         ];
+    }
+
+    /**
+     * A scheduled run discards stdout, so an audit that finds anomalies reaches
+     * the error tracker as a bare "exit code [1]" with nothing to act on. Log
+     * the breakdown so the alert carries what broke and where to look. Only
+     * anomaly codes, counts and ids travel — no amounts, descriptions or owners.
+     *
+     * @param  array{parents_reviewed: int, lines_reviewed: int, anomaly_count: int, anomalies: list<array{code: string, id: string}>}  $report
+     */
+    private function logAnomalies(array $report): void
+    {
+        $byCode = collect($report['anomalies'])->groupBy('code');
+
+        Log::error('Transaction split audit found anomalies', [
+            'parents_reviewed' => $report['parents_reviewed'],
+            'lines_reviewed' => $report['lines_reviewed'],
+            'anomaly_count' => $report['anomaly_count'],
+            'counts_by_code' => $byCode->map(fn (Collection $anomalies): int => $anomalies->count())->all(),
+            'ids_by_code' => $byCode
+                ->map(fn (Collection $anomalies): array => $anomalies->pluck('id')->take(self::LOGGED_IDS_PER_CODE)->values()->all())
+                ->all(),
+        ]);
     }
 
     /** @param list<array{code: string, id: string}> $anomalies */
