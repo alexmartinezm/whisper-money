@@ -7,6 +7,8 @@ use App\Models\TransactionSplit;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 uses(RefreshDatabase::class);
 
@@ -91,4 +93,53 @@ it('reports ownership type soft delete sign and position anomalies', function ()
         'position_not_contiguous',
         'split_sign_mismatch',
     );
+});
+
+it('reports split lines left without a parent transaction', function () {
+    [$transaction, , $splits] = auditSplitFixture();
+
+    // The cascade normally makes this unreachable, so orphan the lines behind
+    // the foreign key to prove the audit still surfaces them.
+    Schema::withoutForeignKeyConstraints(function () use ($transaction): void {
+        DB::table('transactions')->where('id', $transaction->id)->delete();
+    });
+
+    expect(Artisan::call('transactions:audit-splits', ['--json' => true]))->toBe(0);
+
+    $report = json_decode(Artisan::output(), true);
+
+    expect($report['anomaly_count'])->toBe(2)
+        ->and(collect($report['anomalies'])->pluck('code')->all())->toBe(['parent_missing', 'parent_missing'])
+        ->and(collect($report['anomalies'])->pluck('id')->sort()->values()->all())
+        ->toBe($splits->pluck('id')->sort()->values()->all());
+
+    $this->artisan('transactions:audit-splits', ['--fail-on-invalid' => true])->assertFailed();
+});
+
+it('logs the anomaly breakdown so a scheduled failure says what broke', function () {
+    [$transaction, $categories] = auditSplitFixture();
+    DB::table('transactions')->where('id', $transaction->id)->update(['category_id' => $categories[0]->id]);
+
+    Log::shouldReceive('error')
+        ->once()
+        ->withArgs(function (string $message, array $context) use ($transaction): bool {
+            return $message === 'Transaction split audit found anomalies'
+                && $context['parents_reviewed'] === 1
+                && $context['lines_reviewed'] === 2
+                && $context['anomaly_count'] === 1
+                && $context['counts_by_code'] === ['parent_classification_present' => 1]
+                && $context['ids_by_code'] === ['parent_classification_present' => [$transaction->id]];
+        });
+
+    $this->artisan('transactions:audit-splits', ['--fail-on-invalid' => true])->assertFailed();
+});
+
+it('stays quiet when the audit finds nothing', function () {
+    auditSplitFixture();
+
+    Log::spy();
+
+    $this->artisan('transactions:audit-splits', ['--fail-on-invalid' => true])->assertSuccessful();
+
+    Log::shouldNotHaveReceived('error');
 });
