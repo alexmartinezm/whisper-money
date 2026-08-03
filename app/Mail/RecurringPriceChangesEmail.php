@@ -48,10 +48,10 @@ class RecurringPriceChangesEmail extends Mailable implements ShouldQueue
             subject: $this->rises->count() === 1
                 ? __(':name has gone up', [
                     'name' => $this->rises->first()->series->display_name,
-                ], $this->user->locale ?? 'en')
+                ])
                 : __(':count of your recurring charges have gone up', [
                     'count' => $this->rises->count(),
-                ], $this->user->locale ?? 'en'),
+                ]),
         );
     }
 

@@ -64,6 +64,18 @@ it('warns when the projection dips below zero', function () {
     Mail::assertQueued(RunwayShortfallEmail::class);
 });
 
+it('sends in the language the user reads', function () {
+    // Laravel reads HasLocalePreference off the recipient model, so addressing
+    // the mail to a plain string renders the body in the app default.
+    $this->user->forceFill(['locale' => 'es'])->saveQuietly();
+    alertAccount($this->user, 50000);
+    shortfallCharge($this->user);
+
+    $this->artisan('recurring:alert-shortfall')->assertSuccessful();
+
+    Mail::assertQueued(RunwayShortfallEmail::class, fn ($mail): bool => $mail->locale === 'es');
+});
+
 it('stays quiet while the balance holds', function () {
     alertAccount($this->user, 500000);
     shortfallCharge($this->user);

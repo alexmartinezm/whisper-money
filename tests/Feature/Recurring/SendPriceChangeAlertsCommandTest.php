@@ -89,6 +89,34 @@ it('skips a user whose flag is off', function () {
     Mail::assertNothingQueued();
 });
 
+it('sends in the language the user reads', function () {
+    // The address alone loses this. Laravel reads HasLocalePreference off the
+    // recipient model, so Mail::to($user->email) renders the body in the app
+    // default while the subject still looks right -- which is exactly how this
+    // shipped in English without anyone noticing.
+    $this->user->forceFill(['locale' => 'es'])->saveQuietly();
+    seriesCharging($this->user, $this->account, [1299, 1299, 1299, 1599, 1599, 1599]);
+
+    $this->artisan('recurring:alert-price-changes')->assertSuccessful();
+
+    Mail::assertQueued(RecurringPriceChangesEmail::class, fn ($mail): bool => $mail->locale === 'es');
+});
+
+it('renders the body in Spanish, not just the subject', function () {
+    // Mail::fake() never runs Blade, so the locale wiring above can be right
+    // while a missing key still ships an English paragraph.
+    $series = seriesCharging($this->user, $this->account, [1299, 1299, 1299, 1599, 1599, 1599]);
+    $rises = app(DetectPriceChanges::class)->forUser($this->user);
+
+    app()->setLocale('es');
+    $html = (new RecurringPriceChangesEmail($this->user, $rises))->render();
+
+    expect($html)->toContain('Una suscripción ha subido')
+        ->toContain('estos cargos recurrentes ahora cuestan más que antes')
+        ->toContain('Revisar tus suscripciones')
+        ->toContain($series->display_name);
+});
+
 it('renders the digest with both prices and the yearly impact', function () {
     // Mail::fake() never runs the template, so without this the only things
     // reading previousAmount, percentage() and yearlyImpact() would be Blade

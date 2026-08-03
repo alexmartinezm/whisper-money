@@ -46,7 +46,7 @@ class UpcomingRecurringChargesEmail extends Mailable implements ShouldQueue
         return new Envelope(
             subject: __('Coming up: :count recurring charges', [
                 'count' => $this->series->count(),
-            ], $this->user->locale ?? 'en'),
+            ]),
         );
     }
 

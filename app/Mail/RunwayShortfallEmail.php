@@ -47,7 +47,7 @@ class RunwayShortfallEmail extends Mailable implements ShouldQueue
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: __('Heads up: your balance runs out before payday', [], $this->user->locale ?? 'en'),
+            subject: __('Heads up: your balance runs out before payday'),
         );
     }
 
