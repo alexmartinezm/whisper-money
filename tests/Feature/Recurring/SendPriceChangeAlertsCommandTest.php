@@ -7,6 +7,7 @@ use App\Models\Account;
 use App\Models\User;
 use App\Services\Recurring\DetectPriceChanges;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\URL;
 use Laravel\Pennant\Feature;
 
 beforeEach(function () {
@@ -87,6 +88,54 @@ it('skips a user whose flag is off', function () {
     $this->artisan('recurring:alert-price-changes')->assertSuccessful();
 
     Mail::assertNothingQueued();
+});
+
+it('sends in the language the user reads', function () {
+    // The address alone loses this. Laravel reads HasLocalePreference off the
+    // recipient model, so Mail::to($user->email) renders the body in the app
+    // default while the subject still looks right -- which is exactly how this
+    // shipped in English without anyone noticing.
+    $this->user->forceFill(['locale' => 'es'])->saveQuietly();
+    seriesCharging($this->user, $this->account, [1299, 1299, 1299, 1599, 1599, 1599]);
+
+    $this->artisan('recurring:alert-price-changes')->assertSuccessful();
+
+    Mail::assertQueued(RecurringPriceChangesEmail::class, fn ($mail): bool => $mail->locale === 'es');
+});
+
+it('links to the app rather than wherever the worker thinks it is', function () {
+    // route() has no request to read in a queue worker, so it falls back to
+    // config('app.url'). With APP_URL missing from the worker's environment
+    // every link in the mail silently becomes http://localhost.
+    config()->set('app.url', 'https://whisper.example');
+    URL::forceRootUrl('https://whisper.example');
+    // forceRootUrl sets the host; the scheme is chosen separately and would
+    // otherwise come from the (plain http) test request.
+    URL::forceScheme('https');
+    seriesCharging($this->user, $this->account, [1299, 1299, 1299, 1599, 1599, 1599]);
+    $rises = app(DetectPriceChanges::class)->forUser($this->user);
+
+    $html = (new RecurringPriceChangesEmail($this->user, $rises))->render();
+
+    expect($html)->toContain('https://whisper.example/recurring')
+        // The unsubscribe line is a link too, as in every other mail here.
+        ->toContain('https://whisper.example/settings/notifications')
+        ->not->toContain('http://localhost');
+});
+
+it('renders the body in Spanish, not just the subject', function () {
+    // Mail::fake() never runs Blade, so the locale wiring above can be right
+    // while a missing key still ships an English paragraph.
+    $series = seriesCharging($this->user, $this->account, [1299, 1299, 1299, 1599, 1599, 1599]);
+    $rises = app(DetectPriceChanges::class)->forUser($this->user);
+
+    app()->setLocale('es');
+    $html = (new RecurringPriceChangesEmail($this->user, $rises))->render();
+
+    expect($html)->toContain('Una suscripción ha subido')
+        ->toContain('estos cargos recurrentes ahora cuestan más que antes')
+        ->toContain('Revisar tus suscripciones')
+        ->toContain($series->display_name);
 });
 
 it('renders the digest with both prices and the yearly impact', function () {

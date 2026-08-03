@@ -17,6 +17,20 @@ beforeEach(function () {
     );
 });
 
+it('sends in the language the user reads', function () {
+    // Laravel reads HasLocalePreference off the recipient model, so addressing
+    // the mail to a plain string renders the body in the app default.
+    $this->user->forceFill(['locale' => 'es'])->saveQuietly();
+    RecurringSeries::factory()->create([
+        'user_id' => $this->user->id,
+        'next_expected_on' => CarbonImmutable::today()->addDay(),
+    ]);
+
+    $this->artisan('recurring:remind')->assertSuccessful();
+
+    Mail::assertQueued(UpcomingRecurringChargesEmail::class, fn ($mail): bool => $mail->locale === 'es');
+});
+
 it('emails one digest covering everything due soon', function () {
     RecurringSeries::factory()->count(3)->create([
         'user_id' => $this->user->id,

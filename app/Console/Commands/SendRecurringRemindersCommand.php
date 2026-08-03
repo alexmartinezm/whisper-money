@@ -79,7 +79,7 @@ class SendRecurringRemindersCommand extends Command
             return false;
         }
 
-        Mail::to($user->email)->send(new UpcomingRecurringChargesEmail($user, $due));
+        Mail::to($user)->send(new UpcomingRecurringChargesEmail($user, $due));
 
         // Store the occurrence that was announced, not the day it went out:
         // a reminder sent three days early must still silence this charge

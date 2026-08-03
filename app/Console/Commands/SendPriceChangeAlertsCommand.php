@@ -71,7 +71,7 @@ class SendPriceChangeAlertsCommand extends Command
             return false;
         }
 
-        Mail::to($user->email)->send(new RecurringPriceChangesEmail($user, $rises));
+        Mail::to($user)->send(new RecurringPriceChangesEmail($user, $rises));
 
         foreach ($rises as $rise) {
             $rise->series->forceFill(['price_alerted_amount' => $rise->currentAmount])->saveQuietly();

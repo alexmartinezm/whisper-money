@@ -96,7 +96,7 @@ class SendRunwayShortfallAlertsCommand extends Command
             return false;
         }
 
-        Mail::to($user->email)->send(new RunwayShortfallEmail(
+        Mail::to($user)->send(new RunwayShortfallEmail(
             $user,
             $lowest,
             $forecast['currency_code'],

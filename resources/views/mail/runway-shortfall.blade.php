@@ -17,5 +17,5 @@
 {{ __('See the projection') }}
 </x-mail::button>
 
-{{ __('You can turn this warning off in your notification settings.') }}
+{{ __('You can turn this warning off in your [notification settings](:url).', ['url' => route('notifications.index')]) }}
 </x-mail::message>

@@ -2408,7 +2408,6 @@
     "Hi :name, these recurring charges are due shortly.": "Hola :name, estos cargos recurrentes vencen pronto.",
     "Amounts are estimates based on what these charges have cost before.": "Los importes son estimaciones basadas en lo que han costado antes.",
     "View recurring": "Ver recurrentes",
-    "You can turn these reminders off in your notification settings.": "Puedes desactivar estos avisos en tus ajustes de notificaciones.",
     "What": "Qué",
     "When": "Cuándo",
     "Coming up: :count recurring charges": "Próximamente: :count cargos recurrentes",
@@ -2431,7 +2430,6 @@
     "That figure counts your recurring charges plus what you usually spend on everything else, so it is an estimate rather than a certainty.": "Esa cifra cuenta tus cargos recurrentes más lo que sueles gastar en todo lo demás, así que es una estimación, no una certeza.",
     "That figure counts only the recurring charges we know about, so the real dip is likely to come sooner.": "Esa cifra solo cuenta los cargos recurrentes que conocemos, así que el bajón real llegará probablemente antes.",
     "See the projection": "Ver la previsión",
-    "You can turn this warning off in your notification settings.": "Puedes desactivar este aviso en tus ajustes de notificaciones.",
     "Subscriptions going up": "Suscripciones que suben de precio",
     "Get told when a subscription or bill starts costing more than it used to, with what the rise adds over a year. Bills that simply vary month to month are left out.": "Entérate cuando una suscripción o recibo empieza a costar más que antes, con lo que suma la subida al año. Los recibos que simplemente varían de un mes a otro quedan fuera.",
     ":name has gone up": ":name ha subido de precio",
@@ -2443,7 +2441,6 @@
     "Per year": "Al año",
     "Prices are the typical amount of the last few charges compared with the ones before them, so a one-off surcharge will not appear here.": "Los precios son el importe típico de los últimos cargos comparado con los anteriores, así que un recargo puntual no aparece aquí.",
     "Review your subscriptions": "Revisar tus suscripciones",
-    "You can turn these warnings off in your notification settings.": "Puedes desactivar estos avisos en tus ajustes de notificaciones.",
     "Where this is heading": "Hacia dónde va",
     "Your net worth in :months months if nothing changes.": "Tu patrimonio dentro de :months meses si nada cambia.",
     "Committed": "Comprometido",
@@ -2461,5 +2458,8 @@
     "Moved into savings": "Traspasado a ahorro",
     "Recurring income": "Ingresos recurrentes",
     "Recurring charges": "Cargos recurrentes",
-    "The committed figure assumes your recurring income keeps arriving — it is also what pays the loans down.": "La cifra comprometida da por hecho que tus ingresos recurrentes siguen llegando: son también los que amortizan los préstamos."
+    "The committed figure assumes your recurring income keeps arriving — it is also what pays the loans down.": "La cifra comprometida da por hecho que tus ingresos recurrentes siguen llegando: son también los que amortizan los préstamos.",
+    "You can turn these reminders off in your [notification settings](:url).": "Puedes desactivar estos avisos en tus [ajustes de notificaciones](:url).",
+    "You can turn these warnings off in your [notification settings](:url).": "Puedes desactivar estos avisos en tus [ajustes de notificaciones](:url).",
+    "You can turn this warning off in your [notification settings](:url).": "Puedes desactivar este aviso en tus [ajustes de notificaciones](:url)."
 }

@@ -17,5 +17,5 @@
 {{ __('View recurring') }}
 </x-mail::button>
 
-{{ __('You can turn these reminders off in your notification settings.') }}
+{{ __('You can turn these reminders off in your [notification settings](:url).', ['url' => route('notifications.index')]) }}
 </x-mail::message>
