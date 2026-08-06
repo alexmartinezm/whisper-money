@@ -68,6 +68,7 @@ it('creates splits for an imported transaction through MCP', function () {
     $suggested = Category::factory()->create([
         'user_id' => $user->id,
         'space_id' => $transaction->space_id,
+        'name' => 'Suggested',
         'type' => CategoryType::Expense,
     ]);
     $transaction->forceFill([
