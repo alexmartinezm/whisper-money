@@ -18,7 +18,6 @@ use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Collection as SupportCollection;
 
 class DashboardAnalyticsController extends Controller
 {
@@ -300,9 +299,9 @@ class DashboardAnalyticsController extends Controller
      * account it sits on. A split transaction contributes its postings, so the
      * categories the user actually filed the money under are the ones counted.
      *
-     * @return SupportCollection<int, array{type: ?CategoryType, amount: int}>
+     * @return list<array{type: ?CategoryType, amount: int}>
      */
-    private function ownedPostings(Carbon $from, Carbon $to): SupportCollection
+    private function ownedPostings(Carbon $from, Carbon $to): array
     {
         $transactions = Transaction::query()
             ->where('transactions.user_id', request()->user()->id)
@@ -315,22 +314,34 @@ class DashboardAnalyticsController extends Controller
             ->with(['category', 'splits.category'])
             ->get();
 
-        return $transactions->flatMap(fn (Transaction $transaction): SupportCollection => $this->postings
-            ->forTransaction($transaction)
-            ->map(fn ($posting): array => [
-                'type' => $posting->category?->type,
-                'amount' => Account::shareOf($posting->amount, $transaction->ownership_percentage),
-            ]));
+        $postings = [];
+
+        foreach ($transactions as $transaction) {
+            foreach ($this->postings->forTransaction($transaction) as $posting) {
+                $postings[] = [
+                    'type' => $posting->category?->type,
+                    'amount' => Account::shareOf($posting->amount, $transaction->ownership_percentage),
+                ];
+            }
+        }
+
+        return $postings;
     }
 
     /**
-     * @param  SupportCollection<int, array{type: ?CategoryType, amount: int}>  $postings
+     * @param  list<array{type: ?CategoryType, amount: int}>  $postings
      */
-    private function sumOfType(SupportCollection $postings, CategoryType $type): int
+    private function sumOfType(array $postings, CategoryType $type): int
     {
-        return (int) $postings
-            ->filter(fn (array $posting): bool => $posting['type'] === $type)
-            ->sum('amount');
+        $total = 0;
+
+        foreach ($postings as $posting) {
+            if ($posting['type'] === $type) {
+                $total += $posting['amount'];
+            }
+        }
+
+        return $total;
     }
 
     /**

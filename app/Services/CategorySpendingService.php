@@ -38,16 +38,24 @@ class CategorySpendingService
             ->with(['category', 'splits.category'])
             ->get();
 
-        $perCategory = $transactions
-            ->flatMap(fn (Transaction $transaction): Collection => $this->postings
-                ->forTransaction($transaction)
-                ->filter(fn ($posting): bool => $posting->category?->type === CategoryType::Expense)
-                ->map(fn ($posting): array => [
+        $rows = [];
+
+        foreach ($transactions as $transaction) {
+            foreach ($this->postings->forTransaction($transaction) as $posting) {
+                if ($posting->category?->type !== CategoryType::Expense) {
+                    continue;
+                }
+
+                $rows[] = [
                     'category_id' => $posting->categoryId,
                     // A shared account is only the user's at their percentage, and
-                    // a split posting is weighed like the transaction it comes from.
+                    // a split posting is weighed like the transaction it is on.
                     'amount' => Account::shareOf($posting->amount, $transaction->ownership_percentage),
-                ]))
+                ];
+            }
+        }
+
+        $perCategory = collect($rows)
             ->groupBy('category_id')
             ->map(fn (Collection $group, string $categoryId): array => [
                 'category_id' => $categoryId,

@@ -28,8 +28,12 @@ class EffectiveTransactionPostings
         )]);
     }
 
-    /** @param Collection<int, Transaction> $transactions
+    /**
+     * @param  Collection<int, Transaction>  $transactions
      * @return Collection<int, EffectiveTransactionPosting>
+     *
+     * @api Measured by the transaction-split volume suite, which PHPStan does
+     *      not analyse - only `app` is in its paths.
      */
     public function forTransactions(Collection $transactions): Collection
     {

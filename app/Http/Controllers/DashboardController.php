@@ -13,7 +13,6 @@ use App\Services\PeriodComparator;
 use App\Services\Transactions\EffectiveTransactionPostings;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
-use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -126,21 +125,22 @@ class DashboardController extends Controller
             ->with(['category', 'splits.category'])
             ->get();
 
-        return $transactions
-            ->flatMap(fn (Transaction $transaction): Collection => $this->effectivePostings
-                ->forTransaction($transaction)
-                ->filter(function ($posting) use ($type): bool {
-                    if ($posting->category !== null) {
-                        return $posting->category->type === $type;
-                    }
+        $total = 0;
 
-                    return $type === CategoryType::Income
-                        ? $posting->amount > 0
-                        : $posting->amount < 0;
-                })
-                // A shared account only counts at the owner's percentage, and a
-                // split posting is weighed like the transaction it comes from.
-                ->map(fn ($posting): int => Account::shareOf($posting->amount, $transaction->ownership_percentage)))
-            ->sum();
+        foreach ($transactions as $transaction) {
+            foreach ($this->effectivePostings->forTransaction($transaction) as $posting) {
+                $matches = $posting->category !== null
+                    ? $posting->category->type === $type
+                    : ($type === CategoryType::Income ? $posting->amount > 0 : $posting->amount < 0);
+
+                if ($matches) {
+                    // A shared account only counts at the owner's percentage, and
+                    // a split posting is weighed like the transaction it is on.
+                    $total += Account::shareOf($posting->amount, $transaction->ownership_percentage);
+                }
+            }
+        }
+
+        return $total;
     }
 }

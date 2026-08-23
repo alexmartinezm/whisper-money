@@ -304,7 +304,9 @@ class AutomationRuleService
     }
 
     /**
-     * @return array<int, string>
+     * Whether the transaction is filed under postings rather than its own
+     * category column. Reads the loaded relation when there is one so a caller
+     * looping over a chunk does not query per row.
      */
     private function isSplit(Transaction $transaction): bool
     {

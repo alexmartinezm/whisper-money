@@ -27,6 +27,7 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * @property Carbon $transaction_date
+ * @property-read ?int $ownership_percentage the owning account's share, selected by {@see self::scopeJoinOwningAccount()} and absent otherwise
  * @property int|float $total_amount
  * @property TransactionSource $source
  * @property ?CategorySource $category_source
