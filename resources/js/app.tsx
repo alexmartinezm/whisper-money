@@ -26,12 +26,15 @@ import { SyncProvider } from './contexts/sync-context';
 import { initializeTheme } from './hooks/use-appearance';
 import { initializeChartColorScheme } from './hooks/use-chart-color-scheme';
 import { installChunkLoadRecovery } from './lib/chunk-load-recovery';
+import { installFailedNavigationToast } from './lib/failed-navigation-toast';
 import { leavePage } from './lib/leave-page';
 import { initializePostHog } from './lib/posthog';
+import { trackPrefetchedUrls } from './lib/prefetch-tracker';
 import {
     isBrowserExtensionNoise,
     isChunkLoadErrorEvent,
     isFacebookInAppBrowserJavaBridgeNoise,
+    isFailedPrefetchNoise,
     isPageLeaveAbortNoise,
     isPostMessageDataCloneNoise,
     isSafariCashbackExtensionNoise,
@@ -41,6 +44,8 @@ import type { ExpiredBankingConnectionNotification, SharedData } from './types';
 import { __, setTranslations } from './utils/i18n';
 
 installChunkLoadRecovery();
+trackPrefetchedUrls();
+installFailedNavigationToast();
 
 Sentry.init({
     dsn: import.meta.env.SENTRY_LARAVEL_DSN,
@@ -52,6 +57,7 @@ Sentry.init({
         if (
             isChunkLoadErrorEvent(event) ||
             isPageLeaveAbortNoise(event) ||
+            isFailedPrefetchNoise(event) ||
             isBrowserExtensionNoise(event) ||
             isPostMessageDataCloneNoise(event) ||
             isFacebookInAppBrowserJavaBridgeNoise(event) ||
@@ -177,9 +183,13 @@ createInertiaApp({
     resolve: (name) =>
         resolvePageComponent(
             `./pages/${name}.tsx`,
-            import.meta.glob<{ default: ResolvedComponent }>(
+            // Excluding the tests that live next to their pages: without it Vite
+            // treats each one as a page entry and bundles what it imports, which
+            // pulls vitest into the production build.
+            import.meta.glob<{ default: ResolvedComponent }>([
                 './pages/**/*.tsx',
-            ),
+                '!./pages/**/*.test.tsx',
+            ]),
         ).then((module) => module.default),
     setup({ el, App, props }) {
         const root = createRoot(el);

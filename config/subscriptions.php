@@ -17,6 +17,45 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Price Experiment
+    |--------------------------------------------------------------------------
+    |
+    | A/B test on the price of the paid plan. Anonymous visitors are drawn 50/50
+    | into `control` (the plans.* prices below) and `high` (the variant tier) on
+    | their first page view, and the arm is frozen onto users.price_arm when they
+    | register — so the landing quotes the price they will actually be charged.
+    | Anyone without an arm keeps the control price. While `started_at` is blank
+    | the experiment is off and nobody is drawn. Set `force_variant` to
+    | control/high to roll a winner out to everyone without a deploy; that also
+    | ends the split.
+    |
+    | Each variant needs its own Stripe price — run `php artisan stripe:sync-prices`
+    | BEFORE setting `started_at`. The yearly price is the monthly × 6, matching
+    | the control plan structure.
+    |
+    */
+
+    'price_experiment' => [
+        'started_at' => env('PRICE_EXPERIMENT_STARTED_AT'),
+        'force_variant' => env('PRICE_EXPERIMENT_FORCE_VARIANT'),
+        'variants' => [
+            'high' => [
+                'monthly' => [
+                    'price' => 8.99,
+                    'original_price' => null,
+                    'lookup' => 'whisper_pro_monthly_high',
+                ],
+                'yearly' => [
+                    'price' => 53.94,
+                    'original_price' => 107.88,
+                    'lookup' => 'whisper_pro_yearly_high',
+                ],
+            ],
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Stripe Product IDs
     |--------------------------------------------------------------------------
     |
