@@ -1,4 +1,8 @@
 {
+    "Apply it to the balance too, so only my share counts towards net worth": "Aplicarlo también al saldo, para que solo mi parte cuente en el patrimonio neto",
+    "Enter the full amount held in the account. You own :percentage% of it, and that is the share shown everywhere else.": "Introduce el importe total que hay en la cuenta. Tú tienes el :percentage % y esa es la parte que se muestra en el resto de pantallas.",
+    "For accounts you share with someone else. Income and expenses only count towards your figures by this percentage.": "Para cuentas que compartes con otra persona. Los ingresos y gastos solo cuentan en tus cifras en ese porcentaje.",
+    "My share of this account (%)": "Mi parte de esta cuenta (%)",
     "Set this up on a computer": "Configúralo desde un ordenador",
     "Signing in and approving works fine in a desktop browser, but usually breaks in a phone's in-app browser. Once it's connected, you can chat with Whisper Money from Claude or ChatGPT on your phone as usual.": "El inicio de sesión y la aprobación funcionan bien en un navegador de escritorio, pero suelen fallar en el navegador interno del móvil. Una vez conectado, puedes chatear con Whisper Money desde Claude o ChatGPT en el móvil con normalidad.",
     "Learned: similar transactions will be categorized automatically.": "Aprendido: las transacciones similares se categorizarán automáticamente.",
@@ -849,7 +853,6 @@
     "Get started at no cost. No bank connections included.": "Empieza sin coste. Sin conexiones bancarias incluidas.",
     "Get started quickly with your existing financial data.": "Comienza rápidamente con tus datos financieros existentes.",
     "Github": "Github",
-    "Go now": "Ir ahora",
     "Go to Dashboard": "Ir al Panel",
     "Go to Settings": "Ir a Configuración",
     "Go to your account's transaction history": "Ve al historial de transacciones de tu cuenta",
@@ -1338,8 +1341,6 @@
     "Recovery codes": "Códigos de recuperación",
     "Recovery codes let you regain access if you lose your 2FA device. Store them in a secure password manager.": "Los códigos de recuperación te permiten recuperar acceso si pierdes tu dispositivo 2FA. Guárdalos en un administrador de contraseñas seguro.",
     "Recovery codes let you regain access if you lose your 2FA\\n                    device. Store them in a secure password manager.": "Los códigos de recuperación te permiten recuperar el acceso si pierdes tu dispositivo 2FA. Guárdalos en un gestor de contraseñas seguro.",
-    "Redirect progress": "Progreso de redirección",
-    "Redirecting to your dashboard": "Redirigiendo a tu panel",
     "Redirecting...": "Redirigiendo...",
     "Regenerate Codes": "Regenerar Códigos",
     "Register": "Registrarse",
@@ -1942,7 +1943,6 @@
     "You already have an active connection with this bank. If you authorize with the same bank login, the previous connection will stop working.": "Ya tienes una conexión activa con este banco. Si autorizas con el mismo acceso del banco, la conexión anterior dejará de funcionar.",
     "You already have accounts set up. Let's continue with the onboarding.": "Ya tienes cuentas configuradas. Continuemos con la configuración.",
     "You are always the owner of your data": "Siempre eres el dueño de tus datos",
-    "You are being redirected in 3 seconds.": "Serás redirigido en 3 segundos.",
     "You are currently **#:position** in line for early access.": "Actualmente estás en el puesto **#:position** para el acceso anticipado.",
     "You are now **#:position** in line for early access.": "Ahora estás en el puesto **#:position** para el acceso anticipado.",
     "You are responsible for all taxes associated with your purchase": "Eres responsable de todos los impuestos asociados con tu compra",
@@ -2480,5 +2480,13 @@
     "Your :provider connection has expired, so we cannot sync new transactions until you reconnect it.": "Tu conexión con :provider ha dejado de ser válida, así que no podemos sincronizar nuevos movimientos hasta que vuelvas a conectarla.",
     "Reconnect Account": "Volver a conectar",
     "If the button does not work, open your connection settings and reconnect :provider from there.": "Si el botón no funciona, abre los ajustes de tus conexiones y vuelve a conectar :provider desde ahí.",
-    "This account's balance comes from your bank, so it won't change.": "El saldo de esta cuenta lo trae tu banco, así que no cambiará."
+    "This account's balance comes from your bank, so it won't change.": "El saldo de esta cuenta lo trae tu banco, así que no cambiará.",
+    "Planned": "Planificado",
+    "Shipped": "Publicado",
+    "Roadmap.": "Hoja de Ruta.",
+    "Roadmap - Whisper Money": "Hoja de Ruta - Whisper Money",
+    "See what's shipped, what we're building, and what's coming next in Whisper Money.": "Descubre qué hemos publicado, qué estamos construyendo y qué viene después en Whisper Money.",
+    "What's shipped. What's coming.": "Lo publicado. Lo que viene.",
+    "Request a feature": "Pedir una función",
+    "The roadmap is temporarily unavailable. Check it out on our feedback board.": "La hoja de ruta no está disponible ahora mismo. Puedes consultarla en nuestro tablón de sugerencias."
 }

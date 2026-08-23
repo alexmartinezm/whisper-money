@@ -25,6 +25,7 @@ use App\Http\Controllers\RealEstateDetailController;
 use App\Http\Controllers\RecurringDetectionController;
 use App\Http\Controllers\RecurringSeriesController;
 use App\Http\Controllers\ReEvaluateTransactionRulesController;
+use App\Http\Controllers\RoadmapController;
 use App\Http\Controllers\RobotsController;
 use App\Http\Controllers\SitemapController;
 use App\Http\Controllers\SubscriptionController;
@@ -94,6 +95,8 @@ Route::get('privacy', function () {
 Route::get('terms', function () {
     return Inertia::render('terms');
 })->name('terms');
+
+Route::get('roadmap', [RoadmapController::class, 'index'])->name('roadmap');
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('subscribe', [SubscriptionController::class, 'index'])->name('subscribe');

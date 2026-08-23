@@ -13,6 +13,7 @@ use App\Services\PeriodComparator;
 use App\Services\Transactions\EffectiveTransactionPostings;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -117,19 +118,29 @@ class DashboardController extends Controller
         $transactions = Transaction::query()
             ->where('transactions.user_id', $userId)
             ->whereBetween('transactions.transaction_date', [$from, $to])
+            // The join carries the ownership percentage without a second query,
+            // and ignores the account's soft-delete scope, as the aggregate it
+            // replaced did.
+            ->joinOwningAccount()
+            ->select('transactions.*', 'accounts.ownership_percentage')
             ->with(['category', 'splits.category'])
             ->get();
 
-        return $this->effectivePostings->forTransactions($transactions)
-            ->filter(function ($posting) use ($type): bool {
-                if ($posting->category !== null) {
-                    return $posting->category->type === $type;
-                }
+        return $transactions
+            ->flatMap(fn (Transaction $transaction): Collection => $this->effectivePostings
+                ->forTransaction($transaction)
+                ->filter(function ($posting) use ($type): bool {
+                    if ($posting->category !== null) {
+                        return $posting->category->type === $type;
+                    }
 
-                return $type === CategoryType::Income
-                    ? $posting->amount > 0
-                    : $posting->amount < 0;
-            })
-            ->sum('amount');
+                    return $type === CategoryType::Income
+                        ? $posting->amount > 0
+                        : $posting->amount < 0;
+                })
+                // A shared account only counts at the owner's percentage, and a
+                // split posting is weighed like the transaction it comes from.
+                ->map(fn ($posting): int => Account::shareOf($posting->amount, $transaction->ownership_percentage)))
+            ->sum();
     }
 }

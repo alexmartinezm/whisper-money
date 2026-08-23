@@ -53,6 +53,8 @@ export interface Account {
     linked_at: string | null;
     linked_loan_account_id?: UUID | null;
     include_in_net_worth?: boolean;
+    ownership_percentage?: number;
+    ownership_applies_to_balance?: boolean;
 }
 
 export interface AccountBalance {
