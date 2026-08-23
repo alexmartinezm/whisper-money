@@ -3,8 +3,6 @@
 namespace App\Services\Recurring;
 
 use App\Enums\RecurringCadence;
-use App\Enums\RecurringSeriesStatus;
-use App\Enums\RecurringSeriesUserState;
 use App\Models\Account;
 use App\Models\RecurringSeries;
 use App\Models\Space;
@@ -63,8 +61,7 @@ class ProjectCashflow
         $series = RecurringSeries::query()
             ->where('user_id', $user->id)
             ->where('space_id', $spaceId)
-            ->where('status', RecurringSeriesStatus::Active)
-            ->where('user_state', '!=', RecurringSeriesUserState::Ignored)
+            ->stillCharging()
             ->with('category')
             ->get();
 

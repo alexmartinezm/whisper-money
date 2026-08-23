@@ -3,6 +3,7 @@
 use App\Enums\AccountType;
 use App\Enums\CategoryType;
 use App\Enums\RecurringCadence;
+use App\Enums\RecurringSeriesUserState;
 use App\Models\Account;
 use App\Models\AccountBalance;
 use App\Models\Category;
@@ -250,6 +251,33 @@ it('draws the estimated line below the committed one once spending is known', fu
         ->and($projection['estimated'])->toBeLessThan($projection['committed'])
         ->and($projection['drivers']['everyday_spending'])->toBeLessThan(0)
         ->and($projection['assumptions']['months_observed'])->toBe(3);
+});
+
+it('counts spending whose series the forecast no longer walks', function () {
+    // The reported symptom. Dismissing a detected series stops the forecast
+    // walking it, so the money has to reappear in the everyday estimate — it
+    // was showing up in neither, and the card projected as if it was never
+    // spent at all.
+    $account = accountWorth($this->user, AccountType::Checking, 5000000);
+    spendingOverThreeMonths($this->user, $account);
+
+    $dismissed = RecurringSeries::factory()->create([
+        'user_id' => $this->user->id,
+        'space_id' => $this->user->personalSpace->id,
+        'account_id' => $account->id,
+        'currency_code' => 'EUR',
+        'user_state' => RecurringSeriesUserState::Ignored,
+    ]);
+    $dismissed->transactions()->attach(
+        Transaction::query()->where('account_id', $account->id)->pluck('id')
+    );
+
+    $projection = $this->project->forUser($this->user);
+
+    // Counted once, on the everyday side: the forecast walks nothing here.
+    expect($projection['drivers']['recurring_out'])->toBe(0)
+        ->and($projection['drivers']['everyday_spending'])->toBeLessThan(0)
+        ->and($projection['estimated'])->toBeLessThan($projection['committed']);
 });
 
 it('says nothing about everyday spending without enough history', function () {

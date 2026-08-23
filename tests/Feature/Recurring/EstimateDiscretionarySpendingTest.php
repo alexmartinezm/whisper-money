@@ -2,6 +2,8 @@
 
 use App\Enums\AccountType;
 use App\Enums\CategoryType;
+use App\Enums\RecurringSeriesStatus;
+use App\Enums\RecurringSeriesUserState;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\RecurringSeries;
@@ -100,6 +102,58 @@ it('excludes what the projection already walks', function () {
 
     // Only the groceries, never the subscription counted twice.
     expect(estimateFor($this->user, $this->account)['monthly'])->toBe(-20000);
+});
+
+/**
+ * Three months of charges claimed by one series, for the caller to then stop
+ * the forecast from walking.
+ */
+function seriesClaimingThreeMonths(User $user, Account $account, Category $category): RecurringSeries
+{
+    $series = RecurringSeries::factory()->create([
+        'user_id' => $user->id,
+        'currency_code' => 'EUR',
+    ]);
+
+    foreach ([1, 2, 3] as $back) {
+        $series->transactions()->attach(spend($user, $account, $back, -80000, $category)->id);
+    }
+
+    return $series;
+}
+
+it('counts spending the user dismissed from the recurring list', function () {
+    // Absent from the recurring charges because the series is dismissed, absent
+    // from the estimate because the series once claimed it: the money vanished
+    // from both sides at once, and the projection spent none of it.
+    seriesClaimingThreeMonths($this->user, $this->account, $this->groceries)
+        ->update(['user_state' => RecurringSeriesUserState::Ignored]);
+
+    expect(estimateFor($this->user, $this->account)['monthly'])->toBe(-80000);
+});
+
+it('counts spending whose series the user deleted', function () {
+    // A deleted series keeps its pivot rows: the detection run rewrites the
+    // pivot for every series except the deleted ones, deliberately.
+    seriesClaimingThreeMonths($this->user, $this->account, $this->groceries)->delete();
+
+    expect(estimateFor($this->user, $this->account)['monthly'])->toBe(-80000);
+});
+
+it('counts spending whose series has lapsed', function () {
+    seriesClaimingThreeMonths($this->user, $this->account, $this->groceries)
+        ->update(['status' => RecurringSeriesStatus::Lapsed]);
+
+    expect(estimateFor($this->user, $this->account)['monthly'])->toBe(-80000);
+});
+
+it('counts a charge billed in a currency the forecast skips', function () {
+    // The forecast only walks series in the user's own currency, so this one
+    // is nobody else's to count.
+    seriesClaimingThreeMonths($this->user, $this->account, $this->groceries)
+        ->update(['currency_code' => 'USD']);
+
+    expect(estimateFor($this->user, $this->account)['monthly'])->toBe(-80000);
 });
 
 it('ignores money moved rather than spent', function () {
