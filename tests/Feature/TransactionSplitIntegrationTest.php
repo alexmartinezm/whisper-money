@@ -258,8 +258,12 @@ it('builds authoritative bulk records before releasing row locks', function () {
     $authoritativeQueryLevels = [];
 
     DB::listen(function (QueryExecuted $query) use ($transaction, &$authoritativeQueryLevels): void {
+        // Scoped to the user-filtered read: the bulk update also queues a
+        // budget reassignment, whose own pass over `transactions` runs after
+        // the locks are released, as it should.
         if (
             str_contains($query->sql, 'from `transactions`')
+            && str_contains($query->sql, '`user_id` = ?')
             && ! str_contains($query->sql, 'for update')
             && in_array($transaction->id, $query->bindings, true)
         ) {

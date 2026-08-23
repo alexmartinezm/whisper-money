@@ -8,6 +8,7 @@ use App\Http\Requests\BulkUpdateTransactionsRequest;
 use App\Http\Requests\IndexTransactionRequest;
 use App\Http\Requests\StoreTransactionRequest;
 use App\Http\Requests\UpdateTransactionRequest;
+use App\Jobs\ReassignTransactionsToBudgets;
 use App\Models\Account;
 use App\Models\AutomationRule;
 use App\Models\Bank;
@@ -496,6 +497,14 @@ class TransactionController extends Controller
                 'transactions' => $updatedTransactions,
             ];
         }, attempts: 5);
+
+        // Neither branch above fires a model event — the category goes through a
+        // query-builder mass update and the labels through the pivot — so nothing
+        // else would re-derive which budgets now track these transactions.
+        // Silently: editing existing rows is not new spending.
+        if ($result['updated_ids'] !== []) {
+            ReassignTransactionsToBudgets::dispatch($result['updated_ids'], notify: false);
+        }
 
         return response()->json([
             'message' => 'Transactions updated successfully',

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\CategorySource;
+use App\Jobs\ReassignTransactionsToBudgets;
 use App\Models\AutomationRule;
 use App\Models\LabelTransaction;
 use App\Models\Transaction;
@@ -15,6 +16,14 @@ use JWadhams\JsonLogic;
 class AutomationRuleService
 {
     /**
+     * How many transaction ids ride in one reassignment job.
+     *
+     * ponytail: fixed 500; only the AI suggestion path is unbounded, and it has
+     * never come close to needing a smarter split.
+     */
+    private const REASSIGN_BATCH_SIZE = 500;
+
+    /**
      * Per-user rule cache, memoized for the lifetime of this service instance.
      *
      * Bulk re-evaluation calls applyRules() once per transaction; without this
@@ -26,24 +35,34 @@ class AutomationRuleService
      */
     private array $rulesByUser = [];
 
-    public function applyRules(Transaction $transaction): void
+    /**
+     * @param  bool  $reassignBudgets  set to false when the caller loops over many
+     *                                 transactions and batches the reassignment
+     *                                 itself, so this does not queue one job per row
+     * @return bool whether the rule changed something budget membership depends on
+     */
+    public function applyRules(Transaction $transaction, bool $reassignBudgets = true): bool
     {
         if ($transaction->description_iv !== null || $this->isSplit($transaction)) {
-            return;
+            return false;
         }
 
         $rules = $this->rulesForUser($transaction->user_id);
 
         if ($rules->isEmpty()) {
-            return;
+            return false;
         }
 
         $transactionData = $this->prepareTransactionData($transaction);
         $matchedRule = $this->evaluateRules($rules, $transactionData);
 
-        if ($matchedRule) {
-            $this->applyActions($transaction, $matchedRule);
+        $affectsBudgets = $matchedRule !== null && $this->applyActions($transaction, $matchedRule);
+
+        if ($affectsBudgets && $reassignBudgets) {
+            ReassignTransactionsToBudgets::dispatch([$transaction->id]);
         }
+
+        return $affectsBudgets;
     }
 
     /**
@@ -88,6 +107,9 @@ class AutomationRuleService
 
         $rule->loadMissing('labels');
         $transactions->loadMissing(['labels', 'splits']);
+
+        // A split transaction carries its categories on its postings, so a rule
+        // that would rewrite its category column has nothing to say about it.
         $transactions = $transactions->reject(
             fn (Transaction $transaction): bool => $transaction->splits->isNotEmpty(),
         );
@@ -106,85 +128,155 @@ class AutomationRuleService
             }
         }
 
-        $changedTransactionIds = [];
+        // Kept in this order: the note is appended with saveQuietly(), which must
+        // run after the category mass update so it writes only the notes column.
+        $categorizedIds = $this->applyCategoryInBulk($transactions, $rule);
+        $notedIds = $this->applyNoteInBulk($transactions, $rule);
+        $labelledIds = $this->applyLabelsInBulk($transactions, $rule);
 
-        if ($rule->action_category_id !== null) {
-            $candidateIds = $transactions->pluck('id')->all();
-            $categoryTransactionIds = DB::transaction(function () use ($candidateIds, $rule, $onlyUncategorized): array {
-                $eligibleIds = Transaction::query()
-                    ->whereIn('id', $candidateIds)
-                    ->orderBy('id')
-                    ->lockForUpdate()
-                    ->whereDoesntHave('splits')
-                    ->when($onlyUncategorized, fn ($query) => $query->whereNull('category_id'))
-                    ->where(fn ($query) => $query
-                        ->whereNull('category_id')
-                        ->orWhere('category_id', '!=', $rule->action_category_id))
-                    ->pluck('id')
-                    ->all();
+        // A note never changes which budget counts a transaction, so it does not
+        // earn a reassignment — but it does count as a change for the caller.
+        $this->reassignInBatches(array_merge($categorizedIds, $labelledIds));
 
-                if ($eligibleIds !== []) {
-                    Transaction::query()
-                        ->whereIn('id', $eligibleIds)
-                        ->update([
-                            'category_id' => $rule->action_category_id,
-                            'category_source' => CategorySource::Rule->value,
-                            'categorized_by_rule_id' => $rule->id,
-                            'updated_at' => now(),
-                        ]);
-                }
+        return count(array_unique(array_merge($categorizedIds, $notedIds, $labelledIds)));
+    }
 
-                return $eligibleIds;
-            }, attempts: 5);
+    /**
+     * Queue the budget reassignment of transactions the bulk apply changed.
+     *
+     * The mass update and the pivot insert fire no model event, so nothing else
+     * re-derives which budgets now track them. Dispatching per row would queue a
+     * job for every transaction the rule touched, and dispatching one job for
+     * everything would put an unbounded id list in a single queue payload.
+     *
+     * @param  array<int, string>  $transactionIds
+     */
+    private function reassignInBatches(array $transactionIds): void
+    {
+        foreach (array_chunk(array_values(array_unique($transactionIds)), self::REASSIGN_BATCH_SIZE) as $batch) {
+            ReassignTransactionsToBudgets::dispatch($batch, notify: false);
+        }
+    }
 
-            foreach ($categoryTransactionIds as $transactionId) {
-                $changedTransactionIds[$transactionId] = true;
-            }
+    /**
+     * Set the rule's category on every transaction that does not already carry
+     * it, in a single mass update.
+     *
+     * @param  EloquentCollection<int, Transaction>  $transactions
+     * @return array<int, string> ids of the transactions changed
+     */
+    private function applyCategoryInBulk(EloquentCollection $transactions, AutomationRule $rule): array
+    {
+        if ($rule->action_category_id === null) {
+            return [];
         }
 
-        if ($rule->action_note && $rule->action_note_iv === null) {
-            foreach ($transactions as $transaction) {
-                $existingNotes = $transaction->notes ?? '';
+        $candidateIds = $transactions->pluck('id')->all();
 
-                if ($this->noteAlreadyPresent($existingNotes, $rule->action_note)) {
-                    continue;
-                }
-
-                $transaction->notes = $existingNotes
-                    ? $existingNotes."\n".$rule->action_note
-                    : $rule->action_note;
-                $transaction->saveQuietly();
-                $changedTransactionIds[$transaction->id] = true;
-            }
+        if ($candidateIds === []) {
+            return [];
         }
 
+        // Locked and re-read: the collection was loaded before this ran, so a
+        // transaction split or recategorized in between must not be overwritten.
+        return DB::transaction(function () use ($candidateIds, $rule): array {
+            $eligibleIds = Transaction::query()
+                ->whereIn('id', $candidateIds)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->whereDoesntHave('splits')
+                ->where(fn ($query) => $query
+                    ->whereNull('category_id')
+                    ->orWhere('category_id', '!=', $rule->action_category_id))
+                ->pluck('id')
+                ->all();
+
+            if ($eligibleIds !== []) {
+                Transaction::query()
+                    ->whereIn('id', $eligibleIds)
+                    ->update([
+                        'category_id' => $rule->action_category_id,
+                        'category_source' => CategorySource::Rule->value,
+                        'categorized_by_rule_id' => $rule->id,
+                        'updated_at' => now(),
+                    ]);
+            }
+
+            return $eligibleIds;
+        }, attempts: 5);
+    }
+
+    /**
+     * Append the rule's note where it is not already present. Encrypted notes are
+     * skipped because applying them requires the user's key.
+     *
+     * @param  EloquentCollection<int, Transaction>  $transactions
+     * @return array<int, string> ids of the transactions changed
+     */
+    private function applyNoteInBulk(EloquentCollection $transactions, AutomationRule $rule): array
+    {
+        if (! $rule->action_note || $rule->action_note_iv !== null) {
+            return [];
+        }
+
+        $transactionIds = [];
+
+        foreach ($transactions as $transaction) {
+            $existingNotes = $transaction->notes ?? '';
+
+            if ($this->noteAlreadyPresent($existingNotes, $rule->action_note)) {
+                continue;
+            }
+
+            $transaction->notes = $existingNotes
+                ? $existingNotes."\n".$rule->action_note
+                : $rule->action_note;
+            $transaction->saveQuietly();
+            $transactionIds[] = $transaction->id;
+        }
+
+        return $transactionIds;
+    }
+
+    /**
+     * Attach the rule's labels in a single pivot insert, skipping the pairs that
+     * already exist.
+     *
+     * @param  EloquentCollection<int, Transaction>  $transactions
+     * @return array<int, string> ids of the transactions changed
+     */
+    private function applyLabelsInBulk(EloquentCollection $transactions, AutomationRule $rule): array
+    {
         $labelIds = $rule->labels->pluck('id')->all();
-        if ($labelIds !== []) {
-            $now = now();
-            $labelTransactionRows = [];
 
-            foreach ($transactions as $transaction) {
-                $transactionLabelIds = $transaction->labels->pluck('id')->all();
-                $missingLabelIds = array_diff($labelIds, $transactionLabelIds);
+        if ($labelIds === []) {
+            return [];
+        }
 
-                foreach ($missingLabelIds as $labelId) {
-                    $labelTransactionRows[] = [
-                        'id' => (string) Str::uuid(),
-                        'label_id' => $labelId,
-                        'transaction_id' => $transaction->id,
-                        'created_at' => $now,
-                        'updated_at' => $now,
-                    ];
-                    $changedTransactionIds[$transaction->id] = true;
-                }
-            }
+        $now = now();
+        $labelTransactionRows = [];
+        $transactionIds = [];
 
-            if ($labelTransactionRows !== []) {
-                LabelTransaction::query()->insertOrIgnore($labelTransactionRows);
+        foreach ($transactions as $transaction) {
+            $missingLabelIds = array_diff($labelIds, $transaction->labels->pluck('id')->all());
+
+            foreach ($missingLabelIds as $labelId) {
+                $labelTransactionRows[] = [
+                    'id' => (string) Str::uuid(),
+                    'label_id' => $labelId,
+                    'transaction_id' => $transaction->id,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+                $transactionIds[] = $transaction->id;
             }
         }
 
-        return count($changedTransactionIds);
+        if ($labelTransactionRows !== []) {
+            LabelTransaction::query()->insertOrIgnore($labelTransactionRows);
+        }
+
+        return $transactionIds;
     }
 
     /**
@@ -211,6 +303,9 @@ class AutomationRuleService
         return empty(array_diff($ruleLabelIds, $transactionLabelIds));
     }
 
+    /**
+     * @return array<int, string>
+     */
     private function isSplit(Transaction $transaction): bool
     {
         return $transaction->relationLoaded('splits')
@@ -218,9 +313,6 @@ class AutomationRuleService
             : $transaction->splits()->exists();
     }
 
-    /**
-     * @return array<int, string>
-     */
     public function eagerLoadsForRuleEvaluation(AutomationRule $rule): array
     {
         $variables = $this->ruleVariables($rule);
@@ -337,11 +429,15 @@ class AutomationRuleService
         }
     }
 
+    /**
+     * @return bool whether the actions changed something budget membership
+     *              depends on — the note is deliberately not one of them
+     */
     private function applyActions(Transaction $transaction, AutomationRule $rule): bool
     {
         return DB::transaction(function () use ($transaction, $rule): bool {
             $locked = Transaction::query()->whereKey($transaction->id)->lockForUpdate()->firstOrFail();
-            $changed = false;
+            $affectsBudgets = false;
 
             if ($rule->action_category_id !== null
                 && ! $locked->splits()->exists()
@@ -349,7 +445,7 @@ class AutomationRuleService
                 $locked->category_id = $rule->action_category_id;
                 $locked->category_source = CategorySource::Rule;
                 $locked->categorized_by_rule_id = $rule->id;
-                $changed = true;
+                $affectsBudgets = true;
             }
 
             // Only apply plain (unencrypted) notes — encrypted notes require the user's key
@@ -361,7 +457,6 @@ class AutomationRuleService
                     $locked->notes = $existingNotes
                         ? $existingNotes."\n".$ruleNote
                         : $ruleNote;
-                    $changed = true;
                 }
             }
 
@@ -373,13 +468,13 @@ class AutomationRuleService
             if (! empty($labelIds)) {
                 $result = $locked->labels()->syncWithoutDetaching($labelIds);
                 if (! empty($result['attached'])) {
-                    $changed = true;
+                    $affectsBudgets = true;
                 }
             }
 
             $transaction->setRawAttributes($locked->getAttributes(), true);
 
-            return $changed;
+            return $affectsBudgets;
         });
     }
 

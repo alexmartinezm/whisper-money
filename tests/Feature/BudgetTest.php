@@ -448,6 +448,78 @@ test('user cannot update budget tracking with references from another space', fu
     expect($budget->fresh()->categories->modelKeys())->toBe([$oldCategory->id]);
 });
 
+/**
+ * Upstream moves a new allocation onto the period in progress unconditionally.
+ * Here the change is applied from the server date: it reaches periods starting
+ * on or after it, so the period in progress is only included when the change
+ * lands on its first day. This pins that rule from both sides.
+ */
+test('a new budget amount applies to the period in progress when it starts today', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+
+    $budget = Budget::factory()->create([
+        'user_id' => $user->id,
+        'period_type' => 'monthly',
+        'period_start_day' => 1,
+    ]);
+
+    $this->travelTo(today()->startOfMonth());
+
+    $current = $budget->periods()->create([
+        'start_date' => today()->startOfMonth(),
+        'end_date' => today()->endOfMonth(),
+        'allocated_amount' => 50000,
+        'carried_over_amount' => 0,
+    ]);
+
+    $past = $budget->periods()->create([
+        'start_date' => today()->subMonthNoOverflow()->startOfMonth(),
+        'end_date' => today()->subMonthNoOverflow()->endOfMonth(),
+        'allocated_amount' => 50000,
+        'carried_over_amount' => 0,
+    ]);
+
+    $this->actingAs($user)
+        ->patch("/budgets/{$budget->id}", ['allocated_amount' => 60000])
+        ->assertRedirect();
+
+    expect($current->fresh()->allocated_amount)->toBe(60000);
+    expect($past->fresh()->allocated_amount)->toBe(50000);
+});
+
+test('a new budget amount leaves a period already under way alone', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+
+    $budget = Budget::factory()->create([
+        'user_id' => $user->id,
+        'period_type' => 'monthly',
+        'period_start_day' => 1,
+    ]);
+
+    $this->travelTo(today()->startOfMonth()->addDays(10));
+
+    $current = $budget->periods()->create([
+        'start_date' => today()->startOfMonth(),
+        'end_date' => today()->endOfMonth(),
+        'allocated_amount' => 50000,
+        'carried_over_amount' => 0,
+    ]);
+
+    $next = $budget->periods()->create([
+        'start_date' => today()->addMonthNoOverflow()->startOfMonth(),
+        'end_date' => today()->addMonthNoOverflow()->endOfMonth(),
+        'allocated_amount' => 50000,
+        'carried_over_amount' => 0,
+    ]);
+
+    $this->actingAs($user)
+        ->patch("/budgets/{$budget->id}", ['allocated_amount' => 60000])
+        ->assertRedirect();
+
+    expect($current->fresh()->allocated_amount)->toBe(50000);
+    expect($next->fresh()->allocated_amount)->toBe(60000);
+});
+
 test('user can delete their budget', function () {
     $user = User::factory()->create(['onboarded_at' => now()]);
 

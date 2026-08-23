@@ -2488,5 +2488,12 @@
     "See what's shipped, what we're building, and what's coming next in Whisper Money.": "Descubre qué hemos publicado, qué estamos construyendo y qué viene después en Whisper Money.",
     "What's shipped. What's coming.": "Lo publicado. Lo que viene.",
     "Request a feature": "Pedir una función",
-    "The roadmap is temporarily unavailable. Check it out on our feedback board.": "La hoja de ruta no está disponible ahora mismo. Puedes consultarla en nuestro tablón de sugerencias."
+    "The roadmap is temporarily unavailable. Check it out on our feedback board.": "La hoja de ruta no está disponible ahora mismo. Puedes consultarla en nuestro tablón de sugerencias.",
+    "Each row shows the full amount charged by the bank. The totals above only count your share of the accounts you share with someone else.": "Cada línea muestra el importe completo que cobró el banco. Los totales de arriba solo cuentan tu parte de las cuentas que compartes con otra persona.",
+    "For accounts you share with someone else. Income and expenses only count towards your figures by this percentage. Changing it also rewrites what this account has already spent in your budgets, past periods included.": "Para cuentas que compartes con otra persona. Los ingresos y gastos solo cuentan en tus cifras en ese porcentaje. Cambiarlo también reescribe lo que esta cuenta ya ha gastado en tus presupuestos, incluidos los periodos pasados.",
+    ":days days free": ":days días gratis",
+    "The sync did not finish. We will try again later.": "La sincronización no se completó. Volveremos a intentarlo más tarde.",
+    "We couldn’t check which transactions match.": "No hemos podido comprobar qué transacciones coinciden.",
+    "? matches": "? coincidencias",
+    "Read-only tokens can analyse your data. Read & write tokens can also create, edit and delete transactions, categories, labels, budgets and automation rules.": "Los tokens de solo lectura pueden analizar tus datos. Los tokens de lectura y escritura también pueden crear, editar y eliminar transacciones, categorías, etiquetas, presupuestos y reglas de automatización."
 }
