@@ -2375,5 +2375,6 @@
     "We will keep retrying over the coming days. You keep access for now, but the subscription will be canceled if all retries fail.": "Nous continuerons d'essayer dans les jours à venir. Vous conservez l'accès pour le moment, mais votre abonnement sera annulé si toutes les tentatives échouent.",
     "Your finances, inside Claude or ChatGPT": "Vos finances, dans Claude ou ChatGPT",
     ":bank did not share any accounts through open banking. Not every account type is available this way — contact us if yours should be.": ":bank n'a partagé aucun compte via l'open banking. Tous les types de compte ne sont pas disponibles par ce biais ; écrivez-nous si le vôtre devrait l'être.",
-    "Failed to connect to your bank. Please try again.": "Impossible de nous connecter à votre banque. Veuillez réessayer."
+    "Failed to connect to your bank. Please try again.": "Impossible de nous connecter à votre banque. Veuillez réessayer.",
+    "We could not load these figures. Try again in a moment.": "Nous n'avons pas pu charger ces chiffres. Réessayez dans un instant."
 }
