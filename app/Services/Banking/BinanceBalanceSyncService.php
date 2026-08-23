@@ -115,11 +115,7 @@ class BinanceBalanceSyncService
         $targetCurrency = strtoupper($account->currency_code);
 
         $endDate = now()->subDay();
-        $startDate = $isFirstSync
-            ? now()->subDays(self::SNAPSHOT_MAX_DAYS)
-            : ($account->balances()->max('balance_date')
-                ? Carbon::parse($account->balances()->max('balance_date'))->addDay()
-                : now()->subDays(self::SNAPSHOT_MAX_DAYS));
+        $startDate = $this->resolveStartDate($account, $isFirstSync);
 
         if ($startDate->greaterThanOrEqualTo($endDate)) {
             return false;
@@ -131,6 +127,42 @@ class BinanceBalanceSyncService
             return true;
         }
 
+        $tally = $this->storeSnapshots($account, $snapshots, $targetCurrency);
+
+        Log::info('Synced Binance historical balances', [
+            'account_id' => $account->id,
+            'days_synced' => $tally['synced'],
+            'currency' => $targetCurrency,
+            ...($tally['unpriced'] ? ['unpriced_days' => $tally['unpriced']] : []),
+            ...($tally['without_valuation'] ? ['days_without_valuation' => $tally['without_valuation']] : []),
+        ]);
+
+        return true;
+    }
+
+    /**
+     * Where to resume from: the day after the last balance on file, or the far
+     * end of the snapshot window on a first sync or an account with no history.
+     */
+    private function resolveStartDate(Account $account, bool $isFirstSync): Carbon
+    {
+        if ($isFirstSync) {
+            return now()->subDays(self::SNAPSHOT_MAX_DAYS);
+        }
+
+        $latest = $account->balances()->max('balance_date');
+
+        return $latest
+            ? Carbon::parse($latest)->addDay()
+            : now()->subDays(self::SNAPSHOT_MAX_DAYS);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $snapshots
+     * @return array{synced: int, unpriced: int, without_valuation: int}
+     */
+    private function storeSnapshots(Account $account, array $snapshots, string $targetCurrency): array
+    {
         $count = 0;
         $unpricedDays = 0;
         $daysWithoutValuation = 0;
@@ -172,15 +204,11 @@ class BinanceBalanceSyncService
             $count++;
         }
 
-        Log::info('Synced Binance historical balances', [
-            'account_id' => $account->id,
-            'days_synced' => $count,
-            'currency' => $targetCurrency,
-            ...($unpricedDays ? ['unpriced_days' => $unpricedDays] : []),
-            ...($daysWithoutValuation ? ['days_without_valuation' => $daysWithoutValuation] : []),
-        ]);
-
-        return true;
+        return [
+            'synced' => $count,
+            'unpriced' => $unpricedDays,
+            'without_valuation' => $daysWithoutValuation,
+        ];
     }
 
     /**

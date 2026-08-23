@@ -19,6 +19,24 @@ trait CreatesAccountsFromPending
      */
     private function createAccountsFromPending(User $user, BankingConnection $connection, AccountUserCurrencyService $accountUserCurrencyService): void
     {
+        $bank = $this->resolveConnectionBank($connection);
+
+        foreach ($connection->mappablePendingAccounts() as $accountData) {
+            $this->createAccountFromPendingData($user, $connection, $bank, $accountData, $accountData['uid'], $accountUserCurrencyService);
+        }
+
+        $connection->update([
+            'status' => BankingConnectionStatus::Active,
+            'pending_accounts_data' => null,
+        ]);
+    }
+
+    /**
+     * The shared bank row for this ASPSP, backfilling a logo the first time the
+     * connection carries one.
+     */
+    private function resolveConnectionBank(BankingConnection $connection): Bank
+    {
         $bank = Bank::firstOrCreate(
             ['name' => $connection->aspsp_name, 'user_id' => null],
             ['name' => $connection->aspsp_name, 'logo' => $connection->aspsp_logo],
@@ -28,34 +46,38 @@ trait CreatesAccountsFromPending
             $bank->update(['logo' => $connection->aspsp_logo]);
         }
 
-        $accountType = $connection->provider->defaultAccountType();
+        return $bank;
+    }
 
-        foreach ($connection->mappablePendingAccounts() as $accountData) {
-            $uid = $accountData['uid'];
-
-            $currency = $accountUserCurrencyService->resolveImportedCurrency($accountData['currency'] ?? null, $user);
-            $name = $accountData['name']
+    /**
+     * One account from a connection's pending payload. The account type follows
+     * the provider (Investment for Indexa Capital, Binance, Bitpanda and
+     * Coinbase; Checking for everything else).
+     *
+     * @param  array<string, mixed>  $accountData
+     */
+    private function createAccountFromPendingData(
+        User $user,
+        BankingConnection $connection,
+        Bank $bank,
+        array $accountData,
+        string $uid,
+        AccountUserCurrencyService $accountUserCurrencyService,
+    ): void {
+        $account = $user->accounts()->create([
+            'name' => $accountData['name']
                 ?? $accountData['account_id']['iban']
-                ?? $connection->aspsp_name.' Account';
-
-            $account = $user->accounts()->create([
-                'name' => $name,
-                'name_iv' => null,
-                'encrypted' => false,
-                'bank_id' => $bank->id,
-                'currency_code' => $currency,
-                'type' => $accountType->value,
-                'banking_connection_id' => $connection->id,
-                'external_account_id' => $uid,
-                'iban' => $accountData['account_id']['iban'] ?? null,
-            ]);
-
-            $accountUserCurrencyService->syncFromFirstAccount($account);
-        }
-
-        $connection->update([
-            'status' => BankingConnectionStatus::Active,
-            'pending_accounts_data' => null,
+                ?? $connection->aspsp_name.' Account',
+            'name_iv' => null,
+            'encrypted' => false,
+            'bank_id' => $bank->id,
+            'currency_code' => $accountUserCurrencyService->resolveImportedCurrency($accountData['currency'] ?? null, $user),
+            'type' => $connection->provider->defaultAccountType()->value,
+            'banking_connection_id' => $connection->id,
+            'external_account_id' => $uid,
+            'iban' => $accountData['account_id']['iban'] ?? null,
         ]);
+
+        $accountUserCurrencyService->syncFromFirstAccount($account);
     }
 }

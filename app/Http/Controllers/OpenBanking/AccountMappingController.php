@@ -10,6 +10,7 @@ use App\Http\Requests\OpenBanking\MapAccountsRequest;
 use App\Jobs\SyncBankingConnectionJob;
 use App\Models\Bank;
 use App\Models\BankingConnection;
+use App\Models\User;
 use App\Services\AccountUserCurrencyService;
 use Illuminate\Http\RedirectResponse;
 use Inertia\Inertia;
@@ -78,62 +79,22 @@ class AccountMappingController extends Controller
         $user = auth()->user();
         $mappings = $request->validated()['mappings'];
 
-        $bank = Bank::firstOrCreate(
-            ['name' => $connection->aspsp_name, 'user_id' => null],
-            ['name' => $connection->aspsp_name, 'logo' => $connection->aspsp_logo],
-        );
-
-        if (! $bank->logo && $connection->aspsp_logo) {
-            $bank->update(['logo' => $connection->aspsp_logo]);
-        }
+        $bank = $this->resolveConnectionBank($connection);
 
         $pendingAccounts = collect($connection->pending_accounts_data)
             ->keyBy('uid');
 
-        $accountType = $connection->provider->defaultAccountType();
-
         foreach ($mappings as $mapping) {
-            $uid = $mapping['bank_account_uid'];
-            $action = $mapping['action'];
-            $accountData = $pendingAccounts->get($uid);
+            $accountData = $pendingAccounts->get($mapping['bank_account_uid']);
 
             if (! $accountData) {
                 continue;
             }
 
-            if ($action === 'create') {
-                $currency = $accountUserCurrencyService->resolveImportedCurrency($accountData['currency'] ?? null, $user);
-                $name = $accountData['name']
-                    ?? $accountData['account_id']['iban']
-                    ?? $connection->aspsp_name.' Account';
-
-                $account = $user->accounts()->create([
-                    'name' => $name,
-                    'name_iv' => null,
-                    'encrypted' => false,
-                    'bank_id' => $bank->id,
-                    'currency_code' => $currency,
-                    'type' => $accountType->value,
-                    'banking_connection_id' => $connection->id,
-                    'external_account_id' => $uid,
-                    'iban' => $accountData['account_id']['iban'] ?? null,
-                ]);
-
-                $accountUserCurrencyService->syncFromFirstAccount($account);
-            } elseif ($action === 'link') {
-                $existingAccount = $user->accounts()->find($mapping['existing_account_id']);
-
-                if ($existingAccount) {
-                    $existingAccount->update([
-                        'banking_connection_id' => $connection->id,
-                        'external_account_id' => $uid,
-                        'iban' => $accountData['account_id']['iban'] ?? $existingAccount->iban,
-                        'bank_id' => $bank->id,
-                        'linked_at' => now(),
-                    ]);
-
-                    $accountUserCurrencyService->syncFromFirstAccount($existingAccount);
-                }
+            if ($mapping['action'] === 'create') {
+                $this->createAccountFromPendingData($user, $connection, $bank, $accountData, $mapping['bank_account_uid'], $accountUserCurrencyService);
+            } elseif ($mapping['action'] === 'link') {
+                $this->linkMappedAccount($user, $connection, $bank, $accountData, $mapping, $accountUserCurrencyService);
             }
         }
 
@@ -151,5 +112,34 @@ class AccountMappingController extends Controller
 
         return redirect()->route($successRedirect, $redirectParams)
             ->with('success', 'Bank account connected successfully.');
+    }
+
+    /**
+     * @param  array<string, mixed>  $accountData
+     * @param  array<string, mixed>  $mapping
+     */
+    private function linkMappedAccount(
+        User $user,
+        BankingConnection $connection,
+        Bank $bank,
+        array $accountData,
+        array $mapping,
+        AccountUserCurrencyService $accountUserCurrencyService,
+    ): void {
+        $existingAccount = $user->accounts()->find($mapping['existing_account_id']);
+
+        if (! $existingAccount) {
+            return;
+        }
+
+        $existingAccount->update([
+            'banking_connection_id' => $connection->id,
+            'external_account_id' => $mapping['bank_account_uid'],
+            'iban' => $accountData['account_id']['iban'] ?? $existingAccount->iban,
+            'bank_id' => $bank->id,
+            'linked_at' => now(),
+        ]);
+
+        $accountUserCurrencyService->syncFromFirstAccount($existingAccount);
     }
 }

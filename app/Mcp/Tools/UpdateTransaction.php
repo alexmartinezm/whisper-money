@@ -4,6 +4,7 @@ namespace App\Mcp\Tools;
 
 use App\Enums\CategorySource;
 use App\Enums\TransactionSource;
+use App\Models\Space;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\ManualBalanceAdjuster;
@@ -45,12 +46,10 @@ class UpdateTransaction extends WriteTool
             $transaction = $this->transactionInSpace($request, $space);
             $transaction = Transaction::query()->whereKey($transaction->id)->lockForUpdate()->firstOrFail();
 
-            if ($transaction->source !== TransactionSource::ManuallyCreated) {
-                return Response::error('Only manually-created transactions can be edited. This one came from a bank or import, so its core fields are locked. Use categorize_transaction or label_transaction instead.');
-            }
+            $refusal = $this->refuseUneditable($request, $transaction);
 
-            if ($transaction->splits()->exists() && $request->hasAny(['category_id', 'amount'])) {
-                return Response::error('This transaction is split. Direct category and amount changes are blocked; use split_transaction for category postings. It does not change the parent ledger amount.');
+            if ($refusal !== null) {
+                return $refusal;
             }
 
             $request->validate([
@@ -78,38 +77,78 @@ class UpdateTransaction extends WriteTool
                 'debtor_name' => fn () => $this->nullableString($request, 'debtor_name'),
             ]);
 
-            // A new category is always a manual assignment: reset any AI/rule
-            // provenance so the row is not later treated as machine-categorized.
-            // ponytail: unlike the web edit path this does not learn a correction
-            // rule — MCP writes stay predictable and side-effect free.
-            if ($request->has('category_id')) {
-                $newCategoryId = $request->filled('category_id') ? $this->categoryInSpace($request, $space)->id : null;
-
-                if ($newCategoryId !== $transaction->category_id) {
-                    $transaction->category_id = $newCategoryId;
-                    $transaction->category_source = $newCategoryId === null ? null : CategorySource::Manual;
-                    $transaction->ai_confidence = null;
-                    $transaction->categorized_by_rule_id = null;
-                }
-            }
+            $this->applyCategory($request, $transaction, $space);
 
             $transaction->save();
 
-            $balanceUpdated = false;
-
-            if ($request->boolean('update_balance') && $transaction->wasChanged(['amount', 'transaction_date', 'account_id'])) {
-                $adjuster = app(ManualBalanceAdjuster::class);
-                // Either side no-ops on a connected account, so moving a transaction
-                // onto one still unwinds the manual account it came from.
-                $reversed = $adjuster->reverseDeletedTransaction($originalSnapshot);
-                $applied = $adjuster->applyCreatedTransaction($transaction->load('account'));
-                $balanceUpdated = $reversed || $applied;
-            }
+            // Before the refresh below: it reloads the row and with it drops the
+            // wasChanged() state the balance move is decided on.
+            $balanceUpdated = $this->syncManualBalance($request, $transaction, $originalSnapshot);
 
             return $this->json([
                 'transaction' => $this->presentTransaction($transaction->refresh()),
                 'balance_updated' => $balanceUpdated,
             ]);
         });
+    }
+
+    /**
+     * The two reasons this tool declines to touch a transaction at all, as the
+     * error the client sees. Null when the edit may go ahead.
+     */
+    private function refuseUneditable(Request $request, Transaction $transaction): ?Response
+    {
+        if ($transaction->source !== TransactionSource::ManuallyCreated) {
+            return Response::error('Only manually-created transactions can be edited. This one came from a bank or import, so its core fields are locked. Use categorize_transaction or label_transaction instead.');
+        }
+
+        if ($transaction->splits()->exists() && $request->hasAny(['category_id', 'amount'])) {
+            return Response::error('This transaction is split. Direct category and amount changes are blocked; use split_transaction for category postings. It does not change the parent ledger amount.');
+        }
+
+        return null;
+    }
+
+    /**
+     * A new category is always a manual assignment: reset any AI/rule provenance
+     * so the row is not later treated as machine-categorized.
+     *
+     * ponytail: unlike the web edit path this does not learn a correction rule —
+     * MCP writes stay predictable and side-effect free.
+     */
+    private function applyCategory(Request $request, Transaction $transaction, Space $space): void
+    {
+        if (! $request->has('category_id')) {
+            return;
+        }
+
+        $newCategoryId = $request->filled('category_id') ? $this->categoryInSpace($request, $space)->id : null;
+
+        if ($newCategoryId === $transaction->category_id) {
+            return;
+        }
+
+        $transaction->category_id = $newCategoryId;
+        $transaction->category_source = $newCategoryId === null ? null : CategorySource::Manual;
+        $transaction->ai_confidence = null;
+        $transaction->categorized_by_rule_id = null;
+    }
+
+    /**
+     * Move the manual balance off the pre-edit account/date/amount and onto the
+     * new ones. Either side no-ops on a connected account, so moving a
+     * transaction onto one still unwinds the manual account it came from.
+     */
+    private function syncManualBalance(Request $request, Transaction $transaction, Transaction $originalSnapshot): bool
+    {
+        if (! $request->boolean('update_balance') || ! $transaction->wasChanged(['amount', 'transaction_date', 'account_id'])) {
+            return false;
+        }
+
+        $adjuster = app(ManualBalanceAdjuster::class);
+        $reversed = $adjuster->reverseDeletedTransaction($originalSnapshot);
+        $applied = $adjuster->applyCreatedTransaction($transaction->load('account'));
+
+        return $reversed || $applied;
     }
 }

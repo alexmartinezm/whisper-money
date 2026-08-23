@@ -439,45 +439,79 @@ class AutomationRuleService
     {
         return DB::transaction(function () use ($transaction, $rule): bool {
             $locked = Transaction::query()->whereKey($transaction->id)->lockForUpdate()->firstOrFail();
-            $affectsBudgets = false;
 
-            if ($rule->action_category_id !== null
-                && ! $locked->splits()->exists()
-                && $locked->category_id !== $rule->action_category_id) {
-                $locked->category_id = $rule->action_category_id;
-                $locked->category_source = CategorySource::Rule;
-                $locked->categorized_by_rule_id = $rule->id;
-                $affectsBudgets = true;
-            }
-
-            // Only apply plain (unencrypted) notes — encrypted notes require the user's key
-            if ($rule->action_note && $rule->action_note_iv === null) {
-                $existingNotes = $locked->notes ?? '';
-                $ruleNote = $rule->action_note;
-
-                if (! $this->noteAlreadyPresent($existingNotes, $ruleNote)) {
-                    $locked->notes = $existingNotes
-                        ? $existingNotes."\n".$ruleNote
-                        : $ruleNote;
-                }
-            }
+            $recategorized = $this->applyCategoryAction($locked, $rule);
+            $this->applyNoteAction($locked, $rule);
 
             if ($locked->isDirty()) {
                 $locked->saveQuietly();
             }
 
-            $labelIds = $rule->labels->pluck('id')->all();
-            if (! empty($labelIds)) {
-                $result = $locked->labels()->syncWithoutDetaching($labelIds);
-                if (! empty($result['attached'])) {
-                    $affectsBudgets = true;
-                }
-            }
+            $labelled = $this->applyLabelActions($locked, $rule);
 
             $transaction->setRawAttributes($locked->getAttributes(), true);
 
-            return $affectsBudgets;
+            return $recategorized || $labelled;
         });
+    }
+
+    /**
+     * A split transaction is filed under its postings, so a rule must not
+     * overwrite the parent's category.
+     *
+     * @return bool whether the category actually moved
+     */
+    private function applyCategoryAction(Transaction $locked, AutomationRule $rule): bool
+    {
+        if ($rule->action_category_id === null
+            || $locked->category_id === $rule->action_category_id
+            || $locked->splits()->exists()) {
+            return false;
+        }
+
+        $locked->category_id = $rule->action_category_id;
+        $locked->category_source = CategorySource::Rule;
+        $locked->categorized_by_rule_id = $rule->id;
+
+        return true;
+    }
+
+    /**
+     * Only plain notes are applied — an encrypted one would need the user's key,
+     * which a background rule run does not have.
+     */
+    private function applyNoteAction(Transaction $locked, AutomationRule $rule): void
+    {
+        if (! $rule->action_note || $rule->action_note_iv !== null) {
+            return;
+        }
+
+        $existingNotes = $locked->notes ?? '';
+
+        if ($this->noteAlreadyPresent($existingNotes, $rule->action_note)) {
+            return;
+        }
+
+        $locked->notes = $existingNotes
+            ? $existingNotes."\n".$rule->action_note
+            : $rule->action_note;
+    }
+
+    /**
+     * @return bool whether a label was newly attached — budget membership can
+     *              follow a label, so only an actual attach counts
+     */
+    private function applyLabelActions(Transaction $locked, AutomationRule $rule): bool
+    {
+        $labelIds = $rule->labels->pluck('id')->all();
+
+        if ($labelIds === []) {
+            return false;
+        }
+
+        $result = $locked->labels()->syncWithoutDetaching($labelIds);
+
+        return ! empty($result['attached']);
     }
 
     private function noteAlreadyPresent(string $existingNotes, string $note): bool
