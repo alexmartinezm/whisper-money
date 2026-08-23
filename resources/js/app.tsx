@@ -1,6 +1,10 @@
 import '../css/app.css';
 
-import { createInertiaApp, router } from '@inertiajs/react';
+import {
+    createInertiaApp,
+    router,
+    type ResolvedComponent,
+} from '@inertiajs/react';
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
 import { resolvePageComponent } from 'laravel-vite-plugin/inertia-helpers';
@@ -14,6 +18,7 @@ import {
 import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { toast, Toaster } from 'sonner';
+import { AppErrorBoundary } from './components/app-error-boundary';
 import { EncryptionKeyProvider } from './contexts/encryption-key-context';
 import { PrivacyModeProvider } from './contexts/privacy-mode-context';
 import { SyncProvider } from './contexts/sync-context';
@@ -168,8 +173,10 @@ createInertiaApp({
     resolve: (name) =>
         resolvePageComponent(
             `./pages/${name}.tsx`,
-            import.meta.glob('./pages/**/*.tsx'),
-        ),
+            import.meta.glob<{ default: ResolvedComponent }>(
+                './pages/**/*.tsx',
+            ),
+        ).then((module) => module.default),
     setup({ el, App, props }) {
         const root = createRoot(el);
         const initialPageProps = props.initialPage?.props as
@@ -249,27 +256,29 @@ createInertiaApp({
 
         root.render(
             <StrictMode>
-                <EncryptionKeyProvider
-                    hasEncryptionSetup={
-                        hasEncryptionSetup &&
-                        (hasEncryptedAccounts || hasEncryptedTransactions)
-                    }
-                >
-                    <PrivacyModeProvider>
-                        <SyncProvider
-                            initialIsAuthenticated={initialIsAuthenticated}
-                            initialUser={initialUser}
-                        >
-                            <App {...props} />
-                            <ExpiredConnectionsToast
-                                initialExpiredConnections={
-                                    initialExpiredConnections
-                                }
-                            />
-                            <AppToaster />
-                        </SyncProvider>
-                    </PrivacyModeProvider>
-                </EncryptionKeyProvider>
+                <AppErrorBoundary>
+                    <EncryptionKeyProvider
+                        hasEncryptionSetup={
+                            hasEncryptionSetup &&
+                            (hasEncryptedAccounts || hasEncryptedTransactions)
+                        }
+                    >
+                        <PrivacyModeProvider>
+                            <SyncProvider
+                                initialIsAuthenticated={initialIsAuthenticated}
+                                initialUser={initialUser}
+                            >
+                                <App {...props} />
+                                <ExpiredConnectionsToast
+                                    initialExpiredConnections={
+                                        initialExpiredConnections
+                                    }
+                                />
+                                <AppToaster />
+                            </SyncProvider>
+                        </PrivacyModeProvider>
+                    </EncryptionKeyProvider>
+                </AppErrorBoundary>
             </StrictMode>,
         );
     },

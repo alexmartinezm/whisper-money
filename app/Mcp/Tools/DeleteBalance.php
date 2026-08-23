@@ -69,7 +69,7 @@ class DeleteBalance extends WriteTool
 
         // Resolved from the snapshot rather than from an argument, so the
         // bank-account protection has to be applied to the account it points at.
-        $this->assertWritableAccount($balance->account()->sole(), 'balance_id');
+        $this->assertBalanceWritable($balance->account()->sole(), 'balance_id');
 
         return $balance;
     }
@@ -82,7 +82,7 @@ class DeleteBalance extends WriteTool
             ]);
         }
 
-        $account = $this->writableAccount($request, $space);
+        $account = $this->balanceWritableAccount($request, $space);
         $date = $request->string('balance_date')->toString();
 
         $balance = AccountBalance::query()

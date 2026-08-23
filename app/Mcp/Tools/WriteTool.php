@@ -4,11 +4,13 @@ namespace App\Mcp\Tools;
 
 use App\Mcp\Tools\Concerns\PresentsAutomationRules;
 use App\Models\Account;
+use App\Models\AutomationRule;
 use App\Models\Category;
 use App\Models\Label;
 use App\Models\Space;
 use App\Models\Transaction;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 use Laravel\Mcp\Request;
@@ -20,9 +22,11 @@ use Laravel\Mcp\Response;
  * read+write, and Sanctum personal access tokens must carry the `mcp:write`
  * ability, so a read-only PAT can analyse data but never change it.
  *
- * Each concrete write tool must additionally carry the #[IsDestructive]
- * annotation. PHP attributes are not inherited, so the framework only reports
- * one declared directly on the served tool class — it cannot live here.
+ * Only the irreversible tools (the deletes) carry #[IsDestructive]; creating,
+ * updating, categorizing and labelling are reversible and inherit
+ * `destructiveHint: false` from McpTool. PHP attributes are not inherited, so
+ * the framework only reports one declared directly on the served tool class —
+ * it cannot live here.
  */
 abstract class WriteTool extends McpTool
 {
@@ -34,8 +38,7 @@ abstract class WriteTool extends McpTool
         // ChatGPT, resolved via the `api` guard — the user approves the
         // connection on the consent screen) and to Sanctum personal access
         // tokens carrying the mcp:write ability. A read-only Sanctum token is
-        // rejected. Bank-connected data stays protected for both (see the
-        // writableAccount / transaction helpers below).
+        // rejected.
         if (Auth::getDefaultDriver() !== 'api' && ! $user->tokenCan('mcp:write')) {
             return Response::error('This token is read-only. Create a read & write token to make changes.');
         }
@@ -46,76 +49,76 @@ abstract class WriteTool extends McpTool
     abstract protected function write(Request $request, User $user): Response;
 
     /**
-     * Resolve an account the token may write to: it must live in the space and
-     * must not be connected to a bank (bank-sourced data is never touched).
+     * Assign only the fields the request actually carries — the "only what you
+     * pass changes" contract every update tool promises. Values are closures so
+     * that resolving a related model (which may fail validation) happens only
+     * when the field is present.
+     *
+     * @param  array<string, callable(): mixed>  $fields
      */
-    protected function writableAccount(Request $request, Space $space, string $key = 'account_id'): Account
+    protected function applyFields(Request $request, Model $model, array $fields): void
+    {
+        foreach ($fields as $attribute => $value) {
+            if ($request->has($attribute)) {
+                $model->{$attribute} = $value();
+            }
+        }
+    }
+
+    /**
+     * A string field, or null when the agent passed an empty value to clear it.
+     */
+    protected function nullableString(Request $request, string $key): ?string
+    {
+        return $request->filled($key) ? $request->string($key)->toString() : null;
+    }
+
+    /**
+     * Resolve an account whose balance snapshots may be written. Connected
+     * accounts are rejected: their balances come from the bank and any manual
+     * snapshot would be overwritten by the next sync.
+     */
+    protected function balanceWritableAccount(Request $request, Space $space, string $key = 'account_id'): Account
     {
         $account = $this->accountInSpace($request, $space, $key);
 
-        $this->assertWritableAccount($account, $key);
+        $this->assertBalanceWritable($account, $key);
 
         return $account;
     }
 
     /**
-     * Assert an already-resolved account may be written to. Reached from the
-     * other direction too: a tool given a child row's id (a balance snapshot,
-     * say) resolves the account from it and needs the same verdict, worded the
-     * same way.
+     * Assert an already-resolved account accepts balance writes. Reached from
+     * the other direction too: a tool given a snapshot's id resolves the account
+     * from it and needs the same verdict, worded the same way.
      */
-    protected function assertWritableAccount(Account $account, string $key = 'account_id'): void
+    protected function assertBalanceWritable(Account $account, string $key = 'account_id'): void
     {
         if ($account->isConnected()) {
             throw ValidationException::withMessages([
-                $key => 'That account is connected to a bank and is read-only. Only non-connected (manual) accounts can be written to.',
+                $key => 'That account is connected to a bank, so its balances come from the sync and a manual snapshot would be overwritten. Only non-connected (manual) accounts accept balances.',
             ]);
         }
     }
 
     protected function transactionInSpace(Request $request, Space $space, string $key = 'transaction_id'): Transaction
     {
-        $id = $request->string($key)->toString();
-
-        $transaction = Transaction::query()->forSpace($space)->whereKey($id)->first();
-
-        if ($transaction === null) {
-            throw ValidationException::withMessages([
-                $key => "No transaction with id {$id} in space {$space->id}. Call search_transactions to find ids.",
-            ]);
-        }
-
-        return $transaction;
+        return $this->modelInSpace($request, $space, Transaction::query()->forSpace($space), $key, 'transaction', 'Call search_transactions to find ids.');
     }
 
     protected function categoryInSpace(Request $request, Space $space, string $key = 'category_id'): Category
     {
-        $id = $request->string($key)->toString();
-
-        $category = Category::query()->forSpace($space)->whereKey($id)->first();
-
-        if ($category === null) {
-            throw ValidationException::withMessages([
-                $key => "No category with id {$id} in space {$space->id}. Call list_categories to see valid ids.",
-            ]);
-        }
-
-        return $category;
+        return $this->modelInSpace($request, $space, Category::query()->forSpace($space), $key, 'category', 'Call list_categories to see valid ids.');
     }
 
     protected function labelInSpace(Request $request, Space $space, string $key = 'label_id'): Label
     {
-        $id = $request->string($key)->toString();
+        return $this->modelInSpace($request, $space, Label::query()->forSpace($space), $key, 'label', 'Call list_labels to see valid ids.');
+    }
 
-        $label = Label::query()->forSpace($space)->whereKey($id)->first();
-
-        if ($label === null) {
-            throw ValidationException::withMessages([
-                $key => "No label with id {$id} in space {$space->id}. Call list_labels to see valid ids.",
-            ]);
-        }
-
-        return $label;
+    protected function ruleInSpace(Request $request, Space $space, string $key = 'automation_rule_id'): AutomationRule
+    {
+        return $this->modelInSpace($request, $space, AutomationRule::query()->forSpace($space), $key, 'automation rule');
     }
 
     /**

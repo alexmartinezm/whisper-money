@@ -35,7 +35,7 @@ Whisper Money is a privacy-first personal finance application that helps you tra
 ## Tech Stack
 
 - **Backend:** Laravel 12, PHP 8.4
-- **Frontend:** React 19, Inertia.js v2, TypeScript
+- **Frontend:** React 19, Inertia.js v3, TypeScript
 - **Styling:** Tailwind CSS v4
 - **Database:** MySQL
 - **Cache/Queue:** Redis
@@ -190,8 +190,11 @@ unknown or non-text provider fails fast when the AI feature runs.
 | `AI_PROVIDER`                | `gemini`             | Provider for all AI features. Set once to switch everything.          |
 | `AI_SUGGESTIONS_PROVIDER`    | `AI_PROVIDER`        | Override the provider for rule suggestions only.                      |
 | `AI_CATEGORIZATION_PROVIDER` | `AI_PROVIDER`        | Override the provider for transaction categorization only.            |
+| `AI_REPORTS_PROVIDER`        | `AI_PROVIDER`        | Override the provider for the stats-report summaries only.            |
 | `AI_SUGGESTIONS_MODEL`       | `gemini-flash-latest`| Model used for rule suggestions.                                      |
 | `AI_CATEGORIZATION_MODEL`    | `gemini-flash-latest`| Model used for transaction categorization.                            |
+| `AI_REPORTS_MODEL`           | `gemini-flash-latest`| Model used for the stats-report summaries.                            |
+| `AI_REPORTS_TIMEOUT`         | `30`                 | Seconds before a report is posted without its AI summary.             |
 | `GEMINI_API_KEY`             | -                    | Required when the provider is `gemini`.                               |
 | `OLLAMA_URL`                 | `http://localhost:11434` | Ollama server URL (used when the provider is `ollama`).           |
 | `OLLAMA_API_KEY`             | -                    | Optional; only needed behind an authenticating proxy.                 |

@@ -2307,5 +2307,14 @@
     "The committed figure assumes your recurring income keeps arriving — it is also what pays the loans down.": "Le montant engagé suppose que vos revenus récurrents continuent d'arriver : ce sont aussi eux qui remboursent les prêts.",
     "You can turn these reminders off in your [notification settings](:url).": "Vous pouvez désactiver ces rappels dans vos [paramètres de notifications](:url).",
     "You can turn these warnings off in your [notification settings](:url).": "Vous pouvez désactiver ces alertes dans vos [paramètres de notifications](:url).",
-    "You can turn this warning off in your [notification settings](:url).": "Vous pouvez désactiver cette alerte dans vos [paramètres de notifications](:url)."
+    "You can turn this warning off in your [notification settings](:url).": "Vous pouvez désactiver cette alerte dans vos [paramètres de notifications](:url).",
+    "Not shown: :accounts. Your bank did not provide an identifier, so syncing is not possible.": "Non affichés : :accounts. Votre banque n'a pas fourni d'identifiant, la synchronisation est donc impossible.",
+    "Your bank did not provide an identifier for any of its accounts, so they cannot be synced.": "Votre banque n'a fourni d'identifiant pour aucun de ses comptes, ils ne peuvent donc pas être synchronisés.",
+    "Danish Krone": "Couronne danoise",
+    "Nigerian Naira": "Naira nigérian",
+    "Pakistani Rupee": "Roupie pakistanaise",
+    "Brazilian Real": "Réal brésilien",
+    "Dominican Peso": "Peso dominicain",
+    "Saudi Riyal": "Riyal saoudien",
+    "This account's balance comes from your bank, so it won't change.": "Le solde de ce compte provient de votre banque, il ne changera donc pas."
 }

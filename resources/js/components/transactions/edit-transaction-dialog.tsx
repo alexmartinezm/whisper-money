@@ -31,6 +31,7 @@ import { useLocale } from '@/hooks/use-locale';
 import { decrypt, importKey } from '@/lib/crypto';
 import { getStoredKey } from '@/lib/key-storage';
 import { evaluateRulesForNewTransaction } from '@/lib/rule-engine';
+import { readStoredValue, writeStoredValue } from '@/lib/safe-storage';
 import { appendNoteIfNotPresent } from '@/lib/utils';
 import { transactionSyncService } from '@/services/transaction-sync';
 import { type SharedData } from '@/types';
@@ -138,7 +139,7 @@ export function EditTransactionDialog({
     >(new Map());
     const [updateAccountBalance, setUpdateAccountBalance] = useState(() => {
         if (typeof window !== 'undefined') {
-            const stored = localStorage.getItem(STORAGE_KEY_UPDATE_BALANCE);
+            const stored = readStoredValue(STORAGE_KEY_UPDATE_BALANCE);
             // Active by default; only an explicit opt-out turns it off.
             return stored === null ? true : stored === 'true';
         }
@@ -324,7 +325,7 @@ export function EditTransactionDialog({
 
     function handleUpdateBalanceChange(checked: boolean) {
         setUpdateAccountBalance(checked);
-        localStorage.setItem(STORAGE_KEY_UPDATE_BALANCE, String(checked));
+        writeStoredValue(STORAGE_KEY_UPDATE_BALANCE, String(checked));
     }
 
     async function handleSubmit(e: React.FormEvent) {
@@ -883,7 +884,13 @@ export function EditTransactionDialog({
                                         allowNegative
                                     />
 
-                                    {!selectedAccount?.banking_connection_id && (
+                                    {selectedAccount?.banking_connection_id ? (
+                                        <p className="text-sm text-muted-foreground">
+                                            {__(
+                                                "This account's balance comes from your bank, so it won't change.",
+                                            )}
+                                        </p>
+                                    ) : (
                                         <div className="flex items-center gap-2">
                                             <Checkbox
                                                 id="update-balance"

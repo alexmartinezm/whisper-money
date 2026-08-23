@@ -484,7 +484,7 @@ describe('EditTransactionDialog', () => {
         );
     });
 
-    it('hides "update account balance" for a connected account', () => {
+    it('explains why the balance stays put on a connected account', () => {
         const connectedAccount = {
             ...checkingAccount,
             id: 'account-connected',
@@ -507,6 +507,11 @@ describe('EditTransactionDialog', () => {
         );
 
         expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+        expect(
+            screen.getByText(
+                "This account's balance comes from your bank, so it won't change.",
+            ),
+        ).toBeInTheDocument();
     });
 
     const manualTransaction = {
