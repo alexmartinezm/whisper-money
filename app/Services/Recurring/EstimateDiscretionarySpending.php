@@ -3,6 +3,7 @@
 namespace App\Services\Recurring;
 
 use App\Enums\CategoryType;
+use App\Models\RecurringSeries;
 use App\Models\Transaction;
 use App\Models\TransactionSplit;
 use App\Services\ExchangeRateService;
@@ -23,8 +24,9 @@ use Illuminate\Support\Collection;
  * The gap is measured from the user's own history rather than from their
  * budgets: budgets are optional, cover a handful of categories, and state an
  * intention rather than a prediction. The recurring pivot makes the split exact
- * — a transaction either belongs to a series or it does not — so nothing has to
- * be inferred about which spending the projection already covers.
+ * — a transaction either belongs to a series the forecast walks or it does not
+ * — so nothing has to be inferred about which spending the projection covers.
+ * Belonging to a series is not enough on its own: see notAlreadyRecurring().
  */
 class EstimateDiscretionarySpending
 {
@@ -109,7 +111,7 @@ class EstimateDiscretionarySpending
                 $query->whereNull('transactions.category_id')
                     ->orWhereHas('category', fn (Builder $category) => $category->whereNotIn('type', self::INTERNAL_TYPES));
             })
-            ->where($this->notAlreadyRecurring())
+            ->where($this->notAlreadyRecurring($currency))
             ->selectRaw("DATE_FORMAT(transactions.transaction_date, '%Y-%m') as month")
             ->selectRaw('transactions.currency_code as currency_code')
             ->selectRaw('SUM(transactions.amount) as total')
@@ -126,7 +128,7 @@ class EstimateDiscretionarySpending
                 $query->whereNull('transaction_splits.category_id')
                     ->orWhereHas('category', fn (Builder $category) => $category->whereNotIn('type', self::INTERNAL_TYPES));
             })
-            ->where($this->notAlreadyRecurring())
+            ->where($this->notAlreadyRecurring($currency))
             ->selectRaw("DATE_FORMAT(transactions.transaction_date, '%Y-%m') as month")
             ->selectRaw('transactions.currency_code as currency_code')
             ->selectRaw('SUM(transaction_splits.amount) as total')
@@ -153,14 +155,29 @@ class EstimateDiscretionarySpending
     }
 
     /**
-     * Excludes anything the projection already walks. The pivot holds at most
-     * one row per transaction, so this can neither double count nor miss.
+     * Excludes what the forecast walks forward, and nothing else.
+     *
+     * A transaction outlives the series that claimed it. The user dismisses a
+     * false positive, deletes a series outright, or it simply lapses — and a
+     * deleted series keeps its pivot rows, because the run that rewrites them
+     * deliberately leaves deleted series alone. The forecast stops walking any
+     * of those, so excluding their transactions here too would drop the same
+     * spending from both sides at once: invisible in the recurring charges,
+     * invisible in the everyday estimate, and quietly worse every time the user
+     * tidies the detected list up. Only a series still charging in the currency
+     * the forecast walks can vouch for a transaction being counted already.
      */
-    private function notAlreadyRecurring(): callable
+    private function notAlreadyRecurring(string $currency): callable
     {
+        $walkedForward = RecurringSeries::query()
+            ->stillCharging()
+            ->where('currency_code', $currency)
+            ->select('id');
+
         return fn (Builder $query) => $query->whereNotExists(
             fn ($sub) => $sub->from('recurring_series_transaction')
                 ->whereColumn('recurring_series_transaction.transaction_id', 'transactions.id')
+                ->whereIn('recurring_series_transaction.recurring_series_id', $walkedForward)
         );
     }
 }

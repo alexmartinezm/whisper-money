@@ -119,6 +119,24 @@ class RecurringSeries extends Model
     }
 
     /**
+     * The series a forecast walks forward: still billing, still wanted, still
+     * here. Soft deletes are handled by the model's own scope.
+     *
+     * The everyday-spending estimate leaves out exactly the transactions these
+     * series claim, on the grounds that the forecast already counts them. That
+     * only holds while both sides read the same set, so the definition lives
+     * here rather than being spelled out again at each call site: the two
+     * drifting apart is how spending falls through the gap between them.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopeStillCharging(Builder $query): Builder
+    {
+        return $query->visible()->where('status', RecurringSeriesStatus::Active);
+    }
+
+    /**
      * The expected amount rescaled to a month, so cadences can be summed and
      * ranked against each other.
      */
