@@ -95,8 +95,12 @@ export default function Dashboard() {
         return ids;
     }, [accountMetrics]);
 
-    const manageableAccounts = accountMetrics;
-
+    // Archived accounts stay in the payload so the chart keeps their history,
+    // but they are off the dashboard itself: no card, no row in the manager.
+    const manageableAccounts = useMemo(
+        () => accountMetrics.filter((a) => !a.archived_at),
+        [accountMetrics],
+    );
     const [editOpen, setEditOpen] = useState(false);
 
     // Optimistic ordering layered on top of the server order. Null means "use

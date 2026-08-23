@@ -1,6 +1,7 @@
 <?php
 
 use App\Mcp\Servers\WhisperMoneyServer;
+use App\Mcp\Tools\ListSpaces;
 use App\Models\User;
 
 use function Pest\Laravel\postJson;
@@ -131,4 +132,14 @@ it('restricts the recurring series status filter to the statuses that exist', fu
     $status = collect($tools)->firstWhere('name', 'list_recurring_series')['inputSchema']['properties']['status'];
 
     expect($status['enum'])->toBe(['active', 'lapsed']);
+});
+
+it('rejects the demo account, whose credentials are public and data is shared', function () {
+    config(['app.demo.email' => 'demo@example.test']);
+    $user = User::factory()->create(['email' => 'demo@example.test']);
+    $user->withAccessToken($user->createToken('mcp', ['mcp:read'])->accessToken);
+
+    WhisperMoneyServer::actingAs($user)
+        ->tool(ListSpaces::class)
+        ->assertHasErrors();
 });

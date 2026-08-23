@@ -78,6 +78,20 @@ class Budget extends Model
         return $this->hasMany(BudgetPeriod::class);
     }
 
+    /**
+     * The period covering the application date (today by default), if any.
+     *
+     * Ordered because more than one can cover today. Overlapping periods are
+     * not hypothetical - every biweekly budget created before the fix to
+     * `generatePreviousPeriod` has a pair, and a monthly budget anchored past
+     * the 28th can still produce one - and an unordered `first()` resolves to
+     * whatever MySQL returns first, which on the `(budget_id, start_date)`
+     * index is the *earliest* starting window. That is the wrong one: it is the
+     * period the user did not configure, and `BudgetController::show` cannot
+     * navigate out of it because its previous/next queries are strict
+     * comparisons that step over an overlapping sibling. Taking the latest
+     * start picks the period the chain actually continues from.
+     */
     public function getCurrentPeriod(?CarbonInterface $applicationDate = null): ?BudgetPeriod
     {
         $applicationDate ??= today();
@@ -85,6 +99,7 @@ class Budget extends Model
         return $this->periods()
             ->whereDate('start_date', '<=', $applicationDate->toDateString())
             ->whereDate('end_date', '>=', $applicationDate->toDateString())
+            ->orderByDesc('start_date')
             ->first();
     }
 
@@ -97,6 +112,28 @@ class Budget extends Model
 
         return $this->periods()
             ->whereDate('start_date', $currentPeriod->end_date->copy()->addDay()->toDateString())
+            ->first();
+    }
+
+    /**
+     * The period that continues the chain after the given one.
+     *
+     * Lives here rather than on the service so that the query is scoped to the
+     * budget by construction - stamping one budget's leftover onto another
+     * budget's period is not a mistake worth leaving reachable.
+     *
+     * Inclusive of a period starting on the given one's end date, because not
+     * every chain is a clean tiling: budgets that touch or overlap are real,
+     * most of them biweekly, since `calculatePeriodDates` snaps to a weekday
+     * rather than to a 14-day grid. Excluding that day skipped the real
+     * successor and appended yet another period alongside it.
+     */
+    public function periodFollowing(BudgetPeriod $period): ?BudgetPeriod
+    {
+        return $this->periods()
+            ->whereKeyNot($period->getKey())
+            ->where('start_date', '>=', $period->end_date)
+            ->orderBy('start_date')
             ->first();
     }
 }

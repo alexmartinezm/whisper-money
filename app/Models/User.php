@@ -37,6 +37,7 @@ use Stripe\Subscription as StripeSubscription;
  * @property ?Carbon $transactions_last_visited_at
  * @property ?Carbon $ai_consent_prompt_dismissed_at
  * @property ?string $price_arm
+ * @property ?string $signup_plan
  */
 class User extends Authenticatable implements HasLocalePreference, MustVerifyEmail
 {
@@ -60,6 +61,7 @@ class User extends Authenticatable implements HasLocalePreference, MustVerifyEma
         'timezone',
         'current_space_id',
         'price_arm',
+        'signup_plan',
     ];
 
     /**
@@ -78,6 +80,7 @@ class User extends Authenticatable implements HasLocalePreference, MustVerifyEma
         'trial_ends_at',
         'encryption_salt',
         'price_arm',
+        'signup_plan',
     ];
 
     /**
@@ -489,6 +492,15 @@ class User extends Authenticatable implements HasLocalePreference, MustVerifyEma
         return $this->email === config('app.demo.email');
     }
 
+    /**
+     * Whether the demo account's restrictions apply. Local is exempt so the
+     * account stays usable in development, matching BlockDemoAccountActions.
+     */
+    public function isRestrictedDemoAccount(): bool
+    {
+        return $this->isDemoAccount() && ! app()->environment('local');
+    }
+
     public function isAdmin(): bool
     {
         return $this->email === config('mail.admin_email');
@@ -527,6 +539,11 @@ class User extends Authenticatable implements HasLocalePreference, MustVerifyEma
     public function wantsBankTransactionsSyncedEmail(): bool
     {
         return $this->setting->notify_on_bank_transactions_synced ?? true;
+    }
+
+    public function wantsInactiveNoBankEmail(): bool
+    {
+        return $this->setting->notify_on_inactive_no_bank ?? true;
     }
 
     public function routeNotificationForMail(?Notification $notification = null): ?string

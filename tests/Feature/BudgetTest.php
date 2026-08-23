@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\BudgetPeriodType;
 use App\Models\Account;
 use App\Models\Budget;
 use App\Models\BudgetPeriod;
@@ -988,4 +989,39 @@ test('budget period planning patch updates only the direct successor', function 
         ->and($september->fresh()->allocated_amount)->toBe(40000);
     $this->actingAs($user)->patch("/budgets/{$budget->id}/periods/{$august->id}", ['allocated_amount' => -1])
         ->assertSessionHasErrors('allocated_amount');
+});
+
+test('opening a dormant budget lands on the period covering today', function () {
+    Carbon::setTestNow(Carbon::parse('2026-08-20 09:00:00'));
+
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $budget = Budget::factory()->create([
+        'user_id' => $user->id,
+        'period_type' => BudgetPeriodType::Monthly,
+        'period_start_day' => 1,
+    ]);
+    BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => '2026-02-01',
+        'end_date' => '2026-02-28',
+        'allocated_amount' => 10000,
+    ]);
+
+    // Twice, because continuing the chain from where it ended produced a period
+    // that still did not cover today - so the next visit found no current
+    // period either and appended another one, on every single page load.
+    foreach (range(1, 2) as $ignored) {
+        $this->actingAs($user)
+            ->get("/budgets/{$budget->id}")
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('budgets/show')
+                ->where(
+                    'currentPeriod.start_date',
+                    fn (string $date): bool => str_starts_with($date, '2026-08-01'),
+                )
+            );
+    }
+
+    expect(BudgetPeriod::where('budget_id', $budget->id)->count())->toBe(2);
 });

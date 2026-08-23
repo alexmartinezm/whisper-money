@@ -19,6 +19,7 @@ export interface NetWorthEvolutionAccount {
     linked_loan_account_id?: string | null;
     hidden_on_dashboard?: boolean;
     include_in_net_worth?: boolean;
+    archived_at?: string | null;
 }
 
 export interface OriginalAmount {
@@ -44,6 +45,7 @@ export interface AccountWithMetrics extends Account {
     investedAmount: number | null;
     hidden_on_dashboard: boolean;
     include_in_net_worth?: boolean;
+    archived_at: string | null;
 }
 
 export interface DashboardData {
@@ -108,6 +110,7 @@ export function deriveAccountMetrics(
             investedAmount: account.invested_amount ?? null,
             hidden_on_dashboard: account.hidden_on_dashboard ?? false,
             include_in_net_worth: account.include_in_net_worth ?? true,
+            archived_at: account.archived_at ?? null,
         } as AccountWithMetrics;
     });
 }

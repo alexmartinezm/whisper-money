@@ -3,16 +3,13 @@
 namespace App\Console\Commands;
 
 use App\Console\Commands\Concerns\NotifiesBankUsers;
-use App\Enums\BankingConnectionStatus;
 use App\Enums\DripEmailType;
-use App\Jobs\SyncBankingConnectionJob;
 use App\Mail\BankOutageEmail;
 use App\Models\BankingConnection;
 use App\Models\User;
 use Closure;
 use Illuminate\Console\Command;
 use Illuminate\Contracts\Console\Isolatable;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
 /**
@@ -95,28 +92,6 @@ class NotifyBankOutageCommand extends Command implements Isolatable
     }
 
     /**
-     * The connections an outage at the bank actually explains: the ones the
-     * scheduler will keep retrying, mirroring SyncAllBankingConnectionsJob.
-     *
-     * This is what makes the email honest. An expired, revoked or retry-capped
-     * connection is stuck for its own reason and its owner does have to
-     * reconnect — the exact opposite of what this notice tells them.
-     */
-    private function matchesOutage(Closure $matchesBank): Closure
-    {
-        return fn (Builder $query) => $query
-            ->tap($matchesBank)
-            ->where(fn (Builder $query) => $query
-                ->where('status', BankingConnectionStatus::Active)
-                ->orWhere(fn (Builder $query) => $query
-                    ->where('status', BankingConnectionStatus::Error)
-                    ->where('consecutive_sync_failures', '<', SyncBankingConnectionJob::MAX_SCHEDULED_RETRIES)))
-            ->where(fn (Builder $query) => $query
-                ->whereNull('valid_until')
-                ->orWhere('valid_until', '>', now()));
-    }
-
-    /**
      * Show who is about to be emailed, and flag the connections to the same bank
      * that are deliberately left out because this notice would be wrong for them.
      *
@@ -135,7 +110,7 @@ class NotifyBankOutageCommand extends Command implements Isolatable
             - BankingConnection::query()->tap($matchesOutage)->count();
 
         if ($excluded > 0) {
-            $this->warn("Skipping {$excluded} other connection(s) to {$displayName}: expired, revoked or past the retry cap. Those need a reconnect, not this notice.");
+            $this->warn("Skipping {$excluded} other connection(s) to {$displayName}: expired, revoked, past the retry cap, or left behind by a deleted account. Those need a reconnect, not this notice.");
         }
     }
 
@@ -149,7 +124,7 @@ class NotifyBankOutageCommand extends Command implements Isolatable
         $existing = BankingConnection::query()->tap($this->matchesBank($aspsp, $country))->count();
 
         if ($existing > 0) {
-            $this->warn("{$existing} connection(s) to {$displayName} exist, but none is waiting on the bank: expired, revoked or past the retry cap. Those need a reconnect, not this notice.");
+            $this->warn("{$existing} connection(s) to {$displayName} exist, but none is waiting on the bank: expired, revoked, past the retry cap, or left behind by a deleted account. Those need a reconnect, not this notice.");
 
             return self::SUCCESS;
         }

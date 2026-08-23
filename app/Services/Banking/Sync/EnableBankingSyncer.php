@@ -3,6 +3,7 @@
 namespace App\Services\Banking\Sync;
 
 use App\Enums\TransactionSource;
+use App\Exceptions\Banking\CarriesBankingOperation;
 use App\Exceptions\Banking\ExpiredBankingSessionException;
 use App\Exceptions\Banking\InaccessibleBankAccountException;
 use App\Exceptions\Banking\TransientBankingProviderException;
@@ -14,6 +15,7 @@ use App\Services\Banking\BalanceSyncService;
 use App\Services\Banking\TransactionSyncService;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class EnableBankingSyncer extends AbstractBankingConnectionSyncer
 {
@@ -48,82 +50,199 @@ class EnableBankingSyncer extends AbstractBankingConnectionSyncer
 
     public function sync(BankingConnection $connection, bool $isFirstSync): array
     {
-        $dateTo = now()->toDateString();
-
         $transactionsPerBank = [];
         $balanceFailed = 0;
+        $balanceRateLimitFailure = null;
         $transactionFailure = null;
 
+        $accountsAttempted = 0;
+
         $connection->load('accounts.bank');
+        $pageBudget = $this->pageBudget($connection);
 
-        foreach ($connection->accounts as $account) {
-            $created = 0;
-            [$dateFrom, $strategy] = $this->resolveWindow($connection, $account, $dateTo, $isFirstSync);
+        try {
+            foreach ($connection->accounts as $account) {
+                $created = 0;
+                $accountsAttempted++;
+                [$dateFrom, $dateTo, $strategy] = $this->resolveWindow($connection, $account, $isFirstSync);
 
-            try {
-                $created = $this->transactionSync->sync($account, $dateFrom, $dateTo, $strategy, saveDailyBalances: ! $account->isLinked());
-            } catch (InaccessibleBankAccountException|WrongTransactionsPeriodException $e) {
-                // A single account the bank no longer exposes, or whose history
-                // window it refuses even after narrowing, must not break the
-                // whole connection sync. Skip it; the user can stop syncing it
-                // from the manage-accounts screen.
-                Log::warning('Skipping unsyncable EnableBanking account during sync', [
-                    'connection_id' => $connection->id,
-                    'account_id' => $account->id,
-                    'reason' => $e::class,
-                ]);
+                // Read before the balance sync below writes today's row.
+                $owedBackfill = $this->owesHistoricalBalances($account, $isFirstSync);
 
-                continue;
-            } catch (TransientBankingProviderException $e) {
-                $transactionFailure ??= $this->recordAccountTransactionFailure($account, $e);
+                // Balances first, and deliberately so. The transactions call is
+                // the paginated one: it is what spends the consent's metered
+                // daily allowance, and it is what throws. A balance call queued
+                // behind it is the call that never happens - Trade Republic made
+                // 5,740 transaction requests in the week to 2026-08-21 and not
+                // one balance request, because every run died paginating before
+                // it got here. One request per account, taken while there is
+                // still allowance left to take it with.
+                $balanceSynced = $this->syncBalances($connection, $account, $balanceRateLimitFailure);
+
+                if (! $balanceSynced) {
+                    $balanceFailed++;
+                }
+
+                try {
+                    $created = $this->transactionSync->sync($account, $dateFrom, $dateTo, $strategy, saveDailyBalances: ! $account->isLinked(), pageBudget: $pageBudget);
+                } catch (InaccessibleBankAccountException|WrongTransactionsPeriodException $e) {
+                    // A single account the bank no longer exposes, or whose history
+                    // window it refuses even after narrowing, must not break the
+                    // whole connection sync. Skip it; the user can stop syncing it
+                    // from the manage-accounts screen.
+                    Log::warning('Skipping unsyncable EnableBanking account during sync', [
+                        ...$connection->logContext(),
+                        'account_id' => $account->id,
+                        'reason' => $e::class,
+                    ]);
+
+                    continue;
+                } catch (TransientBankingProviderException $e) {
+                    $transactionFailure ??= $this->recordAccountTransactionFailure($connection, $account, $e);
+                }
+
+                $transactionsPerBank = $this->tally($transactionsPerBank, $account, $created);
+
+                // Local arithmetic over the rows just imported, so unlike the
+                // balance request itself this half has to follow them.
+                $this->backfillHistoricalBalances($connection, $account, $owedBackfill && $balanceSynced);
             }
+        } catch (\Throwable $e) {
+            $this->logAbortedSync($connection, $e, [
+                'accounts_attempted' => $accountsAttempted,
+                'accounts_total' => $connection->accounts->count(),
+                'transactions_synced' => array_sum($transactionsPerBank),
+                'balance_failed' => $balanceFailed,
+                'balance_rate_limited' => $balanceRateLimitFailure !== null,
+            ]);
 
-            if (! $this->syncBalances($account, $isFirstSync)) {
-                $balanceFailed++;
-            }
-
-            if ($created > 0) {
-                $bankName = $account->bank->name ?? __('Unknown Bank');
-                $transactionsPerBank[$bankName] = ($transactionsPerBank[$bankName] ?? 0) + $created;
-            }
+            throw $e;
         }
 
         // Report the failure only once every account has had its turn. The run
         // still fails, so the connection keeps its Error state, its retries and its
         // unset last_synced_at exactly as before - the one thing that changes is
         // that the accounts behind the failing one were attempted at all.
+        //
+        // Outside the try on purpose: by here nothing was aborted mid-run, every
+        // account was attempted, and the per-account failure is already logged.
         if ($transactionFailure !== null) {
+            // The balance rate limit has no channel here - the metadata only
+            // travels on the success path - so a run that dies like this loses its
+            // backoff and retries into an allowance it knows is spent. Throwing
+            // the 429 instead would buy the backoff at the price of the sync log
+            // blaming the balances endpoint for a run the transactions ended, so
+            // the abort is recorded with `balance_rate_limited` and the next
+            // attempt's own 429 is what applies the window.
             throw $transactionFailure;
         }
 
-        if ($isFirstSync) {
-            $connection->update(['bank_transactions_email_cutoff_at' => now()]);
-        } elseif ($connection->user->canReceiveEmails()) {
-            SendDailyBankTransactionsSyncedEmailJob::dispatch($connection->user, now()->toDateString());
-        }
+        $this->notifyRunCompleted($connection, $isFirstSync);
 
         return [
             'transactions_synced' => array_sum($transactionsPerBank),
             'transactions_per_bank' => $transactionsPerBank,
             'balance_failed' => $balanceFailed,
+            'balance_rate_limit' => $this->rateLimitFacts($balanceRateLimitFailure),
         ];
+    }
+
+    /**
+     * Record what the run had already got done when it died.
+     *
+     * A throwing run returns no metadata, so "this connection imported six
+     * transactions and then the rate limit killed the run" was until now only
+     * reconstructable by lining up timestamps across two tables.
+     *
+     * @param  array<string, bool|int>  $progress
+     */
+    private function logAbortedSync(BankingConnection $connection, \Throwable $e, array $progress): void
+    {
+        // A consent that lapsed mid-run is a lifecycle event the job already
+        // records, not a failure worth a second warning.
+        if ($e instanceof ExpiredBankingSessionException) {
+            return;
+        }
+
+        Log::warning('EnableBanking sync aborted mid-run', [
+            ...$connection->logContext(),
+            ...$progress,
+            'operation' => $e instanceof CarriesBankingOperation ? $e->operation : null,
+            'status_code' => $e instanceof RequestException ? $e->response->status() : null,
+            'reason' => $e::class,
+            'error' => $e->getMessage(),
+        ]);
     }
 
     /**
      * The window to ask the bank for, and the strategy a window that wide needs.
      *
-     * @return array{0: string, 1: string|null}
+     * @return array{0: string, 1: string, 2: string|null}
      */
-    private function resolveWindow(BankingConnection $connection, Account $account, string $dateTo, bool $isFirstSync): array
+    private function resolveWindow(BankingConnection $connection, Account $account, bool $isFirstSync): array
     {
+        // A previous run ran out of page budget partway down this account's
+        // history. The provider serves pages newest-first, so picking up where
+        // it stopped means ending the window there instead of at today - and
+        // asking for the full history again, because the watermark the routine
+        // window is built on has already moved past it.
+        //
+        // Until it drains, the account's window ends in the past, so its newest
+        // transactions wait for the backfill to finish. That is the accepted
+        // cost: the balance, which is what reads as zero today, is fetched on
+        // every one of those runs regardless. A --full resync is an explicit
+        // request to re-pull everything, so it starts over rather than resuming.
+        $resumeBefore = $isFirstSync ? null : $account->transactions_paginate_before?->toDateString();
+
+        if ($resumeBefore !== null) {
+            $dateFrom = $this->resolveDateFrom($account, $resumeBefore, forceFullWindow: true);
+
+            // Unless the full window has since closed over the marker: it moves
+            // forward a day at a time, so a marker left alone for long enough
+            // ends up before the start of the history we ask for and there is
+            // nothing left to walk back to. Falling through to the routine
+            // window is what keeps that from inverting into date_from > date_to;
+            // the run that ends without being cut short clears the marker.
+            if ($dateFrom < $resumeBefore) {
+                return [$dateFrom, $resumeBefore, $this->strategyFor($dateFrom)];
+            }
+        }
+
         // A first sync on a connection that has synced before can only come from
         // the --full flag, an explicit request to re-pull the whole history.
         $forceFullWindow = $isFirstSync && $connection->last_synced_at !== null;
 
+        $dateTo = now()->toDateString();
         $dateFrom = $this->resolveDateFrom($account, $dateTo, $forceFullWindow);
-        $shortWindowStart = now()->subDays(self::SHORT_WINDOW_DAYS)->toDateString();
 
-        return [$dateFrom, $dateFrom < $shortWindowStart ? 'longest' : null];
+        return [$dateFrom, $dateTo, $this->strategyFor($dateFrom)];
+    }
+
+    /**
+     * The strategy a window starting this far back needs, or null when it is
+     * narrow enough to ask for plainly.
+     */
+    private function strategyFor(string $dateFrom): ?string
+    {
+        return $dateFrom < now()->subDays(self::SHORT_WINDOW_DAYS)->toDateString() ? 'longest' : null;
+    }
+
+    /**
+     * How many transaction pages one account may cost this connection's bank,
+     * from `config('banking.transaction_page_budget')`. PHP_INT_MAX is
+     * unbudgeted, which is every bank that has not needed an entry.
+     */
+    private function pageBudget(BankingConnection $connection): int
+    {
+        $budgets = config('banking.transaction_page_budget');
+
+        if (! is_array($budgets)) {
+            return PHP_INT_MAX;
+        }
+
+        $budget = $budgets[$connection->aspsp_name ?? ''] ?? $budgets['default'] ?? null;
+
+        return is_int($budget) && $budget > 0 ? $budget : PHP_INT_MAX;
     }
 
     /**
@@ -136,17 +255,18 @@ class EnableBankingSyncer extends AbstractBankingConnectionSyncer
      * path. Only a reply that came back with a status says something about *this*
      * account: the ConnectionException path is the one that leaves statusCode null.
      */
-    private function recordAccountTransactionFailure(Account $account, TransientBankingProviderException $e): TransientBankingProviderException
+    private function recordAccountTransactionFailure(BankingConnection $connection, Account $account, TransientBankingProviderException $e): TransientBankingProviderException
     {
         if ($e->statusCode === null) {
             throw $e;
         }
 
         Log::warning('EnableBanking transaction sync failed for one account, continuing', [
-            'connection_id' => $account->banking_connection_id,
+            ...$connection->logContext(),
             'account_id' => $account->id,
             'status_code' => $e->statusCode,
             'provider_code' => $e->providerCode,
+            'operation' => $e->operation,
             'error' => $e->getMessage(),
         ]);
 
@@ -154,40 +274,181 @@ class EnableBankingSyncer extends AbstractBankingConnectionSyncer
     }
 
     /**
-     * Sync one account's balances, tolerating a provider that will not serve them.
+     * Fetch one account's balances, tolerating a provider that will not serve them.
+     *
+     * `$rateLimitFailure` is filled in with the 429 when the provider rate limited
+     * the call, so the caller can hand the job what its backoff policy needs.
+     *
+     * Arriving with it already filled in means an earlier account in the same run
+     * was rate limited: the allowance is spent for the whole consent, so this call
+     * is not made at all rather than burning what is left of it.
      *
      * @return bool Whether the balances were synced
      */
-    private function syncBalances(Account $account, bool $isFirstSync): bool
+    private function syncBalances(BankingConnection $connection, Account $account, ?RequestException &$rateLimitFailure): bool
     {
+        if ($rateLimitFailure !== null) {
+            return false;
+        }
+
         try {
             $this->balanceSync->sync($account);
 
-            if ($isFirstSync && ! $account->isLinked()) {
-                $this->balanceSync->calculateHistoricalBalances($account);
-            }
-
             return true;
         } catch (\Throwable $e) {
-            // An expired consent needs the user to reconnect, and a rate limit has
-            // to reach the job so it applies the provider backoff: swallowing it
-            // would keep burning the remaining daily quota.
-            if ($e instanceof ExpiredBankingSessionException || $this->isRateLimit($e)) {
+            // An expired consent needs the user to reconnect, so it still has to
+            // reach the job.
+            if ($e instanceof ExpiredBankingSessionException) {
                 throw $e;
             }
 
-            // Anything else is not worth losing the run over. Balances are a
+            // A rate limit used to be rethrown so the job would apply the provider
+            // backoff, which threw away a run whose transactions were already
+            // persisted - and with them last_synced_at. The backoff is the part
+            // worth keeping, so it is reported instead of thrown: without it the
+            // remaining scheduled runs keep burning the daily allowance.
+            if ($e instanceof RequestException && $e->response->status() === 429) {
+                $rateLimitFailure = $e;
+            }
+
+            // No balance failure is worth losing the run over. Balances are a
             // nice-to-have next to the transactions we just persisted, and failing
             // here leaves last_synced_at unset.
             Log::warning('EnableBanking balance sync failed, continuing', [
-                'connection_id' => $account->banking_connection_id,
+                ...$connection->logContext(),
                 'account_id' => $account->id,
+                'operation' => 'balances',
                 'reason' => $e::class,
+                'status_code' => $e instanceof RequestException ? $e->response->status() : null,
+                'rate_limited' => $rateLimitFailure !== null,
                 'error' => $e->getMessage(),
             ]);
 
             return false;
         }
+    }
+
+    /**
+     * What a completed run leaves behind: the cutoff that keeps the daily email
+     * from reporting a whole imported history as today's news, or the email
+     * itself on every run after that.
+     */
+    private function notifyRunCompleted(BankingConnection $connection, bool $isFirstSync): void
+    {
+        // A run still walking an account's history back is importing rows dated
+        // months ago, and the daily email keys on when a row was written rather
+        // than when it happened. Announcing those as today's news is the very
+        // thing the cutoff exists to prevent, so it moves with the backfill and
+        // the email waits until there is no history left owed.
+        if ($isFirstSync || $this->isBackfillingHistory($connection)) {
+            $connection->update(['bank_transactions_email_cutoff_at' => now()]);
+
+            return;
+        }
+
+        if ($connection->user->canReceiveEmails()) {
+            SendDailyBankTransactionsSyncedEmailJob::dispatch($connection->user, now()->toDateString());
+        }
+    }
+
+    /**
+     * Whether any of this connection's accounts still owes history to a run the
+     * page budget cut short.
+     */
+    private function isBackfillingHistory(BankingConnection $connection): bool
+    {
+        return $connection->accounts->contains(
+            fn (Account $account) => $account->transactions_paginate_before !== null
+        );
+    }
+
+    /**
+     * Whether this account is still owed the daily balances derived from its
+     * transactions.
+     *
+     * Read before the balance sync writes today's row. The backfill used to be
+     * spent on the first sync alone, which was safe while a refused balance call
+     * discarded the whole run and left the next one a first sync too. Now that
+     * the run is kept, an account that has never had a balance is still owed it;
+     * the backfill only ever writes dates it has not written.
+     *
+     * A linked account's balances are its counterpart's, not its own.
+     */
+    private function owesHistoricalBalances(Account $account, bool $isFirstSync): bool
+    {
+        if ($account->isLinked()) {
+            return false;
+        }
+
+        return $isFirstSync || $account->balances()->doesntExist();
+    }
+
+    /**
+     * Fill in the days between the balance the bank reported and the
+     * transactions just imported.
+     *
+     * Local arithmetic, so unlike the balance request itself this half has to
+     * follow the transactions - and it is tolerated the same way, because it is
+     * derived data. Letting it end the run would leave `last_synced_at` unset
+     * over already-persisted transactions and charge the connection a strike
+     * towards being dropped from the schedule for good.
+     */
+    private function backfillHistoricalBalances(BankingConnection $connection, Account $account, bool $owed): void
+    {
+        if (! $owed) {
+            return;
+        }
+
+        try {
+            $this->balanceSync->calculateHistoricalBalances($account);
+        } catch (\Throwable $e) {
+            Log::warning('EnableBanking historical balance backfill failed, continuing', [
+                ...$connection->logContext(),
+                'account_id' => $account->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Tally what one account imported, under the bank it came from.
+     *
+     * @param  array<string, int>  $transactionsPerBank
+     * @return array<string, int>
+     */
+    private function tally(array $transactionsPerBank, Account $account, int $created): array
+    {
+        if ($created <= 0) {
+            return $transactionsPerBank;
+        }
+
+        $bankName = $account->bank->name ?? __('Unknown Bank');
+        $transactionsPerBank[$bankName] = ($transactionsPerBank[$bankName] ?? 0) + $created;
+
+        return $transactionsPerBank;
+    }
+
+    /**
+     * What the provider's 429 said, in the JSON-safe shape the job's backoff
+     * policy reads - the exception itself cannot go in the metadata, which is
+     * persisted as JSON on the sync log. Null when no balance call was limited.
+     *
+     * @return array{retry_after: string|null, message: string}|null
+     */
+    private function rateLimitFacts(?RequestException $e): ?array
+    {
+        if ($e === null) {
+            return null;
+        }
+
+        $body = $e->response->json();
+
+        return [
+            'retry_after' => $e->response->header('Retry-After') ?: null,
+            // Capped like the response body the job logs: a provider that answers
+            // an error with something enormous must not empty it into the row.
+            'message' => is_array($body) ? Str::limit((string) ($body['message'] ?? ''), 500) : '',
+        ];
     }
 
     /**
@@ -219,10 +480,5 @@ class EnableBankingSyncer extends AbstractBankingConnectionSyncer
         $start = $watermark->toDateString() > $dateTo ? now() : $watermark;
 
         return $start->copy()->subDays(self::WATERMARK_OVERLAP_DAYS)->toDateString();
-    }
-
-    private function isRateLimit(\Throwable $e): bool
-    {
-        return $e instanceof RequestException && $e->response->status() === 429;
     }
 }

@@ -29,22 +29,21 @@ import { installChunkLoadRecovery } from './lib/chunk-load-recovery';
 import { installFailedNavigationToast } from './lib/failed-navigation-toast';
 import { leavePage } from './lib/leave-page';
 import { initializePostHog } from './lib/posthog';
-import { trackPrefetchedUrls } from './lib/prefetch-tracker';
 import {
     isBrowserExtensionNoise,
     isChunkLoadErrorEvent,
     isFacebookInAppBrowserJavaBridgeNoise,
-    isFailedPrefetchNoise,
     isPageLeaveAbortNoise,
     isPostMessageDataCloneNoise,
     isSafariCashbackExtensionNoise,
+    isUnattendedRequestNoise,
 } from './lib/sentry';
-import { showSubscriptionPaymentIssueToast } from './lib/subscription-payment-issue-toast';
+import { trackUnattendedRequests } from './lib/unattended-requests';
 import type { ExpiredBankingConnectionNotification, SharedData } from './types';
 import { __, setTranslations } from './utils/i18n';
 
 installChunkLoadRecovery();
-trackPrefetchedUrls();
+trackUnattendedRequests();
 installFailedNavigationToast();
 
 Sentry.init({
@@ -57,7 +56,7 @@ Sentry.init({
         if (
             isChunkLoadErrorEvent(event) ||
             isPageLeaveAbortNoise(event) ||
-            isFailedPrefetchNoise(event) ||
+            isUnattendedRequestNoise(event) ||
             isBrowserExtensionNoise(event) ||
             isPostMessageDataCloneNoise(event) ||
             isFacebookInAppBrowserJavaBridgeNoise(event) ||
@@ -208,8 +207,6 @@ createInertiaApp({
             (initialPageProps?.expiredBankingConnections as
                 | ExpiredBankingConnectionNotification[]
                 | undefined) ?? [];
-        const initialSubscriptionPaymentIssue =
-            initialPageProps?.subscriptionPaymentIssue;
 
         const syncUserTimezone = async (pageProps?: Partial<SharedData>) => {
             const user = pageProps?.auth?.user ?? null;
@@ -257,14 +254,8 @@ createInertiaApp({
                 setTranslations(translations);
             }
 
-            showSubscriptionPaymentIssueToast(
-                pageProps.subscriptionPaymentIssue,
-            );
-
             void syncUserTimezone(pageProps);
         });
-
-        showSubscriptionPaymentIssueToast(initialSubscriptionPaymentIssue);
 
         void syncUserTimezone(initialPageProps);
 

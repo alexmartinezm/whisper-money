@@ -13,12 +13,19 @@ Schedule::command('banks:check-logos')->weekly();
 // existed without ever running. The flag matters: without it the audit always
 // exits zero, so a scheduled run would stay silent about whatever it found.
 Schedule::command('transactions:audit-splits --fail-on-invalid')->dailyAt('03:30');
+
+// Connectors move in and out of beta at the provider, so the flag stored on
+// each connection goes stale on its own. Weekly is plenty: it is 17 catalogue
+// calls and a badge, not something a user is waiting on.
+Schedule::command('banking:sync-aspsp-beta')->weekly();
 Schedule::command('banking:cancel-free-enablebanking')->lastDayOfMonth('18:00');
 Schedule::command('real-estate:apply-revaluation')->monthlyOn(1, '00:00');
 Schedule::command('loans:generate-balances')->monthlyOn(1, '00:00');
 Schedule::command('email:paywall-follow-up')->dailyAt('10:00')->timezone('Europe/Madrid');
 Schedule::command('email:ai-consent-follow-up')->dailyAt('10:15')->timezone('Europe/Madrid');
+Schedule::command('email:inactive-no-bank')->dailyAt('09:45')->timezone('Europe/Madrid');
 Schedule::command('email:user-emails-report')->monthlyOn(1, '09:05')->timezone('Europe/Madrid');
+Schedule::command('banking:health --email')->dailyAt('09:30')->timezone('Europe/Madrid');
 Schedule::command('stats:daily-report')->dailyAt('09:00')->timezone('Europe/Madrid');
 Schedule::command('stats:ai-cohort-report')->monthlyOn(1, '09:00')->timezone('Europe/Madrid');
 Schedule::command('stats:subscription-funnel')->weekly()->mondays()->at('09:15')->timezone('Europe/Madrid');

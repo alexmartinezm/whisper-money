@@ -5,7 +5,9 @@ namespace App\Models;
 use App\Enums\AccountType;
 use App\Models\Concerns\BelongsToSpace;
 use App\Services\BudgetTransactionService;
+use Carbon\Carbon;
 use Database\Factories\AccountFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -17,6 +19,8 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
  * @property AccountType $type
+ * @property ?Carbon $archived_at
+ * @property ?Carbon $transactions_paginate_before
  */
 class Account extends Model
 {
@@ -34,11 +38,13 @@ class Account extends Model
         'encrypted',
         'banking_connection_id',
         'external_account_id',
+        'transactions_paginate_before',
         'iban',
         'linked_at',
         'position',
         'hidden_on_dashboard',
         'include_in_net_worth',
+        'archived_at',
         'ownership_percentage',
         'ownership_applies_to_balance',
     ];
@@ -48,6 +54,7 @@ class Account extends Model
         'user_id',
         'space_id',
         'bank_id',
+        'transactions_paginate_before',
         'iban',
         'position',
         'hidden_on_dashboard',
@@ -82,12 +89,32 @@ class Account extends Model
             'type' => AccountType::class,
             'encrypted' => 'boolean',
             'linked_at' => 'datetime',
+            'transactions_paginate_before' => 'date',
             'position' => 'integer',
             'hidden_on_dashboard' => 'boolean',
             'include_in_net_worth' => 'boolean',
+            'archived_at' => 'datetime',
             'ownership_percentage' => 'integer',
             'ownership_applies_to_balance' => 'boolean',
         ];
+    }
+
+    /**
+     * Archived accounts are left out of the accounts page and of every picker
+     * that points new data at an account. They stay in the balance history, so
+     * the queries that build it deliberately do not use this scope.
+     *
+     * @param  Builder<Account>  $query
+     * @return Builder<Account>
+     */
+    public function scopeNotArchived(Builder $query): Builder
+    {
+        return $query->whereNull('archived_at');
+    }
+
+    public function isArchived(): bool
+    {
+        return $this->archived_at !== null;
     }
 
     /**

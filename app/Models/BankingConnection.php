@@ -17,6 +17,11 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
  * @property bool $has_pending_accounts
+ * @property bool $can_sync_manually
+ * @property Carbon|null $next_sync_attempt_at
+ * @property string|null $aspsp_name
+ * @property string|null $aspsp_country
+ * @property bool|null $aspsp_beta
  * @property BankingProvider $provider
  * @property BankingConnectionStatus $status
  * @property Carbon|null $valid_until
@@ -41,6 +46,7 @@ class BankingConnection extends Model
         'aspsp_name',
         'aspsp_country',
         'aspsp_logo',
+        'aspsp_beta',
         'status',
         'valid_until',
         'last_synced_at',
@@ -63,11 +69,30 @@ class BankingConnection extends Model
         'session_id',
     ];
 
+    /**
+     * How this connection identifies itself in a log line.
+     *
+     * Which bank it is decides whether a wave of failures is one connector
+     * misbehaving or the provider as a whole, and that is the first question
+     * every sync investigation starts with.
+     *
+     * @return array<string, string|null>
+     */
+    public function logContext(): array
+    {
+        return [
+            'connection_id' => $this->id,
+            'aspsp_name' => $this->aspsp_name,
+            'aspsp_country' => $this->aspsp_country,
+        ];
+    }
+
     protected function casts(): array
     {
         return [
             'provider' => BankingProvider::class,
             'status' => BankingConnectionStatus::class,
+            'aspsp_beta' => 'boolean',
             'valid_until' => 'datetime',
             'last_synced_at' => 'datetime',
             'bank_transactions_email_cutoff_at' => 'datetime',

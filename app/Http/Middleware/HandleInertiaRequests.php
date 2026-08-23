@@ -5,7 +5,6 @@ namespace App\Http\Middleware;
 use App\Enums\BankingConnectionStatus;
 use App\Enums\BankingProvider;
 use App\Features\CalculateBalancesOnImport;
-use App\Features\Mcp;
 use App\Features\RecurringTransactions;
 use App\Features\TransactionSplitting;
 use App\Jobs\PurgeResidualEncryptionArtifactsJob;
@@ -248,7 +247,6 @@ class HandleInertiaRequests extends Middleware
             return [
                 'cashflow' => true,
                 'calculateBalancesOnImport' => false,
-                'mcp' => false,
                 'transactionSplitting' => true,
                 'recurringTransactions' => false,
             ];
@@ -256,7 +254,6 @@ class HandleInertiaRequests extends Middleware
 
         $features = Feature::for($user)->values([
             CalculateBalancesOnImport::class,
-            Mcp::class,
             TransactionSplitting::class,
             RecurringTransactions::class,
         ]);
@@ -264,7 +261,6 @@ class HandleInertiaRequests extends Middleware
         return [
             'cashflow' => true,
             'calculateBalancesOnImport' => $features[CalculateBalancesOnImport::class] !== false,
-            'mcp' => $features[Mcp::class] !== false,
             'transactionSplitting' => $features[TransactionSplitting::class] !== false,
             'recurringTransactions' => $features[RecurringTransactions::class] !== false,
         ];
