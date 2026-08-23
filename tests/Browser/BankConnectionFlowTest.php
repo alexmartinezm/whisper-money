@@ -35,13 +35,12 @@ it('connects a bank during onboarding', function () {
 
     $page = visit('/onboarding');
 
-    $page->assertSee('Welcome to')
+    $page->assertSee('Welcome to Whisper Money')
         ->click("Let's Get Started")
         ->waitForText('Account Types', 5)
         ->click('Create Your First Account')
         ->waitForText('How would you like to set up this account?', 5)
         ->click('Connected')
-        ->click('Continue')
         ->waitForText('Connect Your Bank', 5)
         ->click('[role="combobox"]')
         ->wait(0.5)
@@ -85,9 +84,12 @@ it('connects a bank from settings and maps accounts', function () {
         ->wait(0.3)
         ->click('button:has-text("Continue")')
         ->waitForText('Banco de Sabadell', 5)
+        // Sabadell is a beta connector in the fake catalogue.
+        ->assertSee('Beta')
         ->click('[role="dialog"] button:has-text("Banco de Sabadell")')
         ->click('[role="dialog"] button:has-text("Continue")')
         ->waitForText('You will be redirected', 5)
+        ->assertSee('This bank is still in beta')
         ->click('[role="dialog"] button:has-text("Connect")')
         ->wait(3);
 

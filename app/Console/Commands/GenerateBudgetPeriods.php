@@ -5,7 +5,6 @@ namespace App\Console\Commands;
 use App\Models\Budget;
 use App\Models\BudgetPeriod;
 use App\Services\BudgetPeriodService;
-use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
 
 class GenerateBudgetPeriods extends Command
@@ -13,6 +12,19 @@ class GenerateBudgetPeriods extends Command
     protected $signature = 'budgets:generate-periods';
 
     protected $description = 'Generate upcoming budget periods and close completed ones';
+
+    /**
+     * How far ahead of today the chain is kept.
+     *
+     * The repair migration that trims the runaway chains reads this, so that its
+     * result is exactly what the first run afterwards expects to find. Raising
+     * it here without re-running that migration only means the next run tops the
+     * chain up, which is harmless - the two disagreeing silently is not.
+     *
+     * @api Read from a migration, which PHPStan does not analyse - only `app` is
+     *      in its paths, so without this the constant reads as unused.
+     */
+    public const PERIODS_KEPT_AHEAD = 2;
 
     public function __construct(protected BudgetPeriodService $budgetPeriodService)
     {
@@ -23,22 +35,48 @@ class GenerateBudgetPeriods extends Command
     {
         $this->info('Generating budget periods...');
 
-        $applicationDate = CarbonImmutable::today();
-        $budgets = Budget::query()->get();
+        // Not eager loading the periods: everything below re-queries them, and
+        // loading every period of every budget is what eventually exhausted the
+        // 128M limit and killed this command outright. Lazily for the same
+        // reason - nothing here needs every budget in memory at once.
+        $budgets = Budget::query()->lazyById();
         $generatedCount = 0;
         $closedCount = 0;
 
         foreach ($budgets as $budget) {
-            $currentPeriod = $budget->getCurrentPeriod($applicationDate);
+            $currentPeriod = $budget->getCurrentPeriod();
 
-            if ($currentPeriod === null) {
-                $currentPeriod = $this->budgetPeriodService->generatePeriod($budget, null, $applicationDate);
+            if (! $currentPeriod) {
+                // Anchored on today, not on the end of the chain: a budget whose
+                // last period ended months ago needs the period covering now, or
+                // it crawls forward one period per night before it works again.
+                $currentPeriod = $this->budgetPeriodService->generatePeriod($budget, null, today());
                 $generatedCount++;
                 $this->info("Generated initial period for budget: {$budget->name}");
             }
 
+            // Oldest first, so that when two ended periods share a successor
+            // the most recent one has the last word instead of whichever row
+            // MySQL happened to return first.
+            $completedPeriods = BudgetPeriod::where('budget_id', $budget->id)
+                ->where('end_date', '<', today())
+                ->orderBy('start_date')
+                ->get();
+
+            foreach ($completedPeriods as $period) {
+                $this->budgetPeriodService->closePeriod($period);
+                $closedCount++;
+            }
+
+            // Walked forward from the period in progress rather than counting
+            // what lies ahead: planning reads the period starting the day after
+            // the current one, and generatePeriod() without a start date anchors
+            // at the end of the chain — which leaves that gap unfilled whenever a
+            // more distant period already exists. ensureSuccessor is idempotent
+            // on the start date, so running this again creates nothing.
             $cursor = $currentPeriod;
-            for ($i = 0; $i < 2; $i++) {
+
+            for ($i = 0; $i < self::PERIODS_KEPT_AHEAD; $i++) {
                 $successor = $this->budgetPeriodService->ensureSuccessor(
                     $budget,
                     $cursor,
@@ -46,16 +84,6 @@ class GenerateBudgetPeriods extends Command
                 );
                 $generatedCount += $successor->wasRecentlyCreated ? 1 : 0;
                 $cursor = $successor;
-            }
-
-            $completedPeriods = BudgetPeriod::query()
-                ->where('budget_id', $budget->id)
-                ->whereDate('end_date', '<', $applicationDate->toDateString())
-                ->get();
-
-            foreach ($completedPeriods as $period) {
-                $this->budgetPeriodService->closePeriod($period);
-                $closedCount++;
             }
         }
 

@@ -105,8 +105,9 @@ export default function Mcp() {
 
     function createToken(event: React.FormEvent) {
         event.preventDefault();
+        // No preserveScroll: the one-time secret renders above the developer
+        // section this form lives in, so staying put would hide it.
         form.post(store().url, {
-            preserveScroll: true,
             onSuccess: () => form.setData('name', ''),
         });
     }
@@ -144,7 +145,9 @@ export default function Mcp() {
             label: __('Claude Desktop'),
             steps: [
                 __('Open Settings → Connectors in Claude Desktop.'),
-                __('Click "Add" in the top right, then "Add custom connector".'),
+                __(
+                    'Click "Add" in the top right, then "Add custom connector".',
+                ),
                 <>
                     {__('Give it a name and paste this URL:')}
                     {oauthUrlBlock}
@@ -304,7 +307,7 @@ export default function Mcp() {
 
                             <p className="text-sm text-muted-foreground">
                                 {__(
-                                    'Connected apps can read, analyse and make changes to your data (bank-connected accounts stay read-only).',
+                                    'Connected apps can read, analyse and make changes to your data (transactions synced from your bank cannot be edited or deleted).',
                                 )}
                             </p>
                         </CardContent>
@@ -360,7 +363,7 @@ export default function Mcp() {
                                             </h3>
                                             <p className="text-sm text-muted-foreground">
                                                 {__(
-                                                    'Read-only tokens can analyse your data. Read & write tokens can also create, edit and delete transactions, categories, labels and automation rules.',
+                                                    'Read-only tokens can analyse your data. Read & write tokens can also create, edit and delete transactions, categories, labels, budgets and automation rules.',
                                                 )}
                                             </p>
                                         </div>

@@ -8,18 +8,22 @@ use App\Http\Requests\BulkUpdateTransactionsRequest;
 use App\Http\Requests\IndexTransactionRequest;
 use App\Http\Requests\StoreTransactionRequest;
 use App\Http\Requests\UpdateTransactionRequest;
+use App\Jobs\ReassignTransactionsToBudgets;
 use App\Models\Account;
 use App\Models\AutomationRule;
 use App\Models\Bank;
 use App\Models\Category;
 use App\Models\Label;
 use App\Models\Transaction;
+use App\Models\User;
 use App\Services\Ai\CategoryOverrideHandler;
 use App\Services\ManualBalanceAdjuster;
 use App\Services\Transactions\ReplaceTransactionSplits;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -369,25 +373,11 @@ class TransactionController extends Controller
         $transactionIds = $request->input('transaction_ids');
         $filters = $request->input('filters');
 
-        $updateData = [];
-        if ($request->has('category_id')) {
-            $newCategoryId = $request->input('category_id');
-            $updateData['category_id'] = $newCategoryId;
-            $updateData['category_source'] = $newCategoryId === null ? null : CategorySource::Manual->value;
-            $updateData['ai_confidence'] = null;
-            $updateData['categorized_by_rule_id'] = null;
-        }
-        if ($request->has('notes')) {
-            $updateData['notes'] = $request->input('notes');
-        }
-        if ($request->has('notes_iv')) {
-            $updateData['notes_iv'] = $request->input('notes_iv');
-        }
-
-        $labelIds = $request->input('label_ids');
+        $updateData = $this->bulkUpdateData($request);
         $hasLabelUpdate = $request->has('label_ids');
+        $labelIds = $request->input('label_ids');
 
-        if (empty($updateData) && ! $hasLabelUpdate) {
+        if ($updateData === [] && ! $hasLabelUpdate) {
             return response()->json([
                 'message' => 'No update data provided.',
             ], 400);
@@ -402,90 +392,40 @@ class TransactionController extends Controller
             $hasLabelUpdate,
             $labelIds,
         ): array {
-            $lockedQuery = Transaction::query()->where('user_id', $user->id);
-            if ($transactionIds && count($transactionIds) > 0) {
-                $lockedQuery->whereIn('id', $transactionIds);
-            } elseif ($filters !== null) {
-                $lockedQuery->applyFilters($filters);
-            }
-
-            $lockedTransactions = $lockedQuery
-                ->orderBy('id')
-                ->lockForUpdate()
-                ->get()
-                ->load('splits');
+            $lockedTransactions = $this->lockBulkTargets($user, $transactionIds, $filters);
 
             if ($transactionIds && $lockedTransactions->count() !== count($transactionIds)) {
                 abort(403, 'Some transactions were not found or do not belong to you.');
             }
 
-            $hasCategoryUpdate = $request->has('category_id');
-            $splitIds = $hasCategoryUpdate
+            $categoryFields = ['category_id', 'category_source', 'ai_confidence', 'categorized_by_rule_id'];
+            $categoryData = collect($updateData)->only($categoryFields)->all();
+            $generalData = collect($updateData)->except($categoryFields)->all();
+
+            // A split transaction is filed under its postings, so a bulk category
+            // change has to leave it alone and say so in the response.
+            $splitIds = $categoryData !== []
                 ? $lockedTransactions->filter(fn (Transaction $candidate): bool => $candidate->splits->isNotEmpty())->pluck('id')
                 : collect();
-            $eligibleTransactions = $hasCategoryUpdate
-                ? $lockedTransactions->whereNotIn('id', $splitIds)
-                : $lockedTransactions;
-            $categoryData = collect($updateData)
-                ->only(['category_id', 'category_source', 'ai_confidence', 'categorized_by_rule_id'])
-                ->all();
-            $generalData = collect($updateData)
-                ->except(['category_id', 'category_source', 'ai_confidence', 'categorized_by_rule_id'])
-                ->all();
 
             $changedIds = collect();
-            if ($hasCategoryUpdate) {
-                $categoryCandidates = $eligibleTransactions->filter(
-                    fn (Transaction $candidate): bool => collect($categoryData)->contains(
-                        fn (mixed $value, string $field): bool => $candidate->getRawOriginal($field) !== $value,
-                    ),
-                );
-                $overrideHandler = app(CategoryOverrideHandler::class);
-                foreach ($categoryCandidates as $candidate) {
-                    if ($candidate->category_id !== $request->input('category_id')) {
-                        $overrideHandler->record($candidate, $request->input('category_id'));
-                    }
-                }
-                if ($categoryCandidates->isNotEmpty()) {
-                    Transaction::query()
-                        ->whereIn('id', $categoryCandidates->pluck('id'))
-                        ->update($categoryData);
-                    $changedIds = $changedIds->merge($categoryCandidates->pluck('id'));
-                }
+
+            if ($categoryData !== []) {
+                $candidates = $this->rowsNeedingUpdate($lockedTransactions->whereNotIn('id', $splitIds), $categoryData);
+                $this->recordCategoryOverrides($candidates, $request->input('category_id'));
+                $changedIds = $changedIds->merge($this->massUpdate($candidates, $categoryData));
             }
 
             if ($generalData !== []) {
-                $generalCandidates = $lockedTransactions->filter(
-                    fn (Transaction $candidate): bool => collect($generalData)->contains(
-                        fn (mixed $value, string $field): bool => $candidate->getRawOriginal($field) !== $value,
-                    ),
-                );
-                if ($generalCandidates->isNotEmpty()) {
-                    Transaction::query()
-                        ->whereIn('id', $generalCandidates->pluck('id'))
-                        ->update($generalData);
-                    $changedIds = $changedIds->merge($generalCandidates->pluck('id'));
-                }
+                $candidates = $this->rowsNeedingUpdate($lockedTransactions, $generalData);
+                $changedIds = $changedIds->merge($this->massUpdate($candidates, $generalData));
             }
 
             if ($hasLabelUpdate) {
-                foreach ($lockedTransactions as $lockedTransaction) {
-                    $changes = $lockedTransaction->labels()->sync($labelIds ?? []);
-                    if ($changes['attached'] !== [] || $changes['detached'] !== [] || $changes['updated'] !== []) {
-                        $lockedTransaction->touch();
-                        $changedIds->push($lockedTransaction->id);
-                    }
-                }
+                $changedIds = $changedIds->merge($this->syncBulkLabels($lockedTransactions, $labelIds ?? []));
             }
 
             $updatedIds = $changedIds->unique()->values();
-            $updatedTransactions = Transaction::query()
-                ->where('user_id', $user->id)
-                ->whereIn('id', $updatedIds)
-                ->with(['category', 'account.bank', 'labels', 'categorizedByRule:id,origin', 'splits.category'])
-                ->orderBy('id')
-                ->get();
-            $updatedTransactions->each->append(['ai_categorized', 'is_split', 'split_count']);
 
             return [
                 'count' => $lockedTransactions->count(),
@@ -493,13 +433,159 @@ class TransactionController extends Controller
                 'skipped_split_count' => $splitIds->count(),
                 'updated_ids' => $updatedIds->all(),
                 'skipped_split_ids' => $splitIds->values()->all(),
-                'transactions' => $updatedTransactions,
+                'transactions' => $this->presentUpdated($user, $updatedIds),
             ];
         }, attempts: 5);
+
+        // Neither branch above fires a model event — the category goes through a
+        // query-builder mass update and the labels through the pivot — so nothing
+        // else would re-derive which budgets now track these transactions.
+        // Silently: editing existing rows is not new spending.
+        if ($result['updated_ids'] !== []) {
+            ReassignTransactionsToBudgets::dispatch($result['updated_ids'], notify: false);
+        }
 
         return response()->json([
             'message' => 'Transactions updated successfully',
             ...$result,
         ]);
+    }
+
+    /**
+     * The columns a bulk edit writes. A new category is a manual assignment, so
+     * it clears any AI or rule provenance along with it.
+     *
+     * @return array<string, mixed>
+     */
+    private function bulkUpdateData(BulkUpdateTransactionsRequest $request): array
+    {
+        $updateData = [];
+
+        if ($request->has('category_id')) {
+            $newCategoryId = $request->input('category_id');
+            $updateData['category_id'] = $newCategoryId;
+            $updateData['category_source'] = $newCategoryId === null ? null : CategorySource::Manual->value;
+            $updateData['ai_confidence'] = null;
+            $updateData['categorized_by_rule_id'] = null;
+        }
+
+        foreach (['notes', 'notes_iv'] as $field) {
+            if ($request->has($field)) {
+                $updateData[$field] = $request->input($field);
+            }
+        }
+
+        return $updateData;
+    }
+
+    /**
+     * The rows the edit applies to, locked in id order so concurrent bulk edits
+     * queue instead of deadlocking.
+     *
+     * @param  array<int, string>|null  $transactionIds
+     * @param  array<string, mixed>|null  $filters
+     * @return EloquentCollection<int, Transaction>
+     */
+    private function lockBulkTargets(User $user, ?array $transactionIds, ?array $filters): EloquentCollection
+    {
+        $query = Transaction::query()->where('user_id', $user->id);
+
+        if ($transactionIds !== null && $transactionIds !== []) {
+            $query->whereIn('id', $transactionIds);
+        } elseif ($filters !== null) {
+            $query->applyFilters($filters);
+        }
+
+        return $query
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get()
+            ->load('splits');
+    }
+
+    /**
+     * The rows whose stored value actually differs from what is being written.
+     * Comparing raw originals keeps a no-op edit out of the updated set.
+     *
+     * @param  EloquentCollection<int, Transaction>  $transactions
+     * @param  array<string, mixed>  $data
+     * @return EloquentCollection<int, Transaction>
+     */
+    private function rowsNeedingUpdate(EloquentCollection $transactions, array $data): EloquentCollection
+    {
+        return $transactions->filter(
+            fn (Transaction $candidate): bool => collect($data)->contains(
+                fn (mixed $value, string $field): bool => $candidate->getRawOriginal($field) !== $value,
+            ),
+        );
+    }
+
+    /**
+     * @param  EloquentCollection<int, Transaction>  $candidates
+     * @param  array<string, mixed>  $data
+     * @return Collection<int, string> the ids that were written
+     */
+    private function massUpdate(EloquentCollection $candidates, array $data): Collection
+    {
+        if ($candidates->isEmpty()) {
+            return collect();
+        }
+
+        Transaction::query()->whereIn('id', $candidates->pluck('id'))->update($data);
+
+        return $candidates->pluck('id');
+    }
+
+    /**
+     * @param  EloquentCollection<int, Transaction>  $candidates
+     */
+    private function recordCategoryOverrides(EloquentCollection $candidates, ?string $newCategoryId): void
+    {
+        $overrideHandler = app(CategoryOverrideHandler::class);
+
+        foreach ($candidates as $candidate) {
+            if ($candidate->category_id !== $newCategoryId) {
+                $overrideHandler->record($candidate, $newCategoryId);
+            }
+        }
+    }
+
+    /**
+     * @param  EloquentCollection<int, Transaction>  $transactions
+     * @param  array<int, string>  $labelIds
+     * @return Collection<int, string> the ids whose labels actually moved
+     */
+    private function syncBulkLabels(EloquentCollection $transactions, array $labelIds): Collection
+    {
+        $changed = collect();
+
+        foreach ($transactions as $transaction) {
+            $changes = $transaction->labels()->sync($labelIds);
+
+            if ($changes['attached'] !== [] || $changes['detached'] !== [] || $changes['updated'] !== []) {
+                $transaction->touch();
+                $changed->push($transaction->id);
+            }
+        }
+
+        return $changed;
+    }
+
+    /**
+     * @param  Collection<int, string>  $updatedIds
+     * @return EloquentCollection<int, Transaction>
+     */
+    private function presentUpdated(User $user, Collection $updatedIds): EloquentCollection
+    {
+        $updated = Transaction::query()
+            ->where('user_id', $user->id)
+            ->whereIn('id', $updatedIds)
+            ->with(['category', 'account.bank', 'labels', 'categorizedByRule:id,origin', 'splits.category'])
+            ->orderBy('id')
+            ->get();
+
+        $updated->each->append(['ai_categorized', 'is_split', 'split_count']);
+
+        return $updated;
     }
 }

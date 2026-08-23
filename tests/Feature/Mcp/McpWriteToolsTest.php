@@ -59,18 +59,21 @@ it('creates a manual transaction and defaults the currency to the account', func
     expect($transaction->source->value)->toBe('manually_created');
 });
 
-it('refuses to create a transaction on a connected account', function () {
+it('creates a transaction on a connected account without touching its balances', function () {
     $user = User::factory()->create();
     $account = Account::factory()->connected()->create(['user_id' => $user->id]);
+    $account->balances()->create(['balance_date' => '2026-01-15', 'balance' => 10_000]);
 
     callWriteTool($user, CreateTransaction::class, [
         'account_id' => $account->id,
-        'description' => 'Nope',
+        'description' => 'Cash withdrawal the bank missed',
         'amount' => -100,
         'transaction_date' => '2026-01-15',
-    ])->assertHasErrors(['connected']);
+        'update_balance' => true,
+    ])->assertOk()->assertSee('Cash withdrawal the bank missed');
 
-    expect(Transaction::query()->where('account_id', $account->id)->count())->toBe(0);
+    expect(Transaction::query()->where('account_id', $account->id)->count())->toBe(1);
+    expect($account->balances()->where('balance_date', '2026-01-15')->value('balance'))->toBe(10_000);
 });
 
 it('edits a manual transaction', function () {
@@ -88,6 +91,33 @@ it('edits a manual transaction', function () {
     ])->assertOk()->assertSee('Fresh description');
 
     expect($transaction->fresh()->description)->toBe('Fresh description');
+});
+
+it('moves a transaction onto a connected account, unwinding only the manual side', function () {
+    $user = User::factory()->create();
+    $manualAccount = Account::factory()->create(['user_id' => $user->id]);
+    $connectedAccount = Account::factory()->connected()->create(['user_id' => $user->id]);
+
+    $manualAccount->balances()->create(['balance_date' => '2026-01-15', 'balance' => 9_000]);
+    $connectedAccount->balances()->create(['balance_date' => '2026-01-15', 'balance' => 50_000]);
+
+    $transaction = Transaction::factory()->create([
+        'user_id' => $user->id,
+        'account_id' => $manualAccount->id,
+        'transaction_date' => '2026-01-15',
+        'amount' => -1_000,
+    ]);
+
+    callWriteTool($user, UpdateTransaction::class, [
+        'transaction_id' => $transaction->id,
+        'account_id' => $connectedAccount->id,
+        'update_balance' => true,
+    ])->assertOk();
+
+    expect($transaction->fresh()->account_id)->toBe($connectedAccount->id);
+    // The manual account gets the money back; the bank's balance is left alone.
+    expect($manualAccount->balances()->where('balance_date', '2026-01-15')->value('balance'))->toBe(10_000);
+    expect($connectedAccount->balances()->where('balance_date', '2026-01-15')->value('balance'))->toBe(50_000);
 });
 
 it('refuses to edit an imported transaction', function () {
@@ -466,4 +496,23 @@ it('never lets a write tool touch another user\'s data', function () {
     ])->assertHasErrors();
 
     expect(Transaction::query()->find($otherTransaction->id))->not->toBeNull();
+});
+
+it('tells the agent which id was missing and where to find valid ones', function () {
+    $user = User::factory()->create();
+
+    // Records that have a listing tool point the agent at it.
+    callWriteTool($user, UpdateTransaction::class, [
+        'transaction_id' => 'no-such-transaction',
+        'description' => 'Nope',
+    ])->assertHasErrors([
+        'No transaction with id no-such-transaction in space '.$user->personalSpace->id.'. Call search_transactions to find ids.',
+    ]);
+
+    // Those without one end at the sentence, with no dangling hint.
+    callWriteTool($user, DeleteAutomationRule::class, [
+        'automation_rule_id' => 'no-such-rule',
+    ])->assertHasErrors([
+        'No automation rule with id no-such-rule in space '.$user->personalSpace->id.'.',
+    ]);
 });

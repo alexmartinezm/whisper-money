@@ -13,6 +13,7 @@ use App\Models\Concerns\BelongsToSpace;
 use App\Services\CategoryTree;
 use Carbon\Carbon;
 use Database\Factories\TransactionFactory;
+use Illuminate\Contracts\Database\Query\Expression;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
@@ -22,9 +23,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\DB;
 
 /**
  * @property Carbon $transaction_date
+ * @property-read ?int $ownership_percentage the owning account's share, selected by {@see self::scopeJoinOwningAccount()} and absent otherwise
  * @property int|float $total_amount
  * @property TransactionSource $source
  * @property ?CategorySource $category_source
@@ -274,101 +277,143 @@ class Transaction extends Model
     }
 
     /**
+     * The owner's share of an amount held by this transaction's account, for
+     * the row-by-row PHP paths. Falls back to the full amount when the account
+     * is not loaded, so a partial select never silently zeroes the figure.
+     */
+    public function ownerShareOf(int $amount): int
+    {
+        return $this->account?->shareOfAmount($amount) ?? $amount;
+    }
+
+    /**
+     * A transaction amount reduced to the owner's share of its account, for
+     * SQL-side aggregates. Rounds per row, matching {@see Account::shareOfAmount()}
+     * (MySQL and PHP both round half away from zero).
+     * Only valid on queries that ran {@see self::scopeJoinOwningAccount()}.
+     */
+    public const OWNED_AMOUNT_SQL = 'round(transactions.amount * accounts.ownership_percentage / 100)';
+
+    /**
+     * Join the owning account so aggregates can weigh each amount by the
+     * account's ownership percentage. Pair it with {@see self::ownedAmount()}.
+     *
+     * `account_id` is NOT NULL and the join deliberately ignores the account's
+     * soft-delete scope, so the row set is exactly what it was before the
+     * ownership weighting existed.
+     *
+     * @param  Builder<Transaction>  $query
+     * @return Builder<Transaction>
+     */
+    public function scopeJoinOwningAccount(Builder $query): Builder
+    {
+        return $query->join('accounts', 'accounts.id', '=', 'transactions.account_id');
+    }
+
+    /**
+     * {@see self::OWNED_AMOUNT_SQL} as an expression, for `sum()` and friends.
+     */
+    public static function ownedAmount(): Expression
+    {
+        return DB::raw(self::OWNED_AMOUNT_SQL);
+    }
+
+    /**
      * @param  Builder<Transaction>  $query
      * @param  array<string, mixed>  $filters
      * @return Builder<Transaction>
      */
     public function scopeApplyFilters(Builder $query, array $filters): Builder
     {
-        if (isset($filters['date_from'])) {
-            $query->whereDate('transaction_date', '>=', $filters['date_from']);
-        }
+        $query
+            ->when(isset($filters['date_from']), fn (Builder $q) => $q->whereDate('transaction_date', '>=', $filters['date_from']))
+            ->when(isset($filters['date_to']), fn (Builder $q) => $q->whereDate('transaction_date', '<=', $filters['date_to']))
+            // Amounts arrive in major units from the UI but are stored in cents.
+            ->when(isset($filters['amount_min']), fn (Builder $q) => $q->where('amount', '>=', $filters['amount_min'] * 100))
+            ->when(isset($filters['amount_max']), fn (Builder $q) => $q->where('amount', '<=', $filters['amount_max'] * 100))
+            ->when(! empty($filters['account_ids']), fn (Builder $q) => $q->whereIn('account_id', $filters['account_ids']))
+            ->when(! empty($filters['category_source']), fn (Builder $q) => $q->where('category_source', $filters['category_source']))
+            ->when(! empty($filters['creditor_name']), fn (Builder $q) => $q->where('creditor_name', 'LIKE', '%'.$filters['creditor_name'].'%'))
+            ->when(! empty($filters['debtor_name']), fn (Builder $q) => $q->where('debtor_name', 'LIKE', '%'.$filters['debtor_name'].'%'))
+            ->when(! empty($filters['search']), fn (Builder $q) => $q->where(
+                fn (Builder $inner) => $inner
+                    ->where('description', 'LIKE', '%'.$filters['search'].'%')
+                    ->orWhere('notes', 'LIKE', '%'.$filters['search'].'%')
+                    ->orWhere('creditor_name', 'LIKE', '%'.$filters['search'].'%')
+                    ->orWhere('debtor_name', 'LIKE', '%'.$filters['search'].'%')
+            ));
 
-        if (isset($filters['date_to'])) {
-            $query->whereDate('transaction_date', '<=', $filters['date_to']);
-        }
-
-        if (isset($filters['amount_min'])) {
-            $query->where('amount', '>=', $filters['amount_min'] * 100);
-        }
-
-        if (isset($filters['amount_max'])) {
-            $query->where('amount', '<=', $filters['amount_max'] * 100);
-        }
-
-        $hasCategoryFilter = ! empty($filters['category_ids']);
-        $hasLabelFilter = ! empty($filters['label_ids']);
-
-        if ($hasCategoryFilter || $hasLabelFilter) {
-            $realIds = [];
-            $hasUncategorized = false;
-
-            if ($hasCategoryFilter) {
-                $ids = collect($filters['category_ids']);
-                $hasUncategorized = $ids->contains('uncategorized');
-                $realIds = $ids->reject(fn ($id) => $id === 'uncategorized')->values()->all();
-
-                if ($realIds !== []) {
-                    $userId = $filters['user_id'] ?? Category::query()->whereIn('id', $realIds)->value('user_id');
-
-                    if ($userId !== null) {
-                        $realIds = app(CategoryTree::class)->expand($userId, $realIds);
-                    }
-                }
-            }
-
-            $labelIds = $filters['label_ids'] ?? [];
-
-            $query->where(function (Builder $outer) use ($hasCategoryFilter, $realIds, $hasUncategorized, $hasLabelFilter, $labelIds) {
-                if ($hasCategoryFilter) {
-                    $outer->where(function (Builder $q) use ($realIds, $hasUncategorized) {
-                        if (! empty($realIds)) {
-                            $q->where(function (Builder $categorized) use ($realIds) {
-                                $categorized->whereIn('category_id', $realIds)
-                                    ->orWhereHas('splits', fn (Builder $splitQuery) => $splitQuery->whereIn('category_id', $realIds));
-                            });
-                        }
-                        if ($hasUncategorized) {
-                            $q->orWhere(function (Builder $uncategorized) {
-                                $uncategorized->whereNull('category_id')->whereDoesntHave('splits');
-                            });
-                        }
-                    });
-                }
-
-                if ($hasLabelFilter) {
-                    $outer->orWhereHas('labels', fn (Builder $q) => $q->whereIn('labels.id', $labelIds));
-                }
-            });
-        }
-
-        if (! empty($filters['account_ids'])) {
-            $query->whereIn('account_id', $filters['account_ids']);
-        }
-
-        if (! empty($filters['category_source'])) {
-            $query->where('category_source', $filters['category_source']);
-        }
-
-        if (! empty($filters['creditor_name'])) {
-            $term = '%'.$filters['creditor_name'].'%';
-            $query->where('creditor_name', 'LIKE', $term);
-        }
-
-        if (! empty($filters['debtor_name'])) {
-            $term = '%'.$filters['debtor_name'].'%';
-            $query->where('debtor_name', 'LIKE', $term);
-        }
-
-        if (! empty($filters['search'])) {
-            $term = '%'.$filters['search'].'%';
-            $query->where(fn (Builder $q) => $q
-                ->where('description', 'LIKE', $term)
-                ->orWhere('notes', 'LIKE', $term)
-                ->orWhere('creditor_name', 'LIKE', $term)
-                ->orWhere('debtor_name', 'LIKE', $term));
-        }
+        $this->applyCategoryAndLabelFilters($query, $filters);
 
         return $query;
+    }
+
+    /**
+     * Categories and labels are one filter, not two: a transaction matches when it
+     * sits in a wanted category OR carries a wanted label, so both sides are ORed
+     * together inside a single group.
+     *
+     * @param  Builder<Transaction>  $query
+     * @param  array<string, mixed>  $filters
+     */
+    private function applyCategoryAndLabelFilters(Builder $query, array $filters): void
+    {
+        $categoryIds = empty($filters['category_ids']) ? [] : collect($filters['category_ids']);
+        $labelIds = empty($filters['label_ids']) ? [] : $filters['label_ids'];
+
+        if ($categoryIds === [] && $labelIds === []) {
+            return;
+        }
+
+        // "uncategorized" is a pseudo id the UI sends for transactions with no
+        // category at all, so it can be picked alongside real categories.
+        $wantsUncategorized = $categoryIds !== [] && $categoryIds->contains('uncategorized');
+        $wantedCategoryIds = $categoryIds === []
+            ? []
+            : $this->expandToDescendants(
+                $categoryIds->reject(fn ($id) => $id === 'uncategorized')->values()->all(),
+                $filters['user_id'] ?? null,
+            );
+
+        $query->where(function (Builder $group) use ($wantedCategoryIds, $wantsUncategorized, $labelIds): void {
+            if ($wantedCategoryIds !== []) {
+                // A split transaction is filed under its postings, not its own
+                // column: its category_id is usually null while the splits carry
+                // the categories the user is filtering on.
+                $group->where(fn (Builder $q) => $q
+                    ->whereIn('category_id', $wantedCategoryIds)
+                    ->orWhereHas('splits', fn (Builder $splits) => $splits->whereIn('category_id', $wantedCategoryIds)));
+            }
+
+            if ($wantsUncategorized) {
+                // Split transactions are categorized by their postings, so a null
+                // category_id alone does not make one uncategorized.
+                $group->orWhere(fn (Builder $q) => $q->whereNull('category_id')->whereDoesntHave('splits'));
+            }
+
+            if ($labelIds !== []) {
+                $group->orWhereHas('labels', fn (Builder $q) => $q->whereIn('labels.id', $labelIds));
+            }
+        });
+    }
+
+    /**
+     * Picking a category means picking everything under it, so the selection is
+     * widened to the whole subtree. Left as-is when the owner cannot be resolved.
+     *
+     * @param  list<string>  $categoryIds
+     * @return list<string>
+     */
+    private function expandToDescendants(array $categoryIds, ?string $userId): array
+    {
+        if ($categoryIds === []) {
+            return [];
+        }
+
+        $userId ??= Category::query()->whereIn('id', $categoryIds)->value('user_id');
+
+        return $userId === null
+            ? $categoryIds
+            : app(CategoryTree::class)->expand($userId, $categoryIds);
     }
 }

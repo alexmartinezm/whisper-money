@@ -46,6 +46,7 @@ interface Props {
     notifyUpcomingRecurring: boolean;
     notifyRunwayShortfall: boolean;
     notifyPriceChanges: boolean;
+    notifyOnInactiveNoBank: boolean;
     budgetDefaults: Record<BudgetToggleKey, boolean>;
     budgets: BudgetRow[];
 }
@@ -81,45 +82,62 @@ export default function Notifications({
     notifyUpcomingRecurring,
     notifyRunwayShortfall,
     notifyPriceChanges,
+    notifyOnInactiveNoBank,
     budgetDefaults,
     budgets,
 }: Props) {
-    const patchBankTransactions = (checked: boolean) => {
-        router.patch(
-            update().url,
-            { notifications: { bank_transactions_synced: checked } },
-            patchOptions,
-        );
-    };
+    const emailToggles = [
+        {
+            id: 'notify-upcoming-recurring',
+            preferenceKey: 'upcoming_recurring',
+            checked: notifyUpcomingRecurring,
+            label: __('Upcoming recurring charges'),
+            description: __(
+                'Receive one email listing the subscriptions and bills due in the next few days.',
+            ),
+        },
+        {
+            id: 'notify-runway-shortfall',
+            preferenceKey: 'runway_shortfall',
+            checked: notifyRunwayShortfall,
+            label: __('Running out before payday'),
+            description: __(
+                'Get warned when your projected balance dips below zero, counting your usual spending as well as your recurring charges. Sent once per dip, not every day.',
+            ),
+        },
+        {
+            id: 'notify-price-changes',
+            preferenceKey: 'price_changes',
+            checked: notifyPriceChanges,
+            label: __('Subscriptions going up'),
+            description: __(
+                'Get told when a subscription or bill starts costing more than it used to, with what the rise adds over a year. Bills that simply vary month to month are left out.',
+            ),
+        },
+        {
+            id: 'notify-on-bank-transactions-synced',
+            preferenceKey: 'bank_transactions_synced',
+            checked: notifyOnBankTransactionsSynced,
+            label: __('New transactions from connected banks'),
+            description: __(
+                'Receive an email when new transactions are imported from your connected banks. Sent at most once a day.',
+            ),
+        },
+        {
+            id: 'notify-on-inactive-no-bank',
+            preferenceKey: 'inactive_no_bank',
+            checked: notifyOnInactiveNoBank,
+            label: __('Reminders when no bank is connected'),
+            description: __(
+                "Receive an email if you haven't visited in a week and no bank is connected.",
+            ),
+        },
+    ];
 
-    const patchUpcomingRecurring = (checked: boolean) => {
+    const patchPreference = (key: string, checked: boolean) => {
         router.patch(
             update().url,
-            { notifications: { upcoming_recurring: checked } },
-            patchOptions,
-        );
-    };
-
-    const patchRunwayShortfall = (checked: boolean) => {
-        router.patch(
-            update().url,
-            { notifications: { runway_shortfall: checked } },
-            patchOptions,
-        );
-    };
-
-    const patchPriceChanges = (checked: boolean) => {
-        router.patch(
-            update().url,
-            { notifications: { price_changes: checked } },
-            patchOptions,
-        );
-    };
-
-    const patchDefault = (defaultKey: string, checked: boolean) => {
-        router.patch(
-            update().url,
-            { notifications: { [defaultKey]: checked } },
+            { notifications: { [key]: checked } },
             patchOptions,
         );
     };
@@ -141,88 +159,33 @@ export default function Notifications({
                         )}
                     />
 
-                    <div className="flex items-start gap-3">
-                        <Checkbox
-                            id="notify-upcoming-recurring"
-                            defaultChecked={notifyUpcomingRecurring}
-                            onCheckedChange={(checked) =>
-                                patchUpcomingRecurring(checked === true)
-                            }
-                            className="mt-0.5"
-                        />
-                        <div className="grid gap-1">
-                            <Label htmlFor="notify-upcoming-recurring">
-                                {__('Upcoming recurring charges')}
-                            </Label>
-                            <p className="text-sm text-muted-foreground">
-                                {__(
-                                    'Receive one email listing the subscriptions and bills due in the next few days.',
-                                )}
-                            </p>
-                        </div>
-                    </div>
-
-                    <div className="flex items-start gap-3">
-                        <Checkbox
-                            id="notify-runway-shortfall"
-                            defaultChecked={notifyRunwayShortfall}
-                            onCheckedChange={(checked) =>
-                                patchRunwayShortfall(checked === true)
-                            }
-                            className="mt-0.5"
-                        />
-                        <div className="grid gap-1">
-                            <Label htmlFor="notify-runway-shortfall">
-                                {__('Running out before payday')}
-                            </Label>
-                            <p className="text-sm text-muted-foreground">
-                                {__(
-                                    'Get warned when your projected balance dips below zero, counting your usual spending as well as your recurring charges. Sent once per dip, not every day.',
-                                )}
-                            </p>
-                        </div>
-                    </div>
-
-                    <div className="flex items-start gap-3">
-                        <Checkbox
-                            id="notify-price-changes"
-                            defaultChecked={notifyPriceChanges}
-                            onCheckedChange={(checked) =>
-                                patchPriceChanges(checked === true)
-                            }
-                            className="mt-0.5"
-                        />
-                        <div className="grid gap-1">
-                            <Label htmlFor="notify-price-changes">
-                                {__('Subscriptions going up')}
-                            </Label>
-                            <p className="text-sm text-muted-foreground">
-                                {__(
-                                    'Get told when a subscription or bill starts costing more than it used to, with what the rise adds over a year. Bills that simply vary month to month are left out.',
-                                )}
-                            </p>
-                        </div>
-                    </div>
-
-                    <div className="flex items-start gap-3">
-                        <Checkbox
-                            id="notify-on-bank-transactions-synced"
-                            defaultChecked={notifyOnBankTransactionsSynced}
-                            onCheckedChange={(checked) =>
-                                patchBankTransactions(checked === true)
-                            }
-                            className="mt-0.5"
-                        />
-                        <div className="grid gap-1">
-                            <Label htmlFor="notify-on-bank-transactions-synced">
-                                {__('New transactions from connected banks')}
-                            </Label>
-                            <p className="text-sm text-muted-foreground">
-                                {__(
-                                    'Receive an email when new transactions are imported from your connected banks. Sent at most once a day.',
-                                )}
-                            </p>
-                        </div>
+                    <div className="space-y-4">
+                        {emailToggles.map((toggle) => (
+                            <div
+                                key={toggle.id}
+                                className="flex items-start gap-3"
+                            >
+                                <Checkbox
+                                    id={toggle.id}
+                                    defaultChecked={toggle.checked}
+                                    onCheckedChange={(checked) =>
+                                        patchPreference(
+                                            toggle.preferenceKey,
+                                            checked === true,
+                                        )
+                                    }
+                                    className="mt-0.5"
+                                />
+                                <div className="grid gap-1">
+                                    <Label htmlFor={toggle.id}>
+                                        {toggle.label}
+                                    </Label>
+                                    <p className="text-sm text-muted-foreground">
+                                        {toggle.description}
+                                    </p>
+                                </div>
+                            </div>
+                        ))}
                     </div>
 
                     <div className="space-y-4">
@@ -272,7 +235,7 @@ export default function Notifications({
                                                     onCheckedChange={(
                                                         checked,
                                                     ) =>
-                                                        patchDefault(
+                                                        patchPreference(
                                                             column.defaultKey,
                                                             checked === true,
                                                         )

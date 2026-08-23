@@ -1,9 +1,7 @@
 import HeadingSmall from '@/components/heading-small';
 import { ProBadge } from '@/components/pro-badge';
-import {
-    PlanCard,
-    UpgradeDialog,
-} from '@/components/subscription/upgrade-dialog';
+import { PlanPicker, planTerms } from '@/components/subscription/plan-picker';
+import { UpgradeDialog } from '@/components/subscription/upgrade-dialog';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -14,13 +12,13 @@ import {
     store as storeConsent,
 } from '@/routes/ai/consent';
 import { billing } from '@/routes/settings';
-import { portal, refund as refundRoute } from '@/routes/settings/billing';
+import { portal } from '@/routes/settings/billing';
 import { checkout } from '@/routes/subscribe';
 import { type BreadcrumbItem, type SharedData } from '@/types';
 import { Plan } from '@/types/pricing';
 import { formatCurrency } from '@/utils/currency';
 import { __ } from '@/utils/i18n';
-import { Head, router, usePage } from '@inertiajs/react';
+import { Head, usePage } from '@inertiajs/react';
 import axios from 'axios';
 import {
     CheckIcon,
@@ -30,7 +28,6 @@ import {
     LandmarkIcon,
     ShieldCheckIcon,
     SparklesIcon,
-    ZapIcon,
 } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -104,20 +101,18 @@ function BenefitsGrid() {
 }
 
 function UpgradeSection({
-    planEntries,
+    plans,
     defaultPlan,
     currency,
     locale,
 }: {
-    planEntries: [string, Plan][];
+    plans: Record<string, Plan>;
     defaultPlan: string;
     currency: string;
     locale: string;
 }) {
     const [selectedPlan, setSelectedPlan] = useState(defaultPlan);
-    const selectedPlanData = planEntries.find(
-        ([key]) => key === selectedPlan,
-    )?.[1];
+    const terms = planTerms(plans[selectedPlan], currency, locale);
 
     return (
         <div className="space-y-6">
@@ -131,130 +126,29 @@ function UpgradeSection({
             <BenefitsGrid />
 
             <div className="rounded-lg border bg-card p-5">
-                <p className="mb-4 text-sm font-medium">
+                <p className="mb-2 text-sm font-medium">
                     {__('Choose your billing cycle')}
                 </p>
 
-                <div className="flex gap-3">
-                    {planEntries.map(([key, plan]) => (
-                        <PlanCard
-                            key={key}
-                            plan={plan}
-                            isSelected={key === selectedPlan}
-                            onSelect={() => setSelectedPlan(key)}
-                            currency={currency}
-                            locale={locale}
-                        />
-                    ))}
-                </div>
+                {/* The same picker as the paywall and the upgrade dialog, at
+                    the app's own density — 52px rows would read as the
+                    onboarding leaking into a settings page. */}
+                <PlanPicker
+                    plans={plans}
+                    currency={currency}
+                    selectedPlan={selectedPlan}
+                    onSelect={setSelectedPlan}
+                    size="compact"
+                />
 
-                {selectedPlanData && selectedPlanData.features.length > 0 && (
-                    <ul className="mt-4 grid grid-cols-2 gap-x-4 gap-y-1.5">
-                        {selectedPlanData.features
-                            .slice(0, 4)
-                            .map((feature) => (
-                                <li
-                                    key={feature}
-                                    className="flex items-center gap-1.5"
-                                >
-                                    <CheckIcon className="size-3.5 shrink-0 text-emerald-500" />
-                                    <span className="text-xs text-muted-foreground">
-                                        {__(feature)}
-                                    </span>
-                                </li>
-                            ))}
-                    </ul>
-                )}
+                {terms && <p className="mt-4 text-sm font-medium">{terms}</p>}
 
-                <a
-                    href={checkout.url({
-                        query: { plan: selectedPlan },
-                    })}
-                    className="mt-4 block"
-                >
-                    <Button className="w-full bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-700">
-                        <ZapIcon className="size-4" />
-                        {__('Upgrade to Standard Plan')}
-                    </Button>
-                </a>
-            </div>
-        </div>
-    );
-}
-
-interface RefundInfo {
-    canSelfRefund: boolean;
-    deadline: string | null;
-}
-
-function RefundCard({
-    deadline,
-    locale,
-}: {
-    deadline: string | null;
-    locale: string;
-}) {
-    const [confirming, setConfirming] = useState(false);
-    const [processing, setProcessing] = useState(false);
-
-    const deadlineLabel = deadline
-        ? new Date(deadline).toLocaleDateString(locale, {
-              day: 'numeric',
-              month: 'long',
-          })
-        : null;
-
-    const submit = () => {
-        setProcessing(true);
-        router.post(
-            refundRoute.url(),
-            {},
-            { onFinish: () => setProcessing(false) },
-        );
-    };
-
-    return (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-5 dark:border-amber-900 dark:bg-amber-950/30">
-            <h4 className="font-medium text-amber-900 dark:text-amber-200">
-                {__('Money-back guarantee')}
-            </h4>
-            <p className="mt-1 text-sm text-amber-800/80 dark:text-amber-300/80">
-                {deadlineLabel
-                    ? __(
-                          'Changed your mind? Request a full refund until :date. This cancels your subscription and disconnects your bank accounts — the data you already imported is kept.',
-                          { date: deadlineLabel },
-                      )
-                    : __(
-                          'Changed your mind? Request a full refund. This cancels your subscription and disconnects your bank accounts — the data you already imported is kept.',
-                      )}
-            </p>
-
-            {confirming ? (
-                <div className="mt-4 flex flex-wrap gap-2">
-                    <Button
-                        variant="destructive"
-                        disabled={processing}
-                        onClick={submit}
-                    >
-                        {__('Confirm refund')}
-                    </Button>
-                    <Button
-                        variant="ghost"
-                        disabled={processing}
-                        onClick={() => setConfirming(false)}
-                    >
-                        {__('Keep my plan')}
-                    </Button>
-                </div>
-            ) : (
-                <Button
-                    variant="outline"
-                    className="mt-4"
-                    onClick={() => setConfirming(true)}
-                >
-                    {__('Request a refund')}
+                <Button asChild className="mt-4 w-full">
+                    <a href={checkout.url({ query: { plan: selectedPlan } })}>
+                        {__('Start a plan')}
+                    </a>
                 </Button>
-            )}
+            </div>
         </div>
     );
 }
@@ -264,13 +158,11 @@ function SubscribedSection({
     defaultPlan,
     currency,
     locale,
-    refund,
 }: {
     isDemoAccount: boolean;
     defaultPlan: Plan | undefined;
     currency: string;
     locale: string;
-    refund?: RefundInfo;
 }) {
     return (
         <div className="space-y-6">
@@ -318,10 +210,6 @@ function SubscribedSection({
                     </a>
                 )}
             </div>
-
-            {refund?.canSelfRefund && (
-                <RefundCard deadline={refund.deadline} locale={locale} />
-            )}
         </div>
     );
 }
@@ -456,12 +344,11 @@ function AiConsentSection({
 }
 
 export default function Billing() {
-    const { auth, pricing, locale, hasAiConsent, refund } = usePage<
-        SharedData & { hasAiConsent: boolean; refund?: RefundInfo }
+    const { auth, pricing, locale, hasAiConsent } = usePage<
+        SharedData & { hasAiConsent: boolean }
     >().props;
     const isDemoAccount = auth?.isDemoAccount ?? false;
     const hasProPlan = auth?.hasProPlan ?? false;
-    const planEntries = Object.entries(pricing.plans);
     const defaultPlan = pricing.plans[pricing.defaultPlan];
     const [showAiUpgrade, setShowAiUpgrade] = useState(false);
 
@@ -483,11 +370,10 @@ export default function Billing() {
                             defaultPlan={defaultPlan}
                             currency={pricing.currency}
                             locale={locale}
-                            refund={refund}
                         />
                     ) : (
                         <UpgradeSection
-                            planEntries={planEntries}
+                            plans={pricing.plans}
                             defaultPlan={pricing.defaultPlan}
                             currency={pricing.currency}
                             locale={locale}

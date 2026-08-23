@@ -141,6 +141,12 @@ return [
             'allows_account' => true,
         ],
         [
+            'code' => 'KWD',
+            'name' => 'Kuwaiti Dinar',
+            'allows_primary' => true,
+            'allows_account' => true,
+        ],
+        [
             'code' => 'BTC',
             'name' => 'Bitcoin',
             'allows_primary' => false,
@@ -179,6 +185,24 @@ return [
         [
             'code' => 'HKD',
             'name' => 'Hong Kong Dollar',
+            'allows_primary' => true,
+            'allows_account' => true,
+        ],
+        [
+            'code' => 'THB',
+            'name' => 'Thai Baht',
+            'allows_primary' => true,
+            'allows_account' => true,
+        ],
+        [
+            'code' => 'DKK',
+            'name' => 'Danish Krone',
+            'allows_primary' => true,
+            'allows_account' => true,
+        ],
+        [
+            'code' => 'SGD',
+            'name' => 'Singapore Dollar',
             'allows_primary' => true,
             'allows_account' => true,
         ],

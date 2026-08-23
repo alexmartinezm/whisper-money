@@ -17,32 +17,41 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Trial / Pricing Experiment
+    | Price Experiment
     |--------------------------------------------------------------------------
     |
-    | A/B/C test on how the paid plan is offered. Users who register on or after
-    | `started_at` are split evenly into three variants (control / reduced_trial
-    | / pay_now); everyone who registered earlier stays "legacy" and keeps the
-    | current trial. While `started_at` is null the experiment is off and every
-    | user behaves like the control group, so this is a no-op until activated.
+    | A/B test on the price of the paid plan. Anonymous visitors are drawn 50/50
+    | into `control` (the plans.* prices below) and `high` (the variant tier) on
+    | their first page view, and the arm is frozen onto users.price_arm when they
+    | register — so the landing quotes the price they will actually be charged.
+    | Anyone without an arm keeps the control price. While `started_at` is blank
+    | the experiment is off and nobody is drawn. Set `force_variant` to
+    | control/high to roll a winner out to everyone without a deploy; that also
+    | ends the split.
     |
-    | - control:       the current trial (plans.*.trial_days, 15 days).
-    | - reduced_trial: a shorter trial (reduced_trial.* below).
-    | - pay_now:       no trial, charged immediately, with a self-service refund
-    |                  window of `pay_now_refund_window_days` days.
+    | Each variant needs its own Stripe price — run `php artisan stripe:sync-prices`
+    | BEFORE setting `started_at`. The yearly price is the monthly × 6, matching
+    | the control plan structure.
     |
     */
 
-    'experiment' => [
-        'started_at' => env('SUBSCRIPTION_EXPERIMENT_STARTED_AT'),
-        // Once a winner is chosen, set this to control / reduced_trial / pay_now
-        // to give every user that variant and end the split (env-only, no deploy).
-        'force_variant' => env('SUBSCRIPTION_EXPERIMENT_FORCE_VARIANT'),
-        'reduced_trial' => [
-            'monthly' => (int) env('SUBSCRIPTION_EXPERIMENT_REDUCED_TRIAL_MONTHLY', 3),
-            'yearly' => (int) env('SUBSCRIPTION_EXPERIMENT_REDUCED_TRIAL_YEARLY', 7),
+    'price_experiment' => [
+        'started_at' => env('PRICE_EXPERIMENT_STARTED_AT'),
+        'force_variant' => env('PRICE_EXPERIMENT_FORCE_VARIANT'),
+        'variants' => [
+            'high' => [
+                'monthly' => [
+                    'price' => 8.99,
+                    'original_price' => null,
+                    'lookup' => 'whisper_pro_monthly_high',
+                ],
+                'yearly' => [
+                    'price' => 53.94,
+                    'original_price' => 107.88,
+                    'lookup' => 'whisper_pro_yearly_high',
+                ],
+            ],
         ],
-        'pay_now_refund_window_days' => (int) env('SUBSCRIPTION_EXPERIMENT_REFUND_WINDOW_DAYS', 3),
     ],
 
     /*
@@ -73,6 +82,9 @@ return [
     |
     | Supported billing_period values: 'month', 'year', null (for lifetime)
     |
+    | `trial_days` is per plan: the longer commitment gets the longer trial.
+    | Set it to 0 to charge that plan immediately, with no free trial.
+    |
     */
 
     'plans' => [
@@ -82,7 +94,7 @@ return [
             'original_price' => null,
             'stripe_lookup_key' => env('STRIPE_PRO_MONTHLY_LOOKUP_KEY', 'whisper_pro_monthly'),
             'billing_period' => 'month',
-            'trial_days' => (int) env('STRIPE_PRO_MONTHLY_TRIAL_DAYS', 15),
+            'trial_days' => (int) env('STRIPE_PRO_MONTHLY_TRIAL_DAYS', 7),
             'features' => [
                 'Connect bank accounts',
                 'AI Suggestions',

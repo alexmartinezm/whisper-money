@@ -95,7 +95,18 @@ class BinanceBalanceSyncService
     }
 
     /**
-     * Fetch historical snapshots and convert each day's balances using the currency conversion API.
+     * Rebuild past daily balances from Binance's own daily snapshots.
+     *
+     * Each snapshot carries `totalAssetOfBtc`: what Binance valued the whole
+     * spot account at, on that day. One BTC->fiat conversion turns it into the
+     * user's currency, and BTC is the one ticker the rate provider always
+     * covers.
+     *
+     * The alternative - re-pricing each holding ourselves - needs a dated price
+     * per asset, and the only dated source here is a fiat rate provider that
+     * knows almost no altcoins. Anything it could not price was dropped from
+     * the day's total, so a portfolio of tokens it does not carry produced a
+     * chart history far below what the user actually held.
      *
      * @return bool Whether any API calls were made
      */
@@ -104,11 +115,7 @@ class BinanceBalanceSyncService
         $targetCurrency = strtoupper($account->currency_code);
 
         $endDate = now()->subDay();
-        $startDate = $isFirstSync
-            ? now()->subDays(self::SNAPSHOT_MAX_DAYS)
-            : ($account->balances()->max('balance_date')
-                ? Carbon::parse($account->balances()->max('balance_date'))->addDay()
-                : now()->subDays(self::SNAPSHOT_MAX_DAYS));
+        $startDate = $this->resolveStartDate($account, $isFirstSync);
 
         if ($startDate->greaterThanOrEqualTo($endDate)) {
             return false;
@@ -120,37 +127,73 @@ class BinanceBalanceSyncService
             return true;
         }
 
+        $tally = $this->storeSnapshots($account, $snapshots, $targetCurrency);
+
+        Log::info('Synced Binance historical balances', [
+            'account_id' => $account->id,
+            'days_synced' => $tally['synced'],
+            'currency' => $targetCurrency,
+            ...($tally['unpriced'] ? ['unpriced_days' => $tally['unpriced']] : []),
+            ...($tally['without_valuation'] ? ['days_without_valuation' => $tally['without_valuation']] : []),
+        ]);
+
+        return true;
+    }
+
+    /**
+     * Where to resume from: the day after the last balance on file, or the far
+     * end of the snapshot window on a first sync or an account with no history.
+     */
+    private function resolveStartDate(Account $account, bool $isFirstSync): Carbon
+    {
+        if ($isFirstSync) {
+            return now()->subDays(self::SNAPSHOT_MAX_DAYS);
+        }
+
+        $latest = $account->balances()->max('balance_date');
+
+        return $latest
+            ? Carbon::parse($latest)->addDay()
+            : now()->subDays(self::SNAPSHOT_MAX_DAYS);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $snapshots
+     * @return array{synced: int, unpriced: int, without_valuation: int}
+     */
+    private function storeSnapshots(Account $account, array $snapshots, string $targetCurrency): array
+    {
         $count = 0;
-        $skippedAssets = [];
+        $unpricedDays = 0;
+        $daysWithoutValuation = 0;
 
         foreach ($snapshots as $snapshot) {
             $updateTime = $snapshot['updateTime'] ?? null;
-            $balances = $snapshot['data']['balances'] ?? [];
+            $btcValue = $snapshot['data']['totalAssetOfBtc'] ?? null;
 
-            if ($updateTime === null || empty($balances)) {
+            if ($updateTime === null) {
+                continue;
+            }
+
+            // The whole valuation now rests on this one field, so a Binance
+            // response that stops carrying it must be visible rather than look
+            // like a day they simply had no snapshot for.
+            if ($btcValue === null) {
+                $daysWithoutValuation++;
+
                 continue;
             }
 
             $date = Carbon::createFromTimestampMs($updateTime)->toDateString();
-            $totalValue = 0.0;
+            $btcValue = (float) $btcValue;
+            $totalValue = $this->currencyConverter->convert('BTC', $targetCurrency, $btcValue, $date);
 
-            foreach ($balances as $balance) {
-                $asset = $balance['asset'];
-                $quantity = (float) ($balance['free'] ?? 0) + (float) ($balance['locked'] ?? 0);
+            // A held-but-unpriceable day would land as a zero balance and read as
+            // a portfolio that briefly vanished, so leave the day alone instead.
+            if ($btcValue > 0 && $totalValue <= 0) {
+                $unpricedDays++;
 
-                if ($quantity <= 0 || isset($skippedAssets[$asset])) {
-                    continue;
-                }
-
-                $converted = $this->currencyConverter->convert($asset, $targetCurrency, $quantity, $date);
-
-                if ($converted == 0.0) {
-                    $skippedAssets[$asset] = true;
-
-                    continue;
-                }
-
-                $totalValue += $converted;
+                continue;
             }
 
             $account->balances()->updateOrCreate(
@@ -161,14 +204,11 @@ class BinanceBalanceSyncService
             $count++;
         }
 
-        Log::info('Synced Binance historical balances', [
-            'account_id' => $account->id,
-            'days_synced' => $count,
-            'currency' => $targetCurrency,
-            ...($skippedAssets ? ['skipped_assets' => array_keys($skippedAssets)] : []),
-        ]);
-
-        return true;
+        return [
+            'synced' => $count,
+            'unpriced' => $unpricedDays,
+            'without_valuation' => $daysWithoutValuation,
+        ];
     }
 
     /**

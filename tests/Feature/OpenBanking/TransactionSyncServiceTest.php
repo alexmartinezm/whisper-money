@@ -2,6 +2,7 @@
 
 use App\Contracts\BankingProviderInterface;
 use App\Enums\TransactionSource;
+use App\Exceptions\Banking\TransientBankingProviderException;
 use App\Exceptions\Banking\WrongTransactionsPeriodException;
 use App\Models\Account;
 use App\Models\Bank;
@@ -10,7 +11,9 @@ use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Banking\TransactionDescriptionFormatter;
 use App\Services\Banking\TransactionSyncService;
+use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 
 test('sync creates transactions from provider data', function () {
     $user = User::factory()->onboarded()->create();
@@ -478,6 +481,48 @@ test('sync deduplicates transactions without external id via fingerprint', funct
     expect($stored->dedup_fingerprint)->toStartWith('fp_');
 });
 
+test('sync leaves a manual transaction on a connected account untouched', function () {
+    $user = User::factory()->onboarded()->create();
+    $connection = BankingConnection::factory()->create(['user_id' => $user->id]);
+    $account = Account::factory()->connected()->create([
+        'user_id' => $user->id,
+        'banking_connection_id' => $connection->id,
+        'external_account_id' => 'ext-123',
+    ]);
+
+    $manual = Transaction::factory()->create([
+        'user_id' => $user->id,
+        'account_id' => $account->id,
+        'description' => 'Cash tip the bank never sees',
+        'transaction_date' => '2025-05-12',
+        'amount' => -1_000,
+        'source' => TransactionSource::ManuallyCreated,
+    ]);
+
+    $mockProvider = Mockery::mock(BankingProviderInterface::class);
+    $mockProvider->shouldReceive('getTransactions')
+        ->once()
+        ->andReturn([
+            'transactions' => [[
+                'transaction_id' => 'bank-1',
+                'transaction_amount' => ['amount' => '25.00', 'currency' => 'USD'],
+                'credit_debit_indicator' => 'DBIT',
+                'booking_date' => '2025-05-12',
+                'remittance_information' => ['Supermarket'],
+            ]],
+            'continuation_key' => null,
+        ]);
+
+    $service = new TransactionSyncService($mockProvider, new TransactionDescriptionFormatter);
+    expect($service->sync($account, '2025-05-01', '2025-05-31'))->toBe(1);
+
+    // The manual row survives the sync untouched and does not block the bank row.
+    expect($account->transactions()->count())->toBe(2);
+    expect($manual->fresh())->not->toBeNull();
+    expect($manual->fresh()->description)->toBe('Cash tip the bank never sees');
+    expect($manual->fresh()->amount)->toBe(-1_000);
+});
+
 test('sync still dedupes when bank later supplies a real id for a fingerprinted txn', function () {
     $user = User::factory()->onboarded()->create();
     $connection = BankingConnection::factory()->create(['user_id' => $user->id]);
@@ -740,6 +785,90 @@ test('sync gives up on the account when even the narrowest window is rejected', 
         ->toThrow(WrongTransactionsPeriodException::class);
 });
 
+test('sync recovers the year-wide window a bank connector refuses with an opaque 400', function () {
+    // The Renta 4 regression, end to end through the real provider: an account
+    // with no transactions asks for a year, Redsys refuses it as
+    // EXECUTION_DATE_INVALID, and all EnableBanking passes on is an opaque
+    // ASPSP_ERROR. The narrowing ladder has to run off that alone.
+    $user = User::factory()->onboarded()->create();
+    $connection = BankingConnection::factory()->create(['user_id' => $user->id]);
+    $account = Account::factory()->connected()->create([
+        'user_id' => $user->id,
+        'banking_connection_id' => $connection->id,
+        'external_account_id' => 'ext-123',
+    ]);
+
+    Http::fake(function (Request $request) {
+        parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+        if (($query['date_from'] ?? null) === '2025-07-07') {
+            return Http::response([
+                'code' => 400,
+                'message' => 'Error interacting with ASPSP',
+                'detail' => 'Unknown error',
+                'error' => 'ASPSP_ERROR',
+            ], 400);
+        }
+
+        return Http::response([
+            'transactions' => [
+                [
+                    'transaction_id' => 'txn-001',
+                    'transaction_amount' => ['amount' => '50.00', 'currency' => 'EUR'],
+                    'credit_debit_indicator' => 'DBIT',
+                    'booking_date' => '2026-05-15',
+                    'remittance_information' => ['Renta 4 fee'],
+                ],
+            ],
+            'continuation_key' => null,
+        ]);
+    });
+
+    $service = new TransactionSyncService(enableBankingProviderForTest(), new TransactionDescriptionFormatter);
+    $created = $service->sync($account, '2025-07-07', '2026-07-07', 'longest', saveDailyBalances: false);
+
+    expect($created)->toBe(1);
+
+    // One refusal, one narrowed retry, and no further rungs: the 90-day window
+    // is not wide, so a connector that keeps failing is not worth three calls.
+    Http::assertSentCount(2);
+    Http::assertSent(fn (Request $request) => str_contains($request->url(), 'date_from=2026-04-08')
+        && ! str_contains($request->url(), 'strategy'));
+});
+
+test('sync stops after one narrowed retry when the connector keeps failing opaquely', function () {
+    // The bound on the rule above, pinned end to end: an opaque 400 that has
+    // nothing to do with the window buys the bank one extra request against its
+    // metered allowance, not the ladder's three. It holds because the retry is
+    // 90 days wide and 90 is not wider than 90 - so if that ever drifts apart
+    // from the ladder's first rung, this count is what says so.
+    $user = User::factory()->onboarded()->create();
+    $connection = BankingConnection::factory()->create(['user_id' => $user->id]);
+    $account = Account::factory()->connected()->create([
+        'user_id' => $user->id,
+        'banking_connection_id' => $connection->id,
+        'external_account_id' => 'ext-123',
+    ]);
+
+    Http::fake([
+        'api.enablebanking.com/accounts/ext-123/transactions*' => Http::response([
+            'code' => 400,
+            'message' => 'Error interacting with ASPSP',
+            'detail' => 'Unknown error',
+            'error' => 'ASPSP_ERROR',
+        ], 400),
+    ]);
+
+    $service = new TransactionSyncService(enableBankingProviderForTest(), new TransactionDescriptionFormatter);
+
+    // Transient, not a period refusal: the syncer keeps the account rather than
+    // skipping it as one the bank refuses to serve any window for.
+    expect(fn () => $service->sync($account, '2025-07-07', '2026-07-07', 'longest', saveDailyBalances: false))
+        ->toThrow(TransientBankingProviderException::class);
+
+    Http::assertSentCount(2);
+});
+
 test('sync does not retry when the rejected window is already narrow', function () {
     $user = User::factory()->onboarded()->create();
     $connection = BankingConnection::factory()->create(['user_id' => $user->id]);
@@ -762,4 +891,49 @@ test('sync does not retry when the rejected window is already narrow', function 
 
     expect(fn () => $service->sync($account, '2026-07-04', '2026-07-07', saveDailyBalances: false))
         ->toThrow(WrongTransactionsPeriodException::class);
+});
+
+test('sync dedupes the N26 settled copy of a card payment it already imported as pending', function () {
+    $user = User::factory()->onboarded()->create();
+    $bank = Bank::factory()->create(['name' => 'N26', 'user_id' => $user->id]);
+    $connection = BankingConnection::factory()->create(['user_id' => $user->id]);
+    $account = Account::factory()->connected()->create([
+        'user_id' => $user->id,
+        'bank_id' => $bank->id,
+        'banking_connection_id' => $connection->id,
+        'external_account_id' => 'ext-123',
+    ]);
+
+    // N26 delivers the same purchase twice — un-posted, then settled — with a
+    // freshly minted entry_reference and a mutated transaction code, so neither
+    // the id key nor a code-sensitive content hash recognises the second one.
+    $pending = [
+        'entry_reference' => '95d1119e-92d2-11f1-a38e-4d2ca6090c88',
+        'transaction_amount' => ['amount' => '13.80', 'currency' => 'EUR'],
+        'credit_debit_indicator' => 'DBIT',
+        'booking_date' => '2026-08-08',
+        'status' => 'BOOK',
+        'creditor' => ['name' => 'EL QUEMAITO'],
+        'bank_transaction_code' => ['code' => 'MCRD', 'sub_code' => 'UPCT'],
+        'remittance_information' => ['EL QUEMAITO'],
+    ];
+
+    $settled = array_replace($pending, [
+        'entry_reference' => '95d11175-92d2-11f1-822e-49adef1560a6',
+        'bank_transaction_code' => ['code' => 'CCRD', 'sub_code' => 'POSD'],
+    ]);
+
+    $mockProvider = Mockery::mock(BankingProviderInterface::class);
+    $mockProvider->shouldReceive('getTransactions')
+        ->twice()
+        ->andReturn(
+            ['transactions' => [$pending], 'continuation_key' => null],
+            ['transactions' => [$settled], 'continuation_key' => null],
+        );
+
+    $service = new TransactionSyncService($mockProvider, new TransactionDescriptionFormatter);
+
+    expect($service->sync($account, '2026-08-06', '2026-08-10'))->toBe(1);
+    expect($service->sync($account, '2026-08-06', '2026-08-10'))->toBe(0);
+    expect($account->transactions()->count())->toBe(1);
 });

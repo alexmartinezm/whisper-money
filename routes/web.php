@@ -1,14 +1,17 @@
 <?php
 
 use App\Http\Controllers\AccountController;
+use App\Http\Controllers\AgentDocsController;
 use App\Http\Controllers\Ai\AiConsentController;
 use App\Http\Controllers\Ai\CategorizationController;
 use App\Http\Controllers\Ai\RuleSuggestionController;
 use App\Http\Controllers\Auth\VerifyEmailController;
 use App\Http\Controllers\BudgetController;
 use App\Http\Controllers\CashflowController;
+use App\Http\Controllers\ComparisonController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\IntegrationRequestController;
+use App\Http\Controllers\IntegrationsController;
 use App\Http\Controllers\LoanDetailController;
 use App\Http\Controllers\OnboardingController;
 use App\Http\Controllers\OpenBanking\AccountMappingController;
@@ -25,11 +28,16 @@ use App\Http\Controllers\RealEstateDetailController;
 use App\Http\Controllers\RecurringDetectionController;
 use App\Http\Controllers\RecurringSeriesController;
 use App\Http\Controllers\ReEvaluateTransactionRulesController;
+use App\Http\Controllers\RoadmapController;
 use App\Http\Controllers\RobotsController;
 use App\Http\Controllers\SitemapController;
 use App\Http\Controllers\SubscriptionController;
 use App\Http\Controllers\TransactionController;
 use App\Models\Bank;
+use App\Support\Marketing\ComparisonPages;
+use App\Support\Marketing\IntegrationsPage;
+use App\Support\Marketing\MarketingContent;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -63,11 +71,26 @@ Route::get('/', function () {
     return Inertia::render('welcome', [
         'canRegister' => config('auth.registration_enabled'),
         'popularBanks' => $popularBanks,
+        'comparisonLinks' => ComparisonPages::index(app()->getLocale()),
+        'integrationsLink' => IntegrationsPage::link(app()->getLocale()),
     ]);
 })->name('home');
 
 Route::get('sitemap.xml', [SitemapController::class, 'index'])->name('sitemap');
 Route::get('robots.txt', [RobotsController::class, 'index'])->name('robots');
+
+/**
+ * Domain ownership check for the ChatGPT app directory. It must return the bare
+ * token and nothing else, so an unconfigured deploy 404s rather than serving an
+ * empty body the verifier would read as a mismatched token.
+ */
+Route::get('.well-known/openai-apps-challenge', function (): Response {
+    $token = (string) config('services.openai.apps_challenge');
+
+    abort_if($token === '', 404);
+
+    return response($token)->header('Content-Type', 'text/plain');
+})->name('openai.apps-challenge');
 
 Route::get('verify-email/{id}/{hash}', VerifyEmailController::class)
     ->middleware(['signed', 'throttle:6,1'])
@@ -80,6 +103,41 @@ Route::get('privacy', function () {
 Route::get('terms', function () {
     return Inertia::render('terms');
 })->name('terms');
+
+Route::get('roadmap', [RoadmapController::class, 'index'])->name('roadmap');
+
+Route::get('llms.txt', [AgentDocsController::class, 'llms'])->name('llms');
+
+/**
+ * One URL per language, so a crawler can reach and index each one at a stable
+ * address, and a Markdown twin of each for agents.
+ */
+foreach (MarketingContent::LOCALES as $marketingLocale) {
+    $comparisonBase = MarketingContent::BASE_PATHS[$marketingLocale];
+    $comparisonSlugs = ComparisonPages::slugs($marketingLocale);
+
+    Route::get($comparisonBase.'/{slug}', [ComparisonController::class, 'show'])
+        ->defaults('locale', $marketingLocale)
+        ->whereIn('slug', $comparisonSlugs)
+        ->name("comparison.{$marketingLocale}");
+
+    Route::get($comparisonBase.'/{slug}.md', [ComparisonController::class, 'markdown'])
+        ->defaults('locale', $marketingLocale)
+        ->whereIn('slug', $comparisonSlugs)
+        ->name("comparison.{$marketingLocale}.markdown");
+
+    Route::get(IntegrationsPage::path($marketingLocale), [IntegrationsController::class, 'show'])
+        ->defaults('locale', $marketingLocale)
+        ->name("integrations.{$marketingLocale}");
+
+    Route::get(IntegrationsPage::path($marketingLocale).'.md', [IntegrationsController::class, 'markdown'])
+        ->defaults('locale', $marketingLocale)
+        ->name("integrations.{$marketingLocale}.markdown");
+
+    Route::get($marketingLocale === 'en' ? 'index.md' : "index.{$marketingLocale}.md", [AgentDocsController::class, 'landing'])
+        ->defaults('locale', $marketingLocale)
+        ->name("landing.markdown.{$marketingLocale}");
+}
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('subscribe', [SubscriptionController::class, 'index'])->name('subscribe');
@@ -127,6 +185,7 @@ Route::middleware(['auth', 'verified', 'onboarded', 'subscribed'])->group(functi
     Route::patch('accounts/reorder', [AccountController::class, 'reorder'])->name('accounts.reorder');
     Route::patch('accounts/{account}/visibility', [AccountController::class, 'updateVisibility'])->name('accounts.visibility');
     Route::patch('accounts/{account}/net-worth-inclusion', [AccountController::class, 'updateNetWorthInclusion'])->name('accounts.net-worth-inclusion');
+    Route::patch('accounts/{account}/archived', [AccountController::class, 'updateArchived'])->name('accounts.archived');
     Route::get('accounts/{account}', [AccountController::class, 'show'])->name('accounts.show');
     Route::patch('accounts/{account}/real-estate-detail', [RealEstateDetailController::class, 'update'])->name('accounts.real-estate-detail.update');
     Route::patch('accounts/{account}/loan-detail', [LoanDetailController::class, 'update'])->name('accounts.loan-detail.update');

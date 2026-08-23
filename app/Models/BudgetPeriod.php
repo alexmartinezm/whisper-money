@@ -60,6 +60,23 @@ class BudgetPeriod extends Model
         return (int) $this->budgetTransactions()->sum('amount');
     }
 
+    /**
+     * What is left of this period's own allocation, in cents. Deliberately
+     * ignores `carried_over_amount`: this is what rolls into the next period
+     * when the budget carries over, and carrying a carry-over forward again
+     * would count the same money twice. The warnings use
+     * {@see self::availableAmount()} instead.
+     */
+    public function remainingAmount(): int
+    {
+        return $this->allocated_amount - $this->spentAmount();
+    }
+
+    /**
+     * The period's ceiling: its allocation plus anything carried over from the
+     * period before. This is what the status warnings judge against, which is
+     * why it is not the mirror of {@see self::remainingAmount()}.
+     */
     public function availableAmount(): int
     {
         return (int) $this->allocated_amount + (int) ($this->carried_over_amount ?? 0);

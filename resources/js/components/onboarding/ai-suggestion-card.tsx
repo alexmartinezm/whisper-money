@@ -118,6 +118,7 @@ export function AiSuggestionCard({
     const [previewData, setPreviewData] = useState<PreviewResponse | null>(
         null,
     );
+    const [previewFailed, setPreviewFailed] = useState(false);
 
     const conditions = useMemo(
         () => conditionsFor(draft.values),
@@ -148,12 +149,19 @@ export function AiSuggestionCard({
 
         const handle = setTimeout(async () => {
             setLoading(true);
+            setPreviewFailed(false);
             try {
                 const { data } = await axios.post<PreviewResponse>(
                     preview().url,
                     { conditions },
                 );
                 setPreviewData(data);
+            } catch {
+                // Keeping the old response would show a count for the token the
+                // user just replaced, and they decide whether to create the rule
+                // from that number. Admit we don't know instead.
+                setPreviewData(null);
+                setPreviewFailed(true);
             } finally {
                 setLoading(false);
             }
@@ -164,6 +172,21 @@ export function AiSuggestionCard({
     }, [conditionsKey]);
 
     const matchCount = previewData?.match_count ?? suggestion.group_size;
+
+    const previewSummary = (() => {
+        if (previewFailed) {
+            return __('We couldn’t check which transactions match.');
+        }
+
+        if (previewData) {
+            return __(':count of :total uncategorized transactions match', {
+                count: previewData.match_count,
+                total: previewData.total_uncategorized,
+            });
+        }
+
+        return __('Loading…');
+    })();
 
     const selectedCategory = categories.find((c) => c.id === draft.categoryId);
     const categoryLabel =
@@ -211,41 +234,49 @@ export function AiSuggestionCard({
         }
 
         setLoading(true);
+        setPreviewFailed(false);
         try {
             const { data } = await axios.post<PreviewResponse>(preview().url, {
                 conditions,
             });
             setPreviewData(data);
+        } catch {
+            // Without this the dialog drops out of its loading state into an empty
+            // table, which reads as "nothing matches" rather than "we couldn't
+            // find out".
+            setPreviewFailed(true);
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        <div className="overflow-hidden rounded-xl border bg-card">
-            {/* Collapsed header: select + summary + expand toggle */}
-            <div className="flex items-center gap-3 p-3">
+        <div>
+            {/* Collapsed row: select + summary + expand toggle */}
+            <div className="flex min-h-11 items-center gap-3.5 py-4">
                 <Checkbox
                     checked={draft.include}
                     onCheckedChange={(checked) =>
                         onChange({ ...draft, include: checked === true })
                     }
                     aria-label={__('Include this rule')}
-                    className="shrink-0"
+                    className="size-5 shrink-0 rounded-md"
                 />
                 <button
                     type="button"
                     onClick={() => setExpanded((value) => !value)}
                     aria-expanded={expanded}
-                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                    className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 text-left"
                 >
-                    <span className="min-w-0 flex-1 truncate text-sm">
+                    <span className="min-w-0 flex-1 truncate text-base">
                         <span className="font-medium">{valuesSummary}</span>
                         <span className="text-muted-foreground"> → </span>
                         <span>{categoryLabel}</span>
                     </span>
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                        {__(':count matches', { count: matchCount })}
+                    <span className="shrink-0 text-[13px] text-muted-foreground">
+                        {previewFailed
+                            ? __('? matches')
+                            : __(':count matches', { count: matchCount })}
                     </span>
                     <ChevronDown
                         className={`size-4 shrink-0 text-muted-foreground transition-transform ${expanded ? 'rotate-180' : ''}`}
@@ -255,7 +286,7 @@ export function AiSuggestionCard({
 
             {/* Expanded body: edit values, category, preview */}
             {expanded && (
-                <div className="space-y-3 border-t p-4">
+                <div className="space-y-3 pb-5">
                     <Label className="text-xs text-muted-foreground">
                         {__('If the transaction matches any of')}
                     </Label>
@@ -329,7 +360,7 @@ export function AiSuggestionCard({
                             />
                             {!draft.categoryId &&
                                 suggestion.new_category_name && (
-                                    <Badge className="gap-1 bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">
+                                    <Badge variant="outline" className="gap-1">
                                         <Sparkles className="size-3" />
                                         {__('New: :name', {
                                             name: suggestion.new_category_name,
@@ -360,17 +391,7 @@ export function AiSuggestionCard({
                 <DialogContent className="max-h-[85vh] gap-0 overflow-hidden p-0 sm:max-w-2xl">
                     <DialogHeader className="space-y-1 p-6 pb-4">
                         <DialogTitle>{__('Matching transactions')}</DialogTitle>
-                        <DialogDescription>
-                            {previewData
-                                ? __(
-                                      ':count of :total uncategorized transactions match',
-                                      {
-                                          count: previewData.match_count,
-                                          total: previewData.total_uncategorized,
-                                      },
-                                  )
-                                : __('Loading…')}
-                        </DialogDescription>
+                        <DialogDescription>{previewSummary}</DialogDescription>
                     </DialogHeader>
 
                     <div className="max-h-[60vh] overflow-y-auto border-t">
@@ -379,6 +400,12 @@ export function AiSuggestionCard({
                                 <Loader2 className="size-4 animate-spin" />
                                 {__('Loading…')}
                             </div>
+                        ) : previewFailed ? (
+                            <p className="p-8 text-center text-sm text-muted-foreground">
+                                {__(
+                                    'We couldn’t check which transactions match.',
+                                )}
+                            </p>
                         ) : (
                             <Table>
                                 <TableHeader className="sticky top-0 bg-background">

@@ -17,6 +17,11 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
  * @property bool $has_pending_accounts
+ * @property bool $can_sync_manually
+ * @property Carbon|null $next_sync_attempt_at
+ * @property string|null $aspsp_name
+ * @property string|null $aspsp_country
+ * @property bool|null $aspsp_beta
  * @property BankingProvider $provider
  * @property BankingConnectionStatus $status
  * @property Carbon|null $valid_until
@@ -24,7 +29,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property Carbon|null $bank_transactions_email_cutoff_at
  * @property Carbon|null $rate_limited_until
  * @property int $consecutive_sync_failures
- * @property array<int, mixed>|null $pending_accounts_data
+ * @property array<int, array<string, mixed>>|null $pending_accounts_data
  */
 class BankingConnection extends Model
 {
@@ -41,6 +46,7 @@ class BankingConnection extends Model
         'aspsp_name',
         'aspsp_country',
         'aspsp_logo',
+        'aspsp_beta',
         'status',
         'valid_until',
         'last_synced_at',
@@ -63,11 +69,30 @@ class BankingConnection extends Model
         'session_id',
     ];
 
+    /**
+     * How this connection identifies itself in a log line.
+     *
+     * Which bank it is decides whether a wave of failures is one connector
+     * misbehaving or the provider as a whole, and that is the first question
+     * every sync investigation starts with.
+     *
+     * @return array<string, string|null>
+     */
+    public function logContext(): array
+    {
+        return [
+            'connection_id' => $this->id,
+            'aspsp_name' => $this->aspsp_name,
+            'aspsp_country' => $this->aspsp_country,
+        ];
+    }
+
     protected function casts(): array
     {
         return [
             'provider' => BankingProvider::class,
             'status' => BankingConnectionStatus::class,
+            'aspsp_beta' => 'boolean',
             'valid_until' => 'datetime',
             'last_synced_at' => 'datetime',
             'bank_transactions_email_cutoff_at' => 'datetime',
@@ -150,6 +175,38 @@ class BankingConnection extends Model
     public function hasPendingAccounts(): bool
     {
         return ! empty($this->pending_accounts_data);
+    }
+
+    /**
+     * Pending accounts the user can actually map. Providers sometimes report accounts
+     * without a uid (EnableBanking does it for some French cards); those can never be
+     * synced, so offering them for mapping only produces a validation error.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function mappablePendingAccounts(): array
+    {
+        return array_values(array_filter(
+            $this->pending_accounts_data ?? [],
+            fn (array $account): bool => ! empty($account['uid']),
+        ));
+    }
+
+    /**
+     * Names of the pending accounts left out of the mapping screen, so the user is told
+     * why an account they can see in their bank never shows up here.
+     *
+     * @return array<int, string>
+     */
+    public function unmappablePendingAccountNames(): array
+    {
+        return array_values(array_map(
+            fn (array $account): string => $account['name'] ?? $account['account_id']['iban'] ?? __('Bank Account'),
+            array_filter(
+                $this->pending_accounts_data ?? [],
+                fn (array $account): bool => empty($account['uid']),
+            ),
+        ));
     }
 
     public function isExpired(): bool

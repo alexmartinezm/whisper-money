@@ -207,7 +207,7 @@ export function CreateBudgetDialog({
                                 <Input
                                     id="period-start-day"
                                     type="number"
-                                    min="0"
+                                    min={periodType === 'monthly' ? '1' : '0'}
                                     max={periodType === 'monthly' ? '31' : '6'}
                                     value={periodStartDay}
                                     onChange={(e) =>

@@ -117,19 +117,30 @@ class DashboardController extends Controller
         $transactions = Transaction::query()
             ->where('transactions.user_id', $userId)
             ->whereBetween('transactions.transaction_date', [$from, $to])
+            // The join carries the ownership percentage without a second query,
+            // and ignores the account's soft-delete scope, as the aggregate it
+            // replaced did.
+            ->joinOwningAccount()
+            ->select('transactions.*', 'accounts.ownership_percentage')
             ->with(['category', 'splits.category'])
             ->get();
 
-        return $this->effectivePostings->forTransactions($transactions)
-            ->filter(function ($posting) use ($type): bool {
-                if ($posting->category !== null) {
-                    return $posting->category->type === $type;
-                }
+        $total = 0;
 
-                return $type === CategoryType::Income
-                    ? $posting->amount > 0
-                    : $posting->amount < 0;
-            })
-            ->sum('amount');
+        foreach ($transactions as $transaction) {
+            foreach ($this->effectivePostings->forTransaction($transaction) as $posting) {
+                $matches = $posting->category !== null
+                    ? $posting->category->type === $type
+                    : ($type === CategoryType::Income ? $posting->amount > 0 : $posting->amount < 0);
+
+                if ($matches) {
+                    // A shared account only counts at the owner's percentage, and
+                    // a split posting is weighed like the transaction it is on.
+                    $total += Account::shareOf($posting->amount, $transaction->ownership_percentage);
+                }
+            }
+        }
+
+        return $total;
     }
 }

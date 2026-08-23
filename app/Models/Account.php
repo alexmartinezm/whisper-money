@@ -4,7 +4,10 @@ namespace App\Models;
 
 use App\Enums\AccountType;
 use App\Models\Concerns\BelongsToSpace;
+use App\Services\BudgetTransactionService;
+use Carbon\Carbon;
 use Database\Factories\AccountFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -16,6 +19,8 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
  * @property AccountType $type
+ * @property ?Carbon $archived_at
+ * @property ?Carbon $transactions_paginate_before
  */
 class Account extends Model
 {
@@ -33,11 +38,15 @@ class Account extends Model
         'encrypted',
         'banking_connection_id',
         'external_account_id',
+        'transactions_paginate_before',
         'iban',
         'linked_at',
         'position',
         'hidden_on_dashboard',
         'include_in_net_worth',
+        'archived_at',
+        'ownership_percentage',
+        'ownership_applies_to_balance',
     ];
 
     /** @var list<string> */
@@ -45,6 +54,7 @@ class Account extends Model
         'user_id',
         'space_id',
         'bank_id',
+        'transactions_paginate_before',
         'iban',
         'position',
         'hidden_on_dashboard',
@@ -58,16 +68,82 @@ class Account extends Model
         'linked_loan_account_id',
     ];
 
+    /**
+     * Budget amounts are snapshots taken when a transaction is assigned, so a
+     * new ownership share only reaches the budgets that already counted this
+     * account if something rewrites them. Hooked on the model rather than on
+     * the settings controller so every write path is covered.
+     */
+    protected static function booted(): void
+    {
+        static::updated(function (Account $account): void {
+            if ($account->wasChanged('ownership_percentage')) {
+                app(BudgetTransactionService::class)->reweighAccountSnapshots($account);
+            }
+        });
+    }
+
     protected function casts(): array
     {
         return [
             'type' => AccountType::class,
             'encrypted' => 'boolean',
             'linked_at' => 'datetime',
+            'transactions_paginate_before' => 'date',
             'position' => 'integer',
             'hidden_on_dashboard' => 'boolean',
             'include_in_net_worth' => 'boolean',
+            'archived_at' => 'datetime',
+            'ownership_percentage' => 'integer',
+            'ownership_applies_to_balance' => 'boolean',
         ];
+    }
+
+    /**
+     * Archived accounts are left out of the accounts page and of every picker
+     * that points new data at an account. They stay in the balance history, so
+     * the queries that build it deliberately do not use this scope.
+     *
+     * @param  Builder<Account>  $query
+     * @return Builder<Account>
+     */
+    public function scopeNotArchived(Builder $query): Builder
+    {
+        return $query->whereNull('archived_at');
+    }
+
+    public function isArchived(): bool
+    {
+        return $this->archived_at !== null;
+    }
+
+    /**
+     * The owner's share of an amount held in this account, in the same minor
+     * units. A shared account (say 50% with a partner) only contributes that
+     * slice of every transaction to the user's own figures.
+     */
+    public function shareOfAmount(int $amount): int
+    {
+        return self::shareOf($amount, $this->ownership_percentage);
+    }
+
+    /**
+     * The same slice, for callers holding the percentage without the model —
+     * the row-by-row aggregates read it off the owning-account join rather than
+     * loading an Account per transaction. One rounding rule, one place.
+     */
+    public static function shareOf(int $amount, ?int $percentage): int
+    {
+        // Defaults to full ownership so a model built without the column (a
+        // partial select, a fresh factory instance) reads at face value
+        // instead of silently zeroing every amount.
+        $percentage ??= 100;
+
+        if ($percentage >= 100) {
+            return $amount;
+        }
+
+        return (int) round($amount * $percentage / 100);
     }
 
     /**

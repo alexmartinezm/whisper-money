@@ -1,6 +1,10 @@
 import '../css/app.css';
 
-import { createInertiaApp, router } from '@inertiajs/react';
+import {
+    createInertiaApp,
+    router,
+    type ResolvedComponent,
+} from '@inertiajs/react';
 import * as Sentry from '@sentry/react';
 import axios from 'axios';
 import { resolvePageComponent } from 'laravel-vite-plugin/inertia-helpers';
@@ -14,25 +18,33 @@ import {
 import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { toast, Toaster } from 'sonner';
+import { update as updateTimezone } from './actions/App/Http/Controllers/Settings/TimezoneController';
+import { AppErrorBoundary } from './components/app-error-boundary';
 import { EncryptionKeyProvider } from './contexts/encryption-key-context';
 import { PrivacyModeProvider } from './contexts/privacy-mode-context';
 import { SyncProvider } from './contexts/sync-context';
 import { initializeTheme } from './hooks/use-appearance';
 import { initializeChartColorScheme } from './hooks/use-chart-color-scheme';
 import { installChunkLoadRecovery } from './lib/chunk-load-recovery';
+import { installFailedNavigationToast } from './lib/failed-navigation-toast';
+import { leavePage } from './lib/leave-page';
 import { initializePostHog } from './lib/posthog';
 import {
     isBrowserExtensionNoise,
     isChunkLoadErrorEvent,
     isFacebookInAppBrowserJavaBridgeNoise,
+    isPageLeaveAbortNoise,
     isPostMessageDataCloneNoise,
     isSafariCashbackExtensionNoise,
+    isUnattendedRequestNoise,
 } from './lib/sentry';
-import { showSubscriptionPaymentIssueToast } from './lib/subscription-payment-issue-toast';
+import { trackUnattendedRequests } from './lib/unattended-requests';
 import type { ExpiredBankingConnectionNotification, SharedData } from './types';
 import { __, setTranslations } from './utils/i18n';
 
 installChunkLoadRecovery();
+trackUnattendedRequests();
+installFailedNavigationToast();
 
 Sentry.init({
     dsn: import.meta.env.SENTRY_LARAVEL_DSN,
@@ -43,6 +55,8 @@ Sentry.init({
     beforeSend(event) {
         if (
             isChunkLoadErrorEvent(event) ||
+            isPageLeaveAbortNoise(event) ||
+            isUnattendedRequestNoise(event) ||
             isBrowserExtensionNoise(event) ||
             isPostMessageDataCloneNoise(event) ||
             isFacebookInAppBrowserJavaBridgeNoise(event) ||
@@ -104,7 +118,7 @@ function showExpiredConnectionsToast(
             action: {
                 label: __('Reconnect'),
                 onClick: () => {
-                    window.location.href = firstConnection.reconnect_url;
+                    leavePage(firstConnection.reconnect_url);
                 },
             },
         },
@@ -168,8 +182,14 @@ createInertiaApp({
     resolve: (name) =>
         resolvePageComponent(
             `./pages/${name}.tsx`,
-            import.meta.glob('./pages/**/*.tsx'),
-        ),
+            // Excluding the tests that live next to their pages: without it Vite
+            // treats each one as a page entry and bundles what it imports, which
+            // pulls vitest into the production build.
+            import.meta.glob<{ default: ResolvedComponent }>([
+                './pages/**/*.tsx',
+                '!./pages/**/*.test.tsx',
+            ]),
+        ).then((module) => module.default),
     setup({ el, App, props }) {
         const root = createRoot(el);
         const initialPageProps = props.initialPage?.props as
@@ -187,8 +207,6 @@ createInertiaApp({
             (initialPageProps?.expiredBankingConnections as
                 | ExpiredBankingConnectionNotification[]
                 | undefined) ?? [];
-        const initialSubscriptionPaymentIssue =
-            initialPageProps?.subscriptionPaymentIssue;
 
         const syncUserTimezone = async (pageProps?: Partial<SharedData>) => {
             const user = pageProps?.auth?.user ?? null;
@@ -207,7 +225,7 @@ createInertiaApp({
             hasAttemptedTimezoneBackfill = true;
 
             try {
-                await axios.patch('/settings/timezone', {
+                await axios.patch(updateTimezone.url(), {
                     timezone: detectedTimezone,
                 });
             } catch {
@@ -236,40 +254,36 @@ createInertiaApp({
                 setTranslations(translations);
             }
 
-            showSubscriptionPaymentIssueToast(
-                pageProps.subscriptionPaymentIssue,
-            );
-
             void syncUserTimezone(pageProps);
         });
-
-        showSubscriptionPaymentIssueToast(initialSubscriptionPaymentIssue);
 
         void syncUserTimezone(initialPageProps);
 
         root.render(
             <StrictMode>
-                <EncryptionKeyProvider
-                    hasEncryptionSetup={
-                        hasEncryptionSetup &&
-                        (hasEncryptedAccounts || hasEncryptedTransactions)
-                    }
-                >
-                    <PrivacyModeProvider>
-                        <SyncProvider
-                            initialIsAuthenticated={initialIsAuthenticated}
-                            initialUser={initialUser}
-                        >
-                            <App {...props} />
-                            <ExpiredConnectionsToast
-                                initialExpiredConnections={
-                                    initialExpiredConnections
-                                }
-                            />
-                            <AppToaster />
-                        </SyncProvider>
-                    </PrivacyModeProvider>
-                </EncryptionKeyProvider>
+                <AppErrorBoundary>
+                    <EncryptionKeyProvider
+                        hasEncryptionSetup={
+                            hasEncryptionSetup &&
+                            (hasEncryptedAccounts || hasEncryptedTransactions)
+                        }
+                    >
+                        <PrivacyModeProvider>
+                            <SyncProvider
+                                initialIsAuthenticated={initialIsAuthenticated}
+                                initialUser={initialUser}
+                            >
+                                <App {...props} />
+                                <ExpiredConnectionsToast
+                                    initialExpiredConnections={
+                                        initialExpiredConnections
+                                    }
+                                />
+                                <AppToaster />
+                            </SyncProvider>
+                        </PrivacyModeProvider>
+                    </EncryptionKeyProvider>
+                </AppErrorBoundary>
             </StrictMode>,
         );
     },

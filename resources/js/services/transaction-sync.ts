@@ -1,3 +1,11 @@
+// Aliased because this service's own methods share these names.
+import { index as syncTransactions } from '@/actions/App/Http/Controllers/Sync/TransactionSyncController';
+import {
+    bulkUpdate as bulkUpdateRoute,
+    destroy as destroyRoute,
+    store as storeRoute,
+    update as updateRoute,
+} from '@/actions/App/Http/Controllers/TransactionController';
 import { db, withDb } from '@/lib/dexie-db';
 import { TransactionSyncManager } from '@/lib/sync-manager';
 import type { LearnedRuleNotice } from '@/types/automation-rule';
@@ -75,7 +83,7 @@ class TransactionSyncService {
 
     constructor() {
         this.syncManager = new TransactionSyncManager({
-            endpoint: '/api/sync/transactions',
+            endpoint: syncTransactions.url(),
             transformFromServer: transformTransactionFromServer,
         });
     }
@@ -100,7 +108,7 @@ class TransactionSyncService {
         data: TransactionCreateData,
         options?: { updateBalance?: boolean },
     ): Promise<Transaction> {
-        const response = await axios.post('/transactions', {
+        const response = await axios.post(storeRoute.url(), {
             ...data,
             ...(options?.updateBalance ? { update_balance: true } : {}),
         });
@@ -137,7 +145,7 @@ class TransactionSyncService {
     ): Promise<UpdatedTransaction> {
         const { label_ids, ...transactionData } = data;
 
-        const response = await axios.patch(`/transactions/${id}`, {
+        const response = await axios.patch(updateRoute.url(id), {
             ...transactionData,
             label_ids,
             ...(options?.updateBalance ? { update_balance: true } : {}),
@@ -174,7 +182,7 @@ class TransactionSyncService {
     ): Promise<BulkUpdateResult> {
         const { label_ids, ...transactionData } = data;
 
-        const response = await axios.patch('/transactions/bulk', {
+        const response = await axios.patch(bulkUpdateRoute.url(), {
             transaction_ids: ids,
             label_ids: label_ids,
             ...transactionData,
@@ -224,7 +232,7 @@ class TransactionSyncService {
             requestFilters.category_source = 'ai';
         }
 
-        const response = await axios.patch('/transactions/bulk', {
+        const response = await axios.patch(bulkUpdateRoute.url(), {
             filters: requestFilters,
             label_ids: label_ids,
             ...transactionData,
@@ -274,7 +282,7 @@ class TransactionSyncService {
         id: string,
         options?: { updateBalance?: boolean },
     ): Promise<void> {
-        await axios.delete(`/transactions/${id}`, {
+        await axios.delete(destroyRoute.url(id), {
             data: options?.updateBalance ? { update_balance: true } : undefined,
         });
         // The API delete above is authoritative; the local cache eviction is

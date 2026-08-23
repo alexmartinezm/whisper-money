@@ -18,7 +18,7 @@
 
 **The most secure way to understand your finances.**
 
-Whisper Money is a privacy-first personal finance application that helps you track, categorize, and understand your spending—all while keeping your financial data encrypted and secure.
+Whisper Money is a privacy-first personal finance application that helps you track, categorize, and understand your spending. We don't sell your data and we don't profile you for ads. The entire codebase is public, so you can check exactly where your data goes.
 
 > 🎮 **Try the Demo:** Experience Whisper Money with our [demo account](https://whisper.money/login?demo=1) - no registration required!
 
@@ -26,7 +26,7 @@ Whisper Money is a privacy-first personal finance application that helps you tra
 
 ## Features
 
-- 🔐 **Privacy-first** — Your data is never shared with third parties. You own it
+- 🔐 **Privacy-first** — You own your data and we never sell it. Self-host it and point the AI at a [local model](#ai-provider) to keep it entirely on your own infrastructure
 - 🏦 **Bank account management** — Track multiple accounts in one place
 - 📊 **Transaction categorization** — Automatic and manual categorization
 - 🤖 **Automation rules** — Set up rules to auto-categorize transactions
@@ -35,7 +35,7 @@ Whisper Money is a privacy-first personal finance application that helps you tra
 ## Tech Stack
 
 - **Backend:** Laravel 12, PHP 8.4
-- **Frontend:** React 19, Inertia.js v2, TypeScript
+- **Frontend:** React 19, Inertia.js v3, TypeScript
 - **Styling:** Tailwind CSS v4
 - **Database:** MySQL
 - **Cache/Queue:** Redis
@@ -190,8 +190,11 @@ unknown or non-text provider fails fast when the AI feature runs.
 | `AI_PROVIDER`                | `gemini`             | Provider for all AI features. Set once to switch everything.          |
 | `AI_SUGGESTIONS_PROVIDER`    | `AI_PROVIDER`        | Override the provider for rule suggestions only.                      |
 | `AI_CATEGORIZATION_PROVIDER` | `AI_PROVIDER`        | Override the provider for transaction categorization only.            |
+| `AI_REPORTS_PROVIDER`        | `AI_PROVIDER`        | Override the provider for the stats-report summaries only.            |
 | `AI_SUGGESTIONS_MODEL`       | `gemini-flash-latest`| Model used for rule suggestions.                                      |
 | `AI_CATEGORIZATION_MODEL`    | `gemini-flash-latest`| Model used for transaction categorization.                            |
+| `AI_REPORTS_MODEL`           | `gemini-flash-latest`| Model used for the stats-report summaries.                            |
+| `AI_REPORTS_TIMEOUT`         | `30`                 | Seconds before a report is posted without its AI summary.             |
 | `GEMINI_API_KEY`             | -                    | Required when the provider is `gemini`.                               |
 | `OLLAMA_URL`                 | `http://localhost:11434` | Ollama server URL (used when the provider is `ollama`).           |
 | `OLLAMA_API_KEY`             | -                    | Optional; only needed behind an authenticating proxy.                 |
@@ -209,10 +212,6 @@ Make sure the model is pulled on the Ollama server first (`ollama pull gemma3:12
 Any other provider follows the same pattern: set `AI_PROVIDER`, that provider's
 credentials, and the `*_MODEL` vars to one of its models. Gemini remains the
 default, so existing deployments are unaffected.
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/chart?repos=whisper-money/whisper-money&type=date&legend=top-left&sealed_token=aCH1_aXcn3SWzmvWphdcfCvsm_6KewnWP3tJmVYtXio1ulzirYZDej6gnPuguhtXgvs-urR1q_t6r4-5PWBz8ecaY2G18_a75NOMb5iJVO91OGyBtst20bXRD_tv2p7dpvTDbv3HybWdqnve-rp14PvHDqxoZR-47g4IZusfNCz-5O8Gqv0TItLJBkaA)](https://www.star-history.com/?type=date&legend=top-left&repos=whisper-money%2Fwhisper-money)
 
 ## License
 

@@ -24,15 +24,20 @@ use Illuminate\Notifications\Notification;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Laravel\Cashier\Billable;
+use Laravel\Cashier\Cashier;
+use Laravel\Cashier\Subscription;
 use Laravel\Fortify\TwoFactorAuthenticatable;
 use Laravel\Pennant\Concerns\HasFeatures;
 use Laravel\Sanctum\HasApiTokens;
+use Stripe\Subscription as StripeSubscription;
 
 /**
  * @property ?Carbon $last_logged_in_at
  * @property ?Carbon $last_active_at
  * @property ?Carbon $transactions_last_visited_at
  * @property ?Carbon $ai_consent_prompt_dismissed_at
+ * @property ?string $price_arm
+ * @property ?string $signup_plan
  */
 class User extends Authenticatable implements HasLocalePreference, MustVerifyEmail
 {
@@ -55,6 +60,8 @@ class User extends Authenticatable implements HasLocalePreference, MustVerifyEma
         'locale',
         'timezone',
         'current_space_id',
+        'price_arm',
+        'signup_plan',
     ];
 
     /**
@@ -72,6 +79,8 @@ class User extends Authenticatable implements HasLocalePreference, MustVerifyEma
         'pm_last_four',
         'trial_ends_at',
         'encryption_salt',
+        'price_arm',
+        'signup_plan',
     ];
 
     /**
@@ -366,6 +375,18 @@ class User extends Authenticatable implements HasLocalePreference, MustVerifyEma
     }
 
     /**
+     * Demo and end-to-end fixture accounts are seeded with a made-up Stripe
+     * subscription, so every path that would hand that id back to Stripe has to
+     * bail out first or the call 404s.
+     */
+    public function hasSeededSubscription(): bool
+    {
+        $stripeId = (string) $this->subscription('default')?->stripe_id;
+
+        return str_starts_with($stripeId, 'sub_demo_') || str_starts_with($stripeId, 'sub_e2e_');
+    }
+
+    /**
      * Whether the user can access the given feature on their current plan.
      */
     public function canUseFeature(PlanFeature $feature): bool
@@ -404,9 +425,44 @@ class User extends Authenticatable implements HasLocalePreference, MustVerifyEma
     }
 
     /**
-     * Whether the user is still being billed: on a trial or holding an
-     * active subscription that has not been cancelled (grace period excluded,
-     * as it will not renew). Such users must cancel before deleting their account.
+     * Stripe statuses that leave an invoice Stripe can still put on the card.
+     *
+     * Deliberately an allowlist: a status we do not know about must not block account
+     * deletion, or an unfamiliar one traps the user with nothing to cancel. Cashier's
+     * `valid()` cannot stand in for this — it reports `unpaid` and `incomplete` as
+     * inactive while Stripe keeps their invoices open. (`past_due` is absent from that
+     * list only because {@see Cashier::keepPastDueSubscriptionsActive()}
+     * is enabled in AppServiceProvider, so don't reach for `valid()` here again.)
+     */
+    private const COLLECTABLE_STRIPE_STATUSES = [
+        StripeSubscription::STATUS_ACTIVE,
+        StripeSubscription::STATUS_TRIALING,
+        StripeSubscription::STATUS_PAST_DUE,
+        StripeSubscription::STATUS_UNPAID,
+        StripeSubscription::STATUS_INCOMPLETE,
+    ];
+
+    /**
+     * The subscription Stripe can still collect on, whatever its payment state.
+     * A cancelled one (`ends_at` set, in grace period or over) issues no further
+     * invoices, so it does not count and does not stand in the way of deletion.
+     */
+    public function collectableSubscription(): ?Subscription
+    {
+        $subscription = $this->subscription('default');
+
+        if ($subscription === null || $subscription->canceled()) {
+            return null;
+        }
+
+        return in_array($subscription->stripe_status, self::COLLECTABLE_STRIPE_STATUSES, true)
+            ? $subscription
+            : null;
+    }
+
+    /**
+     * Whether the user is still being billed: on a trial or holding a subscription
+     * Stripe can still collect on. Such users must cancel before deleting their account.
      */
     public function hasActiveSubscriptionOrTrial(): bool
     {
@@ -418,11 +474,7 @@ class User extends Authenticatable implements HasLocalePreference, MustVerifyEma
             return true;
         }
 
-        $subscription = $this->subscription('default');
-
-        return $subscription !== null
-            && $subscription->valid()
-            && ! $subscription->onGracePeriod();
+        return $this->collectableSubscription() !== null;
     }
 
     /**
@@ -438,6 +490,15 @@ class User extends Authenticatable implements HasLocalePreference, MustVerifyEma
     public function isDemoAccount(): bool
     {
         return $this->email === config('app.demo.email');
+    }
+
+    /**
+     * Whether the demo account's restrictions apply. Local is exempt so the
+     * account stays usable in development, matching BlockDemoAccountActions.
+     */
+    public function isRestrictedDemoAccount(): bool
+    {
+        return $this->isDemoAccount() && ! app()->environment('local');
     }
 
     public function isAdmin(): bool
@@ -478,6 +539,11 @@ class User extends Authenticatable implements HasLocalePreference, MustVerifyEma
     public function wantsBankTransactionsSyncedEmail(): bool
     {
         return $this->setting->notify_on_bank_transactions_synced ?? true;
+    }
+
+    public function wantsInactiveNoBankEmail(): bool
+    {
+        return $this->setting->notify_on_inactive_no_bank ?? true;
     }
 
     public function routeNotificationForMail(?Notification $notification = null): ?string

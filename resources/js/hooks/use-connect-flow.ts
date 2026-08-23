@@ -9,6 +9,7 @@ import {
     isProviderComplete,
 } from '@/lib/connect-providers';
 import { getCsrfToken } from '@/lib/csrf';
+import { leavePage } from '@/lib/leave-page';
 import type {
     BankingConnection,
     EnableBankingInstitution,
@@ -196,6 +197,7 @@ export function useConnectFlow(connections: BankingConnection[]) {
                       aspsp_name: selectedBank.name,
                       country,
                       logo: selectedBank.logo,
+                      beta: selectedBank.beta ?? false,
                   };
 
             const response = await fetch(url, {
@@ -216,7 +218,7 @@ export function useConnectFlow(connections: BankingConnection[]) {
             }
 
             const data = await response.json();
-            window.location.href = data.redirect_url;
+            leavePage(data.redirect_url);
         } catch (e) {
             setError(
                 e instanceof Error

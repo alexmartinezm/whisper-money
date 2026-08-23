@@ -1,6 +1,8 @@
+import { bulkUpdate } from '@/actions/App/Http/Controllers/Api/TransactionController';
 import { useEncryptionKey } from '@/contexts/encryption-key-context';
 import { decrypt, importKey } from '@/lib/crypto';
 import { getStoredKey } from '@/lib/key-storage';
+import { reloadPage } from '@/lib/leave-page';
 import { SharedData } from '@/types';
 import { usePage } from '@inertiajs/react';
 import axios from 'axios';
@@ -127,14 +129,14 @@ export function useDecryptTransactions() {
                     for (let i = 0; i < batch.length; i += 50) {
                         const chunk = batch.slice(i, i + 50);
                         await withRetry(() =>
-                            axios.patch('/api/transactions/bulk', {
+                            axios.patch(bulkUpdate.url(), {
                                 transactions: chunk,
                             }),
                         );
                     }
                 }
 
-                window.location.reload();
+                reloadPage();
             } catch {
                 // Silent failure — migration will retry next session
                 hasRun.current = false;

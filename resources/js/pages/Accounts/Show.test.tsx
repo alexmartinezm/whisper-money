@@ -7,13 +7,14 @@ import AccountShow from './Show';
 
 vi.mock('@inertiajs/react', () => ({
     Head: () => null,
-    router: { reload: vi.fn() },
+    router: { reload: vi.fn(), patch: vi.fn() },
     Deferred: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
 vi.mock('@/actions/App/Http/Controllers/AccountController', () => ({
     index: () => ({ url: '/accounts' }),
     show: { url: (id: string) => `/accounts/${id}` },
+    updateArchived: { url: (id: string) => `/accounts/${id}/archived` },
 }));
 
 vi.mock('@/actions/App/Http/Controllers/LoanDetailController', () => ({
@@ -32,6 +33,10 @@ vi.mock('@/layouts/app/app-sidebar-layout', () => ({
 
 vi.mock('@/components/accounts/account-balance-chart', () => ({
     AccountBalanceChart: () => null,
+}));
+
+vi.mock('@/components/accounts/archive-account-dialog', () => ({
+    ArchiveAccountDialog: () => null,
 }));
 
 vi.mock('@/components/accounts/balances-modal', () => ({
@@ -129,14 +134,30 @@ describe('AccountShow', () => {
         expect(router.reload).toHaveBeenCalledWith({ only: ['transactions'] });
     });
 
-    it('hides transaction action for connected accounts', () => {
+    it('opens create transaction dialog for connected transactional accounts', () => {
         renderPage({
             ...baseAccount,
             banking_connection_id: 'connection-1',
         });
 
+        fireEvent.click(
+            screen.getByRole('button', { name: 'Add transaction' }),
+        );
+
+        expect(editTransactionDialog).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                open: true,
+                initialAccountId: 'account-1',
+                mode: 'create',
+            }),
+        );
+    });
+
+    it('hides transaction action for non-transactional accounts', () => {
+        renderPage({ ...baseAccount, type: 'real_estate' });
+
         expect(
-            screen.queryByRole('button', { name: 'Transaction' }),
+            screen.queryByRole('button', { name: 'Add transaction' }),
         ).not.toBeInTheDocument();
     });
 });

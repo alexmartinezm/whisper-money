@@ -42,7 +42,18 @@ if ($useContainers) {
     // We wrap in try/catch because an uncaught exception inside a
     // shutdown function becomes a fatal error in PHP, which would leave
     // the container running.
-    $cleanup = function () use ($container): void {
+    //
+    // Only the process that started the container may stop it. The
+    // split-concurrency tests fork writers, and a forked child inherits this
+    // shutdown hook: without the guard the first child to exit takes the
+    // database down under the parent, and every later test fails to connect.
+    $ownerPid = getmypid();
+
+    $cleanup = function () use ($container, $ownerPid): void {
+        if (getmypid() !== $ownerPid) {
+            return;
+        }
+
         try {
             $container->stop();
         } catch (Throwable) {

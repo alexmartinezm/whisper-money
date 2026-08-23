@@ -41,6 +41,11 @@ class BudgetController extends Controller
             ->with(['categories', 'labels', 'periods' => function ($query) use ($applicationDate) {
                 $query->whereDate('start_date', '<=', $applicationDate->toDateString())
                     ->whereDate('end_date', '>=', $applicationDate->toDateString())
+                    // Same ordering as Budget::getCurrentPeriod, for the same
+                    // reason: the card reads `periods[0]`, and where two periods
+                    // cover today the earliest-starting one is the one the user
+                    // never configured.
+                    ->orderByDesc('start_date')
                     ->withSum('budgetTransactions as spent_amount', 'amount');
             }])
             ->get();

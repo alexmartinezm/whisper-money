@@ -3,11 +3,14 @@
 namespace App\Services;
 
 use App\Enums\CategoryType;
+use App\Jobs\ReassignTransactionsToBudgets;
+use App\Models\Account;
 use App\Models\Budget;
 use App\Models\BudgetPeriod;
 use App\Models\BudgetTransaction;
 use App\Models\Transaction;
 use App\Services\Transactions\EffectiveTransactionPostings;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
 class BudgetTransactionService
@@ -18,7 +21,11 @@ class BudgetTransactionService
         private readonly BudgetNotificationService $notifications = new BudgetNotificationService,
     ) {}
 
-    public function assignTransaction(Transaction $transaction): void
+    /**
+     * @param  bool  $notify  set to false for bulk backfills, where the emails
+     *                        would describe budget states the user never crossed
+     */
+    public function assignTransaction(Transaction $transaction, bool $notify = true): void
     {
         if (! $transaction->user_id) {
             return;
@@ -35,7 +42,7 @@ class BudgetTransactionService
             $locked = Transaction::query()
                 ->whereKey($transaction->id)
                 ->lockForUpdate()
-                ->with(['labels', 'category', 'splits.category'])
+                ->with(['account' => fn ($query) => $query->withTrashed(), 'labels', 'category', 'splits.category'])
                 ->firstOrFail();
             $periods = BudgetPeriod::query()
                 ->whereHas('budget', fn ($query) => $query
@@ -69,7 +76,49 @@ class BudgetTransactionService
                 ->delete();
         }, attempts: 5);
 
-        $this->notifications->handleAssignment($transaction, $matchingPeriodIds, $createdPeriodIds);
+        if ($notify) {
+            $this->notifications->handleAssignment($transaction, $matchingPeriodIds, $createdPeriodIds);
+        }
+    }
+
+    /**
+     * Rewrite the budget snapshots of an account whose ownership share changed.
+     *
+     * The amounts were written when each transaction was assigned, so a new
+     * share only reaches the budgets already counting this account if something
+     * recomputes them. Recomputed rather than rescaled in SQL: a split
+     * transaction contributes only the postings a budget tracks, so its
+     * snapshot is not a fixed fraction of the transaction's amount.
+     *
+     * @return int the number of transactions queued for a fresh assignment
+     */
+    public function reweighAccountSnapshots(Account $account): int
+    {
+        $transactionIds = BudgetTransaction::query()
+            ->join('transactions', 'transactions.id', '=', 'budget_transactions.transaction_id')
+            ->where('transactions.account_id', $account->id)
+            ->distinct()
+            ->pluck('transactions.id')
+            ->all();
+
+        if ($transactionIds === []) {
+            return 0;
+        }
+
+        // Every affected period now holds a different total, so the limit alerts
+        // it already sent describe a state that no longer exists. Clearing the
+        // flags lets the next crossing notify again, the same way a refund that
+        // drops a budget back under its limit does.
+        BudgetPeriod::query()
+            ->whereHas(
+                'budgetTransactions.transaction',
+                fn (Builder $query) => $query->where('account_id', $account->id),
+            )
+            ->update(['close_to_limit_notified' => false, 'over_limit_notified' => false]);
+
+        ReassignTransactionsToBudgets::dispatch($transactionIds, notify: false);
+
+        return count($transactionIds);
     }
 
     public function unassignTransaction(Transaction $transaction): void
@@ -89,7 +138,7 @@ class BudgetTransactionService
             ->where('user_id', $budget->user_id)
             ->where('space_id', $budget->space_id)
             ->whereBetween('transaction_date', [$period->start_date, $period->end_date])
-            ->with(['labels', 'category', 'splits.category'])
+            ->with(['account' => fn ($query) => $query->withTrashed(), 'labels', 'category', 'splits.category'])
             ->chunk(500, function ($transactions) use ($period, $budget, &$count): void {
                 foreach ($transactions as $transaction) {
                     $amount = $this->amountForBudget($transaction, $budget);
@@ -119,7 +168,7 @@ class BudgetTransactionService
     {
         $labelMatch = $budget->labels->pluck('id')->intersect($transaction->labels->pluck('id'))->isNotEmpty();
         if ($labelMatch) {
-            return -$transaction->amount;
+            return -$this->ownedAmount($transaction, $transaction->amount);
         }
 
         $budgetCategoryIds = $this->tree->expand(
@@ -130,13 +179,24 @@ class BudgetTransactionService
         $postings = $this->postings->forTransaction($transaction);
 
         if (! $budget->is_catch_all) {
-            return -$postings->whereIn('categoryId', $budgetCategoryIds)->sum('amount');
+            return -$postings
+                ->whereIn('categoryId', $budgetCategoryIds)
+                ->sum(fn ($posting): int => $this->ownedAmount($transaction, $posting->amount));
         }
 
-        $claimedByLabel = Budget::query()
+        // Only a budget that can actually take this transaction displaces the
+        // catch-all: one whose period covers the transaction's date. A budget
+        // created later, or one whose periods stop short, would otherwise drop
+        // the expense out of every budget there is.
+        $claimants = Budget::query()
             ->where('user_id', $budget->user_id)
             ->where('space_id', $budget->space_id)
             ->where('is_catch_all', false)
+            ->whereHas('periods', fn ($query) => $query
+                ->where('start_date', '<=', $transaction->transaction_date)
+                ->where('end_date', '>=', $transaction->transaction_date));
+
+        $claimedByLabel = (clone $claimants)
             ->whereHas('labels', fn ($query) => $query->whereIn('labels.id', $transaction->labels->pluck('id')))
             ->exists();
         if ($claimedByLabel) {
@@ -145,10 +205,7 @@ class BudgetTransactionService
 
         $claimed = $this->tree->expand(
             $budget->user_id,
-            Budget::query()
-                ->where('user_id', $budget->user_id)
-                ->where('space_id', $budget->space_id)
-                ->where('is_catch_all', false)
+            $claimants
                 ->with('categories:id')
                 ->get()
                 ->flatMap(fn (Budget $other): mixed => $other->categories->pluck('id'))
@@ -159,6 +216,19 @@ class BudgetTransactionService
 
         return -$postings
             ->filter(fn ($posting): bool => $posting->category?->type === CategoryType::Expense && ! in_array($posting->categoryId, $claimed, true))
-            ->sum('amount');
+            ->sum(fn ($posting): int => $this->ownedAmount($transaction, $posting->amount));
+    }
+
+    /**
+     * The owner's slice of an amount on the transaction's account. A budget is
+     * one person's plan, so a jointly held account only contributes the share
+     * that person owns. Loaded with trashed accounts so a deleted one still
+     * weighs its transactions instead of dropping them to face value.
+     */
+    private function ownedAmount(Transaction $transaction, int $amount): int
+    {
+        $transaction->loadMissing(['account' => fn ($query) => $query->withTrashed()]);
+
+        return Account::shareOf($amount, $transaction->account?->ownership_percentage);
     }
 }

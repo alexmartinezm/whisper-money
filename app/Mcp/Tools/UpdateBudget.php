@@ -10,9 +10,7 @@ use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
-use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 
-#[IsDestructive]
 #[Description('Update a budget name, allocation, tracked categories and/or tracked labels. Tracking changes preserve closed-period history and recalculate the active period. Cadence and rollover remain immutable.')]
 class UpdateBudget extends WriteTool
 {

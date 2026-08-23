@@ -3,12 +3,14 @@
 namespace App\Http\Controllers\OpenBanking;
 
 use App\Enums\BankingConnectionStatus;
+use App\Enums\BankingSyncTrigger;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\OpenBanking\Concerns\CreatesAccountsFromPending;
 use App\Http\Requests\OpenBanking\MapAccountsRequest;
 use App\Jobs\SyncBankingConnectionJob;
 use App\Models\Bank;
 use App\Models\BankingConnection;
+use App\Models\User;
 use App\Services\AccountUserCurrencyService;
 use Illuminate\Http\RedirectResponse;
 use Inertia\Inertia;
@@ -36,10 +38,22 @@ class AccountMappingController extends Controller
         // During onboarding, skip the mapping UI — auto-create all accounts directly
         if (! $user->isOnboarded()) {
             $this->createAccountsFromPending($user, $connection, $accountUserCurrencyService);
-            SyncBankingConnectionJob::dispatch($connection);
+            SyncBankingConnectionJob::dispatch($connection, trigger: BankingSyncTrigger::Connect);
 
             return redirect()->route('onboarding', ['step' => 'create-account'])
                 ->with('success', 'Bank account connected successfully.');
+        }
+
+        $mappableAccounts = $connection->mappablePendingAccounts();
+
+        // Nothing the bank gave us can be mapped, so there is no decision left for the
+        // user to make. Close the connection instead of leaving it awaiting a mapping
+        // that can never happen.
+        if ($mappableAccounts === []) {
+            $this->createAccountsFromPending($user, $connection, $accountUserCurrencyService);
+
+            return redirect()->route('settings.connections.index')
+                ->with('error', __('Your bank did not provide an identifier for any of its accounts, so they cannot be synced.'));
         }
 
         $existingAccounts = $user
@@ -50,8 +64,9 @@ class AccountMappingController extends Controller
 
         return Inertia::render('open-banking/map-accounts', [
             'connection' => $connection,
-            'bankAccounts' => $connection->pending_accounts_data,
+            'bankAccounts' => $mappableAccounts,
             'existingAccounts' => $existingAccounts,
+            'unmappableAccountNames' => $connection->unmappablePendingAccountNames(),
         ]);
     }
 
@@ -64,76 +79,67 @@ class AccountMappingController extends Controller
         $user = auth()->user();
         $mappings = $request->validated()['mappings'];
 
-        $bank = Bank::firstOrCreate(
-            ['name' => $connection->aspsp_name, 'user_id' => null],
-            ['name' => $connection->aspsp_name, 'logo' => $connection->aspsp_logo],
-        );
-
-        if (! $bank->logo && $connection->aspsp_logo) {
-            $bank->update(['logo' => $connection->aspsp_logo]);
-        }
+        $bank = $this->resolveConnectionBank($connection);
 
         $pendingAccounts = collect($connection->pending_accounts_data)
             ->keyBy('uid');
 
-        $accountType = $connection->provider->defaultAccountType();
-
         foreach ($mappings as $mapping) {
-            $uid = $mapping['bank_account_uid'];
-            $action = $mapping['action'];
-            $accountData = $pendingAccounts->get($uid);
+            $accountData = $pendingAccounts->get($mapping['bank_account_uid']);
 
             if (! $accountData) {
                 continue;
             }
 
-            if ($action === 'create') {
-                $currency = $accountUserCurrencyService->resolveImportedCurrency($accountData['currency'] ?? null, $user);
-                $name = $accountData['name']
-                    ?? $accountData['account_id']['iban']
-                    ?? $connection->aspsp_name.' Account';
-
-                $account = $user->accounts()->create([
-                    'name' => $name,
-                    'name_iv' => null,
-                    'encrypted' => false,
-                    'bank_id' => $bank->id,
-                    'currency_code' => $currency,
-                    'type' => $accountType->value,
-                    'banking_connection_id' => $connection->id,
-                    'external_account_id' => $uid,
-                    'iban' => $accountData['account_id']['iban'] ?? null,
-                ]);
-
-                $accountUserCurrencyService->syncFromFirstAccount($account);
-            } elseif ($action === 'link') {
-                $existingAccount = $user->accounts()->find($mapping['existing_account_id']);
-
-                if ($existingAccount) {
-                    $existingAccount->update([
-                        'banking_connection_id' => $connection->id,
-                        'external_account_id' => $uid,
-                        'iban' => $accountData['account_id']['iban'] ?? $existingAccount->iban,
-                        'bank_id' => $bank->id,
-                        'linked_at' => now(),
-                    ]);
-
-                    $accountUserCurrencyService->syncFromFirstAccount($existingAccount);
-                }
+            if ($mapping['action'] === 'create') {
+                $this->createAccountFromPendingData($user, $connection, $bank, $accountData, $mapping['bank_account_uid'], $accountUserCurrencyService);
+            } elseif ($mapping['action'] === 'link') {
+                $this->linkMappedAccount($user, $connection, $bank, $accountData, $mapping, $accountUserCurrencyService);
             }
         }
 
         $connection->update([
             'status' => BankingConnectionStatus::Active,
             'pending_accounts_data' => null,
+            'error_message' => null,
+            'consecutive_sync_failures' => 0,
         ]);
 
-        SyncBankingConnectionJob::dispatch($connection);
+        SyncBankingConnectionJob::dispatch($connection, trigger: BankingSyncTrigger::AccountMapping);
 
         $successRedirect = $user->isOnboarded() ? 'settings.connections.index' : 'onboarding';
         $redirectParams = $user->isOnboarded() ? [] : ['step' => 'create-account'];
 
         return redirect()->route($successRedirect, $redirectParams)
             ->with('success', 'Bank account connected successfully.');
+    }
+
+    /**
+     * @param  array<string, mixed>  $accountData
+     * @param  array<string, mixed>  $mapping
+     */
+    private function linkMappedAccount(
+        User $user,
+        BankingConnection $connection,
+        Bank $bank,
+        array $accountData,
+        array $mapping,
+        AccountUserCurrencyService $accountUserCurrencyService,
+    ): void {
+        $existingAccount = $user->accounts()->find($mapping['existing_account_id']);
+
+        if (! $existingAccount) {
+            return;
+        }
+
+        $existingAccount->update([
+            'banking_connection_id' => $connection->id,
+            'external_account_id' => $mapping['bank_account_uid'],
+            'iban' => $accountData['account_id']['iban'] ?? $existingAccount->iban,
+            'bank_id' => $bank->id,
+            'linked_at' => now(),
+        ]);
+
+        $accountUserCurrencyService->syncFromFirstAccount($existingAccount);
     }
 }

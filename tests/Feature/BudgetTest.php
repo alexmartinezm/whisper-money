@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\BudgetPeriodType;
 use App\Models\Account;
 use App\Models\Budget;
 use App\Models\BudgetPeriod;
@@ -446,6 +447,78 @@ test('user cannot update budget tracking with references from another space', fu
         ->assertSessionHasErrors('category_ids');
 
     expect($budget->fresh()->categories->modelKeys())->toBe([$oldCategory->id]);
+});
+
+/**
+ * Upstream moves a new allocation onto the period in progress unconditionally.
+ * Here the change is applied from the server date: it reaches periods starting
+ * on or after it, so the period in progress is only included when the change
+ * lands on its first day. This pins that rule from both sides.
+ */
+test('a new budget amount applies to the period in progress when it starts today', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+
+    $budget = Budget::factory()->create([
+        'user_id' => $user->id,
+        'period_type' => 'monthly',
+        'period_start_day' => 1,
+    ]);
+
+    $this->travelTo(today()->startOfMonth());
+
+    $current = $budget->periods()->create([
+        'start_date' => today()->startOfMonth(),
+        'end_date' => today()->endOfMonth(),
+        'allocated_amount' => 50000,
+        'carried_over_amount' => 0,
+    ]);
+
+    $past = $budget->periods()->create([
+        'start_date' => today()->subMonthNoOverflow()->startOfMonth(),
+        'end_date' => today()->subMonthNoOverflow()->endOfMonth(),
+        'allocated_amount' => 50000,
+        'carried_over_amount' => 0,
+    ]);
+
+    $this->actingAs($user)
+        ->patch("/budgets/{$budget->id}", ['allocated_amount' => 60000])
+        ->assertRedirect();
+
+    expect($current->fresh()->allocated_amount)->toBe(60000);
+    expect($past->fresh()->allocated_amount)->toBe(50000);
+});
+
+test('a new budget amount leaves a period already under way alone', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+
+    $budget = Budget::factory()->create([
+        'user_id' => $user->id,
+        'period_type' => 'monthly',
+        'period_start_day' => 1,
+    ]);
+
+    $this->travelTo(today()->startOfMonth()->addDays(10));
+
+    $current = $budget->periods()->create([
+        'start_date' => today()->startOfMonth(),
+        'end_date' => today()->endOfMonth(),
+        'allocated_amount' => 50000,
+        'carried_over_amount' => 0,
+    ]);
+
+    $next = $budget->periods()->create([
+        'start_date' => today()->addMonthNoOverflow()->startOfMonth(),
+        'end_date' => today()->addMonthNoOverflow()->endOfMonth(),
+        'allocated_amount' => 50000,
+        'carried_over_amount' => 0,
+    ]);
+
+    $this->actingAs($user)
+        ->patch("/budgets/{$budget->id}", ['allocated_amount' => 60000])
+        ->assertRedirect();
+
+    expect($current->fresh()->allocated_amount)->toBe(50000);
+    expect($next->fresh()->allocated_amount)->toBe(60000);
 });
 
 test('user can delete their budget', function () {
@@ -916,4 +989,39 @@ test('budget period planning patch updates only the direct successor', function 
         ->and($september->fresh()->allocated_amount)->toBe(40000);
     $this->actingAs($user)->patch("/budgets/{$budget->id}/periods/{$august->id}", ['allocated_amount' => -1])
         ->assertSessionHasErrors('allocated_amount');
+});
+
+test('opening a dormant budget lands on the period covering today', function () {
+    Carbon::setTestNow(Carbon::parse('2026-08-20 09:00:00'));
+
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $budget = Budget::factory()->create([
+        'user_id' => $user->id,
+        'period_type' => BudgetPeriodType::Monthly,
+        'period_start_day' => 1,
+    ]);
+    BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => '2026-02-01',
+        'end_date' => '2026-02-28',
+        'allocated_amount' => 10000,
+    ]);
+
+    // Twice, because continuing the chain from where it ended produced a period
+    // that still did not cover today - so the next visit found no current
+    // period either and appended another one, on every single page load.
+    foreach (range(1, 2) as $ignored) {
+        $this->actingAs($user)
+            ->get("/budgets/{$budget->id}")
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('budgets/show')
+                ->where(
+                    'currentPeriod.start_date',
+                    fn (string $date): bool => str_starts_with($date, '2026-08-01'),
+                )
+            );
+    }
+
+    expect(BudgetPeriod::where('budget_id', $budget->id)->count())->toBe(2);
 });

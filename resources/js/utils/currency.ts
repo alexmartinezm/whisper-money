@@ -27,6 +27,8 @@ export function getCurrencySymbol(currencyCode: string): string {
         DOP: 'RD$',
         NGN: '₦',
         SEK: 'kr',
+        THB: '฿',
+        SGD: 'S$',
     };
     return symbols[currencyCode] || currencyCode;
 }

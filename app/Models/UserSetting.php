@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property bool $include_loans_in_net_worth_chart
  * @property bool $include_real_estate_in_net_worth_chart
  * @property bool $notify_on_bank_transactions_synced
+ * @property bool $notify_on_inactive_no_bank
  * @property bool $budget_notify_on_new_transaction
  * @property bool $budget_notify_on_close_to_limit
  * @property bool $budget_notify_on_over_limit
@@ -34,6 +35,7 @@ class UserSetting extends Model
         'include_loans_in_net_worth_chart',
         'include_real_estate_in_net_worth_chart',
         'notify_on_bank_transactions_synced',
+        'notify_on_inactive_no_bank',
         'budget_notify_on_new_transaction',
         'budget_notify_on_close_to_limit',
         'budget_notify_on_over_limit',
@@ -50,6 +52,7 @@ class UserSetting extends Model
             'include_loans_in_net_worth_chart' => 'boolean',
             'include_real_estate_in_net_worth_chart' => 'boolean',
             'notify_on_bank_transactions_synced' => 'boolean',
+            'notify_on_inactive_no_bank' => 'boolean',
             'budget_notify_on_new_transaction' => 'boolean',
             'budget_notify_on_close_to_limit' => 'boolean',
             'budget_notify_on_over_limit' => 'boolean',

@@ -14,8 +14,8 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 use Laravel\Pennant\Feature;
 
-#[IsDestructive]
 #[Description('Create, replace, or remove the category split of a transaction. This changes category postings only; the parent ledger amount and bank data stay unchanged.')]
+#[IsDestructive]
 class SplitTransaction extends WriteTool
 {
     /**

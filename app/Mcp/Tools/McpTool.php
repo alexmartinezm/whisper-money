@@ -5,9 +5,12 @@ namespace App\Mcp\Tools;
 use App\Enums\PlanFeature;
 use App\Models\Account;
 use App\Models\Label;
+use App\Models\McpToolCall;
 use App\Models\Space;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Laravel\Mcp\Request;
@@ -30,6 +33,24 @@ abstract class McpTool extends Tool
         return Str::snake(class_basename($this));
     }
 
+    /**
+     * The ChatGPT app directory requires all three MCP hints to be declared
+     * explicitly, with a justification per tool. Default them here — read tools
+     * flip `readOnlyHint` with #[IsReadOnly] and the delete tools flip
+     * `destructiveHint` with #[IsDestructive]. `openWorldHint` is always false:
+     * every tool reads or writes the user's own account, never the open web.
+     *
+     * @return array<string, mixed>
+     */
+    public function annotations(): array
+    {
+        return array_merge([
+            'readOnlyHint' => false,
+            'destructiveHint' => false,
+            'openWorldHint' => false,
+        ], parent::annotations());
+    }
+
     public function handle(Request $request): Response
     {
         $user = $request->user();
@@ -38,13 +59,33 @@ abstract class McpTool extends Tool
             return Response::error('Authentication required.');
         }
 
+        // The demo account's credentials are public and its data is shared, so
+        // it never drives the MCP — an OAuth connection would otherwise carry
+        // write access to it (see WriteTool).
+        if ($user->isRestrictedDemoAccount()) {
+            return Response::error('The demo account cannot be connected to an AI assistant.');
+        }
+
         if (! $user->canUseFeature(PlanFeature::McpAccess)) {
             return Response::error(
                 'A paid (Pro) plan is required to use the Whisper Money MCP. Upgrade your account at '.route('subscribe')
             );
         }
 
-        return $this->respond($request, $user);
+        $response = $this->respond($request, $user);
+
+        // Usage metric (see `stats:mcp-usage`), recorded only for calls that did
+        // something: an error response (a read-only token, an id the user cannot
+        // reach) or a thrown ValidationException is a rejected attempt, not
+        // usage. Rescued so a failed insert can never break a working call.
+        if (! $response->isError()) {
+            rescue(fn (): McpToolCall => McpToolCall::create([
+                'user_id' => $user->id,
+                'tool' => $this->name(),
+            ]));
+        }
+
+        return $response;
     }
 
     abstract protected function respond(Request $request, User $user): Response;
@@ -106,22 +147,40 @@ abstract class McpTool extends Tool
     }
 
     /**
-     * Resolve an account the token may read: it only has to live in the space.
-     * Writing to one is narrower — see WriteTool::writableAccount().
+     * Resolve the record the request points at, failing with a message that tells
+     * the agent which tool lists the valid ids. Callers pass the space-scoped
+     * query so each keeps its own model type.
+     *
+     * @template TModel of Model
+     *
+     * @param  Builder<TModel>  $query
+     * @param  string  $noun  how the record is named in the failure message
+     * @param  string  $hint  appended to the failure message
+     * @return TModel
      */
-    protected function accountInSpace(Request $request, Space $space, string $key = 'account_id'): Account
+    protected function modelInSpace(Request $request, Space $space, Builder $query, string $key, string $noun, string $hint = ''): Model
     {
         $id = $request->string($key)->toString();
 
-        $account = Account::query()->forSpace($space)->whereKey($id)->first();
+        $found = $query->whereKey($id)->first();
 
-        if ($account === null) {
+        if ($found === null) {
             throw ValidationException::withMessages([
-                $key => "No account with id {$id} in space {$space->id}. Call list_accounts to see valid ids.",
+                $key => trim("No {$noun} with id {$id} in space {$space->id}. {$hint}"),
             ]);
         }
 
-        return $account;
+        return $found;
+    }
+
+    /**
+     * Resolve an account in the space. Bank-connected accounts are allowed:
+     * a sync only inserts rows it has not seen before, so a manual transaction
+     * added to a connected account survives every later sync.
+     */
+    protected function accountInSpace(Request $request, Space $space, string $key = 'account_id'): Account
+    {
+        return $this->modelInSpace($request, $space, Account::query()->forSpace($space), $key, 'account', 'Call list_accounts to see valid ids.');
     }
 
     /**
@@ -132,27 +191,37 @@ abstract class McpTool extends Tool
      */
     protected function labelsInSpace(Request $request, Space $space, string $key): Collection
     {
-        $ids = collect($request->get($key, []))
-            ->map(fn (mixed $id): string => (string) $id)
-            ->filter()
-            ->unique()
-            ->values();
+        $ids = $this->requestedIds($request, $key);
 
-        if ($ids->isEmpty()) {
-            /** @var Collection<int, Label> $empty */
-            $empty = Label::query()->whereRaw('1 = 0')->get();
-
-            return $empty;
+        if ($ids === []) {
+            /** @var Collection<int, Label> */
+            return new Collection;
         }
 
         $labels = Label::query()->forSpace($space)->whereIn('id', $ids)->get();
 
-        if ($labels->count() !== $ids->count()) {
+        if ($labels->count() !== count($ids)) {
             throw ValidationException::withMessages([
                 $key => "One or more label ids do not exist in space {$space->id}. Call list_labels to see valid ids.",
             ]);
         }
 
         return $labels;
+    }
+
+    /**
+     * The ids passed under $key, cast to strings and de-duplicated. Empty when
+     * the argument is absent.
+     *
+     * @return list<string>
+     */
+    protected function requestedIds(Request $request, string $key): array
+    {
+        return collect($request->get($key, []))
+            ->map(fn (mixed $id): string => (string) $id)
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
     }
 }
