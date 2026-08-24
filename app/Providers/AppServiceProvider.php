@@ -10,7 +10,12 @@ use App\Services\Ai\LaravelAiRuleSuggestionGenerator;
 use App\Services\Ai\UncategorizedTransactionMatcher;
 use App\Services\Banking\EnableBankingProvider;
 use App\Services\Discord\DiscordWebhook;
+use App\Support\QueueWorkerLoop;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Queue\Events\JobProcessed;
+use Illuminate\Queue\Events\JobProcessing;
+use Illuminate\Queue\Events\Looping;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Cashier\Cashier;
@@ -39,6 +44,10 @@ class AppServiceProvider extends ServiceProvider
             return new DiscordWebhook(config('services.discord.webhook_url'));
         });
 
+        // A singleton because the reporting rule in bootstrap/app.php and the
+        // queue events below have to be looking at the same flags.
+        $this->app->singleton(QueueWorkerLoop::class);
+
         $this->app->bind(TransactionMatcher::class, UncategorizedTransactionMatcher::class);
         $this->app->bind(RuleSuggestionGenerator::class, LaravelAiRuleSuggestionGenerator::class);
     }
@@ -55,6 +64,26 @@ class AppServiceProvider extends ServiceProvider
         // twice per event.
         RateLimiter::for('emails', function (object $job): Limit {
             return Limit::perSecond(30);
+        });
+
+        // Closures rather than App\Listeners classes on purpose: those are
+        // auto-discovered, so a class here would be registered twice. These only
+        // flip a flag the exception reporting rule reads, so they must not queue.
+        // Blocks rather than arrow functions because `Looping` is dispatched with
+        // `until()`: a listener that returned anything but null would stop the
+        // worker from picking up its next job.
+        Event::listen(Looping::class, function (): void {
+            $this->app->make(QueueWorkerLoop::class)->enterLoop();
+        });
+        Event::listen(JobProcessing::class, function (): void {
+            $this->app->make(QueueWorkerLoop::class)->enterJob();
+        });
+        // Only the success event, never JobExceptionOccurred: the worker dispatches
+        // that one *before* it reports, so clearing the flag there would silence
+        // exactly the lost connections that happen inside a job. A job that threw
+        // is cleared by the next turn's `Looping` instead.
+        Event::listen(JobProcessed::class, function (): void {
+            $this->app->make(QueueWorkerLoop::class)->leaveJob();
         });
 
         // Render the OAuth consent screen (Claude Desktop / ChatGPT connecting

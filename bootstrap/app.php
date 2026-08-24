@@ -11,6 +11,7 @@ use App\Http\Middleware\SetSentryUser;
 use App\Http\Middleware\TrackLastActiveAt;
 use App\Jobs\SyncBankingConnectionJob;
 use App\Services\AuthEntryPointService;
+use App\Support\QueueWorkerLoop;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -73,4 +74,10 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $exceptions->dontReportWhen(fn (Throwable $e): bool => $e instanceof OAuthServerException
             && $e->getHttpStatusCode() < 500);
+
+        // A deploy takes MySQL and Redis away underneath the queue workers, and
+        // every worker that is mid-poll reports it: one restart, five identical
+        // exceptions, and nothing to do about any of them. Only the poll loop is
+        // covered — a connection lost inside a job, or in a request, still reports.
+        $exceptions->dontReportWhen(fn (Throwable $e): bool => app(QueueWorkerLoop::class)->isLostConnectionWhilePolling($e));
     })->create();
