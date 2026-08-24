@@ -13,6 +13,10 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+    # Long enough for supervisor to stop the queue workers in order (see
+    # docker/supervisor/supervisord.conf) instead of the default 10s, after which
+    # Docker SIGKILLs them mid-poll and every one reports a lost connection.
+    stop_grace_period: 150s
     restart: unless-stopped
 
   mysql:
