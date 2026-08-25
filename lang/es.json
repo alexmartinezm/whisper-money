@@ -2751,5 +2751,9 @@
     "Tick the transactions that count toward this goal. Unticking one removes it from the goal.": "Marca las transacciones que cuentan para este objetivo. Al desmarcarlas se quitan del objetivo.",
     "Failed to load more transactions.": "No se pudieron cargar más transacciones.",
     "Its transactions will become uncategorized.": "Sus transacciones quedarán sin categoría.",
-    "It will be disconnected from the bank: no new transactions or balances will come in. Unarchiving brings the account back, not the connection — you would have to connect the bank again.": "Se desconectará del banco: no entrarán nuevas transacciones ni balances. Al desarchivarla recuperas la cuenta, no la conexión — tendrías que volver a conectar el banco."
+    "It will be disconnected from the bank: no new transactions or balances will come in. Unarchiving brings the account back, not the connection — you would have to connect the bank again.": "Se desconectará del banco: no entrarán nuevas transacciones ni balances. Al desarchivarla recuperas la cuenta, no la conexión — tendrías que volver a conectar el banco.",
+    "Already Saved": "Ya ahorrado",
+    "Includes :amount you had already saved.": "Incluye :amount que ya tenías ahorrado.",
+    "What you had already put aside before creating this goal. Linked transactions add on top of it.": "Lo que ya tenías apartado antes de crear este objetivo. Las transacciones vinculadas se suman a esa cantidad.",
+    "We could not create your rules. Try again in a moment.": "No hemos podido crear tus reglas. Vuelve a intentarlo en un momento."
 }

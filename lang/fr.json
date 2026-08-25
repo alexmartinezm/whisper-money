@@ -2376,5 +2376,13 @@
     "Your finances, inside Claude or ChatGPT": "Vos finances, dans Claude ou ChatGPT",
     ":bank did not share any accounts through open banking. Not every account type is available this way — contact us if yours should be.": ":bank n'a partagé aucun compte via l'open banking. Tous les types de compte ne sont pas disponibles par ce biais ; écrivez-nous si le vôtre devrait l'être.",
     "Failed to connect to your bank. Please try again.": "Impossible de nous connecter à votre banque. Veuillez réessayer.",
-    "We could not load these figures. Try again in a moment.": "Nous n'avons pas pu charger ces chiffres. Réessayez dans un instant."
+    "We could not load these figures. Try again in a moment.": "Nous n'avons pas pu charger ces chiffres. Réessayez dans un instant.",
+    "This shared account cannot be deleted.": "Ce compte partagé ne peut pas être supprimé.",
+    "Two-factor authentication cannot be changed on this shared account.": "L'authentification à deux facteurs ne peut pas être modifiée sur ce compte partagé.",
+    "Password changes are disabled on this shared account.": "Le changement de mot de passe est désactivé sur ce compte partagé.",
+    "Billing management is not available on this shared account.": "La gestion de la facturation n'est pas disponible sur ce compte partagé.",
+    "Link transactions": "Associer des transactions",
+    "Tick the transactions that count toward this goal. Unticking one removes it from the goal.": "Cochez les transactions qui comptent pour cet objectif. Les décocher les retire de l’objectif.",
+    "Failed to load more transactions.": "Impossible de charger plus de transactions.",
+    "We could not create your rules. Try again in a moment.": "Nous n’avons pas pu créer vos règles. Réessayez dans un instant."
 }
