@@ -310,6 +310,7 @@ class DashboardAnalyticsController extends Controller
             // and ignores the account's soft-delete scope, as the aggregate it
             // replaced did.
             ->joinOwningAccount()
+            ->withoutArchivedAccountActivity()
             ->select('transactions.*', 'accounts.ownership_percentage')
             ->with(['category', 'splits.category'])
             ->get();

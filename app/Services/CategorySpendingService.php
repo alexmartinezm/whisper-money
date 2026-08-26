@@ -22,7 +22,9 @@ class CategorySpendingService
      * Without a drill target, child category amounts fold into their root
      * ancestor so only parents are listed. With one, the parent's children
      * become the rows (plus a direct node for transactions sitting on the
-     * parent itself). Soft-deleted categories are excluded.
+     * parent itself). Soft-deleted categories are excluded, as is what an
+     * archived account no longer contributes
+     * ({@see Transaction::scopeWithoutArchivedAccountActivity()}).
      */
     public function forPeriod(string $userId, Carbon $from, Carbon $to, ?string $drillParentId = null): Collection
     {
@@ -34,6 +36,7 @@ class CategorySpendingService
             // ownership existed. It ignores the account's soft-delete scope, so
             // a deleted account keeps its transactions in the totals.
             ->joinOwningAccount()
+            ->withoutArchivedAccountActivity()
             ->select('transactions.*', 'accounts.ownership_percentage')
             ->with(['category', 'splits.category'])
             ->get();
