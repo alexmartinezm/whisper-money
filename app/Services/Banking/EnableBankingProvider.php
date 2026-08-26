@@ -104,7 +104,7 @@ class EnableBankingProvider implements BankingProviderInterface
             return $session;
         }
 
-        $accountIds = collect($this->getSession($session['session_id'])['accounts'] ?? [])
+        $accountIds = collect($this->getSession($session['session_id'])['accounts'])
             ->map(fn (mixed $account): ?string => match (true) {
                 is_string($account) => $account,
                 is_array($account) && is_string($account['uid'] ?? null) => $account['uid'],
