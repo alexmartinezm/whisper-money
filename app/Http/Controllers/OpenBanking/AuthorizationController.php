@@ -205,7 +205,7 @@ class AuthorizationController extends Controller
             return $this->completeReconnect($connection, $sessionData);
         }
 
-        return $this->completeFirstConnection($user, $connection, $sessionData, $accountUserCurrencyService);
+        return $this->completeFirstConnection($user, $connection, $sessionData, $accountUserCurrencyService, $provider);
     }
 
     /**
@@ -264,8 +264,30 @@ class AuthorizationController extends Controller
      *
      * @param  array<string, mixed>  $sessionData
      */
-    private function completeFirstConnection(User $user, BankingConnection $connection, array $sessionData, AccountUserCurrencyService $accountUserCurrencyService): RedirectResponse|Response
-    {
+    private function completeFirstConnection(
+        User $user,
+        BankingConnection $connection,
+        array $sessionData,
+        AccountUserCurrencyService $accountUserCurrencyService,
+        BankingProviderInterface $provider,
+    ): RedirectResponse|Response {
+        if (! is_array($sessionData['accounts'] ?? null) || $sessionData['accounts'] === []) {
+            try {
+                if (is_string($sessionData['session_id'] ?? null)) {
+                    $provider->revokeSession($sessionData['session_id']);
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Failed to revoke EnableBanking session without accounts', [
+                    'connection_id' => $connection->id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            $connection->delete();
+
+            return $this->finishWithError($user, 'Your bank did not return any accounts. Please try again.');
+        }
+
         $connection->update([
             'session_id' => $sessionData['session_id'],
             'status' => BankingConnectionStatus::AwaitingMapping,
