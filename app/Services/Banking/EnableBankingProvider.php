@@ -98,7 +98,26 @@ class EnableBankingProvider implements BankingProviderInterface
 
         $response->throw();
 
-        return $response->json();
+        $session = $response->json();
+
+        if (! empty($session['accounts']) || ! is_string($session['session_id'] ?? null)) {
+            return $session;
+        }
+
+        $accountIds = collect($this->getSession($session['session_id'])['accounts'])
+            ->map(fn (mixed $account): ?string => match (true) {
+                is_string($account) => $account,
+                is_array($account) && is_string($account['uid'] ?? null) => $account['uid'],
+                default => null,
+            })
+            ->filter(fn (mixed $accountId): bool => is_string($accountId) && $accountId !== '')
+            ->values();
+
+        $session['accounts'] = $accountIds
+            ->map(fn (string $accountId): array => $this->getAccount($accountId))
+            ->all();
+
+        return $session;
     }
 
     public function getTransactions(string $accountId, string $dateFrom, string $dateTo, ?string $continuationKey = null, ?string $strategy = null): array

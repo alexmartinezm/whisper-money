@@ -374,6 +374,40 @@ test('callback with valid code stores pending accounts and redirects to mapping'
     Queue::assertNothingPushed();
 });
 
+test('callback with an authorized session but no accounts closes the connection with an actionable error', function () {
+    Queue::fake();
+
+    $user = User::factory()->onboarded()->create();
+    $connection = BankingConnection::factory()->pending()->create([
+        'user_id' => $user->id,
+        'aspsp_name' => 'Trade Republic',
+        'aspsp_country' => 'ES',
+    ]);
+
+    $mockProvider = Mockery::mock(BankingProviderInterface::class);
+    $mockProvider->shouldReceive('createSession')
+        ->with('test-code')
+        ->once()
+        ->andReturn([
+            'session_id' => 'session-without-accounts',
+            'accounts' => [],
+            'aspsp' => ['name' => 'Trade Republic', 'country' => 'ES'],
+            'access' => ['valid_until' => now()->addDays(90)->toIso8601String()],
+        ]);
+    $mockProvider->shouldReceive('revokeSession')
+        ->with('session-without-accounts')
+        ->once();
+
+    $this->app->instance(BankingProviderInterface::class, $mockProvider);
+
+    $response = $this->actingAs($user)->get('/open-banking/callback?code=test-code');
+
+    $response->assertRedirect(route('settings.connections.index'));
+    $response->assertSessionHas('error', 'Your bank did not return any accounts. Please try again.');
+    $this->assertSoftDeleted('banking_connections', ['id' => $connection->id]);
+    Queue::assertNothingPushed();
+});
+
 test('callback during onboarding redirects a logged-in user directly to the connections step', function () {
     Queue::fake();
 
