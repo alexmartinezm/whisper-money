@@ -90,6 +90,17 @@ class EnableBankingProvider implements BankingProviderInterface
         ];
     }
 
+    /**
+     * Exchange an authorization code for a session, going looking for the
+     * accounts when the exchange hands back none of its own.
+     *
+     * The two log lines are the only ones this class writes about a request
+     * that succeeded, and they are deliberately confined to this branch: a bank
+     * that returns its accounts the first time stays as silent as it was
+     * before. It is the empty ones nobody could explain - Trade Republic
+     * authorizing and then producing nothing to map - and they are rare enough
+     * that describing them costs nothing and answers the question directly.
+     */
     public function createSession(string $code): array
     {
         $response = $this->client()->post('/sessions', [
@@ -104,7 +115,23 @@ class EnableBankingProvider implements BankingProviderInterface
             return $session;
         }
 
-        $accountIds = collect($this->getSession($session['session_id'])['accounts'])
+        Log::warning('EnableBanking session has no accounts', [
+            'stage' => 'exchange',
+            ...EnableBankingSessionShape::describe($session),
+        ]);
+
+        $authorized = $this->getSession($session['session_id']);
+
+        // Written before the array below is read rather than after it returns,
+        // because reading it is where this falls over when a bank answers
+        // without an `accounts` key at all: log first and the shape survives
+        // the throw that follows.
+        Log::warning('EnableBanking session has no accounts', [
+            'stage' => 'lookup',
+            ...EnableBankingSessionShape::describe($authorized),
+        ]);
+
+        $accountIds = collect($authorized['accounts'])
             ->map(fn (mixed $account): ?string => match (true) {
                 is_string($account) => $account,
                 is_array($account) && is_string($account['uid'] ?? null) => $account['uid'],

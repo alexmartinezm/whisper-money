@@ -14,6 +14,7 @@ use App\Jobs\SyncBankingConnectionJob;
 use App\Models\BankingConnection;
 use App\Models\User;
 use App\Services\AccountUserCurrencyService;
+use App\Services\Banking\EnableBankingSessionShape;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -190,7 +191,7 @@ class AuthorizationController extends Controller
         $sessionData = $this->createProviderSession($provider, $code, $connection);
 
         if ($sessionData === null) {
-            return $this->finishWithError($user, 'Failed to connect to your bank. Please try again.');
+            return $this->finishWithError($user, __('Failed to connect to your bank. Please try again.'));
         }
 
         $connection ??= $this->findPendingConnectionForSession($user, $sessionData);
@@ -219,7 +220,14 @@ class AuthorizationController extends Controller
         try {
             return $provider->createSession($code);
         } catch (\Throwable $e) {
-            Log::error('EnableBanking session creation failed', ['error' => $e->getMessage()]);
+            // The bank belongs here as much as the message does. Without it
+            // this was the one line in the flow that could not say which
+            // connector had failed, so a wave from a single bank read as
+            // scattered noise.
+            Log::error('EnableBanking session creation failed', [
+                'error' => $e->getMessage(),
+                ...$connection?->logContext() ?? [],
+            ]);
 
             if ($connection) {
                 $connection->update(['state_token' => null]);
@@ -272,6 +280,19 @@ class AuthorizationController extends Controller
         BankingProviderInterface $provider,
     ): RedirectResponse|Response {
         if (! is_array($sessionData['accounts'] ?? null) || $sessionData['accounts'] === []) {
+            // Before the revoke and the delete, not after: those two are what
+            // stop a connection stranding in `awaiting_mapping` with nothing to
+            // map, and between them they destroy every trace of why it was
+            // empty. The connection's own record wins the keys it shares with
+            // the session body, which is how the rest of this flow logs a bank.
+            Log::warning('EnableBanking session has no accounts', [
+                'stage' => 'callback',
+                ...EnableBankingSessionShape::describe($sessionData),
+                ...$connection->logContext(),
+            ]);
+
+            $bankName = $connection->aspsp_name;
+
             try {
                 if (is_string($sessionData['session_id'] ?? null)) {
                     $provider->revokeSession($sessionData['session_id']);
@@ -285,7 +306,11 @@ class AuthorizationController extends Controller
 
             $connection->delete();
 
-            return $this->finishWithError($user, 'Your bank did not return any accounts. Please try again.');
+            // Distinct from the exchange failure above, because the two ask the
+            // user for different things. This one succeeded: the bank was asked
+            // and shared nothing, so "please try again" sends them round a loop
+            // that ends here every time.
+            return $this->finishWithError($user, __(':bank did not share any accounts through open banking. Not every account type is available this way — contact us if yours should be.', ['bank' => $bankName]));
         }
 
         $connection->update([

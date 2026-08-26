@@ -7,6 +7,7 @@ use App\Exceptions\Banking\TransientBankingProviderException;
 use App\Exceptions\Banking\WrongTransactionsPeriodException;
 use Illuminate\Contracts\Debug\ShouldntReport;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Request;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\Event;
@@ -667,4 +668,84 @@ test('getInstitutions passes the provider beta flag through, defaulting to stabl
         ->and($institutions['BBVA']['beta'])->toBeFalse()
         // A connector the provider says nothing about is not a beta connector.
         ->and($institutions['CaixaBank']['beta'])->toBeFalse();
+});
+
+test('an empty session exchange describes both stages without writing an identifier down', function () {
+    Http::preventStrayRequests();
+    Http::fake(function (Request $request) {
+        return match ([$request->method(), parse_url($request->url(), PHP_URL_PATH)]) {
+            ['POST', '/sessions'] => Http::response([
+                'session_id' => 'session-secret-123',
+                'accounts' => [],
+                'aspsp' => ['name' => 'Trade Republic', 'country' => 'ES'],
+                'access' => ['valid_until' => '2026-11-24T13:19:41Z'],
+            ]),
+            ['GET', '/sessions/session-secret-123'] => Http::response([
+                'status' => 'AUTHORIZED',
+                'accounts' => ['uid-secret-456'],
+                'accounts_data' => [['uid' => 'uid-secret-456', 'identification_hash' => 'hash-secret-789']],
+            ]),
+            ['GET', '/accounts/uid-secret-456/details'] => Http::response([
+                'uid' => 'uid-secret-456',
+                'currency' => 'EUR',
+                'account_id' => ['iban' => 'ES1234567890'],
+            ]),
+            default => Http::response([], 404),
+        };
+    });
+
+    $logged = [];
+    Event::listen(MessageLogged::class, function (MessageLogged $event) use (&$logged): void {
+        $logged[] = $event->context;
+    });
+
+    enableBankingProviderForTest()->createSession('authorization-code');
+
+    $stages = array_column($logged, 'stage');
+
+    expect($stages)->toBe(['exchange', 'lookup']);
+
+    // The exchange saw a session with no accounts at all; the lookup saw the
+    // uid it was hiding. Told apart, those are two different bugs.
+    [$exchange, $lookup] = $logged;
+
+    expect($exchange)->toMatchArray([
+        'accounts_count' => 0,
+        'accounts_data_count' => 0,
+        'has_session_id' => true,
+        'access_valid_until' => '2026-11-24T13:19:41Z',
+        'aspsp_name' => 'Trade Republic',
+    ]);
+
+    expect($lookup)->toMatchArray([
+        'session_status' => 'AUTHORIZED',
+        'accounts_count' => 1,
+        'accounts_entry_type' => 'string',
+        'accounts_data_count' => 1,
+        'accounts_data_keys' => ['uid', 'identification_hash'],
+    ]);
+
+    // These logs leave the building, so this is the assertion that matters.
+    expect(json_encode($logged))
+        ->not->toContain('session-secret-123')
+        ->not->toContain('uid-secret-456')
+        ->not->toContain('hash-secret-789')
+        ->not->toContain('ES1234567890');
+});
+
+test('a session that hands back its own accounts is not described at all', function () {
+    Http::preventStrayRequests();
+    Http::fake([
+        'api.enablebanking.com/sessions' => Http::response([
+            'session_id' => 'session-123',
+            'accounts' => [['uid' => 'account-123', 'currency' => 'EUR']],
+        ]),
+    ]);
+
+    Log::spy();
+
+    enableBankingProviderForTest()->createSession('authorization-code');
+
+    // The happy path stays as quiet as it was before the diagnostic existed.
+    Log::shouldNotHaveReceived('warning');
 });
