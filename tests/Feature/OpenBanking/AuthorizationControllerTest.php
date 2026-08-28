@@ -6,6 +6,8 @@ use App\Jobs\SyncBankingConnectionJob;
 use App\Models\Account;
 use App\Models\BankingConnection;
 use App\Models\User;
+use Illuminate\Log\Events\MessageLogged;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 
@@ -403,9 +405,89 @@ test('callback with an authorized session but no accounts closes the connection 
     $response = $this->actingAs($user)->get('/open-banking/callback?code=test-code');
 
     $response->assertRedirect(route('settings.connections.index'));
-    $response->assertSessionHas('error', 'Your bank did not return any accounts. Please try again.');
+    // Named, and not "please try again": the bank was asked and shared
+    // nothing, so trying again lands here every time.
+    $response->assertSessionHas('error', 'Trade Republic did not share any accounts through open banking. Not every account type is available this way — contact us if yours should be.');
     $this->assertSoftDeleted('banking_connections', ['id' => $connection->id]);
     Queue::assertNothingPushed();
+});
+
+test('a callback that closes an empty connection describes the session before revoking it', function () {
+    Queue::fake();
+
+    $user = User::factory()->onboarded()->create();
+    BankingConnection::factory()->pending()->create([
+        'user_id' => $user->id,
+        'aspsp_name' => 'Trade Republic',
+        'aspsp_country' => 'ES',
+    ]);
+
+    $mockProvider = Mockery::mock(BankingProviderInterface::class);
+    $mockProvider->shouldReceive('createSession')->andReturn([
+        'session_id' => 'session-secret-123',
+        'status' => 'AUTHORIZED',
+        'accounts' => [],
+        'accounts_data' => [],
+        'aspsp' => ['name' => 'Trade Republic', 'country' => 'ES'],
+        'access' => ['valid_until' => '2026-11-24T13:19:41Z'],
+    ]);
+    $mockProvider->shouldReceive('revokeSession')->once();
+
+    $this->app->instance(BankingProviderInterface::class, $mockProvider);
+
+    $logged = [];
+    Event::listen(MessageLogged::class, function (MessageLogged $event) use (&$logged): void {
+        if ($event->message === 'EnableBanking session has no accounts') {
+            $logged[] = $event->context;
+        }
+    });
+
+    $this->actingAs($user)->get('/open-banking/callback?code=test-code');
+
+    // The revoke and the delete that follow destroy every trace of why the
+    // session was empty, so this has to be written before them.
+    expect($logged)->toHaveCount(1)
+        ->and($logged[0])->toMatchArray([
+            'stage' => 'callback',
+            'session_status' => 'AUTHORIZED',
+            'accounts_count' => 0,
+            'accounts_data_count' => 0,
+            'has_session_id' => true,
+            'access_valid_until' => '2026-11-24T13:19:41Z',
+            'aspsp_name' => 'Trade Republic',
+            'aspsp_country' => 'ES',
+        ])
+        ->and(json_encode($logged))->not->toContain('session-secret-123');
+});
+
+test('a failed session exchange logs which bank it was', function () {
+    Queue::fake();
+
+    $user = User::factory()->onboarded()->create();
+    $connection = BankingConnection::factory()->pending()->create([
+        'user_id' => $user->id,
+        'aspsp_name' => 'Trade Republic',
+        'aspsp_country' => 'ES',
+        'state_token' => 'state-token-123',
+    ]);
+
+    $mockProvider = Mockery::mock(BankingProviderInterface::class);
+    $mockProvider->shouldReceive('createSession')->andThrow(new RuntimeException('boom'));
+
+    $this->app->instance(BankingProviderInterface::class, $mockProvider);
+
+    Log::spy();
+
+    $response = $this->actingAs($user)
+        ->get('/open-banking/callback?code=test-code&state='.$connection->state_token);
+
+    $response->assertSessionHas('error', 'Failed to connect to your bank. Please try again.');
+
+    Log::shouldHaveReceived('error')
+        ->withArgs(fn (string $message, array $context): bool => $message === 'EnableBanking session creation failed'
+            && $context['aspsp_name'] === 'Trade Republic'
+            && $context['connection_id'] === $connection->id)
+        ->once();
 });
 
 test('callback during onboarding redirects a logged-in user directly to the connections step', function () {
