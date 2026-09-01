@@ -2,9 +2,9 @@ import { type MultiSelectOption } from '@/components/ui/multi-select';
 import { buildCategoryTree, flattenCategoryTree } from '@/lib/category-tree';
 import { cn } from '@/lib/utils';
 import { getCategoryColorClasses, type Category } from '@/types/category';
+import { LabelIcon } from '@/components/shared/label-icon';
 import { getLabelColorClasses, type Label } from '@/types/label';
 import * as Icons from 'lucide-react';
-import { Tag } from 'lucide-react';
 
 /**
  * The tracking pickers shared by the create and edit budget dialogs.
@@ -44,7 +44,7 @@ export function labelTrackingOptions(labels: Label[]): MultiSelectOption[] {
         return {
             value: label.id,
             label: label.name,
-            icon: <Tag className="h-3 w-3 opacity-80" />,
+            icon: <LabelIcon label={label} className="h-3 w-3 opacity-80" />,
             badgeClassName: cn(colorClasses.bg, colorClasses.text),
         };
     });
