@@ -180,7 +180,7 @@ describe('BudgetsIndex filter', () => {
         render(
             <BudgetsIndex
                 budgets={[budget]}
-            budgetSummary={budgetSummary}
+                budgetSummary={budgetSummary}
                 savingsGoalsEnabled={false}
                 currencyCode="EUR"
             />,
@@ -228,7 +228,7 @@ describe('BudgetsIndex create card', () => {
         render(
             <BudgetsIndex
                 budgets={[budget]}
-            budgetSummary={budgetSummary}
+                budgetSummary={budgetSummary}
                 savingsGoalsEnabled={false}
                 currencyCode="EUR"
             />,

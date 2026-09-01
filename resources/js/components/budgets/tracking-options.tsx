@@ -1,8 +1,8 @@
+import { LabelIcon } from '@/components/shared/label-icon';
 import { type MultiSelectOption } from '@/components/ui/multi-select';
 import { buildCategoryTree, flattenCategoryTree } from '@/lib/category-tree';
 import { cn } from '@/lib/utils';
 import { getCategoryColorClasses, type Category } from '@/types/category';
-import { LabelIcon } from '@/components/shared/label-icon';
 import { getLabelColorClasses, type Label } from '@/types/label';
 import * as Icons from 'lucide-react';
 
