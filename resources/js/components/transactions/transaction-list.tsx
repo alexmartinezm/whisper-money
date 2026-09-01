@@ -276,6 +276,8 @@ export interface TransactionListProps {
     maxHeight?: number;
     hideColumns?: string[];
     onBalanceUpdated?: () => void;
+    /** A label every listed transaction already carries; hidden from the rows. */
+    hiddenLabelId?: UUID;
 }
 
 export function TransactionList({
@@ -293,6 +295,7 @@ export function TransactionList({
     maxHeight,
     hideColumns = [],
     onBalanceUpdated,
+    hiddenLabelId,
 }: TransactionListProps) {
     const locale = useLocale();
     const [labels, setLabels] = useState<Label[]>(() => initialLabels ?? []);
@@ -759,6 +762,7 @@ export function TransactionList({
             onCategorized: showAutomatizeToast,
             onReEvaluateRules: handleReEvaluateRules,
             isDateHidden: columnVisibility.transaction_date === false,
+            hiddenLabelId,
         });
 
         if (hideColumns.length === 0) {
@@ -781,6 +785,7 @@ export function TransactionList({
         handleReEvaluateRules,
         hideColumns,
         columnVisibility,
+        hiddenLabelId,
     ]);
 
     const table = useReactTable({
