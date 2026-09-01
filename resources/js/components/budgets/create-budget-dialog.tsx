@@ -1,5 +1,5 @@
 import { store } from '@/actions/App/Http/Controllers/BudgetController';
-import { LabelIcon } from '@/components/shared/label-icon';
+import { CreatePlaceholderCard } from '@/components/shared/create-placeholder-card';
 import { AmountInput } from '@/components/ui/amount-input';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -23,7 +23,6 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { useControllableOpen } from '@/hooks/use-controllable-open';
-import { cn } from '@/lib/utils';
 import { SharedData } from '@/types';
 import {
     BUDGET_PERIOD_TYPES,
@@ -37,9 +36,7 @@ import { Category } from '@/types/category';
 import { Label } from '@/types/label';
 import { __ } from '@/utils/i18n';
 import { router, usePage } from '@inertiajs/react';
-import { Plus } from 'lucide-react';
 import React, { useState } from 'react';
-import { Card, CardContent } from '../ui/card';
 import {
     categoryTrackingOptions,
     labelTrackingOptions,
@@ -145,19 +142,9 @@ export function CreateBudgetDialog({
                 <DialogTrigger asChild>{trigger}</DialogTrigger>
             ) : isControlled ? null : (
                 <DialogTrigger asChild>
-                    <Card
-                        className={cn(
-                            'cursor-pointer opacity-50 transition-opacity duration-200 hover:opacity-100',
-                            className,
-                        )}
-                    >
-                        <CardContent className="flex h-full items-center justify-center">
-                            <div className="flex flex-row items-center justify-center gap-1">
-                                <Plus className="mr-2 h-4 w-4" />
-                                {__('Create Budget')}
-                            </div>
-                        </CardContent>
-                    </Card>
+                    <CreatePlaceholderCard className={className}>
+                        {__('Create Budget')}
+                    </CreatePlaceholderCard>
                 </DialogTrigger>
             )}
             <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[600px]">

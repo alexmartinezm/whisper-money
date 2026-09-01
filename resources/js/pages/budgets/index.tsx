@@ -5,6 +5,7 @@ import { CreateBudgetDialog } from '@/components/budgets/create-budget-dialog';
 import HeadingSmall from '@/components/heading-small';
 import { CreateSavingsGoalDialog } from '@/components/savings-goals/create-savings-goal-dialog';
 import { SavingsGoalListCard } from '@/components/savings-goals/savings-goal-list-card';
+import { CreatePlaceholderCard } from '@/components/shared/create-placeholder-card';
 import { Button } from '@/components/ui/button';
 import { CreateButton } from '@/components/ui/create-button';
 import {
@@ -14,15 +15,16 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { useLocale } from '@/hooks/use-locale';
 import AppSidebarLayout from '@/layouts/app/app-sidebar-layout';
+import { mergePlanningItems } from '@/lib/planning-items';
 import { BreadcrumbItem } from '@/types';
 import type { Budget, BudgetSummary } from '@/types/budget';
 import { SavingsGoal } from '@/types/savings-goal';
-import { sortBudgetsByAllocatedAmount } from '@/utils/budget';
 import { __ } from '@/utils/i18n';
 import { Head, router, usePage } from '@inertiajs/react';
 import { ChevronDown, Plus } from 'lucide-react';
-import { useState } from 'react';
+import { ReactNode, useMemo, useState } from 'react';
 
 const breadcrumbs: BreadcrumbItem[] = [
     {
@@ -54,13 +56,14 @@ export default function BudgetsIndex({
     savingsGoalsEnabled = false,
     currencyCode,
 }: Props) {
-    const sortedBudgets = sortBudgetsByAllocatedAmount(budgets);
     const [createType, setCreateType] = useState<'budget' | 'goal' | null>(
         null,
     );
     const { url } = usePage();
+    const locale = useLocale();
     // Without savings goals there is no toggle to undo a ?show= filter coming
-    // from a stale bookmark, so clamp it to 'all' instead of hiding sections.
+    // from a stale bookmark, so clamp it to 'all' instead of serving a list
+    // the user has no way to unfilter.
     const [filter, setFilter] = useState<BudgetTypeFilter>(() =>
         savingsGoalsEnabled ? budgetTypeFilterFromUrl(url) : 'all',
     );
@@ -77,6 +80,19 @@ export default function BudgetsIndex({
         });
     };
 
+    // Budgets and savings goals share one list: whichever needs attention
+    // first leads it, and neither type is stuck below the other.
+    const items = useMemo(
+        () =>
+            mergePlanningItems(
+                filter === 'goals' ? [] : budgets,
+                savingsGoalsEnabled && filter !== 'budgets' ? savingsGoals : [],
+                locale,
+                savingsGoalsEnabled ? 'name' : 'allocation',
+            ),
+        [budgets, savingsGoals, savingsGoalsEnabled, filter, locale],
+    );
+
     return (
         <AppSidebarLayout breadcrumbs={breadcrumbs}>
             <Head title={__('Planning')} />
@@ -90,39 +106,16 @@ export default function BudgetsIndex({
                         )}
                     />
                     {savingsGoalsEnabled ? (
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
+                        <CreateMenu
+                            onCreate={setCreateType}
+                            trigger={
                                 <Button>
                                     <Plus />
                                     {__('Create')}
                                     <ChevronDown className="ml-1 h-4 w-4" />
                                 </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                                {/* Let the menu close itself (no preventDefault, or
-                                    it leaves pointer-events locked on the body), and
-                                    defer opening the dialog to the next frame so it
-                                    doesn't race the menu's close. */}
-                                <DropdownMenuItem
-                                    onSelect={() =>
-                                        requestAnimationFrame(() =>
-                                            setCreateType('budget'),
-                                        )
-                                    }
-                                >
-                                    {__('Budget')}
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                    onSelect={() =>
-                                        requestAnimationFrame(() =>
-                                            setCreateType('goal'),
-                                        )
-                                    }
-                                >
-                                    {__('Savings Goal')}
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
+                            }
+                        />
                     ) : (
                         <CreateBudgetDialog
                             currencyCode={currencyCode}
@@ -134,13 +127,6 @@ export default function BudgetsIndex({
                         />
                     )}
                 </div>
-
-                {sortedBudgets.length > 0 && filter !== 'goals' && (
-                    <BudgetOverviewCard
-                        budgetSummary={budgetSummary}
-                        currencyCode={currencyCode}
-                    />
-                )}
 
                 {savingsGoalsEnabled && (
                     <ToggleGroup
@@ -172,55 +158,37 @@ export default function BudgetsIndex({
                     </ToggleGroup>
                 )}
 
-                {filter !== 'goals' && (
-                    <section className="space-y-4">
-                        {savingsGoalsEnabled && filter === 'all' && (
-                            <h2 className="text-lg font-medium">
-                                {__('Budgets')}
-                            </h2>
-                        )}
-                        <div className="grid gap-4 lg:grid-cols-2">
-                            {sortedBudgets.map((budget) => (
-                                <BudgetListCard
-                                    key={budget.id}
-                                    budget={budget}
-                                    currencyCode={currencyCode}
-                                />
-                            ))}
-                            <CreateBudgetDialog
-                                currencyCode={currencyCode}
-                                className={
-                                    budgets.length ? '' : 'min-h-[260px]'
-                                }
-                            />
-                        </div>
-                    </section>
+                {budgets.length > 0 && filter !== 'goals' && (
+                    <BudgetOverviewCard
+                        budgetSummary={budgetSummary}
+                        currencyCode={currencyCode}
+                    />
                 )}
 
-                {savingsGoalsEnabled && filter !== 'budgets' && (
-                    <section className="space-y-4">
-                        {filter === 'all' && (
-                            <h2 className="text-lg font-medium">
-                                {__('Savings Goals')}
-                            </h2>
-                        )}
-                        <div className="grid gap-4 lg:grid-cols-2">
-                            {savingsGoals.map((goal) => (
-                                <SavingsGoalListCard
-                                    key={goal.id}
-                                    savingsGoal={goal}
-                                    currencyCode={currencyCode}
-                                />
-                            ))}
-                            <CreateSavingsGoalDialog
+                <div className="grid gap-4 lg:grid-cols-2">
+                    {items.map((item) =>
+                        item.type === 'budget' ? (
+                            <BudgetListCard
+                                key={item.id}
+                                budget={item.budget}
                                 currencyCode={currencyCode}
-                                className={
-                                    savingsGoals.length ? '' : 'min-h-[260px]'
-                                }
                             />
-                        </div>
-                    </section>
-                )}
+                        ) : (
+                            <SavingsGoalListCard
+                                key={item.id}
+                                savingsGoal={item.goal}
+                                currencyCode={currencyCode}
+                            />
+                        ),
+                    )}
+                    <CreateCard
+                        currencyCode={currencyCode}
+                        savingsGoalsEnabled={savingsGoalsEnabled}
+                        filter={filter}
+                        isListEmpty={items.length === 0}
+                        onCreate={setCreateType}
+                    />
+                </div>
             </div>
 
             {savingsGoalsEnabled && (
@@ -238,5 +206,98 @@ export default function BudgetsIndex({
                 </>
             )}
         </AppSidebarLayout>
+    );
+}
+
+interface CreateCardProps {
+    currencyCode: string;
+    savingsGoalsEnabled: boolean;
+    filter: BudgetTypeFilter;
+    isListEmpty: boolean;
+    onCreate: (type: 'budget' | 'goal') => void;
+}
+
+/**
+ * The card that trails the list. Without savings goals it is the budget
+ * dialog's own placeholder, exactly as before. With them it offers both types
+ * — unless the list is filtered, in which case it creates the type the user is
+ * already looking at instead of asking again.
+ */
+function CreateCard({
+    currencyCode,
+    savingsGoalsEnabled,
+    filter,
+    isListEmpty,
+    onCreate,
+}: CreateCardProps) {
+    const className = isListEmpty ? 'min-h-[260px]' : '';
+
+    if (!savingsGoalsEnabled || filter === 'budgets') {
+        return (
+            <CreateBudgetDialog
+                currencyCode={currencyCode}
+                className={className}
+            />
+        );
+    }
+
+    if (filter === 'goals') {
+        return (
+            <CreateSavingsGoalDialog
+                currencyCode={currencyCode}
+                className={className}
+            />
+        );
+    }
+
+    return (
+        <CreateMenu
+            align="start"
+            onCreate={onCreate}
+            trigger={
+                <CreatePlaceholderCard className={className}>
+                    {__('Create')}
+                    <ChevronDown className="ml-1 h-4 w-4" />
+                </CreatePlaceholderCard>
+            }
+        />
+    );
+}
+
+interface CreateMenuProps {
+    trigger: ReactNode;
+    onCreate: (type: 'budget' | 'goal') => void;
+    align?: 'start' | 'end';
+}
+
+/**
+ * The Budget / Savings Goal choice, offered from both the header button and
+ * the list's trailing card.
+ *
+ * Let the menu close itself (no preventDefault, or it leaves pointer-events
+ * locked on the body), and defer opening the dialog to the next frame so it
+ * doesn't race the menu's close.
+ */
+function CreateMenu({ trigger, onCreate, align = 'end' }: CreateMenuProps) {
+    return (
+        <DropdownMenu>
+            <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+            <DropdownMenuContent align={align}>
+                <DropdownMenuItem
+                    onSelect={() =>
+                        requestAnimationFrame(() => onCreate('budget'))
+                    }
+                >
+                    {__('Budget')}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                    onSelect={() =>
+                        requestAnimationFrame(() => onCreate('goal'))
+                    }
+                >
+                    {__('Savings Goal')}
+                </DropdownMenuItem>
+            </DropdownMenuContent>
+        </DropdownMenu>
     );
 }
