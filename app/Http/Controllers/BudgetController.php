@@ -41,6 +41,8 @@ class BudgetController extends Controller
         $activeSpaceId = $user->activeSpace()->id;
         $budgets = $user
             ->budgets()
+            ->orderBy('position')
+            ->orderBy('name')
             ->with(['categories', 'labels', 'periods' => function ($query) use ($applicationDate) {
                 $query->whereDate('start_date', '<=', $applicationDate->toDateString())
                     ->whereDate('end_date', '>=', $applicationDate->toDateString())

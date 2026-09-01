@@ -28,6 +28,7 @@ class SavingsGoal extends Model
         'space_id',
         'label_id',
         'name',
+        'position',
         'target_amount',
         'initial_amount',
         'target_date',
@@ -43,6 +44,7 @@ class SavingsGoal extends Model
     protected function casts(): array
     {
         return [
+            'position' => 'integer',
             'target_amount' => 'integer',
             'initial_amount' => 'integer',
             'target_date' => 'date:Y-m-d',
@@ -98,7 +100,7 @@ class SavingsGoal extends Model
     {
         // Archiving soft-deletes the label, so it has to be read through the
         // trashed scope or an archived goal loses the name it saved under.
-        $goals = $user->savingsGoals()->with(['label' => fn ($query) => $query->withTrashed()])->get();
+        $goals = $user->savingsGoals()->orderBy('position')->orderBy('name')->with(['label' => fn ($query) => $query->withTrashed()])->get();
 
         // ponytail: one grouped sum+min for all goals' labels avoids N+1 across the list.
         $aggByLabel = Transaction::query()
