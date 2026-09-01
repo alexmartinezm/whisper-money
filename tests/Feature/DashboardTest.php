@@ -62,6 +62,11 @@ test('dashboard top categories roll child spending up into the parent', function
 });
 
 test('dashboard cashflow uses split category types instead of the parent sign', function () {
+    // The widget reads CashflowSummaryService now, which converts each row into
+    // the user's currency, so the rate provider has to be faked for the account
+    // currency the factory picks.
+    fakeCurrencyApi();
+
     $user = User::factory()->onboarded()->create();
     $account = Account::factory()->create(['user_id' => $user->id]);
     $transaction = Transaction::factory()->plaintext()->create([

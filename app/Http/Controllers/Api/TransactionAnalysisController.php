@@ -70,7 +70,14 @@ class TransactionAnalysisController extends Controller
             fn (string $categoryId): bool => $categoryId !== 'uncategorized',
         ));
         $categoryIds = $this->tree->expand($user->id, $categoryIds);
-        if ($requestedCategoryIds !== []) {
+
+        // A split parent enters the set through any one of its parts, so the
+        // postings are narrowed back down to the categories that were asked for.
+        // Not when a label filter is active, though: labels are ORed with
+        // categories, so the set deliberately holds transactions from outside
+        // the subtree and narrowing here would drop them from the breakdown
+        // while they still count towards the totals.
+        if ($requestedCategoryIds !== [] && empty($filters['label_ids'])) {
             $analysisTransactions = $analysisTransactions
                 ->filter(fn (Transaction $transaction): bool => in_array($transaction->category_id, $categoryIds, true)
                     || ($includeUncategorized && $transaction->category_id === null))
