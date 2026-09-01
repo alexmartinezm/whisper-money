@@ -9,7 +9,6 @@ use App\Services\CategorySpendingService;
 use App\Services\LabelSpendingService;
 use App\Services\NetWorth\ProjectNetWorth;
 use App\Services\PeriodComparator;
-use App\Services\Transactions\EffectiveTransactionPostings;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -20,7 +19,6 @@ class DashboardController extends Controller
     public function __construct(
         private AccountMetricsService $accountMetricsService,
         private CategorySpendingService $categorySpendingService,
-        private EffectiveTransactionPostings $effectivePostings,
         private ProjectNetWorth $projectNetWorth,
         private LabelSpendingService $labelSpendingService,
         private CashflowSummaryService $summaries,

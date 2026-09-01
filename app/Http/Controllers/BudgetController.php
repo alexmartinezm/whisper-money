@@ -389,7 +389,7 @@ class BudgetController extends Controller
     {
         $this->authorize('archive', $budget);
 
-        $budget->update(['archived_at' => now()]);
+        $this->budgetManagementService->archive($budget);
 
         // Named route, not back(): the dialog only exists on this page, and the
         // previous-url redirect resolves to the app's internal host behind a

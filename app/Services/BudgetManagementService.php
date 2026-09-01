@@ -301,17 +301,18 @@ class BudgetManagementService
      * taking in anything new. One-way, which is why the record stays reachable
      * instead of being deleted.
      */
-    public function archive(User $user, Space $space, string $budgetId): Budget
+    public function archive(Budget $budget): Budget
     {
-        return DB::transaction(function () use ($user, $space, $budgetId): Budget {
-            $this->assertSpaceAccess($user, $space);
-            $budget = $this->ownedBudget($user, $space, $budgetId, lock: true);
+        return DB::transaction(function () use ($budget): Budget {
+            $locked = Budget::query()->whereKey($budget->id)->lockForUpdate()->firstOrFail();
 
-            if (! $budget->isArchived()) {
-                $budget->forceFill(['archived_at' => now()])->save();
+            // Idempotent on purpose: a second click must not move the date a
+            // frozen budget's figures are pinned to.
+            if (! $locked->isArchived()) {
+                $locked->forceFill(['archived_at' => now()])->save();
             }
 
-            return $budget;
+            return $locked;
         }, attempts: 5);
     }
 
