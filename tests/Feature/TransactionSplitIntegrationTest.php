@@ -451,12 +451,16 @@ it('keeps descendant split postings when analysis filters by a parent category',
         ['category_id' => $home->id, 'amount' => -4000],
     ]);
 
+    // Filtering by a parent drills the breakdown into its children (#875), so
+    // the descendant posting is reported under Groceries rather than rolled up
+    // into Food. What matters here is that it survives the filter at all: the
+    // other half of the split sits outside the subtree and is dropped.
     $this->actingAs($user)->getJson('/api/transactions/analysis?'.http_build_query([
         'category_ids' => $food->id,
     ]))->assertOk()
         ->assertJsonPath('summary.expense', 6000)
         ->assertJsonPath('summary.count', 1)
-        ->assertJsonPath('by_category.0.category_id', $food->id)
+        ->assertJsonPath('by_category.0.category_id', $groceries->id)
         ->assertJsonPath('by_category.0.amount', 6000);
 });
 
