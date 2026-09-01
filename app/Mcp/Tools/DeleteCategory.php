@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 
 #[IsDestructive]
-#[Description('Delete a category. The strategy decides what happens to its child categories: "reparent" (default) lifts them to the deleted category\'s parent, "promote" turns them into roots, "cascade" deletes the whole subtree and uncategorizes affected transactions. Because "cascade" can remove categories the user never named, it also requires confirm_cascade: true; without it nothing is deleted. The response reports how many categories went and how many transactions were left uncategorized.')]
+#[Description('Delete a category, uncategorizing its transactions. The strategy decides what happens to its child categories: "reparent" (default) lifts them to the deleted category\'s parent, "promote" turns them into roots, "cascade" deletes the whole subtree and uncategorizes affected transactions. Because "cascade" can remove categories the user never named, it also requires confirm_cascade: true; without it nothing is deleted. The response reports how many categories went and how many transactions were left uncategorized.')]
 class DeleteCategory extends WriteTool
 {
     /**
@@ -55,8 +55,8 @@ class DeleteCategory extends WriteTool
 
             $affected = match ($strategy) {
                 CategoryDeletionStrategy::Cascade => $tree->deleteSubtree($category),
-                CategoryDeletionStrategy::Promote => $this->detachChildrenAndDelete($category, null),
-                CategoryDeletionStrategy::Reparent => $this->detachChildrenAndDelete($category, $category->parent_id),
+                CategoryDeletionStrategy::Promote => $this->detachChildrenAndDelete($tree, $category, null),
+                CategoryDeletionStrategy::Reparent => $this->detachChildrenAndDelete($tree, $category, $category->parent_id),
             };
 
             return $this->json([
@@ -72,23 +72,21 @@ class DeleteCategory extends WriteTool
     /**
      * Move the category's direct children to a new parent, then delete it.
      *
-     * Reports in the same shape as the cascade, which is always the same here:
-     * one category goes, the children survive, no transaction is uncategorized.
+     * The delete goes through the tree so the category's own transactions are
+     * uncategorized, exactly as the cascade does: a transaction left pointing at
+     * a soft-deleted category is counted by the dashboard widget and dropped by
+     * the cashflow screen, and the same month then reads two different ways.
      *
      * @return array{categories: int, transactions: int}
      */
-    private function detachChildrenAndDelete(Category $category, ?string $newParentId): array
+    private function detachChildrenAndDelete(CategoryTree $tree, Category $category, ?string $newParentId): array
     {
         try {
-            $category->children()->update(['parent_id' => $newParentId]);
+            return $tree->detachChildrenAndDelete($category, $newParentId);
         } catch (UniqueConstraintViolationException) {
             throw ValidationException::withMessages([
                 'strategy' => 'A category with the same name already exists at the destination level. Rename it first.',
             ]);
         }
-
-        $category->delete();
-
-        return ['categories' => 1, 'transactions' => 0];
     }
 }

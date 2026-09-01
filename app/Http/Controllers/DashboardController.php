@@ -2,9 +2,7 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\CategoryType;
 use App\Models\Account;
-use App\Models\Transaction;
 use App\Services\AccountMetricsService;
 use App\Services\CashflowSummaryService;
 use App\Services\CategorySpendingService;
@@ -23,6 +21,7 @@ class DashboardController extends Controller
         private CategorySpendingService $categorySpendingService,
         private EffectiveTransactionPostings $effectivePostings,
         private ProjectNetWorth $projectNetWorth,
+        private CashflowSummaryService $summaries,
     ) {}
 
     public function __invoke(Request $request): Response
@@ -92,55 +91,8 @@ class DashboardController extends Controller
     {
         $user = $request->user();
         $now = Carbon::now();
-        $from = $now->copy()->startOfMonth();
-        $to = $now->copy()->endOfMonth();
+        $period = new PeriodComparator($now->copy()->startOfMonth(), $now->copy()->endOfMonth());
 
-        $period = new PeriodComparator($from, $to);
-        $previousPeriod = $period->previous();
-
-        return [
-            'current' => $this->calculateCashflowSummary($user->id, $period->from, $period->to),
-            'previous' => $this->calculateCashflowSummary($user->id, $previousPeriod->from, $previousPeriod->to),
-        ];
-    }
-
-    private function calculateCashflowSummary(string $userId, Carbon $from, Carbon $to): array
-    {
-        $income = max(0, $this->getTransactionSum($userId, $from, $to, CategoryType::Income));
-        $expense = max(0, -$this->getTransactionSum($userId, $from, $to, CategoryType::Expense));
-
-        return CashflowSummaryService::summarize($income, $expense);
-    }
-
-    private function getTransactionSum(string $userId, Carbon $from, Carbon $to, CategoryType $type): int
-    {
-        $transactions = Transaction::query()
-            ->where('transactions.user_id', $userId)
-            ->whereBetween('transactions.transaction_date', [$from, $to])
-            // The join carries the ownership percentage without a second query,
-            // and ignores the account's soft-delete scope, as the aggregate it
-            // replaced did.
-            ->joinOwningAccount()
-            ->select('transactions.*', 'accounts.ownership_percentage')
-            ->with(['category', 'splits.category'])
-            ->get();
-
-        $total = 0;
-
-        foreach ($transactions as $transaction) {
-            foreach ($this->effectivePostings->forTransaction($transaction) as $posting) {
-                $matches = $posting->category !== null
-                    ? $posting->category->type === $type
-                    : ($type === CategoryType::Income ? $posting->amount > 0 : $posting->amount < 0);
-
-                if ($matches) {
-                    // A shared account only counts at the owner's percentage, and
-                    // a split posting is weighed like the transaction it is on.
-                    $total += Account::shareOf($posting->amount, $transaction->ownership_percentage);
-                }
-            }
-        }
-
-        return $total;
+        return $this->summaries->forComparedPeriods($user->id, $user->currency_code, $period, $period->previous());
     }
 }

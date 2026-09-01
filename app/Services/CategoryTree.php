@@ -6,6 +6,7 @@ use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\TransactionSplit;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Validation\ValidationException;
 
 class CategoryTree
@@ -393,6 +394,22 @@ class CategoryTree
                 'type' => $category->type,
                 'cashflow_direction' => $category->cashflow_direction,
             ]);
+    }
+
+    /**
+     * Move the category's direct children to a new parent, then delete it on
+     * its own. The children are out of the way first, so the subtree the delete
+     * sees is the category alone.
+     *
+     * @throws UniqueConstraintViolationException when a moved child's name collides at the destination
+     *
+     * @return array{categories: int, transactions: int}
+     */
+    public function detachChildrenAndDelete(Category $category, ?string $newParentId): array
+    {
+        $category->children()->update(['parent_id' => $newParentId]);
+
+        return $this->deleteSubtree($category);
     }
 
     /**
