@@ -403,6 +403,9 @@ test('archiving a budget releases its categories back to the catch-all', functio
 
     $transaction = Transaction::factory()->create([
         'user_id' => $this->user->id,
+        // Budget assignment is scoped to the transaction's space, as every
+        // other case in this file spells out.
+        'space_id' => $this->user->personalSpace->id,
         'category_id' => $category->id,
         'transaction_date' => now(),
         'amount' => -1000,

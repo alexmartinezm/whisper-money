@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\BudgetPeriodType;
 use App\Features\SavingsGoals;
+use App\Http\Requests\ReorderPlanningItemsRequest;
 use App\Http\Requests\StoreBudgetRequest;
 use App\Http\Requests\UpdateBudgetPeriodRequest;
 use App\Http\Requests\UpdateBudgetRequest;
@@ -272,6 +273,29 @@ class BudgetController extends Controller
             'labels' => $labels,
             'currencyCode' => $user->currency_code ?? 'USD',
         ]);
+    }
+
+    /**
+     * Persists the order of the Planning list, which mixes both types.
+     *
+     * A NULL position means "never dragged", so the client falls back to the
+     * automatic ordering; one drag gives every live item a number and the list
+     * is manual from then on.
+     */
+    public function reorder(ReorderPlanningItemsRequest $request): RedirectResponse
+    {
+        // ponytail: one update per row; fine for the handful of budgets and
+        // goals a user has. Switch to a single CASE update if that ever grows.
+        foreach (array_values($request->validated('items')) as $position => $item) {
+            $model = $item['type'] === 'goal' ? SavingsGoal::class : Budget::class;
+
+            $model::query()
+                ->whereKey($item['id'])
+                ->where('user_id', $request->user()->id)
+                ->update(['position' => $position]);
+        }
+
+        return back();
     }
 
     public function store(StoreBudgetRequest $request): RedirectResponse
