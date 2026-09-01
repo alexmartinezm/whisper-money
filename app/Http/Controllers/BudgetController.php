@@ -174,21 +174,33 @@ class BudgetController extends Controller
         ];
     }
 
+    /**
+     * The period the detail page reads as current.
+     *
+     * An archived budget gets no new periods: it falls back to the last one it
+     * had instead of minting one, so opening the page cannot resume a budget
+     * that stopped counting.
+     */
+    private function activePeriodFor(Budget $budget, CarbonImmutable $applicationDate): BudgetPeriod
+    {
+        $activePeriod = $budget->getCurrentPeriod($applicationDate);
+
+        if ($activePeriod !== null) {
+            return $activePeriod;
+        }
+
+        return $budget->isArchived()
+            ? $budget->periods()->orderByDesc('start_date')->firstOrFail()
+            : $this->budgetPeriodService->generatePeriod($budget, null, $applicationDate);
+    }
+
     public function show(Request $request, Budget $budget): Response
     {
         $this->authorize('view', $budget);
 
         $user = $request->user();
         $applicationDate = CarbonImmutable::today();
-        $activePeriod = $budget->getCurrentPeriod($applicationDate);
-        if ($activePeriod === null) {
-            // An archived budget gets no new periods: it falls back to the last
-            // one it had instead of minting one, so opening the page cannot
-            // resume a budget that stopped counting.
-            $activePeriod = $budget->isArchived()
-                ? $budget->periods()->orderByDesc('start_date')->firstOrFail()
-                : $this->budgetPeriodService->generatePeriod($budget, null, $applicationDate);
-        }
+        $activePeriod = $this->activePeriodFor($budget, $applicationDate);
         $directSuccessor = $budget->getNextPlanningPeriod($applicationDate, $activePeriod);
 
         $periodId = $request->query('period');

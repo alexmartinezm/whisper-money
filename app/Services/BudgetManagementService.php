@@ -97,9 +97,7 @@ class BudgetManagementService
             $budget = $this->ownedBudget($user, $space, $budgetId, lock: true);
             $reconciliationPeriods = new Collection;
 
-            if ($budget->isArchived()) {
-                throw ValidationException::withMessages(['budget' => 'An archived budget cannot be changed.']);
-            }
+            $this->assertMutable($budget);
 
             if ($changes === []) {
                 throw ValidationException::withMessages(['budget' => 'Provide a mutable budget field.']);
@@ -356,6 +354,18 @@ class BudgetManagementService
         }
 
         return $references;
+    }
+
+    /**
+     * Archiving is what makes a budget read-only: it keeps every figure it has
+     * already counted, so letting it change afterwards would move a total that
+     * is meant to be final.
+     */
+    private function assertMutable(Budget $budget): void
+    {
+        if ($budget->isArchived()) {
+            throw ValidationException::withMessages(['budget' => 'An archived budget cannot be changed.']);
+        }
     }
 
     private function ownedBudget(User $user, Space $space, string $budgetId, bool $lock = false): Budget
