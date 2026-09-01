@@ -51,6 +51,12 @@ trait ConvertsTransactionCurrency
      * Expand split parents into category-bearing clones. Converted line amounts
      * reconcile to the converted parent; final line receives rounding residue.
      *
+     * Amounts here are converted but NOT reduced to the owner's share: every
+     * caller sums the postings through {@see self::convertTransactionAmount()},
+     * which applies the share itself. Weighing the parent here as well charged
+     * a shared account's split rows the percentage twice — a 50%-owned account
+     * counted a split €100 as €25.
+     *
      * @param  Collection<int, Transaction>  $transactions
      * @return Collection<int, Transaction>
      */
@@ -62,7 +68,12 @@ trait ConvertsTransactionCurrency
                 return [$transaction];
             }
 
-            $convertedParent = $this->convertTransactionAmount($transaction, $currency);
+            $convertedParent = $this->exchangeRateService->convert(
+                $transaction->currency_code ?: $transaction->account?->currency_code ?: $currency,
+                $currency,
+                $transaction->amount,
+                $transaction->transaction_date->toDateString(),
+            );
             $allocated = 0;
             $lastPosition = $transaction->splits->count() - 1;
 

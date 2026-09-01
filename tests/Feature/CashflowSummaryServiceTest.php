@@ -5,6 +5,7 @@ use App\Models\Account;
 use App\Models\Category;
 use App\Models\ExchangeRate;
 use App\Models\Transaction;
+use App\Models\TransactionSplit;
 use App\Models\User;
 use App\Services\CashflowSummaryService;
 use App\Services\PeriodComparator;
@@ -96,4 +97,56 @@ it('counts an uncategorized outflow as an expense', function () {
     Transaction::query()->whereKey($transaction->id)->update(['category_id' => null]);
 
     expect(thisMonthsSummary($user)['expense'])->toBe(2100);
+});
+
+it('counts a split transaction under its parts', function () {
+    $user = User::factory()->create(['currency_code' => 'EUR']);
+    $transaction = record($user, CategoryType::Expense, -10000);
+    Transaction::query()->whereKey($transaction->id)->update(['category_id' => null]);
+
+    $groceries = Category::factory()->create(['user_id' => $user->id, 'type' => CategoryType::Expense]);
+    foreach ([-6000, -4000] as $part) {
+        TransactionSplit::factory()->create([
+            'transaction_id' => $transaction->id,
+            'category_id' => $groceries->id,
+            'amount' => $part,
+        ]);
+    }
+
+    expect(thisMonthsSummary($user)['expense'])->toBe(10000);
+});
+
+it('charges a shared account its ownership share once on a split transaction', function () {
+    $user = User::factory()->create(['currency_code' => 'EUR']);
+    $expense = Category::factory()->create(['user_id' => $user->id, 'type' => CategoryType::Expense]);
+    $account = Account::factory()->create([
+        'user_id' => $user->id,
+        'currency_code' => 'EUR',
+        'ownership_percentage' => 50,
+    ]);
+
+    $make = fn (?string $categoryId): Transaction => Transaction::factory()->plaintext()->create([
+        'user_id' => $user->id,
+        'account_id' => $account->id,
+        'category_id' => $categoryId,
+        'amount' => -10000,
+        'currency_code' => 'EUR',
+        'transaction_date' => today(),
+    ]);
+
+    $make($expense->id);
+
+    $split = $make(null);
+    foreach ([-5000, -5000] as $part) {
+        TransactionSplit::factory()->create([
+            'transaction_id' => $split->id,
+            'category_id' => $expense->id,
+            'amount' => $part,
+        ]);
+    }
+
+    // Two 100 EUR expenses on a half-owned account are 50 EUR each. Splitting
+    // one of them must not make it cost less than the other: the owner's share
+    // belongs to the sum, not to the split expansion as well.
+    expect(thisMonthsSummary($user)['expense'])->toBe(10000);
 });
