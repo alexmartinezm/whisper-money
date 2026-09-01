@@ -48,7 +48,7 @@ class BudgetManagementService
                 throw ValidationException::withMessages(['tracking' => 'A catch-all budget cannot have categories or labels.']);
             }
 
-            if ($isCatchAll && Budget::query()->where('user_id', $user->id)->where('is_catch_all', true)->exists()) {
+            if ($isCatchAll && Budget::query()->notArchived()->where('user_id', $user->id)->where('is_catch_all', true)->exists()) {
                 throw ValidationException::withMessages(['is_catch_all' => 'You already have a catch-all budget.']);
             }
 
@@ -96,6 +96,10 @@ class BudgetManagementService
             $this->assertSpaceAccess($user, $space);
             $budget = $this->ownedBudget($user, $space, $budgetId, lock: true);
             $reconciliationPeriods = new Collection;
+
+            if ($budget->isArchived()) {
+                throw ValidationException::withMessages(['budget' => 'An archived budget cannot be changed.']);
+            }
 
             if ($changes === []) {
                 throw ValidationException::withMessages(['budget' => 'Provide a mutable budget field.']);
@@ -291,6 +295,25 @@ class BudgetManagementService
             $planningPeriod->update(['allocated_amount' => $allocatedAmount]);
 
             return $planningPeriod->fresh();
+        }, attempts: 5);
+    }
+
+    /**
+     * Freeze a budget: it keeps every figure it has already counted and stops
+     * taking in anything new. One-way, which is why the record stays reachable
+     * instead of being deleted.
+     */
+    public function archive(User $user, Space $space, string $budgetId): Budget
+    {
+        return DB::transaction(function () use ($user, $space, $budgetId): Budget {
+            $this->assertSpaceAccess($user, $space);
+            $budget = $this->ownedBudget($user, $space, $budgetId, lock: true);
+
+            if (! $budget->isArchived()) {
+                $budget->forceFill(['archived_at' => now()])->save();
+            }
+
+            return $budget;
         }, attempts: 5);
     }
 

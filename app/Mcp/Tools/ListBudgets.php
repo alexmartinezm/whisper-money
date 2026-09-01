@@ -30,6 +30,7 @@ class ListBudgets extends McpTool
         $space = $this->resolveSpace($request, $user);
         $asOf = today();
         $budgets = Budget::query()
+            ->notArchived()
             ->where('user_id', $user->id)
             ->where('space_id', $space->id)
             ->with([

@@ -14,7 +14,7 @@ import { getBudgetPeriodStats } from '@/utils/budget';
 import { formatDate } from '@/utils/date';
 import { __ } from '@/utils/i18n';
 import { Link } from '@inertiajs/react';
-import { Calendar } from 'lucide-react';
+import { Archive, Calendar } from 'lucide-react';
 import { useMemo } from 'react';
 
 interface Props {
@@ -25,6 +25,7 @@ interface Props {
 export function BudgetListCard({ budget, currencyCode }: Props) {
     const locale = useLocale();
     const currentPeriod = budget.periods?.[0];
+    const archivedAt = budget.archived_at;
 
     // Carry-over aware, and prefers the period's own spent_amount when the
     // server sent one. budgetSeverity() reads the same helper, so the colour
@@ -35,13 +36,19 @@ export function BudgetListCard({ budget, currencyCode }: Props) {
     );
 
     const periodLabel = useMemo(() => {
+        if (archivedAt) {
+            return __('Archived on :date', {
+                date: formatDate(archivedAt, 'MMM d, yyyy', locale),
+            });
+        }
+
         if (!currentPeriod) return __('No active period');
 
         const start = formatDate(currentPeriod.start_date, 'MMM d', locale);
         const end = formatDate(currentPeriod.end_date, 'MMM d', locale);
 
         return `${start} - ${end}`;
-    }, [currentPeriod, locale]);
+    }, [archivedAt, currentPeriod, locale]);
 
     const statusColor = useMemo(
         () => getBudgetSeverityColor(budgetSeverity(budget)),
@@ -59,19 +66,28 @@ export function BudgetListCard({ budget, currencyCode }: Props) {
         <PlanningCard
             href={show({ budget: budget.id }).url}
             title={budget.name}
+            dimmed={!!archivedAt}
             badge={
-                <Badge variant="outline">
-                    {__(getBudgetPeriodTypeLabel(budget.period_type))}
-                </Badge>
+                archivedAt ? (
+                    <Badge variant="secondary">{__('Archived')}</Badge>
+                ) : (
+                    <Badge variant="outline">
+                        {__(getBudgetPeriodTypeLabel(budget.period_type))}
+                    </Badge>
+                )
             }
             description={
                 <>
-                    <Calendar className="h-3 w-3" />
+                    {archivedAt ? (
+                        <Archive className="h-3 w-3" />
+                    ) : (
+                        <Calendar className="h-3 w-3" />
+                    )}
                     {periodLabel}
                 </>
             }
             subtitle={
-                budget.next_planning_period ? (
+                budget.next_planning_period && !archivedAt ? (
                     <Link
                         href={
                             show(
@@ -122,39 +138,45 @@ export function BudgetListCard({ budget, currencyCode }: Props) {
             }
         >
             {/* A budget spends down, so it reads as a bar draining left to
-                right. The savings goal card fills a ring instead. */}
-            <div className="space-y-2">
-                <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">{__('Spent')}</span>
-                    <span className={statusColor}>
-                        <AmountDisplay
-                            amountInCents={stats.totalSpent}
-                            currencyCode={currencyCode}
-                        />{' '}
-                        {__('of')}{' '}
-                        <AmountDisplay
-                            amountInCents={stats.totalAvailable}
-                            currencyCode={currencyCode}
-                        />
-                    </span>
-                </div>
-                <Progress
-                    value={Math.min(stats.percentageUsed, 100)}
-                    className="h-2"
-                />
+                right. The savings goal card fills a ring instead. An archived
+                budget has no period in progress, so it gets no bar at all
+                rather than a row of zeros — its figures are on its own page. */}
+            {!archivedAt && (
+                <div className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">
+                            {__('Spent')}
+                        </span>
+                        <span className={statusColor}>
+                            <AmountDisplay
+                                amountInCents={stats.totalSpent}
+                                currencyCode={currencyCode}
+                            />{' '}
+                            {__('of')}{' '}
+                            <AmountDisplay
+                                amountInCents={stats.totalAvailable}
+                                currencyCode={currencyCode}
+                            />
+                        </span>
+                    </div>
+                    <Progress
+                        value={Math.min(stats.percentageUsed, 100)}
+                        className="h-2"
+                    />
 
-                <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">
-                        {__('Remaining')}
-                    </span>
-                    <span className={statusColor}>
-                        <AmountDisplay
-                            amountInCents={stats.remaining}
-                            currencyCode={currencyCode}
-                        />
-                    </span>
+                    <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">
+                            {__('Remaining')}
+                        </span>
+                        <span className={statusColor}>
+                            <AmountDisplay
+                                amountInCents={stats.remaining}
+                                currencyCode={currencyCode}
+                            />
+                        </span>
+                    </div>
                 </div>
-            </div>
+            )}
         </PlanningCard>
     );
 }

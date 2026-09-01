@@ -2,10 +2,12 @@
 
 use App\Mcp\Servers\WhisperMoneyServer;
 use App\Mcp\Tools\ListAccounts;
+use App\Mcp\Tools\ListBudgets;
 use App\Mcp\Tools\ListCategories;
 use App\Mcp\Tools\ListSpaces;
 use App\Mcp\Tools\SearchTransactions;
 use App\Models\Account;
+use App\Models\Budget;
 use App\Models\Category;
 use App\Models\Label;
 use App\Models\Transaction;
@@ -132,4 +134,16 @@ it('lists the user\'s categories for the space', function () {
         ->tool(ListCategories::class, [])
         ->assertOk()
         ->assertSee('Groceries');
+});
+
+it('leaves archived budgets out of the list', function () {
+    $user = User::factory()->create();
+    Budget::factory()->create(['user_id' => $user->id, 'name' => 'Running Budget']);
+    Budget::factory()->archived()->create(['user_id' => $user->id, 'name' => 'Archived Budget']);
+
+    WhisperMoneyServer::actingAs($user)
+        ->tool(ListBudgets::class)
+        ->assertOk()
+        ->assertSee('Running Budget')
+        ->assertDontSee('Archived Budget');
 });

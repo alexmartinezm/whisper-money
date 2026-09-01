@@ -179,13 +179,19 @@ class BudgetController extends Controller
         $applicationDate = CarbonImmutable::today();
         $activePeriod = $budget->getCurrentPeriod($applicationDate);
         if ($activePeriod === null) {
-            $activePeriod = $this->budgetPeriodService->generatePeriod($budget, null, $applicationDate);
+            // An archived budget gets no new periods: it falls back to the last
+            // one it had instead of minting one, so opening the page cannot
+            // resume a budget that stopped counting.
+            $activePeriod = $budget->isArchived()
+                ? $budget->periods()->orderByDesc('start_date')->firstOrFail()
+                : $this->budgetPeriodService->generatePeriod($budget, null, $applicationDate);
         }
         $directSuccessor = $budget->getNextPlanningPeriod($applicationDate, $activePeriod);
 
         $periodId = $request->query('period');
         $isPlanningPeriod = false;
-        $canPlanThisBudget = $budget->space_id === $user->activeSpace()->id;
+        $canPlanThisBudget = ! $budget->isArchived()
+            && $budget->space_id === $user->activeSpace()->id;
         if ($periodId) {
             $viewedPeriod = $budget->periods()->whereKey($periodId)->firstOrFail();
             $isPlanningPeriod = $canPlanThisBudget
@@ -328,5 +334,28 @@ class BudgetController extends Controller
         );
 
         return redirect()->route('budgets.index');
+    }
+
+    /**
+     * Archiving records the day it happened and is one-way: the budget turns
+     * read-only, stops absorbing transactions and stops claiming its categories
+     * away from the catch-all, and no further periods are generated for it. The
+     * periods it already has keep their figures, which is why the budget stays
+     * reachable instead of being deleted.
+     *
+     * The periods `GenerateBudgetPeriods` had already run ahead are left behind
+     * on purpose: `show()` only navigates to periods that have started, so they
+     * are already invisible and cleaning them up would buy nothing.
+     */
+    public function archive(Request $request, Budget $budget): RedirectResponse
+    {
+        $this->authorize('archive', $budget);
+
+        $budget->update(['archived_at' => now()]);
+
+        // Named route, not back(): the dialog only exists on this page, and the
+        // previous-url redirect resolves to the app's internal host behind a
+        // proxy (same reason as SavingsGoalController::syncTransactions).
+        return redirect()->route('budgets.show', $budget);
     }
 }

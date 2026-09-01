@@ -236,12 +236,14 @@ Route::middleware(['auth', 'verified', 'onboarded', 'subscribed'])->group(functi
     Route::patch('budgets/{budget}/periods/{period}', [BudgetController::class, 'updatePeriod'])->name('budgets.periods.update');
     Route::patch('budgets/{budget}', [BudgetController::class, 'update'])->name('budgets.update');
     Route::delete('budgets/{budget}', [BudgetController::class, 'destroy'])->name('budgets.destroy');
+    Route::post('budgets/{budget}/archive', [BudgetController::class, 'archive'])->name('budgets.archive');
 
     Route::post('savings-goals', [SavingsGoalController::class, 'store'])->name('savings-goals.store');
     Route::get('savings-goals/{savingsGoal}', [SavingsGoalController::class, 'show'])->name('savings-goals.show');
     Route::patch('savings-goals/{savingsGoal}', [SavingsGoalController::class, 'update'])->name('savings-goals.update');
     Route::put('savings-goals/{savingsGoal}/transactions', [SavingsGoalController::class, 'syncTransactions'])->name('savings-goals.transactions.sync');
     Route::delete('savings-goals/{savingsGoal}', [SavingsGoalController::class, 'destroy'])->name('savings-goals.destroy');
+    Route::post('savings-goals/{savingsGoal}/archive', [SavingsGoalController::class, 'archive'])->name('savings-goals.archive');
 });
 
 Route::middleware(['auth', 'verified', 'onboarded', 'subscribed'])->group(function () {
