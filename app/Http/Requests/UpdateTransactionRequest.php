@@ -33,16 +33,23 @@ class UpdateTransactionRequest extends FormRequest
             'splits.*.amount' => ['required', 'integer', 'not_in:0'],
         ];
 
-        // Manually created transactions can edit every field after creation.
-        // Imported ones keep amount, date, account and currency locked to the
-        // source data, so those keys are only validated (and thus persisted)
-        // for manual transactions.
+        // Amount, account and currency stay locked to the source data on
+        // anything the user did not type in: the bank is the authority on what
+        // moved. The date is not - a payroll booked on the 27th can belong to
+        // next month's budget - so it is editable whatever the source.
+        //
+        // A split's parts are rows in transaction_splits, not transactions of
+        // their own, so there is no part to lock here: the parent keeps its own
+        // date and the parts follow it.
         $transaction = $this->route('transaction');
-        if ($transaction instanceof Transaction && $transaction->source === TransactionSource::ManuallyCreated) {
-            $rules['account_id'] = ['sometimes', $this->userOwned('accounts')];
+        if ($transaction instanceof Transaction) {
             $rules['transaction_date'] = ['sometimes', 'date'];
-            $rules['amount'] = ['sometimes', 'integer'];
-            $rules['currency_code'] = ['sometimes', 'string', 'size:3'];
+
+            if ($transaction->source === TransactionSource::ManuallyCreated) {
+                $rules['account_id'] = ['sometimes', $this->userOwned('accounts')];
+                $rules['amount'] = ['sometimes', 'integer'];
+                $rules['currency_code'] = ['sometimes', 'string', 'size:3'];
+            }
         }
 
         return $rules;
