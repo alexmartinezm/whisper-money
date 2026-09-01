@@ -203,23 +203,16 @@ class BudgetController extends Controller
         $activePeriod = $this->activePeriodFor($budget, $applicationDate);
         $directSuccessor = $budget->getNextPlanningPeriod($applicationDate, $activePeriod);
 
-        $periodId = $request->query('period');
-        $isPlanningPeriod = false;
-        $canPlanThisBudget = ! $budget->isArchived()
-            && $budget->space_id === $user->activeSpace()->id;
-        if ($periodId) {
-            $viewedPeriod = $budget->periods()->whereKey($periodId)->firstOrFail();
-            $isPlanningPeriod = $canPlanThisBudget
-                && $directSuccessor !== null
-                && $viewedPeriod->id === $directSuccessor->id;
+        [$viewedPeriod, $isPlanningPeriod] = $this->resolveViewedPeriod(
+            $request,
+            $budget,
+            $activePeriod,
+            $directSuccessor,
+            $applicationDate,
+        );
 
-            if ($viewedPeriod->start_date->greaterThan($applicationDate) && ! $isPlanningPeriod) {
-                abort(404);
-            }
-        } else {
-            $viewedPeriod = $activePeriod;
-        }
-
+        // The planning period has no spending yet by definition, so it is the
+        // one view that does not pay for the transaction graph.
         if (! $isPlanningPeriod) {
             $viewedPeriod->load([
                 'budgetTransactions.transaction.account.bank',
@@ -234,18 +227,6 @@ class BudgetController extends Controller
             ->orderBy('end_date', 'desc')
             ->with(['budgetTransactions.transaction'])
             ->first();
-
-        if ($isPlanningPeriod) {
-            $nextPeriod = null;
-        } elseif ($viewedPeriod->id === $activePeriod->id) {
-            $nextPeriod = $directSuccessor;
-        } else {
-            $nextPeriod = $budget->periods()
-                ->where('start_date', '>', $viewedPeriod->end_date)
-                ->whereDate('start_date', '<=', $applicationDate->toDateString())
-                ->orderBy('start_date', 'asc')
-                ->first();
-        }
 
         $budget->load(['categories', 'labels']);
 
@@ -276,7 +257,7 @@ class BudgetController extends Controller
             'budget' => $budget,
             'currentPeriod' => $viewedPeriod,
             'previousPeriod' => $previousPeriod,
-            'nextPeriod' => $nextPeriod,
+            'nextPeriod' => $this->nextPeriodFor($budget, $viewedPeriod, $activePeriod, $directSuccessor, $isPlanningPeriod, $applicationDate),
             'nextPlanningPeriod' => $isPlanningPeriod ? null : $directSuccessor,
             'is_planning_period' => $isPlanningPeriod,
             'categories' => $categories,
@@ -285,6 +266,74 @@ class BudgetController extends Controller
             'labels' => $labels,
             'currencyCode' => $user->currency_code ?? 'USD',
         ]);
+    }
+
+    /**
+     * The period the page shows, and whether it is the one being planned.
+     *
+     * ?period= addresses a past period, or the single period after the current
+     * one when that is still being planned. Anything else in the future is not
+     * addressable: it does not exist for the user yet.
+     *
+     * @return array{0: BudgetPeriod, 1: bool}
+     */
+    private function resolveViewedPeriod(
+        Request $request,
+        Budget $budget,
+        BudgetPeriod $activePeriod,
+        ?BudgetPeriod $directSuccessor,
+        CarbonImmutable $applicationDate,
+    ): array {
+        $periodId = $request->query('period');
+
+        if (! $periodId) {
+            return [$activePeriod, false];
+        }
+
+        $viewedPeriod = $budget->periods()->whereKey($periodId)->firstOrFail();
+
+        // An archived budget has nothing left to plan, and a budget in another
+        // space is not the one the user is working in.
+        $canPlanThisBudget = ! $budget->isArchived()
+            && $budget->space_id === $request->user()->activeSpace()->id;
+
+        $isPlanningPeriod = $canPlanThisBudget
+            && $directSuccessor !== null
+            && $viewedPeriod->id === $directSuccessor->id;
+
+        if ($viewedPeriod->start_date->greaterThan($applicationDate) && ! $isPlanningPeriod) {
+            abort(404);
+        }
+
+        return [$viewedPeriod, $isPlanningPeriod];
+    }
+
+    /**
+     * Where the "next" arrow points: nowhere from the planning period, which is
+     * already the end of the chain; the planning period itself from the current
+     * one; and otherwise the next period that has actually started.
+     */
+    private function nextPeriodFor(
+        Budget $budget,
+        BudgetPeriod $viewedPeriod,
+        BudgetPeriod $activePeriod,
+        ?BudgetPeriod $directSuccessor,
+        bool $isPlanningPeriod,
+        CarbonImmutable $applicationDate,
+    ): ?BudgetPeriod {
+        if ($isPlanningPeriod) {
+            return null;
+        }
+
+        if ($viewedPeriod->id === $activePeriod->id) {
+            return $directSuccessor;
+        }
+
+        return $budget->periods()
+            ->where('start_date', '>', $viewedPeriod->end_date)
+            ->whereDate('start_date', '<=', $applicationDate->toDateString())
+            ->orderBy('start_date', 'asc')
+            ->first();
     }
 
     /**

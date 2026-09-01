@@ -195,58 +195,22 @@ class CashflowAnalyticsController extends Controller
         $this->preloadExchangeRates($transactions, $userCurrency);
         $transactions = $this->effectiveTransactions($transactions, $userCurrency);
 
-        $regularCategories = $transactions
-            ->filter(function (Transaction $transaction) use ($type): bool {
-                $categoryType = $transaction->categoryType();
+        // Two populations, one pipeline. A transfer is told apart by its
+        // cashflow direction rather than its category type, and its net has to
+        // point the same way as the side being built.
+        $regularCategories = $this->categoryTotals(
+            $transactions,
+            $userCurrency,
+            fn (Transaction $transaction): bool => $this->belongsToSpendingSide($transaction, $type),
+            fn (int $total): bool => $this->categoryNetAmountMatchesSide($total, $type),
+        );
 
-                return $transaction->category_id !== null
-                    && ($categoryType === $type
-                        || ($type === CategoryType::Expense
-                            && in_array($categoryType, [CategoryType::Savings, CategoryType::Investment], true)));
-            })
-            ->groupBy('category_id')
-            ->map(function (Collection $transactions) use ($userCurrency): array {
-                $totalAmount = $transactions->sum(fn (Transaction $transaction): int => $this->convertTransactionAmount($transaction, $userCurrency));
-
-                return [
-                    'category_id' => $transactions->first()->category_id,
-                    'category' => $transactions->first()->category,
-                    'amount' => abs($totalAmount),
-                    'total_amount' => $totalAmount,
-                ];
-            })
-            ->filter(fn (array $item): bool => $this->categoryNetAmountMatchesSide($item['total_amount'], $type))
-            ->map(fn (array $item): array => [
-                'category_id' => $item['category_id'],
-                'category' => $item['category'],
-                'amount' => $item['amount'],
-            ]);
-
-        $transferCategories = $transactions
-            ->filter(function (Transaction $transaction) use ($isIncome): bool {
-                return $transaction->category_id !== null
-                    && $transaction->categoryType() === CategoryType::Transfer
-                    && $this->categoryCashflowDirection($transaction) === ($isIncome
-                        ? CategoryCashflowDirection::Inflow
-                        : CategoryCashflowDirection::Outflow);
-            })
-            ->groupBy('category_id')
-            ->map(function (Collection $transactions) use ($userCurrency): array {
-                $totalAmount = $transactions->sum(fn (Transaction $transaction): int => $this->convertTransactionAmount($transaction, $userCurrency));
-
-                return [
-                    'category_id' => $transactions->first()->category_id,
-                    'category' => $transactions->first()->category,
-                    'amount' => abs($totalAmount),
-                    'total_amount' => $totalAmount,
-                ];
-            })
-            ->filter(fn (array $item): bool => $isIncome ? $item['total_amount'] > 0 : $item['total_amount'] < 0)
-            ->map(fn (array $item): array => [
-                'category_id' => $item['category_id'],
-                'category' => $item['category'],
-                'amount' => $item['amount'],
-            ]);
+        $transferCategories = $this->categoryTotals(
+            $transactions,
+            $userCurrency,
+            fn (Transaction $transaction): bool => $this->isTransferOnSide($transaction, $isIncome),
+            fn (int $total): bool => $this->matchesSign($total, $operator),
+        );
 
         $categorized = collect($this->tree->rollUp(
             $regularCategories->concat($transferCategories)->values()->all(),
@@ -255,29 +219,98 @@ class CashflowAnalyticsController extends Controller
         ));
 
         $uncategorized = $transactions
-            ->filter(function (Transaction $transaction) use ($operator): bool {
-                return $transaction->category_id === null
-                    && $this->matchesSign($transaction->amount, $operator);
-            })
+            ->filter(fn (Transaction $transaction): bool => $transaction->category_id === null
+                && $this->matchesSign($transaction->amount, $operator))
             ->sum(fn (Transaction $transaction): int => $this->convertTransactionAmount($transaction, $userCurrency));
 
+        // Only on the undrilled view: inside a category, spending with no
+        // category of its own is not part of that subtree.
         if ($drillParentId === null && $uncategorized != 0) {
-            $categorized->push([
-                'category_id' => null,
-                'category' => (new Category)->forceFill([
-                    'id' => null,
-                    'name' => $isIncome ? __('Unknown Income') : __('Unknown Expense'),
-                    'type' => $isIncome ? CategoryType::Income : CategoryType::Expense,
-                    'color' => 'gray',
-                    'icon' => 'HelpCircle',
-                ]),
-                'amount' => abs($uncategorized),
-                'has_children' => false,
-                'is_direct' => false,
-            ]);
+            $categorized->push($this->unknownCategoryNode($isIncome, $uncategorized));
         }
 
         return $categorized;
+    }
+
+    /**
+     * Group the transactions a predicate keeps by category and total each one in
+     * the user's currency, dropping the categories whose net points the wrong
+     * way for the side being built.
+     *
+     * @param  Collection<int, Transaction>  $transactions
+     * @param  callable(Transaction): bool  $keep
+     * @param  callable(int): bool  $netMatchesSide
+     */
+    private function categoryTotals(Collection $transactions, string $userCurrency, callable $keep, callable $netMatchesSide): Collection
+    {
+        return $transactions
+            ->filter($keep)
+            ->groupBy('category_id')
+            ->map(function (Collection $grouped) use ($userCurrency): array {
+                $totalAmount = $grouped->sum(fn (Transaction $transaction): int => $this->convertTransactionAmount($transaction, $userCurrency));
+
+                return [
+                    'category_id' => $grouped->first()->category_id,
+                    'category' => $grouped->first()->category,
+                    'amount' => abs($totalAmount),
+                    'total_amount' => $totalAmount,
+                ];
+            })
+            ->filter(fn (array $item): bool => $netMatchesSide($item['total_amount']))
+            ->map(fn (array $item): array => [
+                'category_id' => $item['category_id'],
+                'category' => $item['category'],
+                'amount' => $item['amount'],
+            ]);
+    }
+
+    /**
+     * Savings and investments are money leaving, so they belong on the expense
+     * side alongside expenses proper.
+     */
+    private function belongsToSpendingSide(Transaction $transaction, CategoryType $type): bool
+    {
+        if ($transaction->category_id === null) {
+            return false;
+        }
+
+        $categoryType = $transaction->categoryType();
+
+        if ($categoryType === $type) {
+            return true;
+        }
+
+        return $type === CategoryType::Expense
+            && in_array($categoryType, [CategoryType::Savings, CategoryType::Investment], true);
+    }
+
+    private function isTransferOnSide(Transaction $transaction, bool $isIncome): bool
+    {
+        return $transaction->category_id !== null
+            && $transaction->categoryType() === CategoryType::Transfer
+            && $this->categoryCashflowDirection($transaction) === ($isIncome
+                ? CategoryCashflowDirection::Inflow
+                : CategoryCashflowDirection::Outflow);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function unknownCategoryNode(bool $isIncome, int $uncategorized): array
+    {
+        return [
+            'category_id' => null,
+            'category' => (new Category)->forceFill([
+                'id' => null,
+                'name' => $isIncome ? __('Unknown Income') : __('Unknown Expense'),
+                'type' => $isIncome ? CategoryType::Income : CategoryType::Expense,
+                'color' => 'gray',
+                'icon' => 'HelpCircle',
+            ]),
+            'amount' => abs($uncategorized),
+            'has_children' => false,
+            'is_direct' => false,
+        ];
     }
 
     private function getMonthlyTrendTotals(string $userId, string $userCurrency, Carbon $from, Carbon $to): Collection
