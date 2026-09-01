@@ -439,9 +439,10 @@ class CategoryTree
      * its own. The children are out of the way first, so the subtree the delete
      * sees is the category alone.
      *
-     * @throws UniqueConstraintViolationException when a moved child's name collides at the destination
      *
      * @return array{categories: int, transactions: int}
+     *
+     * @throws UniqueConstraintViolationException when a moved child's name collides at the destination
      */
     public function detachChildrenAndDelete(Category $category, ?string $newParentId): array
     {
