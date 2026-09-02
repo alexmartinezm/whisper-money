@@ -119,6 +119,16 @@ class Account extends Model
     }
 
     /**
+     * Whether the account was already archived on a given day. Anything that
+     * reads a figure as of a past date needs this rather than
+     * {@see self::isArchived()}: history before the archive date still counts.
+     */
+    public function isArchivedOn(Carbon $date): bool
+    {
+        return $this->archived_at !== null && $date->gte($this->archived_at);
+    }
+
+    /**
      * The owner's share of an amount held in this account, in the same minor
      * units. A shared account (say 50% with a partner) only contributes that
      * slice of every transaction to the user's own figures.
