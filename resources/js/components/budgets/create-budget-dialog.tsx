@@ -1,4 +1,5 @@
 import { store } from '@/actions/App/Http/Controllers/BudgetController';
+import { CreatePlaceholderCard } from '@/components/shared/create-placeholder-card';
 import { AmountInput } from '@/components/ui/amount-input';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -21,7 +22,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { cn } from '@/lib/utils';
+import { useControllableOpen } from '@/hooks/use-controllable-open';
 import { SharedData } from '@/types';
 import {
     BUDGET_PERIOD_TYPES,
@@ -35,9 +36,7 @@ import { Category } from '@/types/category';
 import { Label } from '@/types/label';
 import { __ } from '@/utils/i18n';
 import { router, usePage } from '@inertiajs/react';
-import { Plus } from 'lucide-react';
 import React, { useState } from 'react';
-import { Card, CardContent } from '../ui/card';
 import {
     categoryTrackingOptions,
     labelTrackingOptions,
@@ -47,15 +46,23 @@ interface Props {
     className?: string;
     currencyCode?: string;
     trigger?: React.ReactNode;
+    open?: boolean;
+    onOpenChange?: (open: boolean) => void;
 }
 
 export function CreateBudgetDialog({
     className = '',
     currencyCode = 'USD',
     trigger,
+    open,
+    onOpenChange,
 }: Props) {
     const page = usePage<SharedData>();
-    const [open, setOpen] = useState(false);
+    const {
+        open: dialogOpen,
+        setOpen,
+        isControlled,
+    } = useControllableOpen({ open, onOpenChange });
     const [name, setName] = useState('');
     const [periodType, setPeriodType] = useState<BudgetPeriodType>('monthly');
     const [periodStartDay, setPeriodStartDay] = useState<number>(1);
@@ -130,24 +137,16 @@ export function CreateBudgetDialog({
     };
 
     return (
-        <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild>
-                {trigger ?? (
-                    <Card
-                        className={cn(
-                            'cursor-pointer opacity-50 transition-opacity duration-200 hover:opacity-100',
-                            className,
-                        )}
-                    >
-                        <CardContent className="flex h-full items-center justify-center">
-                            <div className="flex flex-row items-center justify-center gap-1">
-                                <Plus className="mr-2 h-4 w-4" />
-                                {__('Create Budget')}
-                            </div>
-                        </CardContent>
-                    </Card>
-                )}
-            </DialogTrigger>
+        <Dialog open={dialogOpen} onOpenChange={setOpen}>
+            {trigger !== undefined ? (
+                <DialogTrigger asChild>{trigger}</DialogTrigger>
+            ) : isControlled ? null : (
+                <DialogTrigger asChild>
+                    <CreatePlaceholderCard className={className}>
+                        {__('Create Budget')}
+                    </CreatePlaceholderCard>
+                </DialogTrigger>
+            )}
             <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[600px]">
                 <form onSubmit={handleSubmit}>
                     <DialogHeader>

@@ -7,6 +7,7 @@ use App\Enums\RolloverType;
 use App\Http\Requests\Concerns\ValidatesUserOwnedResources;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class StoreBudgetRequest extends FormRequest
 {
@@ -40,37 +41,57 @@ class StoreBudgetRequest extends FormRequest
 
     public function withValidator($validator): void
     {
-        $validator->after(function ($validator) {
-            $periodType = $this->enum('period_type', BudgetPeriodType::class);
-            $startDay = $this->input('period_start_day');
-
-            $validStartDay = $periodType === null || match ($periodType) {
-                BudgetPeriodType::Monthly => $startDay === null || ((int) $startDay >= 1 && (int) $startDay <= 31),
-                BudgetPeriodType::Weekly, BudgetPeriodType::Biweekly => $startDay !== null && (int) $startDay >= 0 && (int) $startDay <= 6,
-                BudgetPeriodType::Yearly => $startDay === null || (int) $startDay === 1,
-            };
-
-            if (! $validStartDay) {
-                $validator->errors()->add('period_start_day', 'The start day is invalid for the selected cadence.');
-            }
-
-            $isCatchAll = $this->boolean('is_catch_all');
-            $hasCategories = ! empty($this->category_ids);
-            $hasLabels = ! empty($this->label_ids);
-
-            if (! $isCatchAll && ! $hasCategories && ! $hasLabels) {
-                $validator->errors()->add(
-                    'selection',
-                    'You must select at least one category or label.'
-                );
-            }
-
-            if ($isCatchAll && $this->user()->budgets()->where('is_catch_all', true)->exists()) {
-                $validator->errors()->add(
-                    'is_catch_all',
-                    'You already have a catch-all budget.'
-                );
-            }
+        $validator->after(function (Validator $validator): void {
+            $this->validateStartDay($validator);
+            $this->validateSelection($validator);
+            $this->validateCatchAll($validator);
         });
+    }
+
+    private function validateStartDay(Validator $validator): void
+    {
+        $periodType = $this->enum('period_type', BudgetPeriodType::class);
+
+        if ($periodType === null || $this->isStartDayValid($periodType, $this->input('period_start_day'))) {
+            return;
+        }
+
+        $validator->errors()->add('period_start_day', 'The start day is invalid for the selected cadence.');
+    }
+
+    /**
+     * Each cadence reads the start day differently: a monthly budget takes a day
+     * of the month or none, a weekly or biweekly one requires a weekday, and a
+     * yearly one only ever starts on the first.
+     */
+    private function isStartDayValid(BudgetPeriodType $periodType, mixed $startDay): bool
+    {
+        return match ($periodType) {
+            BudgetPeriodType::Monthly => $startDay === null || ((int) $startDay >= 1 && (int) $startDay <= 31),
+            BudgetPeriodType::Weekly, BudgetPeriodType::Biweekly => $startDay !== null && (int) $startDay >= 0 && (int) $startDay <= 6,
+            BudgetPeriodType::Yearly => $startDay === null || (int) $startDay === 1,
+        };
+    }
+
+    private function validateSelection(Validator $validator): void
+    {
+        if ($this->boolean('is_catch_all') || ! empty($this->category_ids) || ! empty($this->label_ids)) {
+            return;
+        }
+
+        $validator->errors()->add('selection', 'You must select at least one category or label.');
+    }
+
+    private function validateCatchAll(Validator $validator): void
+    {
+        if (! $this->boolean('is_catch_all')) {
+            return;
+        }
+
+        // An archived catch-all no longer counts anything, so it does not stand
+        // in the way of the one that replaces it.
+        if ($this->user()->budgets()->notArchived()->where('is_catch_all', true)->exists()) {
+            $validator->errors()->add('is_catch_all', 'You already have a catch-all budget.');
+        }
     }
 }

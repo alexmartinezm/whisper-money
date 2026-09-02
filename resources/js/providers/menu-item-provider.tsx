@@ -19,7 +19,7 @@ const mobileLabels: Record<string, Record<string, string>> = {
         cashflow: 'Cashflow',
         accounts: 'Accounts',
         transactions: 'Movements',
-        budgets: 'Budget',
+        budgets: 'Plan',
         recurring: 'Recur.',
     },
     es: {
@@ -27,7 +27,7 @@ const mobileLabels: Record<string, Record<string, string>> = {
         cashflow: 'Cashflow',
         accounts: 'Cuentas',
         transactions: 'Movim.',
-        budgets: 'Presup.',
+        budgets: 'Plan',
         recurring: 'Recur.',
     },
     fr: {
@@ -35,7 +35,7 @@ const mobileLabels: Record<string, Record<string, string>> = {
         cashflow: 'Cashflow',
         accounts: 'Comptes',
         transactions: 'Mouv.',
-        budgets: 'Budget',
+        budgets: 'Plan',
         recurring: 'Récur.',
     },
 };
@@ -82,7 +82,7 @@ export function getMainNavItems(features: Features, locale: string): NavItem[] {
         },
         {
             type: 'nav-item',
-            title: 'Budgets',
+            title: 'Planning',
             mobileTitle: getMobileLabel('budgets', locale),
             href: budgetsIndex(),
             icon: PiggyBank,

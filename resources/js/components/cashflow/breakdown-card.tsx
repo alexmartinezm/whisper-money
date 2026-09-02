@@ -2,6 +2,7 @@ import { index as transactionsIndex } from '@/actions/App/Http/Controllers/Trans
 import { CategoryAnalysisButton } from '@/components/categories/category-analysis-button';
 import {
     CategoryBreakdownRow,
+    trendFrom,
     type CategoryBreakdownAdapter,
 } from '@/components/shared/category-breakdown-list';
 import { AmountDisplay } from '@/components/ui/amount-display';
@@ -15,6 +16,7 @@ import {
 import { BreakdownData, BreakdownItem } from '@/hooks/use-cashflow-data';
 import { useChartColors } from '@/hooks/use-chart-color-scheme';
 import { useExpandableCategories } from '@/hooks/use-expandable-categories';
+import { fetchJson } from '@/lib/fetch-json';
 import { cn } from '@/lib/utils';
 import {
     getCategoryColorClasses,
@@ -81,10 +83,10 @@ export function BreakdownCard({
                 type,
                 parent: categoryId,
             });
-            const response = await fetch(
+            const json = await fetchJson<BreakdownData>(
                 `/api/cashflow/breakdown?${params.toString()}`,
             );
-            const json: BreakdownData = await response.json();
+
             return json.data;
         },
         [period, type],
@@ -130,17 +132,7 @@ export function BreakdownCard({
                       },
                   }).url
                 : null,
-        getTrend: (item) =>
-            item.previous_amount > 0
-                ? {
-                      change:
-                          ((item.amount - item.previous_amount) /
-                              item.previous_amount) *
-                          100,
-                      previousAmount: item.previous_amount,
-                      currentAmount: item.amount,
-                  }
-                : null,
+        getTrend: (item) => trendFrom(item.amount, item.previous_amount),
         canExpand: (item) =>
             Boolean(
                 item.has_children &&

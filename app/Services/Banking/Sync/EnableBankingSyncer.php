@@ -13,7 +13,9 @@ use App\Models\Account;
 use App\Models\BankingConnection;
 use App\Services\Banking\BalanceSyncService;
 use App\Services\Banking\TransactionSyncService;
+use Carbon\Carbon;
 use Illuminate\Http\Client\RequestException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -187,12 +189,12 @@ class EnableBankingSyncer extends AbstractBankingConnectionSyncer
         // asking for the full history again, because the watermark the routine
         // window is built on has already moved past it.
         //
-        // Until it drains, the account's window ends in the past, so its newest
-        // transactions wait for the backfill to finish. That is the accepted
-        // cost: the balance, which is what reads as zero today, is fetched on
-        // every one of those runs regardless. A --full resync is an explicit
-        // request to re-pull everything, so it starts over rather than resuming.
-        $resumeBefore = $isFirstSync ? null : $account->transactions_paginate_before?->toDateString();
+        // While it drains, the account's window ends in the past, so its newest
+        // transactions wait for the backfill to finish - which is why a marker
+        // that cannot contribute anything is dropped rather than resumed.
+        // A --full resync is an explicit request to re-pull everything, so it
+        // starts over rather than resuming.
+        $resumeBefore = $this->resumePoint($account, $isFirstSync);
 
         if ($resumeBefore !== null) {
             $dateFrom = $this->resolveDateFrom($account, $resumeBefore, forceFullWindow: true);
@@ -216,6 +218,35 @@ class EnableBankingSyncer extends AbstractBankingConnectionSyncer
         $dateFrom = $this->resolveDateFrom($account, $dateTo, $forceFullWindow);
 
         return [$dateFrom, $dateTo, $this->strategyFor($dateFrom)];
+    }
+
+    /**
+     * Where a run the page budget cut short left this account's history, or
+     * null when picking it up is not worth a run.
+     *
+     * A marker whose span the account already holds is pure cost: the run
+     * spends its whole budget on history dedup will throw away, and pays for it
+     * with the recent transactions the resume window's end shuts out. Measured
+     * over the 2026-08-22 cycles, this was every Trade Republic account that
+     * had one - one of them re-requesting 282 days it held in full, at 10
+     * requests a cycle, four cycles a day, moving the marker a single day each
+     * time. Falling through to the routine window imports the recent
+     * transactions again; the run that follows clears the marker itself, either
+     * by finishing or by being cut short over ground it already covers.
+     */
+    private function resumePoint(Account $account, bool $isFirstSync): ?string
+    {
+        if ($isFirstSync) {
+            return null;
+        }
+
+        $marker = $account->transactions_paginate_before?->toDateString();
+
+        if ($marker === null || $account->hasSyncedTransactionsBefore($marker)) {
+            return null;
+        }
+
+        return $marker;
     }
 
     /**
@@ -465,19 +496,25 @@ class EnableBankingSyncer extends AbstractBankingConnectionSyncer
         // transaction dated later would shrink the window and skip bank history
         // for good. Trashed rows still count, because the dedup that follows
         // sees them too and would re-import nothing anyway.
+        //
+        // A row the user moved to another day reads back at the date the bank
+        // gave it, for the same reason: moving a payroll from the 27th to the 1st
+        // would otherwise advance the window five days and lose the bank rows in
+        // between that the bank had not delivered yet.
         $watermark = $forceFullWindow ? null : $account->transactions()
             ->withTrashed()
             ->where('source', TransactionSource::EnableBanking)
-            ->latest('transaction_date')
-            ->value('transaction_date');
+            ->max(DB::raw('COALESCE(source_date, transaction_date)'));
 
         if (! $watermark) {
             return now()->subYear()->toDateString();
         }
 
+        $watermarkDate = Carbon::parse($watermark);
+
         // Future-dated rows (standing orders) must not push the window past
         // today, but the overlap applies either way.
-        $start = $watermark->toDateString() > $dateTo ? now() : $watermark;
+        $start = $watermarkDate->toDateString() > $dateTo ? now() : $watermarkDate;
 
         return $start->copy()->subDays(self::WATERMARK_OVERLAP_DAYS)->toDateString();
     }

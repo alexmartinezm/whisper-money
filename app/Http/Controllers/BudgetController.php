@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Enums\BudgetPeriodType;
+use App\Features\SavingsGoals;
+use App\Http\Requests\ReorderPlanningItemsRequest;
 use App\Http\Requests\StoreBudgetRequest;
 use App\Http\Requests\UpdateBudgetPeriodRequest;
 use App\Http\Requests\UpdateBudgetRequest;
@@ -12,6 +14,7 @@ use App\Models\Budget;
 use App\Models\BudgetPeriod;
 use App\Models\Category;
 use App\Models\Label;
+use App\Models\SavingsGoal;
 use App\Services\BudgetManagementService;
 use App\Services\BudgetPeriodService;
 use Carbon\CarbonImmutable;
@@ -21,6 +24,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
+use Laravel\Pennant\Feature;
 
 class BudgetController extends Controller
 {
@@ -38,6 +42,8 @@ class BudgetController extends Controller
         $activeSpaceId = $user->activeSpace()->id;
         $budgets = $user
             ->budgets()
+            ->orderBy('position')
+            ->orderBy('name')
             ->with(['categories', 'labels', 'periods' => function ($query) use ($applicationDate) {
                 $query->whereDate('start_date', '<=', $applicationDate->toDateString())
                     ->whereDate('end_date', '>=', $applicationDate->toDateString())
@@ -66,9 +72,13 @@ class BudgetController extends Controller
             ]);
         });
 
+        $savingsGoalsEnabled = Feature::active(SavingsGoals::class);
+
         return Inertia::render('budgets/index', [
             'budgets' => $budgets,
             'budgetSummary' => $this->buildBudgetSummary($budgets),
+            'savingsGoals' => $savingsGoalsEnabled ? SavingsGoal::withStatsForUser($user) : [],
+            'savingsGoalsEnabled' => $savingsGoalsEnabled,
             'currencyCode' => $user->currency_code ?? 'USD',
         ]);
     }
@@ -164,34 +174,45 @@ class BudgetController extends Controller
         ];
     }
 
+    /**
+     * The period the detail page reads as current.
+     *
+     * An archived budget gets no new periods: it falls back to the last one it
+     * had instead of minting one, so opening the page cannot resume a budget
+     * that stopped counting.
+     */
+    private function activePeriodFor(Budget $budget, CarbonImmutable $applicationDate): BudgetPeriod
+    {
+        $activePeriod = $budget->getCurrentPeriod($applicationDate);
+
+        if ($activePeriod !== null) {
+            return $activePeriod;
+        }
+
+        return $budget->isArchived()
+            ? $budget->periods()->orderByDesc('start_date')->firstOrFail()
+            : $this->budgetPeriodService->generatePeriod($budget, null, $applicationDate);
+    }
+
     public function show(Request $request, Budget $budget): Response
     {
         $this->authorize('view', $budget);
 
         $user = $request->user();
         $applicationDate = CarbonImmutable::today();
-        $activePeriod = $budget->getCurrentPeriod($applicationDate);
-        if ($activePeriod === null) {
-            $activePeriod = $this->budgetPeriodService->generatePeriod($budget, null, $applicationDate);
-        }
+        $activePeriod = $this->activePeriodFor($budget, $applicationDate);
         $directSuccessor = $budget->getNextPlanningPeriod($applicationDate, $activePeriod);
 
-        $periodId = $request->query('period');
-        $isPlanningPeriod = false;
-        $canPlanThisBudget = $budget->space_id === $user->activeSpace()->id;
-        if ($periodId) {
-            $viewedPeriod = $budget->periods()->whereKey($periodId)->firstOrFail();
-            $isPlanningPeriod = $canPlanThisBudget
-                && $directSuccessor !== null
-                && $viewedPeriod->id === $directSuccessor->id;
+        [$viewedPeriod, $isPlanningPeriod] = $this->resolveViewedPeriod(
+            $request,
+            $budget,
+            $activePeriod,
+            $directSuccessor,
+            $applicationDate,
+        );
 
-            if ($viewedPeriod->start_date->greaterThan($applicationDate) && ! $isPlanningPeriod) {
-                abort(404);
-            }
-        } else {
-            $viewedPeriod = $activePeriod;
-        }
-
+        // The planning period has no spending yet by definition, so it is the
+        // one view that does not pay for the transaction graph.
         if (! $isPlanningPeriod) {
             $viewedPeriod->load([
                 'budgetTransactions.transaction.account.bank',
@@ -206,18 +227,6 @@ class BudgetController extends Controller
             ->orderBy('end_date', 'desc')
             ->with(['budgetTransactions.transaction'])
             ->first();
-
-        if ($isPlanningPeriod) {
-            $nextPeriod = null;
-        } elseif ($viewedPeriod->id === $activePeriod->id) {
-            $nextPeriod = $directSuccessor;
-        } else {
-            $nextPeriod = $budget->periods()
-                ->where('start_date', '>', $viewedPeriod->end_date)
-                ->whereDate('start_date', '<=', $applicationDate->toDateString())
-                ->orderBy('start_date', 'asc')
-                ->first();
-        }
 
         $budget->load(['categories', 'labels']);
 
@@ -248,7 +257,7 @@ class BudgetController extends Controller
             'budget' => $budget,
             'currentPeriod' => $viewedPeriod,
             'previousPeriod' => $previousPeriod,
-            'nextPeriod' => $nextPeriod,
+            'nextPeriod' => $this->nextPeriodFor($budget, $viewedPeriod, $activePeriod, $directSuccessor, $isPlanningPeriod, $applicationDate),
             'nextPlanningPeriod' => $isPlanningPeriod ? null : $directSuccessor,
             'is_planning_period' => $isPlanningPeriod,
             'categories' => $categories,
@@ -257,6 +266,97 @@ class BudgetController extends Controller
             'labels' => $labels,
             'currencyCode' => $user->currency_code ?? 'USD',
         ]);
+    }
+
+    /**
+     * The period the page shows, and whether it is the one being planned.
+     *
+     * ?period= addresses a past period, or the single period after the current
+     * one when that is still being planned. Anything else in the future is not
+     * addressable: it does not exist for the user yet.
+     *
+     * @return array{0: BudgetPeriod, 1: bool}
+     */
+    private function resolveViewedPeriod(
+        Request $request,
+        Budget $budget,
+        BudgetPeriod $activePeriod,
+        ?BudgetPeriod $directSuccessor,
+        CarbonImmutable $applicationDate,
+    ): array {
+        $periodId = $request->query('period');
+
+        if (! $periodId) {
+            return [$activePeriod, false];
+        }
+
+        $viewedPeriod = $budget->periods()->whereKey($periodId)->firstOrFail();
+
+        // An archived budget has nothing left to plan, and a budget in another
+        // space is not the one the user is working in.
+        $canPlanThisBudget = ! $budget->isArchived()
+            && $budget->space_id === $request->user()->activeSpace()->id;
+
+        $isPlanningPeriod = $canPlanThisBudget
+            && $directSuccessor !== null
+            && $viewedPeriod->id === $directSuccessor->id;
+
+        if ($viewedPeriod->start_date->greaterThan($applicationDate) && ! $isPlanningPeriod) {
+            abort(404);
+        }
+
+        return [$viewedPeriod, $isPlanningPeriod];
+    }
+
+    /**
+     * Where the "next" arrow points: nowhere from the planning period, which is
+     * already the end of the chain; the planning period itself from the current
+     * one; and otherwise the next period that has actually started.
+     */
+    private function nextPeriodFor(
+        Budget $budget,
+        BudgetPeriod $viewedPeriod,
+        BudgetPeriod $activePeriod,
+        ?BudgetPeriod $directSuccessor,
+        bool $isPlanningPeriod,
+        CarbonImmutable $applicationDate,
+    ): ?BudgetPeriod {
+        if ($isPlanningPeriod) {
+            return null;
+        }
+
+        if ($viewedPeriod->id === $activePeriod->id) {
+            return $directSuccessor;
+        }
+
+        return $budget->periods()
+            ->where('start_date', '>', $viewedPeriod->end_date)
+            ->whereDate('start_date', '<=', $applicationDate->toDateString())
+            ->orderBy('start_date', 'asc')
+            ->first();
+    }
+
+    /**
+     * Persists the order of the Planning list, which mixes both types.
+     *
+     * A NULL position means "never dragged", so the client falls back to the
+     * automatic ordering; one drag gives every live item a number and the list
+     * is manual from then on.
+     */
+    public function reorder(ReorderPlanningItemsRequest $request): RedirectResponse
+    {
+        // ponytail: one update per row; fine for the handful of budgets and
+        // goals a user has. Switch to a single CASE update if that ever grows.
+        foreach (array_values($request->validated('items')) as $position => $item) {
+            $model = $item['type'] === 'goal' ? SavingsGoal::class : Budget::class;
+
+            $model::query()
+                ->whereKey($item['id'])
+                ->where('user_id', $request->user()->id)
+                ->update(['position' => $position]);
+        }
+
+        return back();
     }
 
     public function store(StoreBudgetRequest $request): RedirectResponse
@@ -321,5 +421,28 @@ class BudgetController extends Controller
         );
 
         return redirect()->route('budgets.index');
+    }
+
+    /**
+     * Archiving records the day it happened and is one-way: the budget turns
+     * read-only, stops absorbing transactions and stops claiming its categories
+     * away from the catch-all, and no further periods are generated for it. The
+     * periods it already has keep their figures, which is why the budget stays
+     * reachable instead of being deleted.
+     *
+     * The periods `GenerateBudgetPeriods` had already run ahead are left behind
+     * on purpose: `show()` only navigates to periods that have started, so they
+     * are already invisible and cleaning them up would buy nothing.
+     */
+    public function archive(Request $request, Budget $budget): RedirectResponse
+    {
+        $this->authorize('archive', $budget);
+
+        $this->budgetManagementService->archive($budget);
+
+        // Named route, not back(): the dialog only exists on this page, and the
+        // previous-url redirect resolves to the app's internal host behind a
+        // proxy (same reason as SavingsGoalController::syncTransactions).
+        return redirect()->route('budgets.show', $budget);
     }
 }

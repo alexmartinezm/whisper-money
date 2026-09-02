@@ -45,7 +45,12 @@ class BudgetTransactionService
                 ->with(['account' => fn ($query) => $query->withTrashed(), 'labels', 'category', 'splits.category'])
                 ->firstOrFail();
             $periods = BudgetPeriod::query()
+                // An archived budget stops taking in new data from the day it
+                // was archived; what it already counted stays as it was.
+                // Spelled out rather than via Budget::scopeNotArchived: inside
+                // a whereHas closure the builder is not typed to the model.
                 ->whereHas('budget', fn ($query) => $query
+                    ->whereNull('archived_at')
                     ->where('user_id', $locked->user_id)
                     ->where('space_id', $locked->space_id))
                 ->where('start_date', '<=', $locked->transaction_date)
@@ -72,6 +77,7 @@ class BudgetTransactionService
 
             BudgetTransaction::query()
                 ->where('transaction_id', $transaction->id)
+                ->whereHas('budgetPeriod.budget', fn ($query) => $query->whereNull('archived_at'))
                 ->when($matchingPeriodIds !== [], fn ($query) => $query->whereNotIn('budget_period_id', $matchingPeriodIds))
                 ->delete();
         }, attempts: 5);
@@ -189,6 +195,7 @@ class BudgetTransactionService
         // created later, or one whose periods stop short, would otherwise drop
         // the expense out of every budget there is.
         $claimants = Budget::query()
+            ->notArchived()
             ->where('user_id', $budget->user_id)
             ->where('space_id', $budget->space_id)
             ->where('is_catch_all', false)

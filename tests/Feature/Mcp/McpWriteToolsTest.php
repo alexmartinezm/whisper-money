@@ -5,20 +5,24 @@ use App\Mcp\Servers\WhisperMoneyServer;
 use App\Mcp\Tools\CategorizeTransaction;
 use App\Mcp\Tools\CreateAutomationRule;
 use App\Mcp\Tools\CreateBalance;
+use App\Mcp\Tools\CreateBudget;
 use App\Mcp\Tools\CreateCategory;
 use App\Mcp\Tools\CreateLabel;
 use App\Mcp\Tools\CreateTransaction;
 use App\Mcp\Tools\DeleteAutomationRule;
+use App\Mcp\Tools\DeleteBudget;
 use App\Mcp\Tools\DeleteCategory;
 use App\Mcp\Tools\DeleteLabel;
 use App\Mcp\Tools\DeleteTransaction;
 use App\Mcp\Tools\LabelTransaction;
 use App\Mcp\Tools\UpdateAutomationRule;
+use App\Mcp\Tools\UpdateBudget;
 use App\Mcp\Tools\UpdateCategory;
 use App\Mcp\Tools\UpdateLabel;
 use App\Mcp\Tools\UpdateTransaction;
 use App\Models\Account;
 use App\Models\AutomationRule;
+use App\Models\Budget;
 use App\Models\Category;
 use App\Models\Label;
 use App\Models\Transaction;
@@ -246,11 +250,18 @@ it('creates, updates and deletes a category', function () {
 
     expect($category->fresh()->name)->toBe('Holidays');
 
+    $transaction = Transaction::factory()->plaintext()->create([
+        'user_id' => $user->id,
+        'account_id' => Account::factory()->create(['user_id' => $user->id])->id,
+        'category_id' => $category->id,
+    ]);
+
     callWriteTool($user, DeleteCategory::class, [
         'category_id' => $category->id,
     ])->assertOk();
 
-    expect(Category::query()->find($category->id))->toBeNull();
+    expect(Category::query()->find($category->id))->toBeNull()
+        ->and($transaction->fresh()->category_id)->toBeNull();
 });
 
 it('creates, updates and deletes a label', function () {
@@ -515,4 +526,45 @@ it('tells the agent which id was missing and where to find valid ones', function
     ])->assertHasErrors([
         'No automation rule with id no-such-rule in space '.$user->personalSpace->id.'.',
     ]);
+});
+
+it('refuses to edit an archived budget', function () {
+    $user = User::factory()->create();
+    $budget = Budget::factory()->archived()->create([
+        'user_id' => $user->id,
+        'name' => 'Food Budget',
+    ]);
+
+    callWriteTool($user, UpdateBudget::class, [
+        'budget_id' => $budget->id,
+        'name' => 'Groceries Budget',
+    ])->assertHasErrors();
+
+    expect($budget->fresh()->name)->toBe('Food Budget');
+});
+
+it('still deletes an archived budget', function () {
+    $user = User::factory()->create();
+    $budget = Budget::factory()->archived()->create(['user_id' => $user->id]);
+
+    callWriteTool($user, DeleteBudget::class, ['budget_id' => $budget->id])->assertOk();
+
+    expect($user->budgets()->count())->toBe(0);
+});
+
+it('lets an archived catch-all budget be replaced', function () {
+    $user = User::factory()->create();
+    Budget::factory()->archived()->catchAll()->create(['user_id' => $user->id]);
+
+    callWriteTool($user, CreateBudget::class, [
+        'name' => 'Everything else',
+        'period_type' => 'monthly',
+        // This fork's create tool requires a start day for a monthly cadence.
+        'period_start_day' => 1,
+        'rollover_type' => 'reset',
+        'allocated_amount' => 50_000,
+        'is_catch_all' => true,
+    ])->assertOk();
+
+    expect($user->budgets()->notArchived()->where('is_catch_all', true)->count())->toBe(1);
 });

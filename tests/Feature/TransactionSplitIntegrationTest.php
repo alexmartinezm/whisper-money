@@ -451,12 +451,16 @@ it('keeps descendant split postings when analysis filters by a parent category',
         ['category_id' => $home->id, 'amount' => -4000],
     ]);
 
+    // Filtering by a parent drills the breakdown into its children (#875), so
+    // the descendant posting is reported under Groceries rather than rolled up
+    // into Food. What matters here is that it survives the filter at all: the
+    // other half of the split sits outside the subtree and is dropped.
     $this->actingAs($user)->getJson('/api/transactions/analysis?'.http_build_query([
         'category_ids' => $food->id,
     ]))->assertOk()
         ->assertJsonPath('summary.expense', 6000)
         ->assertJsonPath('summary.count', 1)
-        ->assertJsonPath('by_category.0.category_id', $food->id)
+        ->assertJsonPath('by_category.0.category_id', $groceries->id)
         ->assertJsonPath('by_category.0.amount', 6000);
 });
 
@@ -488,6 +492,41 @@ it('exposes split-aware MCP reads and directs direct category writes to split_tr
 
     expect($transaction->refresh()->category_id)->toBeNull()
         ->and($transaction->splits()->count())->toBe(2);
+});
+
+it('preserves archived budget snapshots when replacing split lines', function () {
+    [$user, , $transaction, $food, $home] = splitIntegrationFixture(['transaction_date' => now()]);
+    makeIntegrationSplit($transaction, $food, $home);
+
+    $budget = Budget::factory()->forCategories($food)->create(['user_id' => $user->id]);
+    $period = BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => now()->subDay(),
+        'end_date' => now()->addDay(),
+    ]);
+    $service = app(BudgetTransactionService::class);
+    $service->assignTransaction($transaction);
+
+    $assignment = $period->budgetTransactions()->sole();
+    $originalId = $assignment->id;
+    $originalAmount = (int) $assignment->amount;
+
+    $replacement = Category::factory()->create([
+        'user_id' => $user->id,
+        'space_id' => $transaction->space_id,
+        'type' => CategoryType::Expense,
+    ]);
+    $budget->update(['archived_at' => now()]);
+    Transaction::withoutEvents(fn () => app(ReplaceTransactionSplits::class)->replace($transaction, [
+        ['category_id' => $home->id, 'amount' => -6000],
+        ['category_id' => $replacement->id, 'amount' => -4000],
+    ]));
+
+    $service->assignTransaction($transaction->fresh());
+
+    $preserved = $period->budgetTransactions()->sole();
+    expect($preserved->id)->toBe($originalId)
+        ->and((int) $preserved->amount)->toBe($originalAmount);
 });
 
 it('returns replaced split details through delta sync', function () {

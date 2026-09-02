@@ -1,0 +1,162 @@
+import { Budget, budgetSeverity } from '@/types/budget';
+import { SavingsGoal } from '@/types/savings-goal';
+
+export type PlanningItem =
+    | {
+          type: 'budget';
+          id: string;
+          name: string;
+          position: number | null;
+          budget: Budget;
+      }
+    | {
+          type: 'goal';
+          id: string;
+          name: string;
+          position: number | null;
+          goal: SavingsGoal;
+      };
+
+/**
+ * How badly an item wants to be looked at. Lower sorts first.
+ *
+ * The tiers come straight from the status each card already shows, so the
+ * ordering can never disagree with the colour the user is reading: a budget
+ * past its limit, then anything close to its limit or behind schedule, then
+ * everything that is fine. A savings goal cannot breach the way a budget can,
+ * so it never reaches tier 0.
+ */
+export function planningAttentionTier(item: PlanningItem): number {
+    if (item.type === 'budget') {
+        const severity = budgetSeverity(item.budget);
+
+        if (severity === 'over') {
+            return 0;
+        }
+
+        return severity === 'near' ? 1 : 2;
+    }
+
+    return item.goal.stats?.status === 'behind' ? 1 : 2;
+}
+
+/**
+ * Merges budgets and savings goals into the single Planning list.
+ *
+ * A dragged item carries a `position` and wins outright. Everything still at
+ * null — a list nobody has ever reordered, or an item created after the last
+ * drag — sorts after those, by attention and then by the chosen tiebreak.
+ *
+ * With both types on the list that tiebreak is the name: sorting by name rather
+ * than by type is what keeps the two kinds interleaved; grouping the leftovers
+ * by type would just rebuild the two sections this list replaced.
+ *
+ * With budgets alone there is nothing to interleave, so the list keeps the
+ * allocation ordering it had before savings goals existed: the biggest budget
+ * leads, and a budget with no active period sinks to the bottom.
+ */
+export function mergePlanningItems(
+    budgets: Budget[],
+    savingsGoals: SavingsGoal[],
+    locale?: string,
+    tiebreak: 'name' | 'allocation' = 'name',
+): PlanningItem[] {
+    const items: PlanningItem[] = [
+        ...budgets.map(
+            (budget): PlanningItem => ({
+                type: 'budget',
+                id: budget.id,
+                name: budget.name,
+                position: budget.position ?? null,
+                budget,
+            }),
+        ),
+        ...savingsGoals.map(
+            (goal): PlanningItem => ({
+                type: 'goal',
+                id: goal.id,
+                name: goal.name,
+                position: goal.position ?? null,
+                goal,
+            }),
+        ),
+    ];
+
+    return items.sort((a, b) => {
+        const positionA = a.position ?? Infinity;
+        const positionB = b.position ?? Infinity;
+
+        if (positionA !== positionB) {
+            return positionA - positionB;
+        }
+
+        const byTier = planningAttentionTier(a) - planningAttentionTier(b);
+
+        if (byTier !== 0) {
+            return byTier;
+        }
+
+        if (tiebreak === 'allocation') {
+            const byAllocation = allocationOf(b) - allocationOf(a);
+
+            if (byAllocation !== 0) {
+                return byAllocation;
+            }
+        }
+
+        return a.name.localeCompare(b.name, locale);
+    });
+}
+
+/**
+ * A budget's active allocation, or -1 when it has no active period so those
+ * sink below every budget that has one. Goals report 0 and fall through to the
+ * name, which only matters if a goal ever reaches this branch.
+ */
+function allocationOf(item: PlanningItem): number {
+    if (item.type !== 'budget') {
+        return 0;
+    }
+
+    const period = item.budget.periods?.[0];
+
+    return period ? period.allocated_amount : -1;
+}
+
+/**
+ * Applies an id order to a list, keeping anything the order does not mention
+ * in its current place at the end. Used to show a drag immediately, before the
+ * server has answered with the positions it stored.
+ */
+export function orderPlanningItems(
+    items: PlanningItem[],
+    ids: string[],
+): PlanningItem[] {
+    const known = new Set(ids);
+    const byId = new Map(items.map((item) => [item.id, item]));
+
+    return [
+        ...ids.map((id) => byId.get(id)).filter((item) => item !== undefined),
+        ...items.filter((item) => !known.has(item.id)),
+    ];
+}
+
+/**
+ * Rebuilds the whole live order from a drag that only saw the filtered list.
+ *
+ * The drag returns the visible ids rearranged among themselves, so walk the
+ * complete list and refill every slot that held a visible item with the next
+ * id the drag produced. Hidden items keep their slots, which is what stops
+ * filtering by type from pulling budgets and goals apart from each other.
+ */
+export function applyFilteredOrder(
+    allIds: string[],
+    orderedVisibleIds: string[],
+): string[] {
+    const visible = new Set(orderedVisibleIds);
+    let next = 0;
+
+    return allIds.map((id) =>
+        visible.has(id) ? (orderedVisibleIds[next++] ?? id) : id,
+    );
+}

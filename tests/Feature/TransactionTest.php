@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\CategorySource;
+use App\Enums\CategoryType;
 use App\Models\Account;
 use App\Models\AutomationRule;
 use App\Models\Budget;
@@ -10,6 +11,7 @@ use App\Models\Label;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\BudgetTransactionService;
+use App\Services\Transactions\ReplaceTransactionSplits;
 
 use function Pest\Laravel\actingAs;
 
@@ -253,7 +255,7 @@ test('users can edit the amount, date and account of a manually created transact
     ]);
 });
 
-test('users cannot edit the amount, date or account of an imported transaction', function () {
+test('users cannot edit the amount or account of an imported transaction but can move its date', function () {
     $user = User::factory()->onboarded()->create();
     $account = Account::factory()->create(['user_id' => $user->id]);
     $otherAccount = Account::factory()->create(['user_id' => $user->id]);
@@ -275,9 +277,102 @@ test('users cannot edit the amount, date or account of an imported transaction',
     $this->assertDatabaseHas('transactions', [
         'id' => $transaction->id,
         'amount' => 2500,
-        'transaction_date' => '2026-01-01',
+        'transaction_date' => '2026-02-15',
         'account_id' => $account->id,
     ]);
+});
+
+test('moving a bank transaction date keeps the date the bank gave it', function () {
+    $user = User::factory()->onboarded()->create();
+    $account = Account::factory()->create(['user_id' => $user->id]);
+
+    $transaction = Transaction::factory()->enableBanking()->create([
+        'user_id' => $user->id,
+        'account_id' => $account->id,
+        'transaction_date' => '2026-08-27',
+    ]);
+
+    actingAs($user)->patchJson(route('transactions.update', $transaction), [
+        'transaction_date' => '2026-09-01',
+    ])->assertSuccessful();
+
+    $this->assertDatabaseHas('transactions', [
+        'id' => $transaction->id,
+        'transaction_date' => '2026-09-01',
+        'source_date' => '2026-08-27',
+    ]);
+
+    // A second move must not overwrite it: the point is where the bank put the
+    // row, not where the user last had it.
+    actingAs($user)->patchJson(route('transactions.update', $transaction), [
+        'transaction_date' => '2026-10-05',
+    ])->assertSuccessful();
+
+    $this->assertDatabaseHas('transactions', [
+        'id' => $transaction->id,
+        'transaction_date' => '2026-10-05',
+        'source_date' => '2026-08-27',
+    ]);
+});
+
+test('a manually created transaction records no original date when its date moves', function () {
+    $user = User::factory()->onboarded()->create();
+    $account = Account::factory()->create(['user_id' => $user->id]);
+
+    $transaction = Transaction::factory()->create([
+        'user_id' => $user->id,
+        'account_id' => $account->id,
+        'transaction_date' => '2026-08-27',
+        'source' => 'manually_created',
+    ]);
+
+    actingAs($user)->patchJson(route('transactions.update', $transaction), [
+        'transaction_date' => '2026-09-01',
+    ])->assertSuccessful();
+
+    $this->assertDatabaseHas('transactions', [
+        'id' => $transaction->id,
+        'transaction_date' => '2026-09-01',
+        'source_date' => null,
+    ]);
+});
+
+// Upstream locks the date on a part of a split, because there each part is a
+// transaction of its own carrying split_parent_id. Here a split lives in
+// transaction_splits and the parent keeps the single date its parts follow, so
+// what has to hold is that moving the parent moves the whole split with it.
+test('moving a split parent keeps its parts on the new date', function () {
+    $user = User::factory()->onboarded()->create();
+    $account = Account::factory()->create(['user_id' => $user->id]);
+    $category = Category::factory()->create([
+        'user_id' => $user->id,
+        'type' => CategoryType::Expense,
+    ]);
+
+    $transaction = Transaction::factory()->enableBanking()->create([
+        'user_id' => $user->id,
+        'account_id' => $account->id,
+        'transaction_date' => '2026-08-27',
+        'amount' => -10000,
+    ]);
+
+    app(ReplaceTransactionSplits::class)->replace($transaction, [
+        ['category_id' => $category->id, 'amount' => -6000],
+        ['category_id' => $category->id, 'amount' => -4000],
+    ]);
+
+    actingAs($user)->patchJson(route('transactions.update', $transaction), [
+        'transaction_date' => '2026-09-01',
+    ])->assertSuccessful();
+
+    $this->assertDatabaseHas('transactions', [
+        'id' => $transaction->id,
+        'transaction_date' => '2026-09-01',
+        // The bank's own day is kept so the sync watermark does not move with it.
+        'source_date' => '2026-08-27',
+    ]);
+
+    expect($transaction->fresh()->splits)->toHaveCount(2);
 });
 
 test('users can soft delete their own transactions', function () {

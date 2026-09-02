@@ -26,6 +26,7 @@ import { SyncProvider } from './contexts/sync-context';
 import { initializeTheme } from './hooks/use-appearance';
 import { initializeChartColorScheme } from './hooks/use-chart-color-scheme';
 import { installChunkLoadRecovery } from './lib/chunk-load-recovery';
+import { installDeferredPropsRecovery } from './lib/deferred-props-recovery';
 import { installFailedNavigationToast } from './lib/failed-navigation-toast';
 import { leavePage } from './lib/leave-page';
 import { initializePostHog } from './lib/posthog';
@@ -38,11 +39,14 @@ import {
     isSafariCashbackExtensionNoise,
     isUnattendedRequestNoise,
 } from './lib/sentry';
+import { installSessionExpiryRecovery } from './lib/session-expiry-recovery';
 import { trackUnattendedRequests } from './lib/unattended-requests';
 import type { ExpiredBankingConnectionNotification, SharedData } from './types';
 import { __, setTranslations } from './utils/i18n';
 
 installChunkLoadRecovery();
+installDeferredPropsRecovery();
+installSessionExpiryRecovery();
 trackUnattendedRequests();
 installFailedNavigationToast();
 

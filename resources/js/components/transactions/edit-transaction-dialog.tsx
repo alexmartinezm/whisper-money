@@ -146,10 +146,37 @@ export function EditTransactionDialog({
         return true;
     });
 
-    // Manually created transactions can edit every field (account, date, amount,
-    // description) both on creation and afterwards. Imported ones keep those locked.
+    // Manually created transactions can edit account, amount and description
+    // both on creation and afterwards. Bank-synced and imported ones keep those
+    // locked to what the source reported.
     const canEditAllFields =
         mode === 'create' || transaction?.source === 'manually_created';
+
+    // The date is the exception, and is editable on every transaction: which
+    // month one counts towards is the user's call, not the bank's — a payroll
+    // booked on the 27th can belong to next month's budget. The server keeps
+    // the date the source gave it in source_date, so the sync watermark does
+    // not advance with the move.
+    //
+    // Only rows the user did not type in have a source to compare against: on a
+    // manual transaction the user picked every date it ever had. The comparison
+    // is against the field rather than the saved row, so the hint shows the
+    // moment a different date is typed, and moving it back hides it again.
+    const sourceDate =
+        transaction && transaction.source !== 'manually_created'
+            ? (transaction.source_date ??
+              transaction.transaction_date.split('T')[0])
+            : null;
+    const movedFromSourceDate =
+        sourceDate && sourceDate !== transactionDate
+            ? formatDate(
+                  parseISO(sourceDate),
+                  getYear(parseISO(sourceDate)) === getYear(new Date())
+                      ? 'MMMM d'
+                      : 'MMMM d, yyyy',
+                  locale,
+              )
+            : null;
 
     useEffect(() => {
         if (mode === 'edit' && transaction) {
@@ -518,6 +545,13 @@ export function EditTransactionDialog({
                 const editedCurrencyCode =
                     editedAccount?.currency_code ?? transaction.currency_code;
 
+                if (
+                    transactionDate !==
+                    transaction.transaction_date.split('T')[0]
+                ) {
+                    updateData.transaction_date = transactionDate;
+                }
+
                 if (canEditAllFields) {
                     if (
                         trimmedDescription !== transaction.decryptedDescription
@@ -528,12 +562,6 @@ export function EditTransactionDialog({
                     }
                     if (amount !== transaction.amount) {
                         updateData.amount = amount;
-                    }
-                    if (
-                        transactionDate !==
-                        transaction.transaction_date.split('T')[0]
-                    ) {
-                        updateData.transaction_date = transactionDate;
                     }
                     if (accountId !== transaction.account_id) {
                         updateData.account_id = accountId;
@@ -728,57 +756,31 @@ export function EditTransactionDialog({
                         )}
 
                         <div className="space-y-2">
-                            <FormLabel
-                                htmlFor="date"
-                                className={
-                                    canEditAllFields
-                                        ? ''
-                                        : 'text-sm text-muted-foreground'
+                            <FormLabel htmlFor="date">{__('Date')}</FormLabel>
+                            <Input
+                                id="date"
+                                type="date"
+                                value={transactionDate}
+                                onChange={(e) =>
+                                    setTransactionDate(e.target.value)
                                 }
-                            >
-                                {__('Date')}
-                            </FormLabel>
-                            {canEditAllFields ? (
-                                <Input
-                                    id="date"
-                                    type="date"
-                                    value={transactionDate}
-                                    onChange={(e) =>
-                                        setTransactionDate(e.target.value)
-                                    }
-                                    disabled={isSubmitting}
-                                    required
-                                />
-                            ) : (
-                                <div className="text-sm">
-                                    {transaction &&
-                                        (() => {
-                                            const date = parseISO(
-                                                transaction.transaction_date,
-                                            );
-                                            const currentYear = getYear(
-                                                new Date(),
-                                            );
-                                            const transactionYear =
-                                                getYear(date);
-                                            const formatString =
-                                                transactionYear === currentYear
-                                                    ? 'MMMM d'
-                                                    : 'MMMM d, yyyy';
-                                            const formatted = formatDate(
-                                                date,
-                                                formatString,
-                                                locale,
-                                            );
-                                            // Capitalize first letter
-                                            return (
-                                                formatted
-                                                    .charAt(0)
-                                                    .toUpperCase() +
-                                                formatted.slice(1)
-                                            );
-                                        })()}
-                                </div>
+                                disabled={isSubmitting}
+                                required
+                            />
+                            <p className="text-sm text-muted-foreground">
+                                {__(
+                                    'The date decides which month and budget this transaction counts towards.',
+                                )}
+                            </p>
+                            {movedFromSourceDate && (
+                                <p
+                                    data-testid="original-transaction-date"
+                                    className="text-sm text-muted-foreground"
+                                >
+                                    {__('Original date: :date', {
+                                        date: movedFromSourceDate,
+                                    })}
+                                </p>
                             )}
                         </div>
 

@@ -1,3 +1,4 @@
+import { getBudgetPeriodStats } from '@/utils/budget';
 import { __ } from '@/utils/i18n';
 import { Category } from './category';
 import { Label } from './label';
@@ -25,6 +26,10 @@ export interface Budget {
     period_start_day: number | null;
     rollover_type: RolloverType;
     is_catch_all: boolean;
+    /** Manual order on the Planning list; null until the user drags something. */
+    position: number | null;
+    /** Set once and never cleared: archiving a budget cannot be undone. */
+    archived_at: string | null;
     notify_on_new_transaction: boolean;
     notify_on_close_to_limit: boolean;
     notify_on_over_limit: boolean;
@@ -135,4 +140,40 @@ export function getRolloverTypeDescription(type: RolloverType): string {
         reset: __('Remaining balance returns to available money pool'),
     };
     return descriptions[type];
+}
+
+/**
+ * How much of the current period's allocation is already spent, as a
+ * percentage. The card and the Planning list's ordering both read it, so it
+ * has to be computed in one place.
+ */
+export function budgetPercentageUsed(budget: Budget): number {
+    return getBudgetPeriodStats(budget.periods?.[0]).percentageUsed;
+}
+
+export type BudgetSeverity = 'over' | 'near' | 'ok';
+
+/**
+ * Where a budget sits against its allocation. The card's colour and the
+ * Planning list's ordering both read it, so the position an item takes in the
+ * list can never disagree with the colour the user is looking at.
+ */
+export function budgetSeverity(budget: Budget): BudgetSeverity {
+    const { status } = getBudgetPeriodStats(budget.periods?.[0]);
+
+    if (status === 'over_limit') {
+        return 'over';
+    }
+
+    return status === 'close_to_limit' ? 'near' : 'ok';
+}
+
+export function getBudgetSeverityColor(severity: BudgetSeverity): string {
+    const colors: Record<BudgetSeverity, string> = {
+        over: 'text-red-600 dark:text-red-400',
+        near: 'text-yellow-600 dark:text-yellow-400',
+        ok: 'text-green-600 dark:text-green-400',
+    };
+
+    return colors[severity];
 }

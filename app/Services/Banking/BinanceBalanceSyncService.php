@@ -3,6 +3,7 @@
 namespace App\Services\Banking;
 
 use App\Models\Account;
+use App\Services\Banking\Sync\BalanceSyncResumePoint;
 use App\Services\CurrencyConversionService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
@@ -115,7 +116,11 @@ class BinanceBalanceSyncService
         $targetCurrency = strtoupper($account->currency_code);
 
         $endDate = now()->subDay();
-        $startDate = $this->resolveStartDate($account, $isFirstSync);
+        $startDate = BalanceSyncResumePoint::startDate(
+            $account,
+            $isFirstSync,
+            now()->subDays(self::SNAPSHOT_MAX_DAYS),
+        );
 
         if ($startDate->greaterThanOrEqualTo($endDate)) {
             return false;
@@ -138,23 +143,6 @@ class BinanceBalanceSyncService
         ]);
 
         return true;
-    }
-
-    /**
-     * Where to resume from: the day after the last balance on file, or the far
-     * end of the snapshot window on a first sync or an account with no history.
-     */
-    private function resolveStartDate(Account $account, bool $isFirstSync): Carbon
-    {
-        if ($isFirstSync) {
-            return now()->subDays(self::SNAPSHOT_MAX_DAYS);
-        }
-
-        $latest = $account->balances()->max('balance_date');
-
-        return $latest
-            ? Carbon::parse($latest)->addDay()
-            : now()->subDays(self::SNAPSHOT_MAX_DAYS);
     }
 
     /**

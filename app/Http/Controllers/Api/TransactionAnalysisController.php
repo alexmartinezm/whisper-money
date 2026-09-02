@@ -2,12 +2,12 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Http\Controllers\Api\Concerns\ConvertsTransactionCurrency;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\IndexTransactionRequest;
 use App\Models\Label;
 use App\Models\Transaction;
 use App\Services\CategoryTree;
+use App\Services\Concerns\ConvertsTransactionCurrency;
 use App\Services\ExchangeRateService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -70,14 +70,21 @@ class TransactionAnalysisController extends Controller
             fn (string $categoryId): bool => $categoryId !== 'uncategorized',
         ));
         $categoryIds = $this->tree->expand($user->id, $categoryIds);
-        if ($requestedCategoryIds !== []) {
+
+        // A split parent enters the set through any one of its parts, so the
+        // postings are narrowed back down to the categories that were asked for.
+        // Not when a label filter is active, though: labels are ORed with
+        // categories, so the set deliberately holds transactions from outside
+        // the subtree and narrowing here would drop them from the breakdown
+        // while they still count towards the totals.
+        if ($requestedCategoryIds !== [] && empty($filters['label_ids'])) {
             $analysisTransactions = $analysisTransactions
                 ->filter(fn (Transaction $transaction): bool => in_array($transaction->category_id, $categoryIds, true)
                     || ($includeUncategorized && $transaction->category_id === null))
                 ->values();
         }
 
-        $byCategory = $this->categoryBreakdown($analysisTransactions, $currency, $user->id);
+        $byCategory = $this->categoryBreakdown($analysisTransactions, $currency, $user->id, $this->drillParentId($filters));
         $byTag = $this->tagBreakdown($analysisTransactions, $currency);
         $byPayee = $this->payeeBreakdown($analysisTransactions, $currency);
         $byAccount = $this->accountBreakdown($analysisTransactions, $currency);
@@ -143,11 +150,35 @@ class TransactionAnalysisController extends Controller
     }
 
     /**
-     * Expenses grouped by their top-level category, with the sub-categories
-     * that carry spending nested beneath each parent so the split is visible
-     * instead of folded into the parent total.
+     * The category the breakdown is rooted at: the selected one whenever the
+     * filter narrows to exactly one real category, so its sub-categories are
+     * compared against each other instead of collapsing into a single row.
+     *
+     * @param  array<string, mixed>  $filters
      */
-    private function categoryBreakdown(Collection $transactions, string $currency, string $userId): Collection
+    private function drillParentId(array $filters): ?string
+    {
+        // Categories and labels are ORed, so a label filter pulls in transactions
+        // from outside the subtree. Drilling would drop them from the breakdown
+        // while they still count towards the totals, so leave the rollup alone.
+        if (! empty($filters['label_ids'])) {
+            return null;
+        }
+
+        $categoryIds = array_values(array_filter(
+            $filters['category_ids'] ?? [],
+            fn (string $id): bool => $id !== 'uncategorized',
+        ));
+
+        return count($categoryIds) === 1 ? $categoryIds[0] : null;
+    }
+
+    /**
+     * Expenses grouped by their top-level category — or, when drilling into a
+     * selected category, by its sub-categories — with the level below nested
+     * beneath each row so the split is visible instead of folded into the total.
+     */
+    private function categoryBreakdown(Collection $transactions, string $currency, string $userId, ?string $drillParentId = null): Collection
     {
         $expenses = $transactions->filter(
             fn (Transaction $transaction): bool => $transaction->isExpenseSide(),
@@ -177,7 +208,7 @@ class TransactionAnalysisController extends Controller
                 'icon' => $child['category']->icon,
                 'amount' => $child['amount'],
             ], $node['children']),
-        ], $this->tree->spendingBreakdown($grouped, $userId));
+        ], $this->tree->spendingBreakdown($grouped, $userId, $drillParentId));
 
         $uncategorized = -$expenses
             ->filter(fn (Transaction $transaction): bool => $transaction->category_id === null)

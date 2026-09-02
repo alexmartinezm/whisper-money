@@ -3,10 +3,10 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\CategoryType;
-use App\Http\Controllers\Api\Concerns\ConvertsTransactionCurrency;
 use App\Http\Controllers\Controller;
 use App\Models\Category;
 use App\Models\Transaction;
+use App\Services\Concerns\ConvertsTransactionCurrency;
 use App\Services\ExchangeRateService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
@@ -59,12 +59,13 @@ class CategoryMonthlyBreakdownController extends Controller
         ));
 
         $transactions = Transaction::query()
-            ->where('user_id', $user->id)
+            ->where('transactions.user_id', $user->id)
             ->where(function ($query) use ($subtreeIds): void {
-                $query->whereIn('category_id', $subtreeIds)
+                $query->whereIn('transactions.category_id', $subtreeIds)
                     ->orWhereHas('splits', fn ($splitQuery) => $splitQuery->whereIn('category_id', $subtreeIds));
             })
-            ->where('transaction_date', '>=', $start->toDateString())
+            ->where('transactions.transaction_date', '>=', $start->toDateString())
+            ->countingTowardsTotals()
             ->with(['account', 'category', 'splits.category'])
             ->get();
 
