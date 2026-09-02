@@ -36,7 +36,7 @@ class MonthlySummaryController extends Controller
                 'payload' => $summary->payload,
                 'complete' => $summary->complete,
                 'analysis' => $summary->ai_analysis,
-                'generated_at' => $summary->created_at?->toIso8601String(),
+                'generated_at' => $summary->created_at->toIso8601String(),
             ],
             // Whether asking for the written analysis is worth offering at all.
             'canAnalyse' => $analysis->eligible($user),

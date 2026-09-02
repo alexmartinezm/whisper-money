@@ -7,7 +7,6 @@ use App\Enums\RuleSuggestionStatus;
 use App\Models\Account;
 use App\Models\Budget;
 use App\Models\BudgetPeriod;
-use App\Models\MonthlySummary;
 use App\Models\SavingsGoal;
 use App\Models\Transaction;
 use App\Models\User;
@@ -633,28 +632,5 @@ class SummaryBuilder
     private function percentChange(int $from, int $to): float
     {
         return $from !== 0 ? round(($to - $from) / abs($from) * 100, 1) : 0.0;
-    }
-
-    /**
-     * Last month's frozen percentage for the same goal, so a crossed decile can
-     * be detected without recomputing a goal's history — which the product does
-     * not track.
-     */
-    public function previousGoalPercent(User $user, Carbon $month, ?string $goalName): ?float
-    {
-        if ($goalName === null) {
-            return null;
-        }
-
-        $previous = MonthlySummary::query()
-            ->where('user_id', $user->id)
-            ->where('period', $month->copy()->subMonth()->format('Y-m'))
-            ->first();
-
-        if ($previous === null || $previous->figure('goal.name') !== $goalName) {
-            return null;
-        }
-
-        return (float) $previous->figure('goal.percent', 0);
     }
 }

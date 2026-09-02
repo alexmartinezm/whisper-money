@@ -18,6 +18,7 @@ use Illuminate\Support\Carbon;
  * the month comparable to the next one and stops a paid-for AI paragraph being
  * re-bought every time the page is opened.
  *
+ * @property array<string, mixed> $payload
  * @property Carbon|null $ai_generated_at
  * @property Carbon $created_at
  */

@@ -35,12 +35,4 @@ final class Figures
 
         return $formatter->format($value).$separator.'%';
     }
-
-    /**
-     * A plain integer with the locale's thousands separator.
-     */
-    public static function count(int $value, string $locale): string
-    {
-        return (new NumberFormatter($locale, NumberFormatter::DECIMAL))->format($value);
-    }
 }
