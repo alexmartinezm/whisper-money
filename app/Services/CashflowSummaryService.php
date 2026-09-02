@@ -66,6 +66,53 @@ class CashflowSummaryService
     }
 
     /**
+     * The same summary, one row per calendar month between two dates, keyed by
+     * YYYY-MM. One query for the whole range instead of one per month: the
+     * monthly analysis needs a year of savings rates to draw a streak and a
+     * sparkline, and twelve round trips for that would be twelve too many.
+     *
+     * Splits are expanded once, before the months are cut, so a split
+     * transaction counts as its parts here exactly as it does on the cashflow
+     * screen.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    public function forMonths(string $userId, string $userCurrency, Carbon $from, Carbon $to): array
+    {
+        $transactions = Transaction::query()
+            ->where('transactions.user_id', $userId)
+            ->whereBetween('transactions.transaction_date', [
+                $from->copy()->startOfMonth(),
+                $to->copy()->endOfMonth(),
+            ])
+            ->countingTowardsTotals()
+            ->with(['account', 'category', 'splits.category'])
+            ->get();
+
+        $this->preloadExchangeRates($transactions, $userCurrency);
+
+        $transactions = $this->effectiveTransactions($transactions, $userCurrency);
+
+        $months = [];
+        $cursor = $from->copy()->startOfMonth();
+
+        while ($cursor->lte($to)) {
+            $months[$cursor->format('Y-m')] = $this->forTransactions(
+                $this->transactionsForPeriod(
+                    $transactions,
+                    $cursor->copy()->startOfMonth(),
+                    $cursor->copy()->endOfMonth(),
+                ),
+                $userCurrency,
+            );
+
+            $cursor->addMonth();
+        }
+
+        return $months;
+    }
+
+    /**
      * @param  Collection<int, Transaction>  $transactions
      * @return array<string, mixed>
      */
