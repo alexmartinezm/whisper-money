@@ -13,6 +13,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\IntegrationRequestController;
 use App\Http\Controllers\IntegrationsController;
 use App\Http\Controllers\LoanDetailController;
+use App\Http\Controllers\MonthlySummaryController;
 use App\Http\Controllers\OnboardingController;
 use App\Http\Controllers\OpenBanking\AccountMappingController;
 use App\Http\Controllers\OpenBanking\AuthorizationController;
@@ -253,6 +254,11 @@ Route::middleware(['auth', 'verified', 'onboarded', 'subscribed'])->group(functi
     Route::delete('recurring/{recurringSeries}', [RecurringSeriesController::class, 'destroy'])->name('recurring.destroy');
     Route::post('recurring/detect', [RecurringDetectionController::class, 'store'])->name('recurring.detect');
     Route::get('recurring/detect/status/{jobId}', [RecurringDetectionController::class, 'status'])->name('recurring.detect.status');
+
+    Route::get('monthly-summary', [MonthlySummaryController::class, 'index'])->name('monthly-summary.index');
+    Route::post('monthly-summary', [MonthlySummaryController::class, 'store'])->name('monthly-summary.store');
+    Route::post('monthly-summary/{monthlySummary}/analysis', [MonthlySummaryController::class, 'analyse'])
+        ->name('monthly-summary.analyse');
 });
 
 require __DIR__.'/settings.php';

@@ -1,3 +1,4 @@
+import { index as monthlySummary } from '@/actions/App/Http/Controllers/MonthlySummaryController';
 import { BreakdownCard } from '@/components/cashflow/breakdown-card';
 import { NetCashflowCard } from '@/components/cashflow/net-cashflow-card';
 import { PeriodNavigation } from '@/components/cashflow/period-navigation';
@@ -13,7 +14,7 @@ import AppSidebarLayout from '@/layouts/app/app-sidebar-layout';
 import { cashflow } from '@/routes';
 import { BreadcrumbItem } from '@/types';
 import { __ } from '@/utils/i18n';
-import { Head, usePage } from '@inertiajs/react';
+import { Head, Link, usePage } from '@inertiajs/react';
 import {
     endOfMonth,
     endOfQuarter,
@@ -23,7 +24,7 @@ import {
     startOfQuarter,
     startOfYear,
 } from 'date-fns';
-import { TriangleAlertIcon } from 'lucide-react';
+import { Sparkles, TriangleAlertIcon } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -154,12 +155,21 @@ export default function CashflowPage() {
                         )}
                     />
 
-                    <PeriodNavigation
-                        currentDate={currentDate}
-                        periodType={periodType}
-                        onDateChange={setCurrentDate}
-                        onPeriodTypeChange={setPeriodType}
-                    />
+                    <div className="flex flex-wrap items-center gap-2">
+                        <Button variant="outline" size="sm" asChild>
+                            <Link href={monthlySummary().url}>
+                                <Sparkles />
+                                {__('Month in review')}
+                            </Link>
+                        </Button>
+
+                        <PeriodNavigation
+                            currentDate={currentDate}
+                            periodType={periodType}
+                            onDateChange={setCurrentDate}
+                            onPeriodTypeChange={setPeriodType}
+                        />
+                    </div>
                 </div>
 
                 {hasError && (

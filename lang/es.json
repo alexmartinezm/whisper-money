@@ -2852,5 +2852,22 @@
     "Source": "Fuente",
     "These details cannot be edited.": "Estos datos no se pueden editar.",
     "Imported from a file": "Importada de un archivo",
-    "Imported from your bank": "Importada del banco"
+    "Imported from your bank": "Importada del banco",
+    ":count transactions are still uncategorised, worth :amount.": ":count movimientos siguen sin categorizar, por valor de :amount.",
+    "A reading of one closed month. The figures are frozen the first time you ask, so the month keeps saying the same thing.": "Una lectura de un mes ya cerrado. Las cifras se congelan la primera vez que lo pides, así que el mes sigue diciendo lo mismo.",
+    "A written analysis needs a paid plan and AI enabled.": "El análisis escrito requiere un plan de pago y la IA activada.",
+    "Analyse this month": "Analizar este mes",
+    "Ask for a short written read of what moved this month, and what is going to repeat.": "Pide una lectura breve de qué ha movido el mes y qué se va a repetir.",
+    "Explain this month": "Explicar este mes",
+    "Month in review": "El mes en revisión",
+    "Net worth": "Patrimonio",
+    "Savings rate: :rate": "Tasa de ahorro: :rate",
+    "Still settling": "Aún cerrándose",
+    "This month has not been analysed yet. Nothing is computed until you ask.": "Este mes aún no se ha analizado. No se calcula nada hasta que lo pides.",
+    "Where it went": "En qué se fue",
+    "Written from the figures below. It never sees individual transactions or merchants.": "Escrito a partir de las cifras de abajo. Nunca ve movimientos ni comercios concretos.",
+    "vs last month: :change": "vs. mes anterior: :change",
+    "A month can only be analysed once it has ended.": "Un mes solo se puede analizar cuando ha terminado.",
+    "There is nothing recorded in that month yet.": "Todavía no hay nada registrado en ese mes.",
+    "The analysis could not be written right now. Try again in a moment.": "El análisis no se ha podido escribir ahora mismo. Inténtalo en un momento."
 }
