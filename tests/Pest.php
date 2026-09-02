@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\BankingConnectionStatus;
+use App\Enums\CategoryType;
 use App\Enums\RecurringCadence;
 use App\Jobs\SyncBankingConnectionJob;
 use App\Models\Account;
@@ -17,12 +18,15 @@ use App\Services\Banking\BalanceSyncService;
 use App\Services\Banking\EnableBankingProvider;
 use App\Services\Banking\Sync\BankingConnectionSyncerFactory;
 use App\Services\Banking\TransactionSyncService;
+use Carbon\Carbon;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Queue\Job;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Laravel\Ai\Exceptions\ProviderOverloadedException;
 use Laravel\Mcp\Server\Testing\TestResponse as McpTestResponse;
 use Stripe\Collection as StripeCollection;
 use Stripe\Service\SubscriptionService;
@@ -46,6 +50,25 @@ pest()->extend(TestCase::class)
     ->in('Feature', 'Browser', 'Performance');
 
 pest()->browser()->timeout(15000);
+
+/*
+|--------------------------------------------------------------------------
+| Transient AI provider failures
+|--------------------------------------------------------------------------
+|
+| The two ways an AI provider fails with nobody having a bug to fix: it answers
+| badly (overloaded, rate-limiting us) or it does not answer at all (DNS, connect
+| timeout). Every service that prompts a provider has to treat the two the same
+| way, so they assert against one shared list rather than each keeping its own.
+|
+*/
+
+dataset('transient provider failures', [
+    'provider overloaded' => fn (): Throwable => ProviderOverloadedException::forProvider('gemini'),
+    'provider unreachable' => fn (): Throwable => new ConnectionException(
+        'cURL error 6: Could not resolve host: generativelanguage.googleapis.com',
+    ),
+]);
 
 /*
 |--------------------------------------------------------------------------
@@ -151,6 +174,53 @@ function performanceSeedUser(): User
  *
  * @return array{count: int, queries: list<string>}
  */
+/*
+|--------------------------------------------------------------------------
+| Monthly summary fixtures
+|--------------------------------------------------------------------------
+|
+| Shared by the summary tests. They live here rather than in one of those
+| files because the suite runs with --parallel: a helper defined in one test
+| file is simply absent from the process that picked up the other.
+|
+*/
+
+/**
+ * `$writtenOn` is when the row was created, which is what decides whether the
+ * month has settled — a row entered today is activity in today's month however
+ * old the transaction it records. It defaults to the transaction's own day, so
+ * a month built only of backdated rows reads as still open.
+ */
+function transactionIn(
+    User $user,
+    CategoryType $type,
+    int $amount,
+    Carbon $on,
+    ?Carbon $writtenOn = null,
+): Transaction {
+    $transaction = Transaction::factory()->plaintext()->create([
+        'user_id' => $user->id,
+        'account_id' => Account::factory()->create([
+            'user_id' => $user->id,
+            'currency_code' => 'EUR',
+        ])->id,
+        'category_id' => Category::factory()->create(['user_id' => $user->id, 'type' => $type])->id,
+        'amount' => $amount,
+        'currency_code' => 'EUR',
+        'transaction_date' => $on,
+    ]);
+
+    $transaction->forceFill(['created_at' => $writtenOn ?? $on])->save();
+
+    return $transaction;
+}
+
+/** The month being reported, and a day inside the month after it. */
+function closedMonth(): Carbon
+{
+    return now()->subMonth()->startOfMonth();
+}
+
 function countQueries(Closure $callback): array
 {
     $queryLog = [];

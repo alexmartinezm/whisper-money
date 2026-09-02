@@ -11,6 +11,7 @@ import {
 
 const inertiaProps = vi.hoisted(() => ({
     features: { transactionSplitting: true },
+    auth: { user: { currency_code: 'EUR' } },
 }));
 
 vi.mock('@inertiajs/react', () => ({
@@ -214,10 +215,16 @@ describe('EditTransactionDialog', () => {
             />,
         );
 
+        // The redesign reads these out as rows in a details card rather than
+        // as greyed-out inputs, so they are text now, not form values.
         expect(screen.getByText('Creditor')).toBeInTheDocument();
-        expect(screen.getByDisplayValue('Amazon EU')).toBeDisabled();
+        expect(screen.getByText('Amazon EU')).toBeInTheDocument();
         expect(screen.getByText('Debtor')).toBeInTheDocument();
-        expect(screen.getByDisplayValue('Victor Falcon')).toBeDisabled();
+        expect(screen.getByText('Victor Falcon')).toBeInTheDocument();
+        expect(
+            screen.getByText('These details cannot be edited.'),
+        ).toBeInTheDocument();
+        expect(screen.queryByDisplayValue('Amazon EU')).not.toBeInTheDocument();
     });
 
     const checkingAccount = {
@@ -274,6 +281,76 @@ describe('EditTransactionDialog', () => {
             'data-value',
             'account-1',
         );
+    });
+
+    it('sends a typed amount as an expense, and as income once toggled', async () => {
+        // The user types 12.00 either way; the toggle is what decides the sign,
+        // so nobody has to type a minus to record a payment.
+        const renderDialog = () =>
+            render(
+                <EditTransactionDialog
+                    transaction={manualTransaction}
+                    categories={[]}
+                    accounts={[checkingAccount]}
+                    banks={[]}
+                    labels={[]}
+                    open
+                    onOpenChange={vi.fn()}
+                    onSuccess={vi.fn()}
+                    mode="edit"
+                />,
+            );
+
+        const { unmount } = renderDialog();
+
+        // An existing expense opens with Expense selected and an unsigned field.
+        expect(screen.getByTestId('transaction-type-expense')).toHaveAttribute(
+            'data-state',
+            'on',
+        );
+        expect(screen.getByLabelText('Amount')).not.toHaveValue('-12.00');
+
+        fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+        await waitFor(() =>
+            expect(transactionSyncService.update).toHaveBeenCalledOnce(),
+        );
+        expect(
+            vi.mocked(transactionSyncService.update).mock.calls[0][1],
+        ).not.toHaveProperty('amount');
+
+        unmount();
+        vi.mocked(transactionSyncService.update).mockClear();
+        renderDialog();
+
+        fireEvent.click(screen.getByTestId('transaction-type-income'));
+        fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+        await waitFor(() =>
+            expect(transactionSyncService.update).toHaveBeenCalledOnce(),
+        );
+        expect(
+            vi.mocked(transactionSyncService.update).mock.calls[0][1],
+        ).toMatchObject({ amount: 1200 });
+    });
+
+    it('falls back to the profile currency before an account is picked', () => {
+        render(
+            <EditTransactionDialog
+                transaction={null}
+                categories={[]}
+                accounts={[checkingAccount]}
+                banks={[]}
+                labels={[]}
+                open
+                onOpenChange={vi.fn()}
+                onSuccess={vi.fn()}
+                mode="create"
+            />,
+        );
+
+        // inertiaProps puts the profile on EUR; a hardcoded USD used to show here.
+        expect(screen.getByText('€')).toBeInTheDocument();
+        expect(screen.queryByText('$')).not.toBeInTheDocument();
     });
 
     it('checks "update account balance" by default in create mode', () => {
@@ -562,6 +639,8 @@ describe('EditTransactionDialog', () => {
             />,
         );
 
+        // A transaction with no note starts with the field collapsed.
+        fireEvent.click(screen.getByRole('button', { name: 'Add note' }));
         fireEvent.change(screen.getByLabelText('Notes'), {
             target: { value: 'Receipt checked' },
         });

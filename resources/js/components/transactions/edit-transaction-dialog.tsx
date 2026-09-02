@@ -1,4 +1,5 @@
 import { destroy } from '@/actions/App/Http/Controllers/Settings/AutomationRuleController';
+import { CategoryIcon } from '@/components/shared/category-combobox';
 import { LabelCombobox } from '@/components/shared/label-combobox';
 import { CategorySelect } from '@/components/transactions/category-select';
 import {
@@ -6,6 +7,7 @@ import {
     validTransactionSplits,
 } from '@/components/transactions/transaction-split-editor';
 import { AmountInput } from '@/components/ui/amount-input';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -26,6 +28,7 @@ import {
     SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { useSyncContext } from '@/contexts/sync-context';
 import { useLocale } from '@/hooks/use-locale';
 import { decrypt, importKey } from '@/lib/crypto';
@@ -53,7 +56,14 @@ import { __ } from '@/utils/i18n';
 import { router, usePage } from '@inertiajs/react';
 import axios from 'axios';
 import { getYear, parseISO } from 'date-fns';
-import { Trash2 } from 'lucide-react';
+import {
+    FileText,
+    HelpCircle,
+    Landmark,
+    Lock,
+    Plus,
+    Trash2,
+} from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -118,6 +128,8 @@ export function EditTransactionDialog({
     initialAccountId = null,
 }: EditTransactionDialogProps) {
     const locale = useLocale();
+    const userCurrencyCode =
+        usePage<SharedData>().props.auth.user.currency_code;
     const STORAGE_KEY_UPDATE_BALANCE =
         'whisper_money_update_balance_on_transaction';
 
@@ -126,7 +138,11 @@ export function EditTransactionDialog({
         usePage<SharedData>().props.features.transactionSplitting;
     const [transactionDate, setTransactionDate] = useState('');
     const [description, setDescription] = useState('');
-    const [amount, setAmount] = useState<number>(0);
+    const [unsignedAmount, setUnsignedAmount] = useState<number>(0);
+    const [transactionType, setTransactionType] = useState<
+        'expense' | 'income'
+    >('expense');
+    const [showNotes, setShowNotes] = useState(false);
     const [accountId, setAccountId] = useState<string>('');
     const [categoryId, setCategoryId] = useState<string>('null');
     const [splits, setSplits] = useState<SplitLineInput[] | null>(null);
@@ -151,6 +167,12 @@ export function EditTransactionDialog({
     // locked to what the source reported.
     const canEditAllFields =
         mode === 'create' || transaction?.source === 'manually_created';
+
+    // The toggle carries the sign, so the amount input never sees a minus and
+    // nobody has to type one. Everything that persists or matches on the amount
+    // reads this, never the unsigned field.
+    const signedAmount =
+        transactionType === 'income' ? unsignedAmount : -unsignedAmount;
 
     // The date is the exception, and is editable on every transaction: which
     // month one counts towards is the user's call, not the bank's — a payroll
@@ -182,7 +204,8 @@ export function EditTransactionDialog({
         if (mode === 'edit' && transaction) {
             setTransactionDate(transaction.transaction_date);
             setDescription(transaction.decryptedDescription);
-            setAmount(transaction.amount);
+            setUnsignedAmount(Math.abs(transaction.amount));
+            setTransactionType(transaction.amount > 0 ? 'income' : 'expense');
             setAccountId(transaction.account_id);
             setCategoryId(transaction.category_id || 'null');
             setSplits(
@@ -201,11 +224,14 @@ export function EditTransactionDialog({
                     [],
             );
             setNotes(transaction.decryptedNotes || '');
+            setShowNotes(!!transaction.decryptedNotes);
         } else if (mode === 'create' && open) {
             const today = new Date().toISOString().split('T')[0];
             setTransactionDate(today);
             setDescription('');
-            setAmount(0);
+            setUnsignedAmount(0);
+            setTransactionType('expense');
+            setShowNotes(false);
             const availableAccounts = filterTransactionalAccounts(accounts);
             const initialAccount = availableAccounts.find(
                 (account) => account.id === initialAccountId,
@@ -301,7 +327,7 @@ export function EditTransactionDialog({
         const result = await evaluateRulesForNewTransaction(
             {
                 description: description.trim(),
-                amount: amount / 100,
+                amount: signedAmount / 100,
                 transaction_date: transactionDate,
                 account_id: accountId,
                 notes: notes.trim() || undefined,
@@ -363,7 +389,7 @@ export function EditTransactionDialog({
                 toast.error(__('Description is required'));
                 return;
             }
-            if (amount === 0) {
+            if (unsignedAmount === 0) {
                 toast.error(__('Amount is required'));
                 return;
             }
@@ -377,7 +403,7 @@ export function EditTransactionDialog({
             }
         }
 
-        if (!validTransactionSplits(amount, splits, categories)) {
+        if (!validTransactionSplits(signedAmount, splits, categories)) {
             toast.error(__('Complete the split before saving'));
             return;
         }
@@ -433,7 +459,7 @@ export function EditTransactionDialog({
                         description: finalDescription,
                         description_iv: finalDescriptionIv,
                         transaction_date: transactionDate,
-                        amount: amount,
+                        amount: signedAmount,
                         currency_code: selectedAccount.currency_code,
                         notes: encryptedNotes,
                         notes_iv: notesIv,
@@ -560,8 +586,8 @@ export function EditTransactionDialog({
                         updateData.description_iv = null;
                         finalDecryptedDescription = trimmedDescription;
                     }
-                    if (amount !== transaction.amount) {
-                        updateData.amount = amount;
+                    if (signedAmount !== transaction.amount) {
+                        updateData.amount = signedAmount;
                     }
                     if (accountId !== transaction.account_id) {
                         updateData.account_id = accountId;
@@ -699,6 +725,55 @@ export function EditTransactionDialog({
             ? [...transactionalAccounts, selectedAccount]
             : transactionalAccounts;
 
+    const accountName = transaction
+        ? decryptedAccountNames.get(transaction.account_id)
+        : undefined;
+
+    const headerCategory =
+        categoryId !== 'null'
+            ? (categories.find((category) => category.id === categoryId) ??
+              null)
+            : null;
+
+    const formattedAmount = transaction
+        ? new Intl.NumberFormat(locale, {
+              style: 'currency',
+              currency: transaction.currency_code,
+          })
+              .format(transaction.amount / 100)
+              .replace(/\s/g, '\u202F')
+        : '';
+
+    // What the source reported and the user cannot change. The date is absent
+    // on purpose: this fork lets every transaction be moved, so it stays an
+    // editable field below rather than a locked row here.
+    const detailRows = transaction
+        ? [
+              transaction.creditor_name
+                  ? { label: __('Creditor'), value: transaction.creditor_name }
+                  : null,
+              transaction.debtor_name
+                  ? { label: __('Debtor'), value: transaction.debtor_name }
+                  : null,
+              accountName
+                  ? {
+                        label: __('Account'),
+                        value: transaction.bank?.name
+                            ? `${accountName} · ${transaction.bank.name}`
+                            : accountName,
+                    }
+                  : null,
+          ].filter(
+              (row): row is { label: string; value: string } => row !== null,
+          )
+        : [];
+
+    const sourceLabel =
+        transaction?.source === 'imported'
+            ? __('Imported from a file')
+            : __('Imported from your bank');
+    const SourceIcon = transaction?.source === 'imported' ? FileText : Landmark;
+
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="sm:max-w-[525px]">
@@ -721,176 +796,65 @@ export function EditTransactionDialog({
 
                 <form onSubmit={handleSubmit}>
                     <div className="space-y-4 py-4">
-                        {canEditAllFields && (
-                            <div className="space-y-2">
-                                <FormLabel htmlFor="account">
-                                    {__('Account')}
-                                </FormLabel>
-                                <Select
-                                    value={accountId}
-                                    onValueChange={setAccountId}
-                                    disabled={isSubmitting}
-                                >
-                                    <SelectTrigger
-                                        id="account"
-                                        data-testid="account-select"
-                                    >
-                                        <SelectValue
-                                            placeholder={__('Select account')}
-                                        />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {accountOptions.map((account) => (
-                                            <SelectItem
-                                                key={account.id}
-                                                value={String(account.id)}
-                                            >
-                                                {decryptedAccountNames.get(
-                                                    account.id,
-                                                ) || __('[Loading...]')}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                        )}
-
-                        <div className="space-y-2">
-                            <FormLabel htmlFor="date">{__('Date')}</FormLabel>
-                            <Input
-                                id="date"
-                                type="date"
-                                value={transactionDate}
-                                onChange={(e) =>
-                                    setTransactionDate(e.target.value)
-                                }
-                                disabled={isSubmitting}
-                                required
-                            />
-                            <p className="text-sm text-muted-foreground">
-                                {__(
-                                    'The date decides which month and budget this transaction counts towards.',
-                                )}
-                            </p>
-                            {movedFromSourceDate && (
-                                <p
-                                    data-testid="original-transaction-date"
-                                    className="text-sm text-muted-foreground"
-                                >
-                                    {__('Original date: :date', {
-                                        date: movedFromSourceDate,
-                                    })}
-                                </p>
-                            )}
-                        </div>
-
-                        <div className="space-y-2">
-                            <FormLabel
-                                htmlFor="description"
-                                className={
-                                    canEditAllFields
-                                        ? ''
-                                        : 'text-sm text-muted-foreground'
-                                }
-                            >
-                                {__('Description')}
-                            </FormLabel>
-                            {canEditAllFields ? (
-                                <Textarea
-                                    id="description"
-                                    value={description}
-                                    onChange={(e) =>
-                                        setDescription(e.target.value)
-                                    }
-                                    placeholder={__('Transaction description')}
-                                    disabled={isSubmitting}
-                                    required
-                                    rows={3}
-                                />
-                            ) : (
-                                <div className="space-y-1.5">
-                                    <Textarea
-                                        id="description"
-                                        value={
-                                            transaction?.decryptedDescription ??
-                                            ''
-                                        }
-                                        disabled
-                                        className="bg-muted"
-                                        rows={3}
-                                    />
-
-                                    <p className="text-xs text-muted-foreground">
-                                        {__(
-                                            'This transaction was imported from a\n                                        file. The description cannot be\n                                        modified.',
-                                        )}
-                                    </p>
-                                </div>
-                            )}
-                        </div>
-
-                        {mode === 'edit' &&
-                            (transaction?.creditor_name ||
-                                transaction?.debtor_name) && (
-                                <div className="grid gap-4 md:grid-cols-2">
-                                    {transaction.creditor_name && (
-                                        <div className="space-y-2">
-                                            <FormLabel className="text-sm text-muted-foreground">
-                                                {__('Creditor')}
-                                            </FormLabel>
-                                            <Input
-                                                value={
-                                                    transaction.creditor_name
+                        {canEditAllFields ? (
+                            <>
+                                <div className="space-y-2">
+                                    <FormLabel htmlFor="amount">
+                                        {__('Amount')}
+                                    </FormLabel>
+                                    <div className="flex items-stretch gap-3">
+                                        <ToggleGroup
+                                            type="single"
+                                            variant="outline"
+                                            value={transactionType}
+                                            onValueChange={(value) => {
+                                                if (value) {
+                                                    setTransactionType(
+                                                        value as
+                                                            | 'expense'
+                                                            | 'income',
+                                                    );
                                                 }
-                                                disabled
-                                                readOnly
-                                                className="bg-muted"
+                                            }}
+                                            disabled={isSubmitting}
+                                        >
+                                            <ToggleGroupItem
+                                                value="expense"
+                                                className="h-11 px-4"
+                                                data-testid="transaction-type-expense"
+                                            >
+                                                {__('Expense')}
+                                            </ToggleGroupItem>
+                                            <ToggleGroupItem
+                                                value="income"
+                                                className="h-11 px-4"
+                                                data-testid="transaction-type-income"
+                                            >
+                                                {__('Income')}
+                                            </ToggleGroupItem>
+                                        </ToggleGroup>
+                                        <div className="flex-1">
+                                            <AmountInput
+                                                id="amount"
+                                                value={unsignedAmount}
+                                                // A typed minus sign still parses negative even
+                                                // without allowNegative; the toggle owns the sign.
+                                                onChange={(cents) =>
+                                                    setUnsignedAmount(
+                                                        Math.abs(cents),
+                                                    )
+                                                }
+                                                currencyCode={
+                                                    selectedAccount?.currency_code ||
+                                                    userCurrencyCode
+                                                }
+                                                placeholder="25.00"
+                                                disabled={isSubmitting}
+                                                required
+                                                className="h-11 text-right text-xl font-semibold tabular-nums md:text-xl"
                                             />
                                         </div>
-                                    )}
-
-                                    {transaction.debtor_name && (
-                                        <div className="space-y-2">
-                                            <FormLabel className="text-sm text-muted-foreground">
-                                                {__('Debtor')}
-                                            </FormLabel>
-                                            <Input
-                                                value={transaction.debtor_name}
-                                                disabled
-                                                readOnly
-                                                className="bg-muted"
-                                            />
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                        <div className="space-y-2">
-                            <FormLabel
-                                htmlFor="amount"
-                                className={
-                                    canEditAllFields
-                                        ? ''
-                                        : 'text-sm text-muted-foreground'
-                                }
-                            >
-                                {__('Amount')}
-                            </FormLabel>
-                            {canEditAllFields ? (
-                                <>
-                                    <AmountInput
-                                        id="amount"
-                                        value={amount}
-                                        onChange={setAmount}
-                                        currencyCode={
-                                            selectedAccount?.currency_code ||
-                                            'USD'
-                                        }
-                                        placeholder="25.00"
-                                        disabled={isSubmitting}
-                                        required
-                                        allowNegative
-                                    />
+                                    </div>
 
                                     {selectedAccount?.banking_connection_id ? (
                                         <p className="text-sm text-muted-foreground">
@@ -919,19 +883,193 @@ export function EditTransactionDialog({
                                             </FormLabel>
                                         </div>
                                     )}
-                                </>
-                            ) : (
-                                <div className="text-sm font-medium">
-                                    {transaction &&
-                                        new Intl.NumberFormat(locale, {
-                                            style: 'currency',
-                                            currency: transaction.currency_code,
-                                        })
-                                            .format(transaction.amount / 100)
-                                            .replace(/\s/g, '\u202F')}
                                 </div>
-                            )}
-                        </div>
+
+                                <div className="space-y-2">
+                                    <FormLabel htmlFor="description">
+                                        {__('Description')}
+                                    </FormLabel>
+                                    <Textarea
+                                        id="description"
+                                        value={description}
+                                        onChange={(e) =>
+                                            setDescription(e.target.value)
+                                        }
+                                        placeholder={__(
+                                            'Transaction description',
+                                        )}
+                                        disabled={isSubmitting}
+                                        required
+                                        rows={3}
+                                    />
+                                </div>
+
+                                <div className="grid gap-4 sm:grid-cols-2">
+                                    <div className="space-y-2">
+                                        <FormLabel htmlFor="date">
+                                            {__('Date')}
+                                        </FormLabel>
+                                        <Input
+                                            id="date"
+                                            type="date"
+                                            value={transactionDate}
+                                            onChange={(e) =>
+                                                setTransactionDate(
+                                                    e.target.value,
+                                                )
+                                            }
+                                            disabled={isSubmitting}
+                                            required
+                                        />
+                                        <p className="text-sm text-muted-foreground">
+                                            {__(
+                                                'The date decides which month and budget this transaction counts towards.',
+                                            )}
+                                        </p>
+                                        {movedFromSourceDate && (
+                                            <p
+                                                data-testid="original-transaction-date"
+                                                className="text-sm text-muted-foreground"
+                                            >
+                                                {__('Original date: :date', {
+                                                    date: movedFromSourceDate,
+                                                })}
+                                            </p>
+                                        )}
+                                    </div>
+                                    <div className="space-y-2">
+                                        <FormLabel htmlFor="account">
+                                            {__('Account')}
+                                        </FormLabel>
+                                        <Select
+                                            value={accountId}
+                                            onValueChange={setAccountId}
+                                            disabled={isSubmitting}
+                                        >
+                                            <SelectTrigger
+                                                id="account"
+                                                data-testid="account-select"
+                                            >
+                                                <SelectValue
+                                                    placeholder={__(
+                                                        'Select account',
+                                                    )}
+                                                />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {accountOptions.map(
+                                                    (account) => (
+                                                        <SelectItem
+                                                            key={account.id}
+                                                            value={String(
+                                                                account.id,
+                                                            )}
+                                                        >
+                                                            {`${decryptedAccountNames.get(account.id) || __('[Loading...]')} · ${account.currency_code}`}
+                                                        </SelectItem>
+                                                    ),
+                                                )}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
+                            </>
+                        ) : (
+                            transaction && (
+                                <>
+                                    <div className="flex items-center gap-3">
+                                        {headerCategory ? (
+                                            <CategoryIcon
+                                                category={headerCategory}
+                                                className="p-2.5"
+                                                iconClassName="size-5 sm:size-5"
+                                            />
+                                        ) : (
+                                            <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-zinc-100 dark:bg-zinc-800">
+                                                <HelpCircle className="size-4 text-zinc-500" />
+                                            </div>
+                                        )}
+                                        <div className="min-w-0 flex-1">
+                                            <div className="font-medium">
+                                                {description}
+                                            </div>
+                                            <div className="text-sm text-muted-foreground">
+                                                {accountName ?? ''}
+                                            </div>
+                                        </div>
+                                        <div className="shrink-0 text-2xl font-semibold tabular-nums">
+                                            {formattedAmount}
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <div className="rounded-md border">
+                                            {detailRows.map((row) => (
+                                                <div
+                                                    key={row.label}
+                                                    className="flex items-center justify-between gap-4 border-b px-3 py-2.5 text-sm"
+                                                >
+                                                    <span className="text-muted-foreground">
+                                                        {row.label}
+                                                    </span>
+                                                    <span className="truncate text-right">
+                                                        {row.value}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                            <div className="flex items-center justify-between gap-4 px-3 py-2.5 text-sm">
+                                                <span className="text-muted-foreground">
+                                                    {__('Source')}
+                                                </span>
+                                                <Badge variant="secondary">
+                                                    <SourceIcon />
+                                                    {sourceLabel}
+                                                </Badge>
+                                            </div>
+                                        </div>
+                                        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                            <Lock className="size-3" />
+                                            {__(
+                                                'These details cannot be edited.',
+                                            )}
+                                        </p>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <FormLabel htmlFor="date">
+                                            {__('Date')}
+                                        </FormLabel>
+                                        <Input
+                                            id="date"
+                                            type="date"
+                                            value={transactionDate}
+                                            onChange={(e) =>
+                                                setTransactionDate(
+                                                    e.target.value,
+                                                )
+                                            }
+                                            disabled={isSubmitting}
+                                            required
+                                        />
+                                        <p className="text-sm text-muted-foreground">
+                                            {__(
+                                                'The date decides which month and budget this transaction counts towards.',
+                                            )}
+                                        </p>
+                                        {movedFromSourceDate && (
+                                            <p
+                                                data-testid="original-transaction-date"
+                                                className="text-sm text-muted-foreground"
+                                            >
+                                                {__('Original date: :date', {
+                                                    date: movedFromSourceDate,
+                                                })}
+                                            </p>
+                                        )}
+                                    </div>
+                                </>
+                            )
+                        )}
 
                         {splits === null ? (
                             <div className="space-y-2">
@@ -961,7 +1099,7 @@ export function EditTransactionDialog({
                                                         categoryId === 'null'
                                                             ? ''
                                                             : categoryId,
-                                                    amount,
+                                                    amount: signedAmount,
                                                     position: 0,
                                                 },
                                                 {
@@ -979,11 +1117,11 @@ export function EditTransactionDialog({
                         ) : (
                             <div className="space-y-2">
                                 <TransactionSplitEditor
-                                    amount={amount}
+                                    amount={signedAmount}
                                     currencyCode={
                                         selectedAccount?.currency_code ??
                                         transaction?.currency_code ??
-                                        'USD'
+                                        userCurrencyCode
                                     }
                                     categories={categories}
                                     value={splits}
@@ -1029,17 +1167,33 @@ export function EditTransactionDialog({
                             />
                         </div>
 
-                        <div className="space-y-2">
-                            <FormLabel htmlFor="notes">{__('Notes')}</FormLabel>
-                            <Textarea
-                                id="notes"
-                                placeholder={__('Add notes...')}
-                                value={notes}
-                                onChange={(e) => setNotes(e.target.value)}
-                                rows={3}
+                        {showNotes ? (
+                            <div className="space-y-2">
+                                <FormLabel htmlFor="notes">
+                                    {__('Notes')}
+                                </FormLabel>
+                                <Textarea
+                                    id="notes"
+                                    placeholder={__('Add notes...')}
+                                    value={notes}
+                                    onChange={(e) => setNotes(e.target.value)}
+                                    rows={3}
+                                    disabled={isSubmitting}
+                                />
+                            </div>
+                        ) : (
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="-ml-2 w-fit px-2 text-muted-foreground"
+                                onClick={() => setShowNotes(true)}
                                 disabled={isSubmitting}
-                            />
-                        </div>
+                            >
+                                <Plus />
+                                {__('Add note')}
+                            </Button>
+                        )}
                     </div>
 
                     <DialogFooter>
@@ -1071,7 +1225,7 @@ export function EditTransactionDialog({
                             disabled={
                                 isSubmitting ||
                                 !validTransactionSplits(
-                                    amount,
+                                    signedAmount,
                                     splits,
                                     categories,
                                 )

@@ -12,10 +12,10 @@ use App\Services\BalanceLookup;
 use App\Services\CategorySpendingService;
 use App\Services\ExchangeRateService;
 use App\Services\LoanAmortizationService;
+use App\Services\NetWorthCalculator;
 use App\Services\PeriodComparator;
 use App\Services\Transactions\EffectiveTransactionPostings;
 use Carbon\Carbon;
-use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -26,6 +26,7 @@ class DashboardAnalyticsController extends Controller
         private AccountMetricsService $accountMetricsService,
         private LoanAmortizationService $loanAmortizationService,
         private CategorySpendingService $categorySpendingService,
+        private NetWorthCalculator $netWorthCalculator,
         private EffectiveTransactionPostings $postings,
     ) {}
 
@@ -54,8 +55,8 @@ class DashboardAnalyticsController extends Controller
         );
 
         return response()->json([
-            'current' => $this->calculateNetWorthAt($accounts, $lookup, $period->to, $userCurrency),
-            'previous' => $this->calculateNetWorthAt($accounts, $lookup, $previousPeriod->to, $userCurrency),
+            'current' => $this->netWorthCalculator->at($accounts, $lookup, $period->to, $userCurrency),
+            'previous' => $this->netWorthCalculator->at($accounts, $lookup, $previousPeriod->to, $userCurrency),
             'currency_code' => $userCurrency,
         ]);
     }
@@ -237,35 +238,6 @@ class DashboardAnalyticsController extends Controller
             ->values();
 
         return response()->json($top);
-    }
-
-    /**
-     * @param  Collection<int, Account>  $accounts
-     */
-    private function calculateNetWorthAt(Collection $accounts, BalanceLookup $lookup, Carbon $date, string $userCurrency): int
-    {
-        $total = 0;
-
-        foreach ($accounts as $account) {
-            if ($account->include_in_net_worth === false || ! $account->type->countsInNetWorth()) {
-                continue;
-            }
-
-            $balance = $lookup->getBalanceAt($account->id, $date);
-
-            $convertedBalance = $this->exchangeRateService->convert(
-                $account->currency_code,
-                $userCurrency,
-                $balance,
-                $date->toDateString(),
-            );
-
-            $total += $account->type->reducesNetWorth()
-                ? -abs($convertedBalance)
-                : $convertedBalance;
-        }
-
-        return $total;
     }
 
     private function calculateSpending(Carbon $from, Carbon $to): int
