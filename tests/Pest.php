@@ -20,9 +20,11 @@ use App\Services\Banking\TransactionSyncService;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Queue\Job;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Laravel\Ai\Exceptions\ProviderOverloadedException;
 use Laravel\Mcp\Server\Testing\TestResponse as McpTestResponse;
 use Stripe\Collection as StripeCollection;
 use Stripe\Service\SubscriptionService;
@@ -46,6 +48,25 @@ pest()->extend(TestCase::class)
     ->in('Feature', 'Browser', 'Performance');
 
 pest()->browser()->timeout(15000);
+
+/*
+|--------------------------------------------------------------------------
+| Transient AI provider failures
+|--------------------------------------------------------------------------
+|
+| The two ways an AI provider fails with nobody having a bug to fix: it answers
+| badly (overloaded, rate-limiting us) or it does not answer at all (DNS, connect
+| timeout). Every service that prompts a provider has to treat the two the same
+| way, so they assert against one shared list rather than each keeping its own.
+|
+*/
+
+dataset('transient provider failures', [
+    'provider overloaded' => fn (): Throwable => ProviderOverloadedException::forProvider('gemini'),
+    'provider unreachable' => fn (): Throwable => new ConnectionException(
+        'cURL error 6: Could not resolve host: generativelanguage.googleapis.com',
+    ),
+]);
 
 /*
 |--------------------------------------------------------------------------

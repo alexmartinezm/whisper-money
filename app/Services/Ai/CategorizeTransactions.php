@@ -7,6 +7,7 @@ use App\Enums\CategorySource;
 use App\Jobs\RetryTransientAiCategorizationJob;
 use App\Models\Transaction;
 use App\Models\User;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -122,6 +123,13 @@ class CategorizeTransactions
      * the chunks that succeeded; a transient provider failure additionally
      * schedules a deferred retry of the user's still-pending transactions.
      *
+     * Transient covers both the provider answering badly (overload, rate limit)
+     * and it not answering at all (DNS, connect timeout): neither is a bug, and
+     * both leave the chunk's transactions uncategorized until the retry runs.
+     * The trade-off is that a provider which stays unreachable never reaches
+     * Sentry either — the warning below is the only trace, and the deferred
+     * retry gets one attempt (see {@see RetryTransientAiCategorizationJob}).
+     *
      * @param  Collection<int, Transaction>  $transactions
      * @return list<array<string, mixed>>
      */
@@ -135,7 +143,7 @@ class CategorizeTransactions
                 foreach ($this->resolveChunkWithRetry($chunk, $catalog) as $result) {
                     $results[] = $result;
                 }
-            } catch (FailoverableException $exception) {
+            } catch (ConnectionException|FailoverableException $exception) {
                 Log::warning('AI categorization chunk dropped: provider transient failure.', [
                     'exception' => $exception->getMessage(),
                 ]);
