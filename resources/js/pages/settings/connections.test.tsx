@@ -29,6 +29,7 @@ vi.mock('@inertiajs/react', () => ({
                 cashflow: true,
                 calculateBalancesOnImport: false,
             },
+            locale: 'en',
         },
     }),
     usePoll: () => ({
