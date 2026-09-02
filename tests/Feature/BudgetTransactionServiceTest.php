@@ -453,6 +453,39 @@ test('assignTransaction retries deadlocks during reconciliation (regression for 
         ->and((int) $period->budgetTransactions()->first()->amount)->toBe(1500);
 });
 
+test('assignTransaction preserves archived budget snapshots when category changes', function () {
+    $oldCategory = Category::factory()->create(['user_id' => $this->user->id]);
+    $newCategory = Category::factory()->create(['user_id' => $this->user->id]);
+    $budget = Budget::factory()->forCategories($oldCategory)->create([
+        'user_id' => $this->user->id,
+    ]);
+    $period = BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => now()->subDays(30),
+        'end_date' => now()->addDays(30),
+    ]);
+    $transaction = Transaction::factory()->forUser($this->user)->create([
+        'user_id' => $this->user->id,
+        'category_id' => $oldCategory->id,
+        'transaction_date' => now()->subDays(5),
+        'amount' => -2000,
+    ]);
+
+    $this->service->assignTransaction($transaction);
+
+    $assignment = $period->budgetTransactions()->sole();
+    $originalId = $assignment->id;
+    $originalAmount = (int) $assignment->amount;
+
+    $budget->update(['archived_at' => now()]);
+    $transaction->update(['category_id' => $newCategory->id]);
+    $this->service->assignTransaction($transaction);
+
+    $preserved = $period->budgetTransactions()->sole();
+    expect($preserved->id)->toBe($originalId)
+        ->and((int) $preserved->amount)->toBe($originalAmount);
+});
+
 test('assignTransaction removes stale rows when category changes', function () {
     $oldCategory = Category::factory()->create(['user_id' => $this->user->id]);
     $newCategory = Category::factory()->create(['user_id' => $this->user->id]);

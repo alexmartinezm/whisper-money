@@ -494,6 +494,41 @@ it('exposes split-aware MCP reads and directs direct category writes to split_tr
         ->and($transaction->splits()->count())->toBe(2);
 });
 
+it('preserves archived budget snapshots when replacing split lines', function () {
+    [$user, , $transaction, $food, $home] = splitIntegrationFixture(['transaction_date' => now()]);
+    makeIntegrationSplit($transaction, $food, $home);
+
+    $budget = Budget::factory()->forCategories($food)->create(['user_id' => $user->id]);
+    $period = BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => now()->subDay(),
+        'end_date' => now()->addDay(),
+    ]);
+    $service = app(BudgetTransactionService::class);
+    $service->assignTransaction($transaction);
+
+    $assignment = $period->budgetTransactions()->sole();
+    $originalId = $assignment->id;
+    $originalAmount = (int) $assignment->amount;
+
+    $replacement = Category::factory()->create([
+        'user_id' => $user->id,
+        'space_id' => $transaction->space_id,
+        'type' => CategoryType::Expense,
+    ]);
+    $budget->update(['archived_at' => now()]);
+    Transaction::withoutEvents(fn () => app(ReplaceTransactionSplits::class)->replace($transaction, [
+        ['category_id' => $home->id, 'amount' => -6000],
+        ['category_id' => $replacement->id, 'amount' => -4000],
+    ]));
+
+    $service->assignTransaction($transaction->fresh());
+
+    $preserved = $period->budgetTransactions()->sole();
+    expect($preserved->id)->toBe($originalId)
+        ->and((int) $preserved->amount)->toBe($originalAmount);
+});
+
 it('returns replaced split details through delta sync', function () {
     [$user, , $transaction, $food, $home] = splitIntegrationFixture();
     makeIntegrationSplit($transaction, $food, $home);

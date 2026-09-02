@@ -77,6 +77,7 @@ class BudgetTransactionService
 
             BudgetTransaction::query()
                 ->where('transaction_id', $transaction->id)
+                ->whereHas('budgetPeriod.budget', fn ($query) => $query->whereNull('archived_at'))
                 ->when($matchingPeriodIds !== [], fn ($query) => $query->whereNotIn('budget_period_id', $matchingPeriodIds))
                 ->delete();
         }, attempts: 5);
