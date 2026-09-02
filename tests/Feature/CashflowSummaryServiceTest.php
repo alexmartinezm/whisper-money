@@ -105,11 +105,12 @@ it('counts a split transaction under its parts', function () {
     Transaction::query()->whereKey($transaction->id)->update(['category_id' => null]);
 
     $groceries = Category::factory()->create(['user_id' => $user->id, 'type' => CategoryType::Expense]);
-    foreach ([-6000, -4000] as $part) {
+    foreach ([-6000, -4000] as $position => $part) {
         TransactionSplit::factory()->create([
             'transaction_id' => $transaction->id,
             'category_id' => $groceries->id,
             'amount' => $part,
+            'position' => $position,
         ]);
     }
 
@@ -137,11 +138,12 @@ it('charges a shared account its ownership share once on a split transaction', f
     $make($expense->id);
 
     $split = $make(null);
-    foreach ([-5000, -5000] as $part) {
+    foreach ([-5000, -5000] as $position => $part) {
         TransactionSplit::factory()->create([
             'transaction_id' => $split->id,
             'category_id' => $expense->id,
             'amount' => $part,
+            'position' => $position,
         ]);
     }
 
