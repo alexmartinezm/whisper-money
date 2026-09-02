@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\BankingConnectionStatus;
+use App\Enums\CategoryType;
 use App\Enums\RecurringCadence;
 use App\Jobs\SyncBankingConnectionJob;
 use App\Models\Account;
@@ -17,6 +18,7 @@ use App\Services\Banking\BalanceSyncService;
 use App\Services\Banking\EnableBankingProvider;
 use App\Services\Banking\Sync\BankingConnectionSyncerFactory;
 use App\Services\Banking\TransactionSyncService;
+use Carbon\Carbon;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Queue\Job;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -172,6 +174,53 @@ function performanceSeedUser(): User
  *
  * @return array{count: int, queries: list<string>}
  */
+/*
+|--------------------------------------------------------------------------
+| Monthly summary fixtures
+|--------------------------------------------------------------------------
+|
+| Shared by the summary tests. They live here rather than in one of those
+| files because the suite runs with --parallel: a helper defined in one test
+| file is simply absent from the process that picked up the other.
+|
+*/
+
+/**
+ * `$writtenOn` is when the row was created, which is what decides whether the
+ * month has settled — a row entered today is activity in today's month however
+ * old the transaction it records. It defaults to the transaction's own day, so
+ * a month built only of backdated rows reads as still open.
+ */
+function transactionIn(
+    User $user,
+    CategoryType $type,
+    int $amount,
+    Carbon $on,
+    ?Carbon $writtenOn = null,
+): Transaction {
+    $transaction = Transaction::factory()->plaintext()->create([
+        'user_id' => $user->id,
+        'account_id' => Account::factory()->create([
+            'user_id' => $user->id,
+            'currency_code' => 'EUR',
+        ])->id,
+        'category_id' => Category::factory()->create(['user_id' => $user->id, 'type' => $type])->id,
+        'amount' => $amount,
+        'currency_code' => 'EUR',
+        'transaction_date' => $on,
+    ]);
+
+    $transaction->forceFill(['created_at' => $writtenOn ?? $on])->save();
+
+    return $transaction;
+}
+
+/** The month being reported, and a day inside the month after it. */
+function closedMonth(): Carbon
+{
+    return now()->subMonth()->startOfMonth();
+}
+
 function countQueries(Closure $callback): array
 {
     $queryLog = [];

@@ -1,48 +1,9 @@
 <?php
 
 use App\Enums\CategoryType;
-use App\Models\Account;
-use App\Models\Category;
 use App\Models\MonthlySummary;
-use App\Models\Transaction;
 use App\Models\User;
 use App\Services\MonthlySummary\Summaries;
-
-/**
- * `$writtenOn` is when the row was created, which is what decides whether the
- * month has settled — a row entered today is activity in today's month however
- * old the transaction it records. It defaults to the transaction's own day, so
- * a month built only of backdated rows reads as still open.
- */
-function transactionIn(
-    User $user,
-    CategoryType $type,
-    int $amount,
-    Carbon\Carbon $on,
-    ?Carbon\Carbon $writtenOn = null,
-): Transaction {
-    $transaction = Transaction::factory()->plaintext()->create([
-        'user_id' => $user->id,
-        'account_id' => Account::factory()->create([
-            'user_id' => $user->id,
-            'currency_code' => 'EUR',
-        ])->id,
-        'category_id' => Category::factory()->create(['user_id' => $user->id, 'type' => $type])->id,
-        'amount' => $amount,
-        'currency_code' => 'EUR',
-        'transaction_date' => $on,
-    ]);
-
-    $transaction->forceFill(['created_at' => $writtenOn ?? $on])->save();
-
-    return $transaction;
-}
-
-/** The month being reported, and a day inside the month after it. */
-function closedMonth(): Carbon\Carbon
-{
-    return now()->subMonth()->startOfMonth();
-}
 
 it('freezes a month it can report and reads back the same figures', function () {
     $user = User::factory()->create(['currency_code' => 'EUR']);
