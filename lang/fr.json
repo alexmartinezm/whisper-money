@@ -2478,5 +2478,9 @@
     ":count of :total rows ready": ":count ligne(s) prête(s) sur :total",
     "Update the date, category and notes for this transaction.": "Mettez à jour la date, la catégorie et les notes pour cette transaction.",
     "The date decides which month and budget this transaction counts towards.": "La date détermine dans quel mois et quel budget cette transaction est comptée.",
-    "Original date: :date": "Date d'origine : :date"
+    "Original date: :date": "Date d'origine : :date",
+    "Source": "Source",
+    "These details cannot be edited.": "Ces informations ne peuvent pas être modifiées.",
+    "Imported from a file": "Importée d'un fichier",
+    "Imported from your bank": "Importée de votre banque"
 }

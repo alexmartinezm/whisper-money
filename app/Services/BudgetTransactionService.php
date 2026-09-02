@@ -199,9 +199,13 @@ class BudgetTransactionService
             ->where('user_id', $budget->user_id)
             ->where('space_id', $budget->space_id)
             ->where('is_catch_all', false)
+            // Compared as plain dates: a Carbon binding serializes with a time
+            // ("Y-m-d H:i:s"), which sorts after a stored date-only end_date on
+            // any driver that compares them as strings, so the period's own last
+            // day would never match.
             ->whereHas('periods', fn ($query) => $query
-                ->where('start_date', '<=', $transaction->transaction_date)
-                ->where('end_date', '>=', $transaction->transaction_date));
+                ->where('start_date', '<=', $transaction->transaction_date->toDateString())
+                ->where('end_date', '>=', $transaction->transaction_date->toDateString()));
 
         $claimedByLabel = (clone $claimants)
             ->whereHas('labels', fn ($query) => $query->whereIn('labels.id', $transaction->labels->pluck('id')))
