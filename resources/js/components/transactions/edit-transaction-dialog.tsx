@@ -776,7 +776,18 @@ export function EditTransactionDialog({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-[525px]">
+            <DialogContent
+                className="sm:max-w-[525px]"
+                tabIndex={!canEditAllFields ? -1 : undefined}
+                onOpenAutoFocus={
+                    !canEditAllFields
+                        ? (event) => {
+                              event.preventDefault();
+                              (event.currentTarget as HTMLElement).focus();
+                          }
+                        : undefined
+                }
+            >
                 <DialogHeader>
                     <DialogTitle>
                         {mode === 'create'
