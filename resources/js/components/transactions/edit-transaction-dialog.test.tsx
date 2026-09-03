@@ -3,6 +3,7 @@ import type { Category } from '@/types/category';
 import type { DecryptedTransaction } from '@/types/transaction';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type React from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     EditTransactionDialog,
@@ -97,9 +98,36 @@ vi.mock('@/components/ui/dialog', () => ({
         children: React.ReactNode;
         open: boolean;
     }) => (open ? <div>{children}</div> : null),
-    DialogContent: ({ children }: { children: React.ReactNode }) => (
-        <div>{children}</div>
-    ),
+    DialogContent: ({
+        children,
+        onOpenAutoFocus,
+        ...props
+    }: React.HTMLAttributes<HTMLDivElement> & {
+        children: React.ReactNode;
+        onOpenAutoFocus?: (event: Event) => void;
+    }) => {
+        const contentRef = useRef<HTMLDivElement>(null);
+
+        useLayoutEffect(() => {
+            const content = contentRef.current;
+            if (!content || !onOpenAutoFocus) return;
+
+            // Radix dispatches this cancellable event while mounting content.
+            const event = new Event('dialog-open-auto-focus', {
+                cancelable: true,
+            });
+            Object.defineProperty(event, 'currentTarget', {
+                value: content,
+            });
+            onOpenAutoFocus(event);
+        }, [onOpenAutoFocus]);
+
+        return (
+            <div ref={contentRef} data-testid="dialog-content" {...props}>
+                {children}
+            </div>
+        );
+    },
     DialogDescription: ({ children }: { children: React.ReactNode }) => (
         <div>{children}</div>
     ),
@@ -466,6 +494,28 @@ describe('EditTransactionDialog', () => {
                 'The date decides which month and budget this transaction counts towards.',
             ),
         ).toBeInTheDocument();
+    });
+
+    it('does not focus the date field when opening an imported transaction', () => {
+        render(
+            <EditTransactionDialog
+                transaction={importedTransaction}
+                categories={[]}
+                accounts={[checkingAccount]}
+                banks={[]}
+                labels={[]}
+                open
+                onOpenChange={vi.fn()}
+                onSuccess={vi.fn()}
+                mode="edit"
+            />,
+        );
+
+        const dialogContent = screen.getByTestId('dialog-content');
+        const dateInput = document.querySelector('input[type="date"]');
+
+        expect(document.activeElement).toBe(dialogContent);
+        expect(document.activeElement).not.toBe(dateInput);
     });
 
     it('shows the source date once the transaction has been moved', () => {
