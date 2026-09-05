@@ -92,8 +92,12 @@ class TransactionSettlement
     private const array SETTLED_CARD_CODE = ['CCRD', 'POSD'];
 
     /**
-     * Whether the bank is handing over a delivery that has not settled, so the
-     * caller can wait for the BOOK copy instead of storing both.
+     * Whether the bank is handing over a delivery that has not settled.
+     *
+     * Half of the question waitsForSettlement() answers, and private because
+     * that is the whole audience: an un-settled delivery is not on its own a
+     * reason to hold anything back, so a caller reading this alone would draw
+     * the conclusion this class exists to prevent.
      *
      * Banks that populate `status` leave the card code alone — Revolut,
      * Santander and Sabadell hold 5.6k of the 7.6k PDNG rows in production.
@@ -103,7 +107,7 @@ class TransactionSettlement
      *
      * @param  array<string, mixed>  $data
      */
-    public static function isUnsettled(array $data): bool
+    private static function isUnsettled(array $data): bool
     {
         return in_array($data['status'] ?? null, self::UNSETTLED_STATUSES, true);
     }

@@ -2,14 +2,14 @@
 
 use App\Services\Banking\TransactionSettlement;
 
-test('a delivery the bank has not settled is reported as unsettled', function (string $status) {
-    expect(TransactionSettlement::isUnsettled(['status' => $status]))->toBeTrue();
+test('a delivery the bank has not settled waits for its settled copy', function (string $status) {
+    expect(TransactionSettlement::waitsForSettlement(['status' => $status], 'Santander', true))->toBeTrue();
 })->with(['PDNG', 'HOLD', 'SCHD', 'CNCL', 'RJCT']);
 
-test('a settled, unknown or absent status is reported as settled', function (?string $status) {
+test('a settled, unknown or absent status is imported as it arrives', function (?string $status) {
     $data = $status === null ? [] : ['status' => $status];
 
-    expect(TransactionSettlement::isUnsettled($data))->toBeFalse();
+    expect(TransactionSettlement::waitsForSettlement($data, 'Santander', true))->toBeFalse();
 })->with([
     'booked' => 'BOOK',
     'other' => 'OTHR',
@@ -17,22 +17,8 @@ test('a settled, unknown or absent status is reported as settled', function (?st
 ]);
 
 test('a lowercase status is not mistaken for an unsettled one', function () {
-    expect(TransactionSettlement::isUnsettled(['status' => 'pdng']))->toBeFalse();
+    expect(TransactionSettlement::waitsForSettlement(['status' => 'pdng'], 'Santander', true))->toBeFalse();
 });
-
-test('the un-posted card code is canonicalized to its settled form', function () {
-    expect(TransactionSettlement::canonicalCardCode(['MCRD', 'UPCT']))->toBe(['CCRD', 'POSD']);
-});
-
-test('any other card code keeps discriminating', function (array $code) {
-    expect(TransactionSettlement::canonicalCardCode($code))->toBe($code);
-})->with([
-    'already settled' => [['CCRD', 'POSD']],
-    'unrelated' => [['PMNT', 'RCDT']],
-    'code matches, sub_code does not' => [['MCRD', 'RCDT']],
-    'sub_code matches, code does not' => [['PMNT', 'UPCT']],
-    'absent' => [['', '']],
-]);
 
 test('a pending delivery is imported when the bank re-delivers it under the same id', function (string $status) {
     expect(TransactionSettlement::waitsForSettlement(['status' => $status], 'Revolut', true))->toBeFalse();
@@ -54,8 +40,16 @@ test('a terminal delivery stays out of the ledger even under an id that survives
     expect(TransactionSettlement::waitsForSettlement(['status' => $status], 'Revolut', true))->toBeTrue();
 })->with(['cancelled' => 'CNCL', 'rejected' => 'RJCT']);
 
-test('a settled delivery never waits', function (?string $status) {
-    $data = $status === null ? [] : ['status' => $status];
+test('the un-posted card code is canonicalized to its settled form', function () {
+    expect(TransactionSettlement::canonicalCardCode(['MCRD', 'UPCT']))->toBe(['CCRD', 'POSD']);
+});
 
-    expect(TransactionSettlement::waitsForSettlement($data, 'Revolut', false))->toBeFalse();
-})->with(['booked' => 'BOOK', 'other' => 'OTHR', 'absent' => null]);
+test('any other card code keeps discriminating', function (array $code) {
+    expect(TransactionSettlement::canonicalCardCode($code))->toBe($code);
+})->with([
+    'already settled' => [['CCRD', 'POSD']],
+    'unrelated' => [['PMNT', 'RCDT']],
+    'code matches, sub_code does not' => [['MCRD', 'RCDT']],
+    'sub_code matches, code does not' => [['PMNT', 'UPCT']],
+    'absent' => [['', '']],
+]);
