@@ -46,6 +46,7 @@ class TransactionSyncService
 
         $created = 0;
         $pages = 0;
+        $skippedUnsettled = 0;
         $oldestSeen = null;
         $continuationKey = null;
         $dailyBalances = [];
@@ -88,7 +89,7 @@ class TransactionSyncService
                     $pages++;
 
                     foreach ($result['transactions'] as $transaction) {
-                        if ($this->importTransaction($account, $transaction, $bankName, $knownFingerprints, $knownExternalIds)) {
+                        if ($this->importTransaction($account, $transaction, $bankName, $knownFingerprints, $knownExternalIds, $skippedUnsettled)) {
                             $created++;
                         }
 
@@ -133,6 +134,12 @@ class TransactionSyncService
             'date_from' => $dateFrom,
             'date_to' => $dateTo,
             'pages' => $pages,
+            // A run that imports nothing because the bank had only un-settled
+            // deliveries to give reads exactly like a run with no news at all,
+            // and the manual sync tells the user neither. Counted here so the
+            // difference is greppable instead of inferred from the absence of
+            // rows.
+            'skipped_unsettled' => $skippedUnsettled,
         ]);
 
         return $created;
@@ -299,10 +306,20 @@ class TransactionSyncService
      *  - Banks (e.g. BNP Paribas Fortis) that omit any stable id for
      *    certain card transactions, which previously bypassed dedup.
      *  - Race conditions between overlapping sync runs.
+     *
+     * An un-settled delivery is held back unless the bank re-sends the settled
+     * copy under the id this one already carries, in which case that copy
+     * dedups against the row written here - see
+     * TransactionSettlement::waitsForSettlement(). `$skippedUnsettled` counts
+     * what was held back, for the sync log.
      */
-    private function importTransaction(Account $account, array $data, ?string $bankName, array &$knownFingerprints, array &$knownExternalIds): bool
+    private function importTransaction(Account $account, array $data, ?string $bankName, array &$knownFingerprints, array &$knownExternalIds, int &$skippedUnsettled): bool
     {
-        if (TransactionSettlement::isUnsettled($data)) {
+        $identifiedByUpstreamId = TransactionFingerprint::identifiesTransaction($data, $bankName);
+
+        if (TransactionSettlement::waitsForSettlement($data, $bankName, $identifiedByUpstreamId)) {
+            $skippedUnsettled++;
+
             return false;
         }
 
@@ -315,6 +332,12 @@ class TransactionSyncService
         $exists = isset($knownFingerprints[$fingerprint])
             || ($externalId !== null && isset($knownExternalIds[$this->dedupExternalIdKey($externalId)]));
 
+        // ponytail: the settled re-delivery of a row that was imported while
+        // still pending lands here and is dropped, so the stored amount stays
+        // the one the bank quoted before settlement - a few cents out on a
+        // forex purchase. Updating the row in place instead has to reckon with
+        // one the user has since split or moved, so it is left for its own
+        // change.
         if ($exists) {
             return false;
         }

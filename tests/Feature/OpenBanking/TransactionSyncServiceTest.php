@@ -1068,3 +1068,91 @@ test('sync waits for the booked copy of a purchase it first saw as pending', fun
     expect($stored->amount)->toBe(-1382);
     expect($stored->raw_data['status'])->toBe('BOOK');
 });
+
+test('sync imports a Revolut pending purchase and dedupes its settled re-delivery', function () {
+    $user = User::factory()->onboarded()->create();
+    $bank = Bank::factory()->create(['name' => 'Revolut', 'user_id' => $user->id]);
+    $connection = BankingConnection::factory()->create(['user_id' => $user->id]);
+    $account = Account::factory()->connected()->create([
+        'user_id' => $user->id,
+        'bank_id' => $bank->id,
+        'banking_connection_id' => $connection->id,
+        'external_account_id' => 'ext-123',
+    ]);
+
+    // Revolut hands a card purchase over as PDNG and re-sends it as BOOK about
+    // a day and a half later, tidying the merchant name on the way, under the
+    // transaction_id the pending copy already carried. That id is what makes
+    // importing the pending copy safe: the settled delivery lands on the row it
+    // wrote instead of beside it.
+    $pending = [
+        'transaction_id' => 'rev-txn-1',
+        'transaction_amount' => ['amount' => '31.23', 'currency' => 'EUR'],
+        'credit_debit_indicator' => 'DBIT',
+        'booking_date' => '2026-09-04',
+        'status' => 'PDNG',
+        'creditor' => ['name' => 'Aldi Palau'],
+        'remittance_information' => ['Aldi Palau'],
+    ];
+
+    $settled = array_replace($pending, [
+        'status' => 'BOOK',
+        'creditor' => ['name' => 'ALDI SUPERMERCADOS SL'],
+        'remittance_information' => ['ALDI SUPERMERCADOS SL'],
+    ]);
+
+    $mockProvider = Mockery::mock(BankingProviderInterface::class);
+    $mockProvider->shouldReceive('getTransactions')
+        ->twice()
+        ->andReturn(
+            ['transactions' => [$pending], 'continuation_key' => null],
+            ['transactions' => [$settled], 'continuation_key' => null],
+        );
+
+    $service = new TransactionSyncService($mockProvider, new TransactionDescriptionFormatter);
+
+    expect($service->sync($account, '2026-09-01', '2026-09-05'))->toBe(1);
+    expect($service->sync($account, '2026-09-01', '2026-09-05'))->toBe(0);
+
+    expect($account->transactions()->count())->toBe(1);
+    expect($account->transactions()->first()->amount)->toBe(-3123);
+});
+
+test('sync holds back a delivery whose settled copy would not dedup against it', function (string $bankName, array $payload) {
+    $user = User::factory()->onboarded()->create();
+    $bank = Bank::factory()->create(['name' => $bankName, 'user_id' => $user->id]);
+    $connection = BankingConnection::factory()->create(['user_id' => $user->id]);
+    $account = Account::factory()->connected()->create([
+        'user_id' => $user->id,
+        'bank_id' => $bank->id,
+        'banking_connection_id' => $connection->id,
+        'external_account_id' => 'ext-123',
+    ]);
+
+    $mockProvider = Mockery::mock(BankingProviderInterface::class);
+    $mockProvider->shouldReceive('getTransactions')
+        ->once()
+        ->andReturn([
+            'transactions' => [array_replace([
+                'transaction_amount' => ['amount' => '31.23', 'currency' => 'EUR'],
+                'credit_debit_indicator' => 'DBIT',
+                'booking_date' => '2026-09-04',
+                'creditor' => ['name' => 'Aldi Palau'],
+                'remittance_information' => ['Aldi Palau'],
+            ], $payload)],
+            'continuation_key' => null,
+        ]);
+
+    $service = new TransactionSyncService($mockProvider, new TransactionDescriptionFormatter);
+
+    expect($service->sync($account, '2026-09-01', '2026-09-05'))->toBe(0);
+    expect($account->transactions()->count())->toBe(0);
+})->with([
+    // No id to re-deliver under, so the settled copy would arrive as a second row.
+    'a Revolut delivery the bank did not identify' => ['Revolut', ['status' => 'PDNG']],
+    // Terminal: no settled copy is coming and no money moved.
+    'a cancelled Revolut delivery' => ['Revolut', ['transaction_id' => 'rev-txn-2', 'status' => 'CNCL']],
+    'a rejected Revolut delivery' => ['Revolut', ['transaction_id' => 'rev-txn-3', 'status' => 'RJCT']],
+    // Carries an id, but nothing says this bank re-delivers under it.
+    'a bank whose ids are not known to survive settlement' => ['Santander', ['transaction_id' => 'san-txn-1', 'status' => 'PDNG']],
+]);
