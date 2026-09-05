@@ -170,6 +170,21 @@ test('a bank with stable ids still keys on its own transaction id and entry refe
         ->not->toBe(TransactionFingerprint::for($otherReference, 'BBVA'));
 });
 
+test('a payload the bank gave an id to is keyed on that id', function (array $overrides) {
+    expect(TransactionFingerprint::identifiesTransaction(baseEnableBankingPayload($overrides)))->toBeTrue();
+})->with([
+    'transaction id' => [['transaction_id' => 'txn-123']],
+    'entry reference' => [['entry_reference' => 'entry-456']],
+]);
+
+test('a payload with no id worth keying on falls back to its content', function (array $overrides, ?string $bankName) {
+    expect(TransactionFingerprint::identifiesTransaction(baseEnableBankingPayload($overrides), $bankName))->toBeFalse();
+})->with([
+    'nothing at all' => [[], null],
+    'a positional reference' => [['entry_reference' => '2025-05-12.3'], null],
+    'a bank that mints an id per delivery' => [['transaction_id' => 'txn-123', 'entry_reference' => 'entry-456'], 'N26'],
+]);
+
 /**
  * @param  array<string, mixed>  $overrides
  * @return array<string, mixed>

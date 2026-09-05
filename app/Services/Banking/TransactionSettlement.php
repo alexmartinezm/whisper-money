@@ -43,6 +43,40 @@ class TransactionSettlement
     private const array UNSETTLED_STATUSES = ['PDNG', 'HOLD', 'SCHD', 'CNCL', 'RJCT'];
 
     /**
+     * The subset of the above still waiting for a settled copy, as opposed to
+     * the terminal CNCL and RJCT. Only these can be imported early, and only
+     * under the conditions waitsForSettlement() states: a cancelled or
+     * rejected delivery is money that never moved, so it stays out of the
+     * ledger no matter how stable the bank's id is.
+     *
+     * @var list<string>
+     */
+    private const array AWAITING_SETTLEMENT_STATUSES = ['PDNG', 'HOLD', 'SCHD'];
+
+    /**
+     * Banks that re-deliver a settled transaction under the same upstream id
+     * its un-settled copy already carried. There the copy costs nothing to
+     * import: the settled delivery dedups against the stored row instead of
+     * landing beside it, which is the duplicate this whole class exists to
+     * prevent.
+     *
+     * Revolut is measured rather than assumed. On one production install all
+     * 2,036 of its EnableBanking rows carry an `external_transaction_id`, and
+     * not one of the 92 stored as PDNG ever acquired a settled twin — the
+     * re-delivery was being deduped away, which only happens if the id
+     * survives settlement. So skipping its pending copies prevents nothing and
+     * costs the user roughly 36 hours of blindness per card purchase, which is
+     * how long Revolut takes to move one to BOOK.
+     *
+     * A bank joins this list once its ids are shown to survive settlement, not
+     * before. N26 mints a fresh one per delivery — see UNSTABLE_ID_BANKS in
+     * TransactionFingerprint — and is the reason the skip exists at all.
+     *
+     * @var list<string>
+     */
+    private const array REDELIVERS_UNDER_THE_SAME_ID = ['revolut'];
+
+    /**
      * The un-posted form of a card payment, and the settled form of the same
      * purchase. N26 delivers both, flipping this one content field in between;
      * it is the only field that ever varies inside a duplicate group (verified
@@ -58,8 +92,12 @@ class TransactionSettlement
     private const array SETTLED_CARD_CODE = ['CCRD', 'POSD'];
 
     /**
-     * Whether the bank is handing over a delivery that has not settled, so the
-     * caller can wait for the BOOK copy instead of storing both.
+     * Whether the bank is handing over a delivery that has not settled.
+     *
+     * Half of the question waitsForSettlement() answers, and private because
+     * that is the whole audience: an un-settled delivery is not on its own a
+     * reason to hold anything back, so a caller reading this alone would draw
+     * the conclusion this class exists to prevent.
      *
      * Banks that populate `status` leave the card code alone — Revolut,
      * Santander and Sabadell hold 5.6k of the 7.6k PDNG rows in production.
@@ -69,9 +107,38 @@ class TransactionSettlement
      *
      * @param  array<string, mixed>  $data
      */
-    public static function isUnsettled(array $data): bool
+    private static function isUnsettled(array $data): bool
     {
         return in_array($data['status'] ?? null, self::UNSETTLED_STATUSES, true);
+    }
+
+    /**
+     * Whether this delivery has to be held back until the bank settles it.
+     *
+     * Holding it back is the default, because a bank that re-sends the same
+     * purchase under a new id and different content leaves nothing for dedup
+     * to match on, and the ledger ends up with both copies. Two conditions
+     * lift that, together: the payload carries an upstream id, and this bank
+     * is known to re-deliver under it. Then the settled copy collapses onto
+     * the row the pending copy wrote, and waiting buys the user nothing.
+     *
+     * `$identifiedByUpstreamId` is TransactionFingerprint's verdict on this
+     * same payload — asked there rather than re-read here, so a change to what
+     * counts as a usable id cannot leave the two disagreeing.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public static function waitsForSettlement(array $data, ?string $bankName, bool $identifiedByUpstreamId): bool
+    {
+        if (! self::isUnsettled($data)) {
+            return false;
+        }
+
+        if (! $identifiedByUpstreamId || ! self::redeliversUnderTheSameId($bankName)) {
+            return true;
+        }
+
+        return ! in_array($data['status'] ?? null, self::AWAITING_SETTLEMENT_STATUSES, true);
     }
 
     /**
@@ -85,5 +152,10 @@ class TransactionSettlement
     public static function canonicalCardCode(array $code): array
     {
         return $code === self::PENDING_CARD_CODE ? self::SETTLED_CARD_CODE : $code;
+    }
+
+    private static function redeliversUnderTheSameId(?string $bankName): bool
+    {
+        return $bankName !== null && in_array(mb_strtolower($bankName), self::REDELIVERS_UNDER_THE_SAME_ID, true);
     }
 }

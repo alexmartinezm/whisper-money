@@ -50,10 +50,63 @@ class TransactionFingerprint
      */
     public static function for(array $data, ?string $bankName = null): string
     {
-        $contentOnly = self::hasUnstableIds($bankName);
+        $upstreamId = self::upstreamId($data, $bankName);
 
-        if (! $contentOnly && ($data['transaction_id'] ?? null) !== null) {
-            return self::hash(['transaction_id', $data['transaction_id']]);
+        if ($upstreamId !== null) {
+            return self::hash($upstreamId);
+        }
+
+        $contentOnly = self::hasUnstableIds($bankName);
+        $cardCode = self::cardCode($data);
+
+        return self::hash([
+            $data['booking_date'] ?? '',
+            $data['transaction_amount']['amount'] ?? '',
+            $data['transaction_amount']['currency'] ?? '',
+            $data['credit_debit_indicator'] ?? '',
+            $data['creditor']['name'] ?? '',
+            $data['debtor']['name'] ?? '',
+            $data['creditor_account']['iban'] ?? '',
+            $data['debtor_account']['iban'] ?? '',
+            $data['debtor_account']['other']['identification'] ?? '',
+            $data['creditor_account']['other']['identification'] ?? '',
+            ...($contentOnly ? TransactionSettlement::canonicalCardCode($cardCode) : $cardCode),
+            $data['reference_number'] ?? '',
+            self::remittance($data['remittance_information'] ?? []),
+        ]);
+    }
+
+    /**
+     * Whether the bank's own id is what keys this payload, rather than the
+     * content hash below it.
+     *
+     * TransactionSettlement asks this before importing an un-settled delivery:
+     * a keyed payload means the settled re-delivery collapses onto the row
+     * already stored, while a content-hashed one would land beside it as soon
+     * as the bank changed a field on the way to BOOK.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public static function identifiesTransaction(array $data, ?string $bankName = null): bool
+    {
+        return self::upstreamId($data, $bankName) !== null;
+    }
+
+    /**
+     * The upstream id this payload is keyed by, as the hashed pair, or null
+     * when the bank gave none worth keying on.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<int, mixed>|null
+     */
+    private static function upstreamId(array $data, ?string $bankName): ?array
+    {
+        if (self::hasUnstableIds($bankName)) {
+            return null;
+        }
+
+        if (($data['transaction_id'] ?? null) !== null) {
+            return ['transaction_id', $data['transaction_id']];
         }
 
         $entryReference = $data['entry_reference'] ?? null;
@@ -72,27 +125,11 @@ class TransactionFingerprint
         // silent under-count over the systematic duplication it fixes. Fixing
         // both needs occurrence-aware dedup in the consumer (a schema change),
         // tracked as a follow-up.
-        if (! $contentOnly && $entryReference !== null && ! self::isPositionalReference($entryReference)) {
-            return self::hash(['entry_reference', $entryReference]);
+        if ($entryReference !== null && ! self::isPositionalReference($entryReference)) {
+            return ['entry_reference', $entryReference];
         }
 
-        $cardCode = self::cardCode($data);
-
-        return self::hash([
-            $data['booking_date'] ?? '',
-            $data['transaction_amount']['amount'] ?? '',
-            $data['transaction_amount']['currency'] ?? '',
-            $data['credit_debit_indicator'] ?? '',
-            $data['creditor']['name'] ?? '',
-            $data['debtor']['name'] ?? '',
-            $data['creditor_account']['iban'] ?? '',
-            $data['debtor_account']['iban'] ?? '',
-            $data['debtor_account']['other']['identification'] ?? '',
-            $data['creditor_account']['other']['identification'] ?? '',
-            ...($contentOnly ? TransactionSettlement::canonicalCardCode($cardCode) : $cardCode),
-            $data['reference_number'] ?? '',
-            self::remittance($data['remittance_information'] ?? []),
-        ]);
+        return null;
     }
 
     /**
