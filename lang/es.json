@@ -2871,5 +2871,6 @@
     "The analysis could not be written right now. Try again in a moment.": "El análisis no se ha podido escribir ahora mismo. Inténtalo en un momento.",
     "Leave empty for cash or any account without a bank.": "Déjalo vacío para efectivo o cualquier cuenta sin banco.",
     "Bank (optional)": "Banco (opcional)",
-    "No bank": "Sin banco"
+    "No bank": "Sin banco",
+    "This account is connected to your bank. Every sync overwrites today's figure, and any future date once that day arrives. Earlier dates are yours to edit and import.": "Esta cuenta está conectada a tu banco. Cada sincronización sobrescribe el importe de hoy, y el de cualquier fecha futura cuando llegue ese día. Las fechas anteriores son tuyas: puedes editarlas e importarlas."
 }

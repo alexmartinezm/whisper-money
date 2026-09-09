@@ -1,4 +1,5 @@
 import { store } from '@/actions/App/Http/Controllers/AccountBalanceController';
+import { SyncedBalanceNotice } from '@/components/accounts/synced-balance-notice';
 import AlertError from '@/components/alert-error';
 import {
     Drawer,
@@ -776,6 +777,14 @@ export function ImportBalancesDrawer({
                             <AlertError errors={[error]} />
                         </div>
                     )}
+                    {/* empty:hidden keeps the margin off the steps that
+                        render no notice: a manual account, and the import
+                        itself. */}
+                    <div className="mt-4 empty:hidden">
+                        {!isImporting && (
+                            <SyncedBalanceNotice account={selectedAccount} />
+                        )}
+                    </div>
                     <div className="mt-4">
                         {isImporting ? renderImportProgress() : renderStep()}
                     </div>
