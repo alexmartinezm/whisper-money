@@ -175,6 +175,11 @@ abstract class WriteTool extends McpTool
             'source' => $transaction->source->value,
             'creditor_name' => $transaction->creditor_name,
             'debtor_name' => $transaction->debtor_name,
+            // Plain text, and editable on any transaction through
+            // update_transaction. Rows the old client-side encryption never
+            // migrated still hold ciphertext here; they are returned as they
+            // are, because only the browser holds the key.
+            'notes' => $transaction->notes,
             'labels' => $transaction->labels
                 ->map(fn (Label $label): array => ['id' => $label->id, 'name' => $label->name])
                 ->values()
