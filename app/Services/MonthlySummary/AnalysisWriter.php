@@ -79,6 +79,7 @@ class AnalysisWriter
     public function draft(MonthlySummary $summary, User $user): ?string
     {
         $attempts = max(1, (int) config('ai_monthly_summary.attempts'));
+        $lastTransient = null;
 
         for ($attempt = 1; $attempt <= $attempts; $attempt++) {
             try {
@@ -87,6 +88,8 @@ class AnalysisWriter
                 // A provider that is overloaded, rate-limiting us or simply not
                 // reachable is expected, not a bug. Back off and try again;
                 // only give up once the attempts run out.
+                $lastTransient = $exception;
+
                 Log::warning('Monthly summary analysis attempt failed.', [
                     'summary_id' => $summary->id,
                     'attempt' => $attempt,
@@ -102,6 +105,14 @@ class AnalysisWriter
                 return null;
             }
         }
+
+        // One hiccup is expected and stays in the logs. Every attempt failing is
+        // an outage that just cost a reader their month, and with logs off the
+        // per-attempt warning only reaches Sentry as a breadcrumb on somebody
+        // else's event — so a wrong endpoint or a revoked key surfacing as
+        // connect failures would otherwise go dark. Getting here means the last
+        // attempt was one of those failures.
+        report($lastTransient);
 
         return null;
     }
