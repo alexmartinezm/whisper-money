@@ -535,9 +535,17 @@ class User extends Authenticatable implements HasLocalePreference, MustVerifyEma
         return $this->isDemoAccount() && ! app()->environment('local');
     }
 
+    /**
+     * The ADMIN_EMAIL account: the only one that can open /admin, and the only
+     * one whose integration requests are approved on the spot. Fails closed,
+     * so with ADMIN_EMAIL unset nobody is an admin - not even a user whose own
+     * email is empty.
+     */
     public function isAdmin(): bool
     {
-        return $this->email === config('mail.admin_email');
+        $adminEmail = config('mail.admin_email');
+
+        return filled($adminEmail) && $this->email === $adminEmail;
     }
 
     public function preferredLocale(): string

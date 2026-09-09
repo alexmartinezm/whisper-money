@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AccountController;
+use App\Http\Controllers\AdminController;
 use App\Http\Controllers\AgentDocsController;
 use App\Http\Controllers\Ai\AiConsentController;
 use App\Http\Controllers\Ai\CategorizationController;
@@ -260,6 +261,13 @@ Route::middleware(['auth', 'verified', 'onboarded', 'subscribed'])->group(functi
     Route::post('monthly-summary', [MonthlySummaryController::class, 'store'])->name('monthly-summary.store');
     Route::post('monthly-summary/{monthlySummary}/analysis', [MonthlySummaryController::class, 'analyse'])
         ->name('monthly-summary.analyse');
+});
+
+// Internal tools, for the ADMIN_EMAIL account only. Deliberately outside
+// `onboarded` and `subscribed`: neither says anything about being an admin.
+Route::middleware(['auth', 'verified', 'admin'])->group(function () {
+    Route::get('admin', [AdminController::class, 'index'])->name('admin.index');
+    Route::post('admin/run', [AdminController::class, 'run'])->name('admin.run');
 });
 
 require __DIR__.'/settings.php';
