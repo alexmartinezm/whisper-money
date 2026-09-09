@@ -2881,5 +2881,13 @@
     "Expiring soon": "Caduca pronto",
     "Your bank only grants access for a limited time, and this permission runs out shortly. Renew it now and your transactions keep arriving without a gap.": "Tu banco solo concede acceso durante un tiempo limitado, y este permiso caduca en breve. Renuévalo ahora y tus movimientos seguirán llegando sin interrupciones.",
     "In account currency": "En la moneda de la cuenta",
-    "≈ :amount in the account currency": "≈ :amount en la moneda de la cuenta"
+    "≈ :amount in the account currency": "≈ :amount en la moneda de la cuenta",
+    "AI suggestions are switched off.": "Las sugerencias de IA se desactivan.",
+    "Connected banks are disconnected and stop syncing.": "Los bancos conectados se desconectan y dejan de sincronizarse.",
+    "Continue with the free plan?": "¿Continuar con el plan gratis?",
+    "Disconnect and continue": "Desconectar y continuar",
+    "The AI assistant loses access to your finances.": "El asistente de IA pierde el acceso a tus finanzas.",
+    "The free plan does not include the paid features, so they are switched off:": "El plan gratis no incluye las funciones de pago, así que se desactivan:",
+    "We could not move you to the free plan. Try again.": "No hemos podido pasarte al plan gratis. Vuelve a intentarlo.",
+    "Your accounts and every transaction already imported stay. You can start a plan again whenever you want.": "Tus cuentas y todas las transacciones ya importadas se quedan. Puedes contratar un plan de nuevo cuando quieras."
 }

@@ -2504,5 +2504,14 @@
     "No bank": "Sans banque",
     "This account is connected to your bank. Every sync overwrites today's figure, and any future date once that day arrives. Earlier dates are yours to edit and import.": "Ce compte est connecté à votre banque. Chaque synchronisation écrase le montant du jour, et celui d'une date future lorsque ce jour arrive. Les dates antérieures vous appartiennent : vous pouvez les modifier et les importer.",
     "In account currency": "Dans la devise du compte",
-    "≈ :amount in the account currency": "≈ :amount dans la devise du compte"
+    "≈ :amount in the account currency": "≈ :amount dans la devise du compte",
+    "Continue with the free plan": "Continuer avec le forfait gratuit",
+    "Continue with the free plan?": "Continuer avec le forfait gratuit ?",
+    "The free plan does not include the paid features, so they are switched off:": "Le forfait gratuit n’inclut pas les fonctionnalités payantes, elles sont donc désactivées :",
+    "Connected banks are disconnected and stop syncing.": "Les banques connectées sont déconnectées et cessent de se synchroniser.",
+    "AI suggestions are switched off.": "Les suggestions IA sont désactivées.",
+    "The AI assistant loses access to your finances.": "L’assistant IA perd l’accès à vos finances.",
+    "Your accounts and every transaction already imported stay. You can start a plan again whenever you want.": "Vos comptes et toutes les transactions déjà importées restent. Vous pouvez souscrire un forfait à nouveau quand vous le souhaitez.",
+    "Disconnect and continue": "Déconnecter et continuer",
+    "We could not move you to the free plan. Try again.": "Nous n’avons pas pu vous basculer sur le forfait gratuit. Réessayez."
 }
