@@ -2525,5 +2525,8 @@
     "The AI assistant loses access to your finances.": "L’assistant IA perd l’accès à vos finances.",
     "Your accounts and every transaction already imported stay. You can start a plan again whenever you want.": "Vos comptes et toutes les transactions déjà importées restent. Vous pouvez souscrire un forfait à nouveau quand vous le souhaitez.",
     "Disconnect and continue": "Déconnecter et continuer",
-    "We could not move you to the free plan. Try again.": "Nous n’avons pas pu vous basculer sur le forfait gratuit. Réessayez."
+    "We could not move you to the free plan. Try again.": "Nous n’avons pas pu vous basculer sur le forfait gratuit. Réessayez.",
+    "A connected account keeps the bank of its connection.": "Un compte connecté conserve la banque de sa connexion.",
+    "Your bank sets the currency of a connected account.": "Votre banque définit la devise d’un compte connecté.",
+    "Archive this account first: it is still connected to your bank.": "Archivez d’abord ce compte : il est encore connecté à votre banque."
 }
