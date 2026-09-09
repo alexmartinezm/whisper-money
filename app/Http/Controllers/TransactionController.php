@@ -237,6 +237,83 @@ class TransactionController extends Controller
     }
 
     /**
+     * A split transaction is filed under its postings, so its category and
+     * amount belong to the split editor. Checked twice on purpose: once before
+     * the work starts, and again under the row lock, where a split created
+     * concurrently would otherwise slip through.
+     */
+    private function guardSplitLedgerChange(Request $request, Transaction $transaction, bool $hasSplitUpdate): void
+    {
+        if ($hasSplitUpdate || ! $request->hasAny(['category_id', 'amount'])) {
+            return;
+        }
+
+        if (! $transaction->splits()->exists()) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'splits' => 'Category or amount changes on a split transaction require an explicit split replacement or removal.',
+        ]);
+    }
+
+    /**
+     * A user-set category overrides any AI assignment: learn the correction as a
+     * forward-looking rule, log/self-heal as needed, and reset the provenance
+     * columns on `$data` so the save carries them.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function recordCategoryOverride(Transaction $transaction, array &$data): ?AutomationRule
+    {
+        $newCategoryId = $data['category_id'] ?? null;
+
+        if ($newCategoryId === $transaction->category_id) {
+            return null;
+        }
+
+        $data['category_source'] = $newCategoryId === null ? null : CategorySource::Manual->value;
+        $data['ai_confidence'] = null;
+        $data['categorized_by_rule_id'] = null;
+
+        return app(CategoryOverrideHandler::class)->record($transaction, $newCategoryId);
+    }
+
+    /**
+     * Persist the edit, labels included.
+     *
+     * A pivot change leaves the model itself clean, so labels-only edits are
+     * touched into dirtiness on purpose: the `updated` event is what the
+     * listeners downstream run on, and they have to see the new labels.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function saveWithLabels(Transaction $transaction, array $data, bool $hasLabelUpdate): void
+    {
+        if (! empty($data)) {
+            $transaction->fill($data);
+        }
+
+        if ($transaction->isDirty() || $hasLabelUpdate) {
+            if (! $transaction->isDirty()) {
+                $transaction->touch();
+            }
+            $transaction->save();
+        }
+    }
+
+    /**
+     * Whether the edit moved anything the account's balance snapshots are built
+     * from. Read off the raw originals so a cast does not make an unchanged
+     * column look changed.
+     */
+    private function balanceFieldsChanged(Transaction $before, Transaction $after): bool
+    {
+        return collect(ManualBalanceAdjuster::BALANCE_AFFECTING_ATTRIBUTES)
+            ->contains(fn (string $field): bool => $before->getRawOriginal($field) !== $after->getRawOriginal($field));
+    }
+
+    /**
      * Queue a rebuild of a connected account's derived balance history when a
      * transaction lands on a day that history already covers.
      *
@@ -285,11 +362,7 @@ class TransactionController extends Controller
 
         $learnedRule = null;
 
-        if ($transaction->splits()->exists() && ! $hasSplitUpdate && ($request->has('category_id') || $request->has('amount'))) {
-            throw ValidationException::withMessages([
-                'splits' => 'Category or amount changes on a split transaction require an explicit split replacement or removal.',
-            ]);
-        }
+        $this->guardSplitLedgerChange($request, $transaction, $hasSplitUpdate);
 
         DB::transaction(function () use (
             $request,
@@ -309,24 +382,12 @@ class TransactionController extends Controller
             );
             $originalSnapshot = clone $transaction;
 
-            if ($transaction->splits()->exists() && ! $hasSplitUpdate && $request->hasAny(['category_id', 'amount'])) {
-                throw ValidationException::withMessages([
-                    'splits' => 'Category or amount changes on a split transaction require an explicit split replacement or removal.',
-                ]);
-            }
+            $this->guardSplitLedgerChange($request, $transaction, $hasSplitUpdate);
 
             // Split creation supersedes the simple category and must not teach a
             // single-category correction.
             if ($request->has('category_id') && ! ($hasSplitUpdate && $splits !== [])) {
-                $newCategoryId = $data['category_id'] ?? null;
-
-                if ($newCategoryId !== $transaction->category_id) {
-                    $learnedRule = app(CategoryOverrideHandler::class)->record($transaction, $newCategoryId);
-
-                    $data['category_source'] = $newCategoryId === null ? null : CategorySource::Manual->value;
-                    $data['ai_confidence'] = null;
-                    $data['categorized_by_rule_id'] = null;
-                }
+                $learnedRule = $this->recordCategoryOverride($transaction, $data);
             }
 
             if ($hasLabelUpdate) {
@@ -344,21 +405,10 @@ class TransactionController extends Controller
                 $transaction->setRawAttributes($updated->getAttributes(), true);
                 $transaction->setRelations($updated->getRelations());
             } else {
-                if (! empty($data)) {
-                    $transaction->fill($data);
-                }
-
-                if ($transaction->isDirty() || $hasLabelUpdate) {
-                    if (! $transaction->isDirty() && $hasLabelUpdate) {
-                        $transaction->touch();
-                    }
-                    $transaction->save();
-                }
+                $this->saveWithLabels($transaction, $data, $hasLabelUpdate);
             }
 
-            $balanceFieldsChanged = collect(['amount', 'transaction_date', 'account_id'])
-                ->contains(fn (string $field): bool => $originalSnapshot->getRawOriginal($field) !== $transaction->getRawOriginal($field));
-            if ($request->boolean('update_balance') && $balanceFieldsChanged) {
+            if ($request->boolean('update_balance') && $this->balanceFieldsChanged($originalSnapshot, $transaction)) {
                 $balanceAdjuster->reverseDeletedTransaction($originalSnapshot);
                 $balanceAdjuster->applyCreatedTransaction($transaction->load('account'));
             }

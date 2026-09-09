@@ -7,6 +7,7 @@ use App\Models\AutomationRule;
 use App\Models\Budget;
 use App\Models\BudgetPeriod;
 use App\Models\Category;
+use App\Models\ExchangeRate;
 use App\Models\Label;
 use App\Models\Transaction;
 use App\Models\User;
@@ -102,27 +103,6 @@ test('users can update their own transaction category', function () {
         'id' => $transaction->id,
         'category_id' => $category->id,
     ]);
-});
-
-test('manual category updates return cleared AI provenance', function () {
-    $user = User::factory()->onboarded()->create();
-    $account = Account::factory()->create(['user_id' => $user->id]);
-    $aiCategory = Category::factory()->create(['user_id' => $user->id]);
-    $manualCategory = Category::factory()->create(['user_id' => $user->id]);
-    $transaction = Transaction::factory()->create([
-        'user_id' => $user->id,
-        'account_id' => $account->id,
-        'category_id' => $aiCategory->id,
-        'category_source' => CategorySource::Ai,
-        'ai_confidence' => 0.95,
-    ]);
-
-    actingAs($user)->patchJson(route('transactions.update', $transaction), [
-        'category_id' => $manualCategory->id,
-    ])->assertSuccessful()
-        ->assertJsonPath('data.category_source', CategorySource::Manual->value)
-        ->assertJsonPath('data.ai_confidence', null)
-        ->assertJsonPath('data.ai_categorized', false);
 });
 
 test('users can update transaction notes', function () {
@@ -337,6 +317,27 @@ test('a manually created transaction records no original date when its date move
     ]);
 });
 
+test('manual category updates return cleared AI provenance', function () {
+    $user = User::factory()->onboarded()->create();
+    $account = Account::factory()->create(['user_id' => $user->id]);
+    $aiCategory = Category::factory()->create(['user_id' => $user->id]);
+    $manualCategory = Category::factory()->create(['user_id' => $user->id]);
+    $transaction = Transaction::factory()->create([
+        'user_id' => $user->id,
+        'account_id' => $account->id,
+        'category_id' => $aiCategory->id,
+        'category_source' => CategorySource::Ai,
+        'ai_confidence' => 0.95,
+    ]);
+
+    actingAs($user)->patchJson(route('transactions.update', $transaction), [
+        'category_id' => $manualCategory->id,
+    ])->assertSuccessful()
+        ->assertJsonPath('data.category_source', CategorySource::Manual->value)
+        ->assertJsonPath('data.ai_confidence', null)
+        ->assertJsonPath('data.ai_categorized', false);
+});
+
 // Upstream locks the date on a part of a split, because there each part is a
 // transaction of its own carrying split_parent_id. Here a split lives in
 // transaction_splits and the parent keeps the single date its parts follow, so
@@ -413,7 +414,7 @@ test('users cannot delete other users transactions', function () {
 
 test('deleting a manual account expense increases the current balance when requested', function () {
     $user = User::factory()->onboarded()->create();
-    $account = Account::factory()->create(['user_id' => $user->id]);
+    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
 
     $account->balances()->create([
         'balance_date' => now()->toDateString(),
@@ -424,6 +425,7 @@ test('deleting a manual account expense increases the current balance when reque
         'user_id' => $user->id,
         'account_id' => $account->id,
         'amount' => -2500,
+        'currency_code' => 'EUR',
     ]);
 
     actingAs($user)
@@ -439,7 +441,7 @@ test('deleting a manual account expense increases the current balance when reque
 
 test('deleting a manual account income decreases the current balance when requested', function () {
     $user = User::factory()->onboarded()->create();
-    $account = Account::factory()->create(['user_id' => $user->id]);
+    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
 
     $account->balances()->create([
         'balance_date' => now()->toDateString(),
@@ -450,6 +452,7 @@ test('deleting a manual account income decreases the current balance when reques
         'user_id' => $user->id,
         'account_id' => $account->id,
         'amount' => 3000,
+        'currency_code' => 'EUR',
     ]);
 
     actingAs($user)
@@ -465,7 +468,7 @@ test('deleting a manual account income decreases the current balance when reques
 
 test('deleting a past-dated transaction reverses it on that date and every later balance', function () {
     $user = User::factory()->onboarded()->create();
-    $account = Account::factory()->create(['user_id' => $user->id]);
+    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
 
     $account->balances()->create(['balance_date' => '2025-11-10', 'balance' => 5000]);
     $account->balances()->create(['balance_date' => '2025-11-11', 'balance' => 5000]);
@@ -475,6 +478,7 @@ test('deleting a past-dated transaction reverses it on that date and every later
         'account_id' => $account->id,
         'amount' => -1500,
         'transaction_date' => '2025-11-10',
+        'currency_code' => 'EUR',
     ]);
 
     actingAs($user)
@@ -547,7 +551,7 @@ test('deleting a connected account transaction never changes the balance', funct
 
 test('creating a transaction updates the balance on its date when one exists', function () {
     $user = User::factory()->onboarded()->create();
-    $account = Account::factory()->create(['user_id' => $user->id]);
+    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'USD']);
 
     $account->balances()->create([
         'balance_date' => '2025-11-11',
@@ -574,7 +578,7 @@ test('creating a transaction updates the balance on its date when one exists', f
 
 test('creating a transaction creates a balance on its date from the closest earlier balance', function () {
     $user = User::factory()->onboarded()->create();
-    $account = Account::factory()->create(['user_id' => $user->id]);
+    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'USD']);
 
     $account->balances()->create([
         'balance_date' => '2025-11-01',
@@ -600,7 +604,7 @@ test('creating a transaction creates a balance on its date from the closest earl
 
 test('creating a past-dated transaction updates that date and every later balance', function () {
     $user = User::factory()->onboarded()->create();
-    $account = Account::factory()->create(['user_id' => $user->id]);
+    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'USD']);
 
     $account->balances()->create(['balance_date' => '2025-11-10', 'balance' => 1000]);
     $account->balances()->create(['balance_date' => '2025-11-11', 'balance' => 1000]);
@@ -629,7 +633,7 @@ test('creating a past-dated transaction updates that date and every later balanc
 
 test('creating the first transaction on an account creates a balance equal to its amount', function () {
     $user = User::factory()->onboarded()->create();
-    $account = Account::factory()->create(['user_id' => $user->id]);
+    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'USD']);
 
     actingAs($user)->postJson(route('transactions.store'), [
         'account_id' => $account->id,
@@ -693,7 +697,7 @@ test('creating a connected account transaction never changes the balance', funct
 
 test('editing a manual transaction amount moves the balance by the delta when requested', function () {
     $user = User::factory()->onboarded()->create();
-    $account = Account::factory()->create(['user_id' => $user->id]);
+    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
 
     // Balance already reflects the transaction's original 2500 amount (100000 base + 2500).
     $account->balances()->create([
@@ -706,6 +710,7 @@ test('editing a manual transaction amount moves the balance by the delta when re
         'account_id' => $account->id,
         'amount' => 2500,
         'transaction_date' => '2025-11-11',
+        'currency_code' => 'EUR',
         'source' => 'manually_created',
     ]);
 
@@ -751,8 +756,8 @@ test('editing a manual transaction amount does not change the balance when not r
 
 test('moving a manual transaction between accounts reverses the old balance and credits the new one', function () {
     $user = User::factory()->onboarded()->create();
-    $fromAccount = Account::factory()->create(['user_id' => $user->id]);
-    $toAccount = Account::factory()->create(['user_id' => $user->id]);
+    $fromAccount = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
+    $toAccount = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
 
     // Origin balance embeds the transaction's 2500; destination starts flat.
     $fromAccount->balances()->create(['balance_date' => '2025-11-11', 'balance' => 102500]);
@@ -763,6 +768,7 @@ test('moving a manual transaction between accounts reverses the old balance and 
         'account_id' => $fromAccount->id,
         'amount' => 2500,
         'transaction_date' => '2025-11-11',
+        'currency_code' => 'EUR',
         'source' => 'manually_created',
     ]);
 
@@ -783,10 +789,132 @@ test('moving a manual transaction between accounts reverses the old balance and 
     ]);
 });
 
-test('editing only the currency of a manual transaction does not change the balance', function () {
+test('storing a transaction in a currency other than the account one keeps it as typed', function () {
     $user = User::factory()->onboarded()->create();
-    $account = Account::factory()->create(['user_id' => $user->id]);
+    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
 
+    actingAs($user)->postJson(route('transactions.store'), [
+        'account_id' => $account->id,
+        'description' => 'Hotel in New York',
+        'transaction_date' => '2025-11-11',
+        'amount' => -12000,
+        'currency_code' => 'USD',
+        'source' => 'manually_created',
+    ])->assertCreated();
+
+    $this->assertDatabaseHas('transactions', [
+        'account_id' => $account->id,
+        'amount' => -12000,
+        'currency_code' => 'USD',
+    ]);
+});
+
+test('creating a foreign-currency transaction shifts the balance by its converted amount', function () {
+    $user = User::factory()->onboarded()->create();
+    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
+
+    ExchangeRate::factory()->create([
+        'base_currency' => 'eur',
+        'date' => '2025-11-11',
+        'rates' => ['eur' => 1.0, 'usd' => 2.0],
+    ]);
+
+    $account->balances()->create(['balance_date' => '2025-11-11', 'balance' => 100000]);
+
+    actingAs($user)->postJson(route('transactions.store'), [
+        'account_id' => $account->id,
+        'description' => 'Hotel in New York',
+        'transaction_date' => '2025-11-11',
+        'amount' => -12000,
+        'currency_code' => 'USD',
+        'source' => 'manually_created',
+        'update_balance' => true,
+    ])->assertCreated();
+
+    // 120 USD at 2 USD per EUR is 60 EUR off an account held in euros.
+    $this->assertDatabaseHas('account_balances', [
+        'account_id' => $account->id,
+        'balance_date' => '2025-11-11',
+        'balance' => 94000,
+    ]);
+});
+
+test('deleting a foreign-currency transaction gives back exactly what it took', function () {
+    $user = User::factory()->onboarded()->create();
+    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
+
+    ExchangeRate::factory()->create([
+        'base_currency' => 'eur',
+        'date' => '2025-11-11',
+        'rates' => ['eur' => 1.0, 'usd' => 2.0],
+    ]);
+
+    $account->balances()->create(['balance_date' => '2025-11-11', 'balance' => 94000]);
+
+    $transaction = Transaction::factory()->create([
+        'user_id' => $user->id,
+        'account_id' => $account->id,
+        'amount' => -12000,
+        'currency_code' => 'USD',
+        'transaction_date' => '2025-11-11',
+        'source' => 'manually_created',
+    ]);
+
+    actingAs($user)
+        ->deleteJson(route('transactions.destroy', $transaction), ['update_balance' => true])
+        ->assertSuccessful();
+
+    $this->assertDatabaseHas('account_balances', [
+        'account_id' => $account->id,
+        'balance_date' => '2025-11-11',
+        'balance' => 100000,
+    ]);
+});
+
+test('a transaction in a currency with no rate leaves the balance untouched', function () {
+    $user = User::factory()->onboarded()->create();
+    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
+
+    ExchangeRate::factory()->create([
+        'base_currency' => 'eur',
+        'date' => '2025-11-11',
+        'rates' => ['eur' => 1.0],
+    ]);
+
+    $account->balances()->create(['balance_date' => '2025-11-11', 'balance' => 100000]);
+
+    actingAs($user)->postJson(route('transactions.store'), [
+        'account_id' => $account->id,
+        'description' => 'Hotel in New York',
+        'transaction_date' => '2025-11-11',
+        'amount' => -12000,
+        'currency_code' => 'USD',
+        'source' => 'manually_created',
+        'update_balance' => true,
+    ])->assertCreated();
+
+    // The transaction is still stored; only the balance is held back, because
+    // shifting it by the unconverted number would write a figure nobody can
+    // reconcile against the account.
+    $this->assertDatabaseHas('transactions', ['account_id' => $account->id, 'amount' => -12000]);
+    $this->assertDatabaseHas('account_balances', [
+        'account_id' => $account->id,
+        'balance_date' => '2025-11-11',
+        'balance' => 100000,
+    ]);
+});
+
+test('editing only the currency of a manual transaction re-converts the balance', function () {
+    $user = User::factory()->onboarded()->create();
+    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
+
+    ExchangeRate::factory()->create([
+        'base_currency' => 'eur',
+        'date' => '2025-11-11',
+        'rates' => ['eur' => 1.0, 'usd' => 2.0],
+    ]);
+
+    // Balance already embeds the transaction at 2500 EUR.
     $account->balances()->create(['balance_date' => '2025-11-11', 'balance' => 102500]);
 
     $transaction = Transaction::factory()->create([
@@ -794,19 +922,20 @@ test('editing only the currency of a manual transaction does not change the bala
         'account_id' => $account->id,
         'amount' => 2500,
         'transaction_date' => '2025-11-11',
-        'currency_code' => 'USD',
+        'currency_code' => 'EUR',
         'source' => 'manually_created',
     ]);
 
     actingAs($user)->patchJson(route('transactions.update', $transaction), [
-        'currency_code' => 'EUR',
+        'currency_code' => 'USD',
         'update_balance' => true,
     ])->assertSuccessful();
 
+    // The same 2500 is now dollars, worth half as many euros to the account.
     $this->assertDatabaseHas('account_balances', [
         'account_id' => $account->id,
         'balance_date' => '2025-11-11',
-        'balance' => 102500,
+        'balance' => 101250,
     ]);
 });
 

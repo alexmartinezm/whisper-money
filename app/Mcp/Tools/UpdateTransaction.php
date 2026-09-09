@@ -43,7 +43,7 @@ class UpdateTransaction extends WriteTool
         return [
             'transaction_id' => $schema->string()->description('Id of the transaction to edit.')->required(),
             'description' => $schema->string()->description('New description.'),
-            'amount' => $schema->integer()->description('New signed amount in minor units (cents).'),
+            'amount' => $schema->integer()->description('New signed amount, in the minor units of the transaction\'s own currency.'),
             'transaction_date' => $schema->string()->description('New transaction date, YYYY-MM-DD.'),
             'currency_code' => $schema->string()->description('New ISO 4217 currency code (3 letters).'),
             'account_id' => $schema->string()->description('Move the transaction to another account.'),
@@ -184,7 +184,7 @@ class UpdateTransaction extends WriteTool
      */
     private function syncManualBalance(Request $request, Transaction $transaction, Transaction $originalSnapshot): bool
     {
-        if (! $request->boolean('update_balance') || ! $transaction->wasChanged(['amount', 'transaction_date', 'account_id'])) {
+        if (! $request->boolean('update_balance') || ! $transaction->wasChanged(ManualBalanceAdjuster::BALANCE_AFFECTING_ATTRIBUTES)) {
             return false;
         }
 

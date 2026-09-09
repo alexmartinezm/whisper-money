@@ -13,6 +13,13 @@ import {
 const inertiaProps = vi.hoisted(() => ({
     features: { transactionSplitting: true },
     auth: { user: { currency_code: 'EUR' } },
+    currencies: {
+        profile: [{ code: 'EUR', name: 'Euro' }],
+        accounts: [
+            { code: 'EUR', name: 'Euro' },
+            { code: 'USD', name: 'US Dollar' },
+        ],
+    },
 }));
 
 vi.mock('@inertiajs/react', () => ({
@@ -65,14 +72,29 @@ vi.mock('sonner', () => ({
 }));
 
 vi.mock('@/components/ui/select', () => ({
+    // The dialog renders more than one Select; a named one gets a testid of its
+    // own so the account's stays unambiguous.
     Select: ({
+        name,
         value,
+        onValueChange,
         children,
     }: {
+        name?: string;
         value?: string;
+        onValueChange?: (value: string) => void;
         children: React.ReactNode;
     }) => (
-        <div data-testid="account-value" data-value={value ?? ''}>
+        <div
+            data-testid={name ? `${name}-value` : 'account-value'}
+            data-value={value ?? ''}
+            onClick={(event) => {
+                const next = (event.target as HTMLElement).dataset.selectValue;
+                if (next) {
+                    onValueChange?.(next);
+                }
+            }}
+        >
             {children}
         </div>
     ),
@@ -82,12 +104,20 @@ vi.mock('@/components/ui/select', () => ({
     SelectContent: ({ children }: { children: React.ReactNode }) => (
         <div>{children}</div>
     ),
-    SelectItem: ({ children }: { children: React.ReactNode }) => (
-        <div>{children}</div>
-    ),
-    SelectValue: ({ placeholder }: { placeholder?: string }) => (
-        <span>{placeholder}</span>
-    ),
+    SelectItem: ({
+        value,
+        children,
+    }: {
+        value: string;
+        children: React.ReactNode;
+    }) => <div data-select-value={value}>{children}</div>,
+    SelectValue: ({
+        placeholder,
+        children,
+    }: {
+        placeholder?: string;
+        children?: React.ReactNode;
+    }) => <span>{children ?? placeholder}</span>,
 }));
 
 vi.mock('@/components/ui/dialog', () => ({
@@ -376,9 +406,189 @@ describe('EditTransactionDialog', () => {
             />,
         );
 
-        // inertiaProps puts the profile on EUR; a hardcoded USD used to show here.
-        expect(screen.getByText('€')).toBeInTheDocument();
-        expect(screen.queryByText('$')).not.toBeInTheDocument();
+        // inertiaProps puts the profile on EUR; a hardcoded USD used to show
+        // here. The symbol has since become a picker, so the same guarantee is
+        // read off the code it starts on.
+        expect(screen.getByTestId('currency_code-value')).toHaveAttribute(
+            'data-value',
+            'EUR',
+        );
+    });
+
+    it('defaults the currency to the account it is being added to', () => {
+        render(
+            <EditTransactionDialog
+                transaction={null}
+                categories={[]}
+                accounts={[{ ...checkingAccount, currency_code: 'USD' }]}
+                banks={[]}
+                labels={[]}
+                open
+                onOpenChange={vi.fn()}
+                onSuccess={vi.fn()}
+                mode="create"
+                initialAccountId="account-1"
+            />,
+        );
+
+        expect(screen.getByTestId('currency_code-value')).toHaveAttribute(
+            'data-value',
+            'USD',
+        );
+    });
+
+    it('stores the picked currency rather than the account one', async () => {
+        vi.mocked(transactionSyncService.create).mockResolvedValue({
+            id: 'tx-new',
+            account_id: 'account-1',
+            amount: -4000,
+            currency_code: 'USD',
+        } as never);
+
+        render(
+            <EditTransactionDialog
+                transaction={null}
+                categories={[]}
+                accounts={[checkingAccount]}
+                banks={[]}
+                labels={[]}
+                open
+                onOpenChange={vi.fn()}
+                onSuccess={vi.fn()}
+                mode="create"
+                initialAccountId="account-1"
+            />,
+        );
+
+        fireEvent.click(screen.getByText('USD - US Dollar'));
+
+        fireEvent.change(
+            screen.getByPlaceholderText('Transaction description'),
+            { target: { value: 'Hotel' } },
+        );
+        const amountInput = screen.getByPlaceholderText('25.00');
+        fireEvent.change(amountInput, { target: { value: '40' } });
+        fireEvent.blur(amountInput);
+        fireEvent.click(screen.getByTestId('submit-transaction'));
+
+        await waitFor(() => {
+            expect(transactionSyncService.create).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    amount: -4000,
+                    currency_code: 'USD',
+                }),
+                expect.anything(),
+            );
+        });
+    });
+
+    it('shows what a foreign-currency amount comes to in the account currency', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ amount: 3700 }),
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        render(
+            <EditTransactionDialog
+                transaction={null}
+                categories={[]}
+                accounts={[checkingAccount]}
+                banks={[]}
+                labels={[]}
+                open
+                onOpenChange={vi.fn()}
+                onSuccess={vi.fn()}
+                mode="create"
+                initialAccountId="account-1"
+            />,
+        );
+
+        fireEvent.click(screen.getByText('USD - US Dollar'));
+
+        const amountInput = screen.getByPlaceholderText('25.00');
+        fireEvent.change(amountInput, { target: { value: '40' } });
+        fireEvent.blur(amountInput);
+
+        await waitFor(() => {
+            expect(screen.getByTestId('converted-amount')).toBeInTheDocument();
+        });
+
+        vi.unstubAllGlobals();
+    });
+
+    it('shows nothing extra when the transaction is in the account currency', async () => {
+        const fetchMock = vi.fn();
+        vi.stubGlobal('fetch', fetchMock);
+
+        render(
+            <EditTransactionDialog
+                transaction={null}
+                categories={[]}
+                accounts={[checkingAccount]}
+                banks={[]}
+                labels={[]}
+                open
+                onOpenChange={vi.fn()}
+                onSuccess={vi.fn()}
+                mode="create"
+                initialAccountId="account-1"
+            />,
+        );
+
+        const amountInput = screen.getByPlaceholderText('25.00');
+        fireEvent.change(amountInput, { target: { value: '40' } });
+        fireEvent.blur(amountInput);
+
+        await waitFor(() => {
+            expect(
+                screen.queryByTestId('converted-amount'),
+            ).not.toBeInTheDocument();
+        });
+        // Same currency on both sides: nothing to ask the server for.
+        expect(fetchMock).not.toHaveBeenCalled();
+
+        vi.unstubAllGlobals();
+    });
+
+    it('keeps the original alone when no rate can be found', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            json: async () => ({ amount: null }),
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        render(
+            <EditTransactionDialog
+                transaction={null}
+                categories={[]}
+                accounts={[checkingAccount]}
+                banks={[]}
+                labels={[]}
+                open
+                onOpenChange={vi.fn()}
+                onSuccess={vi.fn()}
+                mode="create"
+                initialAccountId="account-1"
+            />,
+        );
+
+        fireEvent.click(screen.getByText('USD - US Dollar'));
+
+        const amountInput = screen.getByPlaceholderText('25.00');
+        fireEvent.change(amountInput, { target: { value: '40' } });
+        fireEvent.blur(amountInput);
+
+        await waitFor(() => {
+            expect(fetchMock).toHaveBeenCalled();
+        });
+
+        // A figure that could not be converted is never rendered as one.
+        expect(
+            screen.queryByTestId('converted-amount'),
+        ).not.toBeInTheDocument();
+
+        vi.unstubAllGlobals();
     });
 
     it('checks "update account balance" by default in create mode', () => {

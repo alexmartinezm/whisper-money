@@ -2879,5 +2879,7 @@
     "You can renew it right now, before it runs out, and nothing will stop syncing. It takes the same two minutes as connecting the bank did.": "Puedes renovarlo ahora mismo, antes de que caduque, y no se interrumpirá la sincronización. Se tarda los mismos dos minutos que al conectar el banco.",
     "Renew Connection": "Renovar conexión",
     "Expiring soon": "Caduca pronto",
-    "Your bank only grants access for a limited time, and this permission runs out shortly. Renew it now and your transactions keep arriving without a gap.": "Tu banco solo concede acceso durante un tiempo limitado, y este permiso caduca en breve. Renuévalo ahora y tus movimientos seguirán llegando sin interrupciones."
+    "Your bank only grants access for a limited time, and this permission runs out shortly. Renew it now and your transactions keep arriving without a gap.": "Tu banco solo concede acceso durante un tiempo limitado, y este permiso caduca en breve. Renuévalo ahora y tus movimientos seguirán llegando sin interrupciones.",
+    "In account currency": "En la moneda de la cuenta",
+    "≈ :amount in the account currency": "≈ :amount en la moneda de la cuenta"
 }
