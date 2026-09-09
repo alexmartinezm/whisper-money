@@ -56,4 +56,33 @@ describe('mergeAuthoritativeTransactions', () => {
         });
         expect(merged[1]).toBe(previous[1]);
     });
+
+    it('clears label_ids when the bulk action removed every label', () => {
+        // The table renders labels from `label_ids`, not from `labels`, so a
+        // merge that refreshed only the latter would detach the labels
+        // server-side and leave every badge on screen. The authoritative row
+        // arrives with `label_ids` already derived from the server's `labels`
+        // by `transformTransactionFromServer`, and the spread must carry it.
+        const previous = [
+            transaction('tx-1', {
+                label_ids: ['label-1', 'label-2'],
+                labels: [
+                    { id: 'label-1', name: 'Work' },
+                    { id: 'label-2', name: 'Travel' },
+                ],
+            } as Partial<DecryptedTransaction>),
+        ];
+        const authoritative = [
+            {
+                ...previous[0],
+                label_ids: [],
+                labels: [],
+            } as unknown as ServerTransaction,
+        ];
+
+        const merged = mergeAuthoritativeTransactions(previous, authoritative);
+
+        expect(merged[0].label_ids).toEqual([]);
+        expect(merged[0].labels).toEqual([]);
+    });
 });
