@@ -9,6 +9,7 @@ use App\Http\Requests\IndexTransactionRequest;
 use App\Http\Requests\StoreTransactionRequest;
 use App\Http\Requests\UpdateTransactionRequest;
 use App\Jobs\ReassignTransactionsToBudgets;
+use App\Jobs\RecalculateHistoricalBalancesJob;
 use App\Models\Account;
 use App\Models\AutomationRule;
 use App\Models\Bank;
@@ -17,6 +18,7 @@ use App\Models\Label;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Ai\CategoryOverrideHandler;
+use App\Services\Banking\BalanceSyncService;
 use App\Services\ManualBalanceAdjuster;
 use App\Services\Transactions\ReplaceTransactionSplits;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
@@ -227,9 +229,43 @@ class TransactionController extends Controller
             }
         }, attempts: 5);
 
+        $this->recalculateBalanceHistoryIfBackdated($transaction);
+
         return response()->json([
             'data' => $transaction->fresh()->load(['labels', 'splits.category'])->append(['is_split', 'split_count']),
         ], 201);
+    }
+
+    /**
+     * Queue a rebuild of a connected account's derived balance history when a
+     * transaction lands on a day that history already covers.
+     *
+     * Those balances are walked backwards from the bank's latest figure, so a
+     * row dated inside the walked range changes every earlier day. In practice
+     * that means an import: the flow posts one row at a time, and the job is
+     * unique per account, so months of rows collapse into a single run.
+     */
+    private function recalculateBalanceHistoryIfBackdated(Transaction $transaction): void
+    {
+        $account = $transaction->account;
+
+        if ($account === null || ! $account->isConnected()) {
+            return;
+        }
+
+        if (! in_array($transaction->source, BalanceSyncService::WALKED_SOURCES, true)) {
+            return;
+        }
+
+        $newestBalance = $account->balances()
+            ->orderByDesc('balance_date')
+            ->first();
+
+        if ($newestBalance === null || ! $transaction->transaction_date->lt($newestBalance->balance_date)) {
+            return;
+        }
+
+        RecalculateHistoricalBalancesJob::dispatch($account);
     }
 
     public function update(UpdateTransactionRequest $request, Transaction $transaction, ManualBalanceAdjuster $balanceAdjuster, ReplaceTransactionSplits $replaceSplits): JsonResponse
