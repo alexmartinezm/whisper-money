@@ -479,3 +479,11 @@ test('job applies rules to transactions matching filters', function () {
     expect($progress['processed'])->toBe(1);
     expect($progress['updated'])->toBe(1);
 });
+
+test('bulk endpoint rejects a filter date that is not a plain Y-m-d date', function () {
+    $this->actingAs($this->user)
+        ->postJson(route('transactions.re-evaluate-rules.bulk'), [
+            'filters' => ['date_from' => '275752-07-04'],
+        ])
+        ->assertJsonValidationErrors('filters.date_from');
+});
