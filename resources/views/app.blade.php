@@ -1,16 +1,35 @@
+@php
+    // The status bar colour follows the app's own appearance preference, not the
+    // OS one: a user on a dark phone with the app set to light gets a light bar.
+    // Hex mirrors of --background in resources/css/app.css.
+    $appearance = $appearance ?? 'system';
+    $lightBackground = '#ffffff';
+    $darkBackground = '#1c1c1c';
+
+    // Android tints the system bars — the bottom navigation bar included — from
+    // the page's colour scheme, so it has to be declared for the theme the app
+    // renders, not the one the phone is on.
+    $colorScheme = in_array($appearance, ['light', 'dark'], true) ? $appearance : 'light dark';
+@endphp
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" translate="no" @class(['notranslate', 'dark' => ($appearance ?? 'system') == 'dark'])>
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" translate="no" @class(['notranslate', 'dark' => $appearance === 'dark'])>
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-        <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-        <meta name="theme-color" content="#383838" media="(prefers-color-scheme: dark)">
+        {{-- Before any stylesheet, so the system bars are already right at first paint. --}}
+        <meta name="color-scheme" content="{{ $colorScheme }}">
+        @if ($appearance === 'system')
+            <meta name="theme-color" content="{{ $lightBackground }}" media="(prefers-color-scheme: light)">
+            <meta name="theme-color" content="{{ $darkBackground }}" media="(prefers-color-scheme: dark)">
+        @else
+            <meta name="theme-color" content="{{ $appearance === 'dark' ? $darkBackground : $lightBackground }}">
+        @endif
         <meta name="google" content="notranslate">
 
         {{-- Inline script to detect system dark mode preference and apply it immediately --}}
         <script>
             (function() {
-                const appearance = @json($appearance ?? 'system');
+                const appearance = @json($appearance);
 
                 if (appearance === 'system') {
                     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;

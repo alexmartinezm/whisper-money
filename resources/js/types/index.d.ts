@@ -9,6 +9,8 @@ export interface Auth {
     user: User;
     hasProPlan: boolean;
     isDemoAccount: boolean;
+    /** The single ADMIN_EMAIL account, the only one that can open /admin. */
+    isAdmin: boolean;
 }
 
 export interface BreadcrumbItem {

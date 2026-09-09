@@ -90,9 +90,12 @@ data.
 Write tools ... require a read & write Sanctum token; OAuth connections follow the current
 WriteTool policy. A read-only Sanctum token can analyse data but never change it. Manual
 transactions can be created on any account, bank-connected ones included — a sync never
-removes them. Bank/imported transactions themselves are protected: only manually-created
-ones can be edited or deleted, though you can categorize and label any transaction, and
-split any accessible transaction without changing its ledger fields. Balances can only be
+removes them. Bank/imported transactions keep their core fields protected: only a
+manually-created one can change its description, amount, date, currency, account or
+counterparty names, and only a manually-created one can be deleted. Their notes and
+category are not locked — `update_transaction` writes those on any transaction — and you
+can label any transaction, and split any accessible transaction without changing its
+ledger fields. Balances can only be
 recorded on non-connected accounts, since a connected account's balances come from the bank
 and would be overwritten (`list_balances` reads any account's, `delete_balance` removes a
 manual one recorded by mistake). `split_transaction` replaces all category postings at once;

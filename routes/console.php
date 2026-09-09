@@ -30,6 +30,7 @@ Schedule::command('loans:generate-balances')->monthlyOn(1, '00:00');
 Schedule::command('email:paywall-follow-up')->dailyAt('10:00')->timezone('Europe/Madrid');
 Schedule::command('email:ai-consent-follow-up')->dailyAt('10:15')->timezone('Europe/Madrid');
 Schedule::command('email:inactive-no-bank')->dailyAt('09:45')->timezone('Europe/Madrid');
+Schedule::command('email:connection-expiring')->dailyAt('09:50')->timezone('Europe/Madrid');
 // Both of these mail REPORT_RECIPIENTS and, with nobody to mail, exit non-zero
 // by design so an operator running them by hand is told. On a schedule that
 // same exit is an exception a day about a setting, so skip instead: an unset

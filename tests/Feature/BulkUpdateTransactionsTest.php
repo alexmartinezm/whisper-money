@@ -16,6 +16,13 @@ beforeEach(function () {
     $this->category = Category::factory()->create(['user_id' => $this->user->id]);
 });
 
+it('rejects a filter date that is not a plain Y-m-d date', function () {
+    $this->actingAs($this->user)->patchJson('/transactions/bulk', [
+        'filters' => ['date_from' => '275752-07-04'],
+        'category_id' => $this->category->id,
+    ])->assertJsonValidationErrors('filters.date_from');
+});
+
 it('can bulk update transactions by IDs', function () {
     $transactions = Transaction::factory()
         ->count(3)
@@ -283,6 +290,33 @@ it('bulk update replaces labels instead of merging them', function () {
         expect($labelIds)->not->toContain($label1->id);
         expect($labelIds)->not->toContain($label2->id);
     }
+});
+
+it('returns the emptied rows when the bulk action removes every label', function () {
+    // The client rebuilds `label_ids` from the `labels` of the rows this
+    // response carries, and the table renders the badges from `label_ids`. A
+    // removal that left the row out of `transactions`, or returned it with its
+    // old labels, would detach them server-side and leave the badges on screen.
+    $label = Label::factory()->create(['user_id' => $this->user->id, 'name' => 'Work']);
+
+    $transaction = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+    ]);
+    $transaction->labels()->attach([$label->id]);
+
+    $response = $this->actingAs($this->user)->patchJson('/transactions/bulk', [
+        'transaction_ids' => [$transaction->id],
+        'label_ids' => [],
+    ])->assertSuccessful();
+
+    expect($response->json('updated_ids'))->toContain($transaction->id);
+
+    $returned = collect($response->json('transactions'))->firstWhere('id', $transaction->id);
+
+    expect($returned)->not->toBeNull()
+        ->and($returned['labels'])->toBe([])
+        ->and($transaction->fresh()->labels)->toHaveCount(0);
 });
 
 it('can update all transactions when no filters or IDs are provided', function () {

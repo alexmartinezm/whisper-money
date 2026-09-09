@@ -15,25 +15,42 @@ use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
 
-#[Description('Edit a manually-created transaction; only the fields you pass change. Bank/imported ones keep their core fields locked — use categorize_transaction or label_transaction for those instead.')]
+#[Description('Edit a transaction; only the fields you pass change. Notes and category work on any transaction, bank/imported ones included; the other fields only on manually-created ones.')]
 class UpdateTransaction extends WriteTool
 {
+    /**
+     * The fields that describe the transaction itself. A bank/imported row owns
+     * them through its sync, so they are locked there — while notes and
+     * category_id stay editable on any transaction.
+     *
+     * @var list<string>
+     */
+    private const CORE_FIELDS = [
+        'description',
+        'amount',
+        'transaction_date',
+        'currency_code',
+        'account_id',
+        'creditor_name',
+        'debtor_name',
+    ];
+
     /**
      * @return array<string, mixed>
      */
     public function schema(JsonSchema $schema): array
     {
         return [
-            'transaction_id' => $schema->string()->description('Id of the manually-created transaction to edit.')->required(),
+            'transaction_id' => $schema->string()->description('Id of the transaction to edit.')->required(),
             'description' => $schema->string()->description('New description.'),
-            'amount' => $schema->integer()->description('New signed amount in minor units (cents).'),
+            'amount' => $schema->integer()->description('New signed amount, in the minor units of the transaction\'s own currency.'),
             'transaction_date' => $schema->string()->description('New transaction date, YYYY-MM-DD.'),
             'currency_code' => $schema->string()->description('New ISO 4217 currency code (3 letters).'),
             'account_id' => $schema->string()->description('Move the transaction to another account.'),
             'category_id' => $schema->string()->nullable()->description('New category id, or null to clear the category.'),
             'creditor_name' => $schema->string()->nullable()->description('New creditor (payee) name, or null to clear it.'),
             'debtor_name' => $schema->string()->nullable()->description('New debtor (payer) name, or null to clear it.'),
-            'notes' => $schema->string()->nullable()->description('New free-text notes, or null to clear them.'),
+            'notes' => $schema->string()->nullable()->description('New free-text notes, or null to clear them. Editable on any transaction, bank/imported ones included.'),
             'update_balance' => $schema->boolean()->description('When true and the amount/date/account changed, move the account balance snapshots accordingly. Ignored on connected accounts, whose balances come from the bank. Default false.'),
             'space' => $schema->string()->description('Space id. Defaults to the personal space.'),
         ];
@@ -77,6 +94,7 @@ class UpdateTransaction extends WriteTool
                 'debtor_name' => fn () => $this->nullableString($request, 'debtor_name'),
             ]);
 
+            $this->retireLegacyIvs($request, $transaction);
             $this->applyCategory($request, $transaction, $space);
 
             $transaction->save();
@@ -93,20 +111,45 @@ class UpdateTransaction extends WriteTool
     }
 
     /**
-     * The two reasons this tool declines to touch a transaction at all, as the
-     * error the client sees. Null when the edit may go ahead.
+     * Why the request cannot go through, as the error the client sees, or null
+     * when it can. Only a request that actually carries a locked field is
+     * refused: an edit limited to notes is allowed on every transaction, which
+     * is how an agent annotates bank and imported rows.
      */
     private function refuseUneditable(Request $request, Transaction $transaction): ?Response
     {
-        if ($transaction->source !== TransactionSource::ManuallyCreated) {
-            return Response::error('Only manually-created transactions can be edited. This one came from a bank or import, so its core fields are locked. Use categorize_transaction or label_transaction instead.');
-        }
-
         if ($transaction->splits()->exists() && $request->hasAny(['category_id', 'amount'])) {
             return Response::error('This transaction is split. Direct category and amount changes are blocked; use split_transaction for category postings. It does not change the parent ledger amount.');
         }
 
-        return null;
+        $locked = array_values(array_filter(
+            self::CORE_FIELDS,
+            fn (string $field): bool => $request->has($field),
+        ));
+
+        if ($locked === [] || $transaction->source === TransactionSource::ManuallyCreated) {
+            return null;
+        }
+
+        $fields = implode(', ', $locked);
+
+        return Response::error("Only manually-created transactions can change {$fields}. This one came from a bank or import, so its core fields are locked; notes and category_id can still be edited here, and label_transaction handles its labels.");
+    }
+
+    /**
+     * Writing one of the legacy encrypted fields in the clear retires its iv:
+     * one left behind would have the browser try to decrypt plain text and
+     * render the field as broken. The web edit dialog clears them for the same
+     * reason, and the client-side encryption they belong to is being migrated
+     * away.
+     */
+    private function retireLegacyIvs(Request $request, Transaction $transaction): void
+    {
+        foreach (['description' => 'description_iv', 'notes' => 'notes_iv'] as $field => $iv) {
+            if ($request->has($field)) {
+                $transaction->{$iv} = null;
+            }
+        }
     }
 
     /**
@@ -141,7 +184,7 @@ class UpdateTransaction extends WriteTool
      */
     private function syncManualBalance(Request $request, Transaction $transaction, Transaction $originalSnapshot): bool
     {
-        if (! $request->boolean('update_balance') || ! $transaction->wasChanged(['amount', 'transaction_date', 'account_id'])) {
+        if (! $request->boolean('update_balance') || ! $transaction->wasChanged(ManualBalanceAdjuster::BALANCE_AFFECTING_ATTRIBUTES)) {
             return false;
         }
 
