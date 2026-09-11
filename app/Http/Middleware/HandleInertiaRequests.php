@@ -12,6 +12,7 @@ use App\Jobs\PurgeResidualEncryptionArtifactsJob;
 use App\Models\BankingConnection;
 use App\Models\User;
 use App\Services\CurrencyOptions;
+use App\Services\FormatLocaleOptions;
 use App\Services\Subscriptions\PriceExperiment;
 use Closure;
 use Illuminate\Foundation\Inspiring;
@@ -22,7 +23,10 @@ use Laravel\Pennant\Feature;
 
 class HandleInertiaRequests extends Middleware
 {
-    public function __construct(private CurrencyOptions $currencyOptions) {}
+    public function __construct(
+        private CurrencyOptions $currencyOptions,
+        private FormatLocaleOptions $formatLocales,
+    ) {}
 
     /**
      * The root template that's loaded on the first page visit.
@@ -112,7 +116,7 @@ class HandleInertiaRequests extends Middleware
             'hasEncryptedAccounts' => $hasEncryptedAccounts,
             'hasEncryptionSetup' => $user?->encryption_salt !== null,
             'hasEncryptedTransactions' => $hasEncryptedTransactions,
-            'locale' => app()->getLocale(),
+            'locale' => $this->formatLocaleFor($request, $user),
             // The dictionary is ~250 KB in es/fr and never changes between
             // requests. As a "once" prop it ships on the first load and is
             // omitted from every later visit, which also skips re-reading the
@@ -269,6 +273,29 @@ class HandleInertiaRequests extends Middleware
             'recurringTransactions' => $features[RecurringTransactions::class] !== false,
             'savingsGoals' => $features[SavingsGoals::class] !== false,
         ];
+    }
+
+    /**
+     * The locale the client writes amounts and dates in — a full region like
+     * `es-MX`, and deliberately NOT `app()->getLocale()`, which this prop used
+     * to carry.
+     *
+     * The two diverge on purpose and both are right. `app()->getLocale()` names
+     * the language `lang/` is translated into and has to stay two letters, or
+     * `App::setLocale('es-MX')` sends the translator after a directory that does
+     * not exist. This prop names the region, which is what decides where the
+     * decimal separator goes and how a date is ordered — and a reader is allowed
+     * to want the app in English with Mexican numbers.
+     *
+     * Nothing is lost by the swap: `i18n.ts` translates off the `translations`
+     * prop and never reads this one. See `use-locale.ts`.
+     */
+    private function formatLocaleFor(Request $request, ?User $user): string
+    {
+        // A signed-out visitor has no row to have detected anything onto, so
+        // the header is read for them on every request instead.
+        return $user?->formatLocale()
+            ?? $this->formatLocales->detectFromHeader($request->header('Accept-Language'), app()->getLocale());
     }
 
     /**
