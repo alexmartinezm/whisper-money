@@ -126,6 +126,11 @@ class HandleInertiaRequests extends Middleware
                 'profile' => $this->currencyOptions->primaryOptions(),
                 'accounts' => $this->currencyOptions->accountOptions(),
             ],
+            // Codes only: the picker writes each one's country name and its
+            // live example with `Intl`, the way `useConnectCountries()` already
+            // does, so 43 country names never need a translation entry — and
+            // the list never exists twice, once in PHP and once in TypeScript.
+            'formatLocales' => $this->formatLocales->codes(),
         ];
     }
 
