@@ -70,6 +70,7 @@ import { captureEvent } from '@/lib/posthog';
 import { mergeAuthoritativeTransactions } from '@/lib/transaction-bulk-update';
 import { createTransactionCategoryFilter } from '@/lib/transaction-category-filter';
 import { mergeReEvaluatedTransaction } from '@/lib/transaction-re-evaluation';
+import { getTransactionRowActions } from '@/lib/transaction-row-actions';
 import { transactionSyncService } from '@/services/transaction-sync';
 import { type Account, type Bank } from '@/types/account';
 import { type AutomationRule } from '@/types/automation-rule';
@@ -125,6 +126,7 @@ interface TransactionRowProps {
     rowVirtualizer: Virtualizer<HTMLDivElement, Element>;
     onEdit: (transaction: DecryptedTransaction) => void;
     onReEvaluateRules: (transaction: DecryptedTransaction) => void;
+    onAutomate: (transaction: DecryptedTransaction) => void;
     onDelete: (transaction: DecryptedTransaction) => void;
 }
 
@@ -134,6 +136,7 @@ function TransactionRowComponent({
     rowVirtualizer,
     onEdit,
     onReEvaluateRules,
+    onAutomate,
     onDelete,
 }: TransactionRowProps) {
     const transaction = row.original;
@@ -198,18 +201,21 @@ function TransactionRowComponent({
             </ContextMenuTrigger>
             <ContextMenuContent>
                 <ContextMenuLabel>{__('Actions')}</ContextMenuLabel>
-                <ContextMenuItem onClick={() => onEdit(transaction)}>
-                    {__('Edit')}
-                </ContextMenuItem>
-                <ContextMenuItem onClick={() => onReEvaluateRules(transaction)}>
-                    {__('Re-evaluate rules')}
-                </ContextMenuItem>
-                <ContextMenuItem
-                    onClick={() => onDelete(transaction)}
-                    variant="destructive"
-                >
-                    {__('Delete')}
-                </ContextMenuItem>
+                {getTransactionRowActions({
+                    transaction,
+                    onEdit,
+                    onReEvaluateRules,
+                    onAutomate,
+                    onDelete,
+                }).map((action) => (
+                    <ContextMenuItem
+                        key={action.id}
+                        onClick={action.onSelect}
+                        variant={action.variant}
+                    >
+                        {action.label}
+                    </ContextMenuItem>
+                ))}
             </ContextMenuContent>
         </ContextMenu>
     );
@@ -749,6 +755,20 @@ export function TransactionList({
         [],
     );
 
+    const openAutomateDialog = useCallback(
+        (transaction: DecryptedTransaction) => {
+            captureEvent('automation_rule_toast_automatize_clicked', {
+                source: 'row_menu',
+            });
+            setAutomateCandidate({
+                transaction,
+                category: transaction.category ?? null,
+            });
+            setAutomateDialogOpen(true);
+        },
+        [],
+    );
+
     const columns = useMemo(() => {
         const allColumns = createTransactionColumns({
             categories,
@@ -761,6 +781,7 @@ export function TransactionList({
             onUpdate: updateTransaction,
             onCategorized: showAutomatizeToast,
             onReEvaluateRules: handleReEvaluateRules,
+            onAutomate: openAutomateDialog,
             isDateHidden: columnVisibility.transaction_date === false,
             hiddenLabelId,
         });
@@ -783,6 +804,7 @@ export function TransactionList({
         updateTransaction,
         showAutomatizeToast,
         handleReEvaluateRules,
+        openAutomateDialog,
         hideColumns,
         columnVisibility,
         hiddenLabelId,
@@ -993,10 +1015,11 @@ export function TransactionList({
                     onEdit={setEditTransaction}
                     onReEvaluateRules={handleReEvaluateRules}
                     onDelete={setDeleteTransaction}
+                    onAutomate={openAutomateDialog}
                 />
             );
         },
-        [handleReEvaluateRules],
+        [handleReEvaluateRules, openAutomateDialog],
     );
 
     return (

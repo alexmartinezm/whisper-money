@@ -22,6 +22,7 @@ import {
     DropdownMenuLabel,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { getTransactionRowActions } from '@/lib/transaction-row-actions';
 import { type Account, type Bank } from '@/types/account';
 import { type Category } from '@/types/category';
 import { type Label } from '@/types/label';
@@ -42,6 +43,7 @@ interface CreateColumnsOptions {
         source: 'transaction_table',
     ) => void;
     onReEvaluateRules: (transaction: DecryptedTransaction) => void;
+    onAutomate: (transaction: DecryptedTransaction) => void;
     isDateHidden?: boolean;
     /** Ids of transactions AI is categorizing in the background right now. */
     categorizingIds?: Set<string>;
@@ -61,6 +63,7 @@ export function createTransactionColumns({
     onUpdate,
     onCategorized,
     onReEvaluateRules,
+    onAutomate,
     isDateHidden = false,
     categorizingIds,
     categoryFilterIds,
@@ -382,24 +385,21 @@ export function createTransactionColumns({
                                 <DropdownMenuLabel>
                                     {__('Actions')}
                                 </DropdownMenuLabel>
-                                <DropdownMenuItem
-                                    onClick={() => onEdit(transaction)}
-                                >
-                                    {__('Edit')}
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                    onClick={() =>
-                                        onReEvaluateRules(transaction)
-                                    }
-                                >
-                                    {__('Re-evaluate rules')}
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                    variant="destructive"
-                                    onClick={() => onDelete(transaction)}
-                                >
-                                    {__('Delete')}
-                                </DropdownMenuItem>
+                                {getTransactionRowActions({
+                                    transaction,
+                                    onEdit,
+                                    onReEvaluateRules,
+                                    onAutomate,
+                                    onDelete,
+                                }).map((action) => (
+                                    <DropdownMenuItem
+                                        key={action.id}
+                                        variant={action.variant}
+                                        onClick={action.onSelect}
+                                    >
+                                        {action.label}
+                                    </DropdownMenuItem>
+                                ))}
                             </DropdownMenuContent>
                         </DropdownMenu>
                     </div>

@@ -89,6 +89,7 @@ import { captureEvent } from '@/lib/posthog';
 import { mergeAuthoritativeTransactions } from '@/lib/transaction-bulk-update';
 import { getBulkDeleteConfirmationText } from '@/lib/transaction-delete-confirmation';
 import { mergeReEvaluatedTransaction } from '@/lib/transaction-re-evaluation';
+import { getTransactionRowActions } from '@/lib/transaction-row-actions';
 import { cn } from '@/lib/utils';
 import { status as categorizationStatus } from '@/routes/ai/categorization';
 import {
@@ -275,6 +276,7 @@ interface TransactionRowProps {
     isNew: boolean;
     onEdit: (transaction: DecryptedTransaction) => void;
     onReEvaluateRules: (transaction: DecryptedTransaction) => void;
+    onAutomate: (transaction: DecryptedTransaction) => void;
     onDelete: (transaction: DecryptedTransaction) => void;
 }
 
@@ -285,6 +287,7 @@ function TransactionRowComponent({
     isNew,
     onEdit,
     onReEvaluateRules,
+    onAutomate,
     onDelete,
 }: TransactionRowProps) {
     const transaction = row.original;
@@ -363,18 +366,21 @@ function TransactionRowComponent({
             </ContextMenuTrigger>
             <ContextMenuContent>
                 <ContextMenuLabel>{__('Actions')}</ContextMenuLabel>
-                <ContextMenuItem onClick={() => onEdit(transaction)}>
-                    {__('Edit')}
-                </ContextMenuItem>
-                <ContextMenuItem onClick={() => onReEvaluateRules(transaction)}>
-                    {__('Re-evaluate rules')}
-                </ContextMenuItem>
-                <ContextMenuItem
-                    onClick={() => onDelete(transaction)}
-                    variant="destructive"
-                >
-                    {__('Delete')}
-                </ContextMenuItem>
+                {getTransactionRowActions({
+                    transaction,
+                    onEdit,
+                    onReEvaluateRules,
+                    onAutomate,
+                    onDelete,
+                }).map((action) => (
+                    <ContextMenuItem
+                        key={action.id}
+                        onClick={action.onSelect}
+                        variant={action.variant}
+                    >
+                        {action.label}
+                    </ContextMenuItem>
+                ))}
             </ContextMenuContent>
         </ContextMenu>
     );
@@ -1052,6 +1058,20 @@ export default function Transactions({
         );
     }, [categories, filters.categoryIds]);
 
+    const openAutomateDialog = useCallback(
+        (transaction: DecryptedTransaction) => {
+            captureEvent('automation_rule_toast_automatize_clicked', {
+                source: 'row_menu',
+            });
+            setAutomateCandidate({
+                transaction,
+                category: transaction.category ?? null,
+            });
+            setAutomateDialogOpen(true);
+        },
+        [],
+    );
+
     const columns = useMemo(
         () =>
             createTransactionColumns({
@@ -1065,6 +1085,7 @@ export default function Transactions({
                 onUpdate: updateTransaction,
                 onCategorized: showAutomatizeToast,
                 onReEvaluateRules: handleReEvaluateRules,
+                onAutomate: openAutomateDialog,
                 isDateHidden: columnVisibility.transaction_date === false,
                 categorizingIds,
                 categoryFilterIds,
@@ -1078,6 +1099,7 @@ export default function Transactions({
             updateTransaction,
             showAutomatizeToast,
             handleReEvaluateRules,
+            openAutomateDialog,
             columnVisibility,
             categorizingIds,
             categoryFilterIds,
@@ -1358,10 +1380,11 @@ export default function Transactions({
                     onEdit={setEditTransaction}
                     onReEvaluateRules={handleReEvaluateRules}
                     onDelete={setDeleteTransaction}
+                    onAutomate={openAutomateDialog}
                 />
             );
         },
-        [handleReEvaluateRules, lastVisitAtMount],
+        [handleReEvaluateRules, lastVisitAtMount, openAutomateDialog],
     );
 
     return (
