@@ -184,6 +184,32 @@ it('makes the sankey add up to what the summary reports', function () {
         ->and(collect($sankey['income_categories'])->sum('amount'))->toBe($summary['income']);
 })->group('sync');
 
+it('nets a refund against the category of a split line on every cashflow screen', function () {
+    [$user, , $accounts, $categories] = syncWorld();
+
+    // 60 groceries and 40 home in one split, then 80 back against home: home
+    // nets to +40, a refund bigger than what it refunds.
+    syncPostedTransaction($user, $accounts['own'], ['amount' => -10000, 'splits' => syncSplitOf($categories)]);
+    syncPostedTransaction($user, $accounts['own'], ['amount' => 8000, 'category_id' => $categories['home']->id]);
+
+    $summary = syncCashflowSummary($user);
+    $sankey = actingAs($user)->getJson('/api/cashflow/sankey?'.http_build_query(syncWindow()))->assertOk()->json();
+    $breakdown = actingAs($user)
+        ->getJson('/api/cashflow/breakdown?'.http_build_query([...syncWindow(), 'type' => 'expense']))
+        ->assertOk()
+        ->json();
+
+    $homeRow = collect($breakdown['data'])->firstWhere('category_id', $categories['home']->id);
+    $homeNode = collect($sankey['income_categories'])->firstWhere('category_id', $categories['home']->id);
+
+    expect($summary['expense'])->toBe(2000)
+        ->and($homeRow['amount'])->toBe(-4000)
+        ->and($breakdown['total'])->toBe($summary['expense'])
+        ->and($homeNode['amount'])->toBe(4000)
+        ->and($homeNode['category']['name'])->toBe('Home (refund)')
+        ->and($sankey['total_income'] - $sankey['total_expense'])->toBe($summary['income'] - $summary['expense']);
+})->group('sync');
+
 it('weighs a foreign-currency split on a shared account exactly once', function () {
     [$user, , , $categories] = syncWorld();
 
