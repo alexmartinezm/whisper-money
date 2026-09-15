@@ -15,8 +15,8 @@ import type {
     Transaction,
 } from '@/types/transaction';
 import type { UUID } from '@/types/uuid';
+import { formatLocalDate } from '@/utils/date';
 import axios from 'axios';
-import { format } from 'date-fns';
 
 /** A transaction update plus any rule the correction just taught the system. */
 export type UpdatedTransaction = ServerTransaction & {
@@ -199,10 +199,10 @@ class TransactionSyncService {
 
         const requestFilters: Record<string, unknown> = {};
         if (filters.dateFrom) {
-            requestFilters.date_from = format(filters.dateFrom, 'yyyy-MM-dd');
+            requestFilters.date_from = formatLocalDate(filters.dateFrom);
         }
         if (filters.dateTo) {
-            requestFilters.date_to = format(filters.dateTo, 'yyyy-MM-dd');
+            requestFilters.date_to = formatLocalDate(filters.dateTo);
         }
         if (filters.amountMin !== null && filters.amountMin !== undefined) {
             requestFilters.amount_min = filters.amountMin;

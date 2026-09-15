@@ -30,6 +30,7 @@ import {
 } from '@/types/balance-import';
 import { DateFormat } from '@/types/import';
 import type { UUID } from '@/types/uuid';
+import { formatLocalDate } from '@/utils/date';
 import { __ } from '@/utils/i18n';
 import { usePage } from '@inertiajs/react';
 import { Check } from 'lucide-react';
@@ -377,7 +378,7 @@ export function ImportBalancesDrawer({
                     continue;
                 }
 
-                const formattedDate = date.toISOString().split('T')[0];
+                const formattedDate = formatLocalDate(date);
 
                 let investedAmount: number | null = null;
                 if (state.columnMapping.invested_amount) {
