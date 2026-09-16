@@ -92,6 +92,16 @@ export default function RecurringIndex({
             return;
         }
 
+        // The worker re-checks whether recurring detection is switched on
+        // before it writes anything, and stops there if it is not. Without
+        // this the spinner just ran out the polling attempts and the page
+        // reloaded saying nothing.
+        if (progress.status === 'skipped') {
+            setScanning(false);
+            toast.error(__('Recurring detection is switched off.'));
+            return;
+        }
+
         if (attempt >= MAX_POLL_ATTEMPTS) {
             setScanning(false);
             router.reload({

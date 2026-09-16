@@ -83,8 +83,13 @@ export function RecurringSeriesRow({ series }: Props) {
                         </Badge>
                     )}
                 </div>
+                {/* The account is what tells two contracts at one provider
+                    apart. Detection keeps them as separate series on purpose,
+                    and without naming the account here they read as the same
+                    row listed twice. */}
                 <span className="text-xs text-muted-foreground">
                     {series.category?.name ?? __('Uncategorized')} ·{' '}
+                    {series.account && `${series.account.name} · `}
                     {__('Last charged :date', {
                         date: formatDateMedium(series.last_occurred_on, locale),
                     })}

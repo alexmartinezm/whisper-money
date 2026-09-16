@@ -2,6 +2,7 @@
     "Add line": "Ajouter une ligne",
     "Complete the split before saving": "Terminez la répartition avant d'enregistrer",
     "Edit split transaction": "Modifier la transaction répartie",
+    "Recurring detection is switched off.": "La détection des paiements récurrents est désactivée.",
     "Remove split": "Supprimer la répartition",
     "Remove split line :number": "Supprimer la ligne :number de la répartition",
     "Remove split transaction?": "Supprimer la répartition de la transaction ?",
