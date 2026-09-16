@@ -33,13 +33,14 @@ class RecurringSeriesFactory extends Factory
             'display_name' => $merchant,
             'cadence' => $cadence,
             'interval_days' => $cadence->intervalDays(),
+            'anchor_day' => $cadence->monthsPerOccurrence() === null ? null : $lastOccurred->day,
             'expected_amount' => -fake()->numberBetween(500, 9000),
             'amount_is_variable' => false,
             'currency_code' => 'EUR',
             'direction' => 'expense',
             'first_occurred_on' => $lastOccurred->subDays($cadence->intervalDays() * 3),
             'last_occurred_on' => $lastOccurred,
-            'next_expected_on' => $lastOccurred->addDays($cadence->intervalDays()),
+            'next_expected_on' => $cadence->advance($lastOccurred, $lastOccurred->day),
             'occurrence_count' => 4,
             'status' => RecurringSeriesStatus::Active,
             'user_state' => RecurringSeriesUserState::Detected,
@@ -54,7 +55,8 @@ class RecurringSeriesFactory extends Factory
             return [
                 'cadence' => $cadence,
                 'interval_days' => $cadence->intervalDays(),
-                'next_expected_on' => $lastOccurred->addDays($cadence->intervalDays()),
+                'anchor_day' => $cadence->monthsPerOccurrence() === null ? null : $lastOccurred->day,
+                'next_expected_on' => $cadence->advance($lastOccurred, $lastOccurred->day),
             ];
         });
     }
@@ -64,10 +66,15 @@ class RecurringSeriesFactory extends Factory
         return $this->state(function (array $attributes) {
             $lastOccurred = CarbonImmutable::today()->subDays(120);
 
+            $cadence = $attributes['cadence'] instanceof RecurringCadence
+                ? $attributes['cadence']
+                : RecurringCadence::from((string) $attributes['cadence']);
+
             return [
                 'status' => RecurringSeriesStatus::Lapsed,
                 'last_occurred_on' => $lastOccurred,
-                'next_expected_on' => $lastOccurred->addDays($attributes['interval_days']),
+                'anchor_day' => $cadence->monthsPerOccurrence() === null ? null : $lastOccurred->day,
+                'next_expected_on' => $cadence->advance($lastOccurred, $lastOccurred->day),
             ];
         });
     }

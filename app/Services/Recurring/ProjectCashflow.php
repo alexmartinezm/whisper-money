@@ -187,13 +187,12 @@ class ProjectCashflow
         $occurrences = [];
 
         foreach ($series as $row) {
-            $interval = max(1, $row->interval_days);
             $date = CarbonImmutable::parse($row->next_expected_on);
 
             // A series whose next date already passed has not been re-scanned
             // yet; roll it forward rather than reporting a charge in the past.
             while ($date->lessThan($today)) {
-                $date = $date->addDays($interval);
+                $date = $row->cadence->advance($date, $row->anchor_day);
             }
 
             while ($date->lessThanOrEqualTo($horizon)) {
@@ -206,7 +205,7 @@ class ProjectCashflow
                     'category' => $row->category?->name,
                 ];
 
-                $date = $date->addDays($interval);
+                $date = $row->cadence->advance($date, $row->anchor_day);
             }
         }
 

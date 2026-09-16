@@ -122,14 +122,19 @@ it('detects a monthly subscription', function () {
         ->and($series->transactions)->toHaveCount(4);
 });
 
-it('projects the next charge from the last occurrence', function () {
+it('projects the next charge on the same day of the month', function () {
     monthlyCharges($this->user, $this->account, 'Spotify');
 
     $this->detector->forUser($this->user);
     $series = RecurringSeries::query()->sole();
 
-    expect($series->next_expected_on->toDateString())
-        ->toBe($series->last_occurred_on->addDays($series->interval_days)->toDateString());
+    // Counting days walks a monthly charge backwards through the calendar:
+    // thirty days after the 5th is the 4th, then the 3rd. What repeats is the
+    // billing day, and it is recorded so a short month cannot erode it.
+    expect($series->anchor_day)->toBe($series->last_occurred_on->day)
+        ->and($series->next_expected_on->day)->toBe($series->last_occurred_on->day)
+        ->and($series->next_expected_on->toDateString())
+        ->toBe($series->last_occurred_on->addMonthNoOverflow()->toDateString());
 });
 
 it('detects a yearly series', function () {

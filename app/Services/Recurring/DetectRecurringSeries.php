@@ -3,6 +3,7 @@
 namespace App\Services\Recurring;
 
 use App\Data\CadenceMatch;
+use App\Enums\RecurringCadence;
 use App\Enums\RecurringSeriesStatus;
 use App\Enums\RecurringSeriesUserState;
 use App\Models\RecurringSeries;
@@ -372,6 +373,7 @@ class DetectRecurringSeries
             $amounts = array_map(fn (array $occurrence): int => $occurrence['amount'], $occurrences);
             $firstOccurred = $dates[0];
             $lastOccurred = $dates[count($dates) - 1];
+            $anchorDay = $this->anchorDay($match->cadence, $dates);
 
             $series[] = [
                 'match_field' => $group['match_field'],
@@ -383,12 +385,13 @@ class DetectRecurringSeries
                 'currency_code' => $group['currency_code'],
                 'cadence' => $match->cadence,
                 'interval_days' => $match->medianGapDays,
+                'anchor_day' => $anchorDay,
                 'expected_amount' => (int) round($this->median($amounts)),
                 'amount_is_variable' => $this->isVariable($amounts),
                 'account_id' => $group['account_id'],
                 'first_occurred_on' => $firstOccurred,
                 'last_occurred_on' => $lastOccurred,
-                'next_expected_on' => $lastOccurred->addDays($match->medianGapDays),
+                'next_expected_on' => $match->cadence->advance($lastOccurred, $anchorDay),
                 'occurrence_count' => count($occurrences),
                 'transaction_ids' => array_map(fn (array $occurrence): string => $occurrence['id'], $occurrences),
             ];
@@ -450,6 +453,7 @@ class DetectRecurringSeries
                         'identity_aliases' => $aliases,
                         'cadence' => $candidate['cadence'],
                         'interval_days' => $candidate['interval_days'],
+                        'anchor_day' => $candidate['anchor_day'],
                         'expected_amount' => $candidate['expected_amount'],
                         'amount_is_variable' => $candidate['amount_is_variable'],
                         'account_id' => $candidate['account_id'],
@@ -476,6 +480,7 @@ class DetectRecurringSeries
                         'user_state' => RecurringSeriesUserState::Detected,
                         'cadence' => $candidate['cadence'],
                         'interval_days' => $candidate['interval_days'],
+                        'anchor_day' => $candidate['anchor_day'],
                         'expected_amount' => $candidate['expected_amount'],
                         'amount_is_variable' => $candidate['amount_is_variable'],
                         'account_id' => $candidate['account_id'],
@@ -758,6 +763,36 @@ class DetectRecurringSeries
         return CarbonImmutable::today()->greaterThan($cutoff)
             ? RecurringSeriesStatus::Lapsed
             : RecurringSeriesStatus::Active;
+    }
+
+    /**
+     * The day of the month a charge is really billed on.
+     *
+     * The most common day across the occurrences, and the later day when two
+     * are equally common. A contract billed on the 31st reads as the 28th every
+     * February, and the clipped day must not win the vote — it is the one thing
+     * the anchor exists to undo.
+     *
+     * @param  list<CarbonImmutable>  $dates
+     */
+    private function anchorDay(RecurringCadence $cadence, array $dates): ?int
+    {
+        if ($cadence->monthsPerOccurrence() === null) {
+            return null;
+        }
+
+        $tally = [];
+
+        foreach ($dates as $date) {
+            $tally[$date->day] = ($tally[$date->day] ?? 0) + 1;
+        }
+
+        // Sorts are stable, so ordering by day first leaves the later day ahead
+        // of an equally common earlier one.
+        krsort($tally);
+        arsort($tally);
+
+        return (int) array_key_first($tally);
     }
 
     /** @param  list<int|float>  $values */
