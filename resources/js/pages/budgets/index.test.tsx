@@ -102,6 +102,7 @@ vi.mock('@/components/shared/create-placeholder-card', () => ({
 }));
 
 const budget = { id: '1', name: 'Groceries' } as never;
+const yearlyBudget = { id: '3', name: 'Annual travel' } as never;
 const goal = { id: '2', name: 'Japan trip' } as never;
 const budgetSummary = { over_limit_count: 0 } as never;
 
@@ -135,6 +136,20 @@ describe('budgetTypeFilterFromUrl', () => {
 });
 
 describe('BudgetsIndex filter', () => {
+    it('shows both monthly and yearly budget cards in the planning list', () => {
+        render(
+            <BudgetsIndex
+                budgets={[budget, yearlyBudget]}
+                budgetSummary={budgetSummary}
+                savingsGoalsEnabled={false}
+                currencyCode="EUR"
+            />,
+        );
+
+        expect(screen.getByText('Groceries')).not.toBeNull();
+        expect(screen.getByText('Annual travel')).not.toBeNull();
+    });
+
     it('shows both types in one list by default', () => {
         renderPage();
 
