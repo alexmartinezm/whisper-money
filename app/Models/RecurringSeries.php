@@ -44,6 +44,7 @@ class RecurringSeries extends Model
         'merchant_key',
         'identity_key',
         'identity_aliases',
+        'merged_into_id',
         'display_name',
         'cadence',
         'interval_days',

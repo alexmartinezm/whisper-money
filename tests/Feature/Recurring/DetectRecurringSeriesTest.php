@@ -585,6 +585,86 @@ it('gives one identity to charges whose processor reference changes every month'
         ->occurrence_count->toBe(4);
 });
 
+it('collapses rows that a varying reference had split into one obligation', function () {
+    // The state a ledger is left in by the old key: one obligation recorded as
+    // several rows, because the bank wrote the provider's name differently each
+    // time. Now that they answer to one identity, sending them to review would
+    // freeze them — every later run reaches the same verdict and writes
+    // nothing — so they collapse into the oldest, which holds the history.
+    $confirmed = RecurringSeries::factory()->create([
+        'user_id' => $this->user->id,
+        'space_id' => $this->user->activeSpace()->id,
+        'account_id' => $this->account->id,
+        'match_field' => 'description',
+        'merchant_key' => 'digi',
+        'display_name' => 'Internet',
+        'user_state' => RecurringSeriesUserState::Confirmed,
+        'currency_code' => 'EUR',
+        'direction' => 'expense',
+        'first_occurred_on' => CarbonImmutable::today()->subMonths(10),
+    ]);
+    $duplicate = RecurringSeries::factory()->create([
+        'user_id' => $this->user->id,
+        'space_id' => $this->user->activeSpace()->id,
+        'account_id' => $this->account->id,
+        'match_field' => 'creditor_name',
+        'merchant_key' => 'digi spain telecom',
+        'display_name' => 'DIGI SPAIN TELECOM',
+        'user_state' => RecurringSeriesUserState::Detected,
+        'currency_code' => 'EUR',
+        'direction' => 'expense',
+        'first_occurred_on' => CarbonImmutable::today()->subMonths(4),
+    ]);
+
+    // A charge only the duplicate ever claimed, outside the window the current
+    // run observes. Its link has to survive the collapse.
+    $historical = Transaction::factory()->plaintext()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'creditor_name' => 'DIGI',
+        'transaction_date' => CarbonImmutable::today()->subMonths(30)->toDateString(),
+        'amount' => -1899,
+        'currency_code' => 'EUR',
+    ]);
+    $duplicate->transactions()->attach($historical->id);
+
+    monthlyCharges($this->user, $this->account, 'DIGI', count: 4, amount: -1899);
+
+    $this->detector->forUser($this->user);
+
+    $survivor = RecurringSeries::query()->sole();
+
+    expect($survivor->id)->toBe($confirmed->id)
+        ->and($survivor->display_name)->toBe('Internet')
+        ->and($survivor->user_state)->toBe(RecurringSeriesUserState::Confirmed)
+        ->and($survivor->transactions()->whereKey($historical->id)->exists())->toBeTrue();
+
+    $absorbed = RecurringSeries::withTrashed()->findOrFail($duplicate->id);
+
+    expect($absorbed->trashed())->toBeTrue()
+        ->and($absorbed->merged_into_id)->toBe($confirmed->id);
+});
+
+it('does not bring back a series the user deleted, even after absorbing another', function () {
+    // Absorption soft deletes, and so does the user. The two must not read the
+    // same: one is bookkeeping, the other is a decision to leave alone.
+    $deleted = RecurringSeries::factory()->create([
+        'user_id' => $this->user->id,
+        'space_id' => $this->user->activeSpace()->id,
+        'account_id' => $this->account->id,
+        'merchant_key' => 'digi',
+        'currency_code' => 'EUR',
+        'direction' => 'expense',
+    ]);
+    $deleted->delete();
+
+    monthlyCharges($this->user, $this->account, 'DIGI', count: 4, amount: -1899);
+
+    $this->detector->forUser($this->user);
+
+    expect(RecurringSeries::query()->count())->toBe(0);
+});
+
 it('does not count a future transaction as an observed occurrence', function () {
     monthlyCharges($this->user, $this->account, 'Spotify', count: 3);
     Transaction::factory()->plaintext()->create([

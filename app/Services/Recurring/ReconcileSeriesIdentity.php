@@ -18,7 +18,7 @@ class ReconcileSeriesIdentity
     /**
      * @param  array<string, mixed>  $candidate
      * @param  Collection<int, RecurringSeries>  $existing
-     * @return array{action: string, series: RecurringSeries|null, reason: string}
+     * @return array{action: string, series: RecurringSeries|null, reason: string, absorbed: list<RecurringSeries>}
      */
     public function planCandidate(array $candidate, Collection $existing): array
     {
@@ -29,63 +29,106 @@ class ReconcileSeriesIdentity
             $stableKey,
         ));
 
-        if ($sameProvider->contains(fn (RecurringSeries $series): bool => $series->trashed())) {
-            return [
-                'action' => 'review_required',
-                'series' => null,
-                'reason' => 'deleted_identity',
-            ];
+        // A series the user deleted is a decision to leave alone. One this
+        // process absorbed is its own bookkeeping, and must not read as one.
+        $deleted = $sameProvider->filter(fn (RecurringSeries $series): bool => $series->trashed()
+            && $series->getAttribute('merged_into_id') === null);
+
+        if ($deleted->isNotEmpty()) {
+            return $this->resolution('review_required', null, 'deleted_identity');
         }
 
         $active = $sameProvider->reject(fn (RecurringSeries $series): bool => $series->trashed());
         $sameAccount = $active->filter(fn (RecurringSeries $series): bool => $series->getAttribute('account_id') === ($candidate['account_id'] ?? null));
 
-        if ($sameAccount->count() > 1) {
-            return [
-                'action' => 'review_required',
-                'series' => null,
-                'reason' => 'ambiguous_identity',
-            ];
+        if ($sameAccount->isNotEmpty()) {
+            return $this->resolveSameAccount($sameAccount, $candidate, $stableKey);
         }
 
-        if ($sameAccount->count() === 1) {
-            /** @var RecurringSeries $series */
-            $series = $sameAccount->first();
+        return $this->resolveAccountChange($active, $candidate);
+    }
 
-            return [
-                'action' => $this->isMergedObservation($series, $candidate, $stableKey)
-                    ? 'merged'
-                    : ($this->isUnchanged($series, $candidate) ? 'unchanged' : 'updated'),
-                'series' => $series,
-                'reason' => 'stable_identity',
-            ];
+    /**
+     * One contract, on the account it is billed to.
+     *
+     * More than one stored series can answer to a single identity once the key
+     * stops varying with a processor reference the bank rewrites each month:
+     * what were several rows are one obligation, and were only ever separate
+     * because the reference made them look separate. Sending that to review
+     * would freeze them there, since every later run reaches the same verdict
+     * and nothing writes. They are collapsed instead, into the oldest, which is
+     * the one carrying the history.
+     *
+     * @param  Collection<int, RecurringSeries>  $sameAccount
+     * @param  array<string, mixed>  $candidate
+     * @return array{action: string, series: RecurringSeries|null, reason: string, absorbed: list<RecurringSeries>}
+     */
+    private function resolveSameAccount(Collection $sameAccount, array $candidate, string $stableKey): array
+    {
+        // One key, not a list of them: Collection::sortBy treats a list of
+        // callables as comparators rather than as value extractors, which
+        // silently orders by whatever the first one happens to return.
+        $ordered = $sameAccount
+            ->sortBy(fn (RecurringSeries $series): string => sprintf(
+                '%s|%s',
+                CarbonImmutable::parse($series->getAttribute('first_occurred_on'))->toDateString(),
+                (string) $series->getAttribute('id'),
+            ))
+            ->values();
+
+        /** @var RecurringSeries $survivor */
+        $survivor = $ordered->first();
+        $absorbed = $ordered->slice(1)->values()->all();
+
+        if ($absorbed !== []) {
+            return $this->resolution('merged', $survivor, 'absorbed_duplicate_identity', $absorbed);
         }
 
+        return $this->resolution(
+            $this->isMergedObservation($survivor, $candidate, $stableKey)
+                ? 'merged'
+                : ($this->isUnchanged($survivor, $candidate) ? 'unchanged' : 'updated'),
+            $survivor,
+            'stable_identity',
+        );
+    }
+
+    /**
+     * The same contract billed to a different account, or a new one.
+     *
+     * @param  Collection<int, RecurringSeries>  $active
+     * @param  array<string, mixed>  $candidate
+     * @return array{action: string, series: RecurringSeries|null, reason: string, absorbed: list<RecurringSeries>}
+     */
+    private function resolveAccountChange(Collection $active, array $candidate): array
+    {
         if ($active->count() === 1) {
             /** @var RecurringSeries $series */
             $series = $active->first();
 
             if ($this->hasContinuity($series, $candidate)) {
-                return [
-                    'action' => 'merged',
-                    'series' => $series,
-                    'reason' => 'account_change_with_continuity',
-                ];
+                return $this->resolution('merged', $series, 'account_change_with_continuity');
             }
         }
 
         if ($active->count() > 1) {
-            return [
-                'action' => 'review_required',
-                'series' => null,
-                'reason' => 'ambiguous_account_change',
-            ];
+            return $this->resolution('review_required', null, 'ambiguous_account_change');
         }
 
+        return $this->resolution('created', null, 'new_identity');
+    }
+
+    /**
+     * @param  list<RecurringSeries>  $absorbed
+     * @return array{action: string, series: RecurringSeries|null, reason: string, absorbed: list<RecurringSeries>}
+     */
+    private function resolution(string $action, ?RecurringSeries $series, string $reason, array $absorbed = []): array
+    {
         return [
-            'action' => 'created',
-            'series' => null,
-            'reason' => 'new_identity',
+            'action' => $action,
+            'series' => $series,
+            'reason' => $reason,
+            'absorbed' => $absorbed,
         ];
     }
 

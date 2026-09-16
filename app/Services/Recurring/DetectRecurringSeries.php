@@ -442,7 +442,10 @@ class DetectRecurringSeries
 
                     $protectedIds[] = (string) $row->id;
                     $aliases = $this->mergeAliases($row->identity_aliases, $candidate['identity_aliases']);
+                    $absorbed = $this->absorbInto($row, $resolution['absorbed'] ?? [], $existing);
+                    $aliases = $this->mergeAliases($aliases, $absorbed['aliases']);
                     $row->fill([
+                        'user_state' => $absorbed['user_state'] ?? $row->user_state,
                         'identity_key' => $this->identities->identityKey($candidate),
                         'identity_aliases' => $aliases,
                         'cadence' => $candidate['cadence'],
@@ -677,6 +680,60 @@ class DetectRecurringSeries
         }
 
         return $this->identities->matchesIdentity($series, (string) $candidate['stable_key']);
+    }
+
+    /**
+     * Collapse duplicate rows into the survivor.
+     *
+     * Their charges move across so the history survives, their aliases move so
+     * the names they were known by keep matching, and their decisions move
+     * because a user who confirmed one of these confirmed the obligation, not
+     * the row. They are then marked as absorbed and soft deleted, which keeps
+     * them off every screen while staying distinguishable from a series the
+     * user deleted — that one detection must never bring back.
+     *
+     * @param  list<RecurringSeries>  $absorbed
+     * @param  EloquentCollection<int, RecurringSeries>  $existing
+     * @return array{aliases: list<string>, user_state: RecurringSeriesUserState|null}
+     */
+    private function absorbInto(RecurringSeries $survivor, array $absorbed, EloquentCollection $existing): array
+    {
+        $aliases = [];
+        $userState = null;
+
+        foreach ($absorbed as $planned) {
+            $row = $existing->get($planned->id);
+
+            if (! $row instanceof RecurringSeries || $row->trashed() || $row->is($survivor)) {
+                continue;
+            }
+
+            $aliases = array_merge($aliases, $row->identityAliases(), array_filter([
+                (string) $row->getAttribute('identity_key'),
+                $this->merchantKeys->canonicalKey((string) $row->getAttribute('merchant_key')),
+            ]));
+
+            if ($row->user_state === RecurringSeriesUserState::Confirmed) {
+                $userState = RecurringSeriesUserState::Confirmed;
+            } elseif ($row->user_state === RecurringSeriesUserState::Ignored && $userState === null) {
+                $userState = RecurringSeriesUserState::Ignored;
+            }
+
+            RecurringSeriesTransaction::query()
+                ->where('recurring_series_id', $row->id)
+                ->update(['recurring_series_id' => $survivor->id]);
+
+            $row->forceFill(['merged_into_id' => $survivor->id])->save();
+            $row->delete();
+        }
+
+        return [
+            'aliases' => array_values(array_unique(array_filter($aliases))),
+            'user_state' => $userState === RecurringSeriesUserState::Ignored
+                && $survivor->user_state === RecurringSeriesUserState::Confirmed
+                    ? RecurringSeriesUserState::Confirmed
+                    : $userState,
+        ];
     }
 
     private function mergeAliases(array|string|null $stored, array $observed): array
