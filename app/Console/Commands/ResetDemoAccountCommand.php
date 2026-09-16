@@ -72,6 +72,8 @@ class ResetDemoAccountCommand extends Command
 
         $this->deleteExistingData($user);
 
+        $this->applySettings($user);
+
         $this->createCategories($user);
 
         $labels = $this->createLabels($user);
@@ -117,6 +119,22 @@ class ResetDemoAccountCommand extends Command
         $user->save();
 
         return $user;
+    }
+
+    /**
+     * The net worth chart toggles are off for a new user, and a seeded account
+     * is a new user as far as the database is concerned. The demo account has
+     * always drawn its chart with loans and real estate counted, so it opts back
+     * in rather than changing what it shows.
+     */
+    private function applySettings(User $user): void
+    {
+        $user->setting()->updateOrCreate([], [
+            'include_loans_in_net_worth_chart' => true,
+            'include_real_estate_in_net_worth_chart' => true,
+        ]);
+
+        $this->info('  Applied settings');
     }
 
     private function deleteExistingData(User $user): void

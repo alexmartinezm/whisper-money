@@ -37,6 +37,11 @@ test('demo:reset creates demo user with basic data structure', function () {
     expect($user->accounts()->count())->toBe(6);
     expect($user->transactions()->count())->toBeGreaterThan(2000);
     expect($user->categories()->count())->toBe(64);
+
+    // A new account gets both switched off, but the demo has always drawn its
+    // chart with loans and real estate counted, so it keeps them.
+    expect($user->setting->include_loans_in_net_worth_chart)->toBeTrue()
+        ->and($user->setting->include_real_estate_in_net_worth_chart)->toBeTrue();
 })->group('slow');
 
 test('demo:reset verifies existing unverified demo user', function () {
