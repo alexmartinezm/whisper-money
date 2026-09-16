@@ -12,6 +12,7 @@ use App\Models\Space;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Transactions\EffectiveTransactionPostings;
+use App\Support\Statistics;
 use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Database\Eloquent\Builder;
@@ -352,6 +353,7 @@ class DetectRecurringSeries
     private function classify(array $groups): array
     {
         $minOccurrences = (int) config('recurring.min_occurrences');
+        $priceWindow = max(1, (int) config('recurring.price_window'));
         $series = [];
 
         foreach ($groups as $group) {
@@ -386,8 +388,9 @@ class DetectRecurringSeries
                 'cadence' => $match->cadence,
                 'interval_days' => $match->medianGapDays,
                 'anchor_day' => $anchorDay,
-                'expected_amount' => (int) round($this->median($amounts)),
-                'amount_is_variable' => $this->isVariable($amounts),
+                'expected_amount' => (int) round(Statistics::median($amounts)),
+                'recent_amount' => (int) round(Statistics::recentMedian($amounts, $priceWindow)),
+                'amount_is_variable' => $this->isVariable(array_slice($amounts, -$priceWindow)),
                 'account_id' => $group['account_id'],
                 'first_occurred_on' => $firstOccurred,
                 'last_occurred_on' => $lastOccurred,
@@ -455,6 +458,7 @@ class DetectRecurringSeries
                         'interval_days' => $candidate['interval_days'],
                         'anchor_day' => $candidate['anchor_day'],
                         'expected_amount' => $candidate['expected_amount'],
+                        'recent_amount' => $candidate['recent_amount'],
                         'amount_is_variable' => $candidate['amount_is_variable'],
                         'account_id' => $candidate['account_id'],
                         'category_id' => $candidate['category_id'],
@@ -482,6 +486,7 @@ class DetectRecurringSeries
                         'interval_days' => $candidate['interval_days'],
                         'anchor_day' => $candidate['anchor_day'],
                         'expected_amount' => $candidate['expected_amount'],
+                        'recent_amount' => $candidate['recent_amount'],
                         'amount_is_variable' => $candidate['amount_is_variable'],
                         'account_id' => $candidate['account_id'],
                         'category_id' => $candidate['category_id'],
@@ -795,34 +800,16 @@ class DetectRecurringSeries
         return (int) array_key_first($tally);
     }
 
-    /** @param  list<int|float>  $values */
-    private function median(array $values): float
-    {
-        sort($values);
-        $count = count($values);
-
-        if ($count === 0) {
-            return 0.0;
-        }
-
-        $middle = intdiv($count, 2);
-
-        return $count % 2 === 1
-            ? (float) $values[$middle]
-            : ($values[$middle - 1] + $values[$middle]) / 2;
-    }
-
     /** @param  list<int>  $amounts */
     private function isVariable(array $amounts): bool
     {
-        $median = $this->median($amounts);
+        $median = Statistics::median($amounts);
 
         if ((int) $median === 0) {
             return false;
         }
 
-        $deviations = array_map(fn (int $amount): float => abs($amount - $median), $amounts);
-
-        return ($this->median($deviations) / abs($median)) > (float) config('recurring.amount_variance_threshold');
+        return (Statistics::medianAbsoluteDeviation($amounts, $median) / abs($median))
+            > (float) config('recurring.amount_variance_threshold');
     }
 }

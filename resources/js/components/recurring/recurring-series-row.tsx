@@ -22,7 +22,11 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useLocale } from '@/hooks/use-locale';
-import { monthlyEquivalent } from '@/lib/recurring';
+import {
+    chargeAmount,
+    hasMovedPrice,
+    monthlyEquivalent,
+} from '@/lib/recurring';
 import { cn } from '@/lib/utils';
 import { type RecurringSeries } from '@/types/recurring';
 import { formatDateMedium } from '@/utils/date';
@@ -91,11 +95,19 @@ export function RecurringSeriesRow({ series }: Props) {
                 <RecurringCadenceBadge cadence={series.cadence} />
                 <div className="flex flex-col items-end">
                     <AmountDisplay
-                        amountInCents={series.expected_amount}
+                        amountInCents={chargeAmount(series)}
                         currencyCode={series.currency_code}
                         size="sm"
                         weight="medium"
                     />
+                    {hasMovedPrice(series) && (
+                        <span className="text-xs text-muted-foreground line-through">
+                            {new Intl.NumberFormat(locale, {
+                                style: 'currency',
+                                currency: series.currency_code,
+                            }).format(Math.abs(series.expected_amount) / 100)}
+                        </span>
+                    )}
                     <span className="text-xs text-muted-foreground">
                         {series.amount_is_variable && `${__('approx.')} · `}
                         {__(':amount/mo', {
@@ -105,7 +117,7 @@ export function RecurringSeriesRow({ series }: Props) {
                                 maximumFractionDigits: 0,
                             }).format(
                                 monthlyEquivalent(
-                                    series.expected_amount,
+                                    chargeAmount(series),
                                     series.cadence,
                                 ) / 100,
                             ),

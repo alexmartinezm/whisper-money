@@ -200,7 +200,7 @@ class ProjectCashflow
                     'date' => $date->toDateString(),
                     'series_id' => $row->id,
                     'display_name' => $row->display_name,
-                    'amount' => $row->expected_amount,
+                    'amount' => $row->chargeAmount(),
                     'amount_is_variable' => $row->amount_is_variable,
                     'category' => $row->category?->name,
                 ];

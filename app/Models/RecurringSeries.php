@@ -50,6 +50,7 @@ class RecurringSeries extends Model
         'interval_days',
         'anchor_day',
         'expected_amount',
+        'recent_amount',
         'price_alerted_amount',
         'amount_is_variable',
         'currency_code',
@@ -77,6 +78,7 @@ class RecurringSeries extends Model
             'interval_days' => 'integer',
             'anchor_day' => 'integer',
             'expected_amount' => 'integer',
+            'recent_amount' => 'integer',
             'price_alerted_amount' => 'integer',
             'occurrence_count' => 'integer',
             'amount_is_variable' => 'boolean',
@@ -144,12 +146,27 @@ class RecurringSeries extends Model
     }
 
     /**
-     * The expected amount rescaled to a month, so cadences can be summed and
-     * ranked against each other.
+     * What this series charges, as against what it has charged.
+     *
+     * `expected_amount` is the median of the whole history, which answers a
+     * different question and answers it badly once a price moves: a policy that
+     * went from 24 to 104 euros still reads as 24 for as long as the cheap years
+     * outnumber the dear ones. Everything that asks "how much will leave the
+     * account" — the forecast, the summary, the reminder — wants this instead.
+     * The history stays available for saying what changed.
+     */
+    public function chargeAmount(): int
+    {
+        return (int) ($this->recent_amount ?? $this->expected_amount);
+    }
+
+    /**
+     * The charge rescaled to a month, so cadences can be summed and ranked
+     * against each other.
      */
     public function monthlyEquivalentAmount(): int
     {
-        return (int) round($this->expected_amount * $this->cadence->monthlyFactor());
+        return (int) round($this->chargeAmount() * $this->cadence->monthlyFactor());
     }
 
     /**

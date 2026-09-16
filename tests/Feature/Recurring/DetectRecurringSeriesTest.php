@@ -137,6 +137,49 @@ it('projects the next charge on the same day of the month', function () {
         ->toBe($series->last_occurred_on->addMonthNoOverflow()->toDateString());
 });
 
+it('records what a charge costs now beside what it has cost', function () {
+    // A policy that went from 24,78 € to 103,82 €. The lifetime median still
+    // reads as the old price for as long as the cheap years outnumber the dear
+    // ones, and the screen was showing that as the amount due.
+    monthlyCharges($this->user, $this->account, 'Generali', count: 15, amounts: [
+        ...array_fill(0, 12, -2478),
+        ...array_fill(0, 3, -10382),
+    ]);
+
+    $this->detector->forUser($this->user);
+    $series = RecurringSeries::query()->sole();
+
+    expect($series->expected_amount)->toBe(-2478)
+        ->and($series->recent_amount)->toBe(-10382)
+        ->and($series->chargeAmount())->toBe(-10382)
+        // A price that moved and then held is not a bill that varies. Read over
+        // the whole history the step itself looks like variation.
+        ->and($series->amount_is_variable)->toBeFalse();
+});
+
+it('gives a quarterly series a current amount too', function () {
+    // Price-change detection needs two full windows, so at six charges a
+    // quarterly premium would wait years and an annual one for ever. The
+    // current amount is taken from whatever history exists.
+    monthlyCharges($this->user, $this->account, 'Insurer', count: 4, amounts: [
+        -9000, -9000, -12000, -12000,
+    ]);
+
+    $this->detector->forUser($this->user);
+
+    expect(RecurringSeries::query()->sole()->recent_amount)->toBe(-12000);
+});
+
+it('falls back to the lifetime median where no scan has run yet', function () {
+    $series = RecurringSeries::factory()->create([
+        'user_id' => $this->user->id,
+        'expected_amount' => -1299,
+        'recent_amount' => null,
+    ]);
+
+    expect($series->chargeAmount())->toBe(-1299);
+});
+
 it('detects a yearly series', function () {
     // Regression: the lookback window has to span min_occurrences of the
     // slowest cadence. At thirteen months a yearly series needed more history
