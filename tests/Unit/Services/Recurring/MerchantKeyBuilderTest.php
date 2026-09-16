@@ -69,15 +69,61 @@ it('retains distinct merchant names that only share a payment processor', functi
         ->toBe('netflix');
 });
 
-it('preserves merchant numbers that are not recognised processor references', function () {
+it('drops a number from a merchant name but keeps a short alphanumeric one', function () {
     $builder = recurringMerchantKeyBuilder();
-    $merchant = new Transaction([
-        'amount' => -1299,
-        'creditor_name' => 'ACME 2026',
-        'description' => 'ACME 2026',
-    ]);
 
-    expect($builder->stableKeyFor($merchant, [], 0.0))->toBe('2026 acme');
+    // A year, a store number or a terminal id is the kind of thing that
+    // differs between two charges of the same contract, so it cannot be part
+    // of the identity. A short alphanumeric is a trading name — O2, M6 — and
+    // dropping it would leave the charge with no identity at all.
+    expect($builder->canonicalKey('ACME 2026'))->toBe('acme')
+        ->and($builder->canonicalKey('ACME 2027'))->toBe('acme')
+        ->and($builder->canonicalKey('O2 UK'))->toBe('o2 uk');
+});
+
+it('gives every PayPal reference format the same identity', function () {
+    $builder = recurringMerchantKeyBuilder();
+
+    // PayPal rewrites the reference on every charge and uses more than one
+    // format for it. Thirteen charges of one subscription have to reach one
+    // identity, or none of them ever reaches the three needed to be a series.
+    $observed = [
+        'PAYPAL *SPOTIFY 4F1A9B27',
+        'PAYPAL *SPOTIFY 3E7C2D91',
+        'PAYPAL *SPOTIFY 35314369001',
+        'PAYPAL *SPOTIFY 35318822104',
+        'PAYPAL *SPOTIFY 4029357733',
+        'PAYPAL *SPOTIFY',
+    ];
+
+    $keys = array_unique(array_map(fn (string $value): string => $builder->canonicalKey($value), $observed));
+
+    expect($keys)->toBe(['spotify']);
+});
+
+it('keeps a trading name and its full company name as one identity', function () {
+    $builder = recurringMerchantKeyBuilder();
+
+    // The same direct debit, before and after the bank started sending a
+    // creditor name. Grouping still needs exact keys, so these two are not
+    // equal — but reconciliation has to recognise them as one provider or the
+    // series starts again from zero with the user's confirmation lost.
+    expect($builder->shareIdentity('SEPA DD DIGI 9F8E7D6C', 'DIGI SPAIN TELECOM SLU'))->toBeTrue()
+        ->and($builder->shareIdentity('RECIBO GENERALI 0501234567', 'GENERALI ESPANA SA'))->toBeTrue();
+});
+
+it('keeps two contracts at one provider apart', function () {
+    $builder = recurringMerchantKeyBuilder();
+
+    // Neither name contains the other, so containment cannot merge them.
+    expect($builder->shareIdentity('GENERALI VIDA', 'GENERALI AUTO'))->toBeFalse()
+        ->and($builder->shareIdentity('PAYPAL *SPOTIFY', 'PAYPAL *NETFLIX'))->toBeFalse();
+});
+
+it('does not treat a shared short token as a shared identity', function () {
+    $builder = recurringMerchantKeyBuilder();
+
+    expect($builder->shareIdentity('UK', 'UK GYM LIMITED'))->toBeFalse();
 });
 
 it('matches a counterparty to the current user without a hardcoded personal name', function () {

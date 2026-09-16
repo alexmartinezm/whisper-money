@@ -684,24 +684,16 @@ class DetectRecurringSeries
         ]);
     }
 
+    /**
+     * @param  array<string, mixed>  $candidate
+     */
     private function couldBelongToCandidate(RecurringSeries $series, array $candidate): bool
     {
         if ($series->direction !== $candidate['direction'] || $series->currency_code !== $candidate['currency_code']) {
             return false;
         }
 
-        if ($series->identity_key === $candidate['stable_key']) {
-            return true;
-        }
-
-        $aliases = $series->getAttribute('identity_aliases');
-
-        if (is_string($aliases)) {
-            $aliases = json_decode($aliases, true);
-        }
-
-        return is_array($aliases) && in_array($candidate['stable_key'], $aliases, true)
-            || $this->merchantKeys->canonicalKey((string) $series->merchant_key) === $candidate['stable_key'];
+        return $this->identities->matchesIdentity($series, (string) $candidate['stable_key']);
     }
 
     private function mergeAliases(array|string|null $stored, array $observed): array

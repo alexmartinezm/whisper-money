@@ -101,6 +101,38 @@ class ReconcileSeriesIdentity
     }
 
     /**
+     * Whether a stored series carries this identity — as its own key, as an
+     * alias seen on an earlier charge, or as the legacy merchant key read under
+     * today's rules.
+     *
+     * Recognition is by containment, not equality, because a bank shortens and
+     * lengthens the same name at will: "DIGI" and "DIGI SPAIN TELECOM" are one
+     * direct debit. Grouping stays exact — only recognition is generous — so
+     * two real contracts at one provider still key apart, and a candidate that
+     * recognises more than one series is sent to review rather than guessed at.
+     */
+    public function matchesIdentity(RecurringSeries $series, string $stableKey): bool
+    {
+        if ($stableKey === '') {
+            return false;
+        }
+
+        $stored = [
+            (string) $series->getAttribute('identity_key'),
+            ...array_map('strval', $series->identityAliases()),
+            (string) $series->getAttribute('merchant_key'),
+        ];
+
+        foreach ($stored as $key) {
+            if ($key !== '' && ($key === $stableKey || $this->merchantKeys->shareIdentity($key, $stableKey))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * @param  array<string, mixed>  $candidate
      */
     private function sameProvider(RecurringSeries $series, array $candidate, string $stableKey): bool
@@ -110,20 +142,7 @@ class ReconcileSeriesIdentity
             return false;
         }
 
-        if ($series->getAttribute('identity_key') === $stableKey) {
-            return true;
-        }
-
-        $aliases = $series->getAttribute('identity_aliases');
-        if (is_string($aliases)) {
-            $aliases = json_decode($aliases, true);
-        }
-
-        if (is_array($aliases) && in_array($stableKey, $aliases, true)) {
-            return true;
-        }
-
-        return $this->merchantKeys->canonicalKey((string) $series->getAttribute('merchant_key')) === $stableKey;
+        return $this->matchesIdentity($series, $stableKey);
     }
 
     /**
@@ -164,16 +183,7 @@ class ReconcileSeriesIdentity
             return true;
         }
 
-        $storedAliases = $series->getAttribute('identity_aliases');
-        if (is_string($storedAliases)) {
-            $storedAliases = json_decode($storedAliases, true);
-        }
-
-        if (! is_array($storedAliases)) {
-            $storedAliases = [];
-        }
-
-        return count(array_diff($candidate['identity_aliases'] ?? [], $storedAliases)) > 0;
+        return array_diff($candidate['identity_aliases'] ?? [], $series->identityAliases()) !== [];
     }
 
     /**

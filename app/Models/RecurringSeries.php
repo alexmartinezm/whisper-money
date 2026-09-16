@@ -22,6 +22,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * already exist in the ledger; it never creates ledger rows of its own.
  *
  * @property RecurringCadence $cadence
+ * @property ?array<int, string> $identity_aliases
  * @property RecurringSeriesStatus $status
  * @property RecurringSeriesUserState $user_state
  * @property Carbon $first_occurred_on
@@ -146,6 +147,20 @@ class RecurringSeries extends Model
     public function monthlyEquivalentAmount(): int
     {
         return (int) round($this->expected_amount * $this->cadence->monthlyFactor());
+    }
+
+    /**
+     * The identity keys seen on this series' charges, whatever the column
+     * happens to hold. The cast gives an array, but a row written before the
+     * column existed gives null, and every caller was repeating the same guard.
+     *
+     * @return list<string>
+     */
+    public function identityAliases(): array
+    {
+        $aliases = $this->identity_aliases;
+
+        return is_array($aliases) ? array_values(array_filter(array_map('strval', $aliases))) : [];
     }
 
     public function isIgnored(): bool

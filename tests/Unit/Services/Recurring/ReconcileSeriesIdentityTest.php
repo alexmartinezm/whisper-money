@@ -45,7 +45,8 @@ function recurringExistingSeries(string $id, string $accountId, ?string $deleted
     $series->setRawAttributes([
         'id' => $id,
         'identity_key' => 'spotify',
-        'identity_aliases' => ['paypal spotify'],
+        // Raw attributes hold what the column holds, and the column is json.
+        'identity_aliases' => json_encode(['paypal spotify']),
         'match_field' => 'description',
         'merchant_key' => 'paypal spotify',
         'direction' => 'expense',
