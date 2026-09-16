@@ -67,25 +67,25 @@ it('selects the merchant field according to transaction direction', function () 
             'amount' => 250000,
             'creditor_name' => 'ACCOUNT HOLDER',
             'debtor_name' => 'EXAMPLE EMPLOYER LTD',
-            'expected' => ['debtor_name', 'employer example ltd'],
+            'expected' => ['debtor_name', 'employer example'],
         ],
         [
             'amount' => -250000,
             'creditor_name' => 'EXAMPLE EMPLOYER LTD',
             'debtor_name' => 'ACCOUNT HOLDER',
-            'expected' => ['creditor_name', 'employer example ltd'],
+            'expected' => ['creditor_name', 'employer example'],
         ],
         [
             'amount' => 250000,
             'creditor_name' => null,
             'debtor_name' => 'EXAMPLE EMPLOYER LTD',
-            'expected' => ['debtor_name', 'employer example ltd'],
+            'expected' => ['debtor_name', 'employer example'],
         ],
         [
             'amount' => -250000,
             'creditor_name' => 'EXAMPLE EMPLOYER LTD',
             'debtor_name' => null,
-            'expected' => ['creditor_name', 'employer example ltd'],
+            'expected' => ['creditor_name', 'employer example'],
         ],
     ];
 
@@ -287,7 +287,7 @@ it('groups income by debtor when both bank counterparty fields are populated', f
     $series = RecurringSeries::query()->sole();
 
     expect($series->match_field)->toBe('debtor_name')
-        ->and($series->merchant_key)->toBe('employer example ltd')
+        ->and($series->merchant_key)->toBe('employer example')
         ->and($series->display_name)->toBe('EXAMPLE EMPLOYER LTD')
         ->and($series->direction)->toBe('income')
         ->and($series->expected_amount)->toBe(250000)
@@ -314,7 +314,7 @@ it('does not merge incoming counterparties that share the same creditor name', f
 
     expect($this->detector->forUser($this->user))->toBe(2);
     expect(RecurringSeries::query()->pluck('merchant_key')->sort()->values()->all())
-        ->toBe(['employer example ltd', 'other payer']);
+        ->toBe(['employer example', 'other payer']);
 });
 
 it('keeps the same merchant billed in two currencies apart', function () {
@@ -447,7 +447,9 @@ it('groups PayPal Spotify references into one stable obligation', function () {
 });
 
 it('keeps a description-only series when the creditor appears later', function () {
-    $anchor = CarbonImmutable::today()->subDays(3);
+    // Far enough back that the creditor-bearing charge a month later is still
+    // in the past: a future posting is not an observed occurrence.
+    $anchor = CarbonImmutable::today()->subMonth()->subDays(3);
 
     foreach (range(0, 3) as $index) {
         Transaction::factory()->plaintext()->create([
