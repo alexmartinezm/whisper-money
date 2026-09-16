@@ -58,17 +58,30 @@ class ProjectCashflow
         $horizon = $today->addDays($days);
         $spaceId = ($space ?? $user->activeSpace())->id;
 
+        $spendable = $this->spendableAccounts($user, $spaceId);
+        $accounts = $spendable['counted'];
+        $balance = $this->spendableBalance($accounts, $currency, $today);
+        $spendableIds = $accounts->pluck('id');
+
         $series = RecurringSeries::query()
             ->where('user_id', $user->id)
             ->where('space_id', $spaceId)
             ->stillCharging()
             ->with('category')
-            ->get();
+            ->get()
+            // Money that only changes address is not spending and not income.
+            // Counted, a monthly contribution to a joint pot shows up as both.
+            ->reject(fn (RecurringSeries $row): bool => $row->isInternal())
+            // Only what moves within the accounts this balance came from. A
+            // payment into an account excluded from the starting balance was
+            // still being added to the projected one, so the runway read richer
+            // than the accounts it claimed to be about. A series with no account
+            // is counted: it cannot be shown to be outside, and leaving it out
+            // would err towards the optimistic side.
+            ->filter(fn (RecurringSeries $row): bool => $row->account_id === null
+                || $spendableIds->contains($row->account_id));
 
         $occurrences = $this->expand($series->where('currency_code', $currency), $today, $horizon);
-        $spendable = $this->spendableAccounts($user, $spaceId);
-        $accounts = $spendable['counted'];
-        $balance = $this->spendableBalance($accounts, $currency, $today);
 
         $running = $balance;
         $expectedIn = 0;

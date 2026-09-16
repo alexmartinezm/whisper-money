@@ -88,6 +88,10 @@ class RecurringSeriesController extends Controller
     {
         return $series
             ->reject(fn (RecurringSeries $row): bool => $row->isIgnored())
+            // A movement between the user's own accounts is neither spending
+            // nor income. Counted, a monthly contribution to a joint pot adds
+            // itself to both totals and makes each read higher than it is.
+            ->reject(fn (RecurringSeries $row): bool => $row->isInternal())
             ->groupBy('currency_code')
             ->map(function (Collection $group, string $currency): array {
                 $monthlyExpense = (int) $group

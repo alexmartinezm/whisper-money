@@ -478,3 +478,102 @@ it('stays quiet about spending it cannot measure', function () {
 
     expect($this->project->forUser($this->user, 30)['spending'])->toBeNull();
 });
+
+it('leaves money moving between your own accounts out of the runway', function () {
+    $current = accountWithBalance($this->user, 100000);
+    $transfers = Category::factory()->create([
+        'user_id' => $this->user->id,
+        'type' => CategoryType::Transfer,
+    ]);
+
+    RecurringSeries::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $current->id,
+        'category_id' => $transfers->id,
+        'display_name' => 'Joint pot',
+        'expected_amount' => -15000,
+        'recent_amount' => -15000,
+        'currency_code' => 'EUR',
+        'next_expected_on' => CarbonImmutable::today()->addDays(5),
+    ]);
+
+    $forecast = $this->project->forUser($this->user, 30);
+
+    expect($forecast['occurrences'])->toHaveCount(0)
+        ->and($forecast['expected_out'])->toBe(0)
+        ->and($forecast['ending_balance'])->toBe(100000);
+});
+
+it('does not count an inflow to an account the balance leaves out', function () {
+    $current = accountWithBalance($this->user, 100000);
+    // Outside the starting balance, so its charges cannot move the projected
+    // one either — counting only one side is what made the runway read rich.
+    $excluded = accountWithBalance($this->user, 50000, includeInNetWorth: false);
+
+    RecurringSeries::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $excluded->id,
+        'display_name' => 'Rent received',
+        'expected_amount' => 15000,
+        'recent_amount' => 15000,
+        'direction' => 'income',
+        'currency_code' => 'EUR',
+        'next_expected_on' => CarbonImmutable::today()->addDays(5),
+    ]);
+    RecurringSeries::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $current->id,
+        'display_name' => 'Netflix',
+        'expected_amount' => -1299,
+        'recent_amount' => -1299,
+        'currency_code' => 'EUR',
+        'next_expected_on' => CarbonImmutable::today()->addDays(6),
+    ]);
+
+    $forecast = $this->project->forUser($this->user, 30);
+
+    expect($forecast['starting_balance'])->toBe(100000)
+        ->and($forecast['expected_in'])->toBe(0)
+        ->and($forecast['expected_out'])->toBe(-1299)
+        ->and($forecast['ending_balance'])->toBe(98701);
+});
+
+it('still walks a series that has no account', function () {
+    // Rows written before the account was recorded cannot be shown to sit
+    // outside the balance, and dropping them would flatter the runway.
+    accountWithBalance($this->user, 100000);
+
+    RecurringSeries::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => null,
+        'expected_amount' => -1299,
+        'recent_amount' => -1299,
+        'currency_code' => 'EUR',
+        'next_expected_on' => CarbonImmutable::today()->addDays(5),
+    ]);
+
+    expect($this->project->forUser($this->user, 30)['expected_out'])->toBe(-1299);
+});
+
+it('keeps counting a savings contribution, which does leave the account', function () {
+    // Internal in the sense that the money is not gone, but it is gone from
+    // here, and net-worth projection needs it in the forecast to report it as a
+    // contribution rather than as spending.
+    $current = accountWithBalance($this->user, 100000);
+    $savings = Category::factory()->create([
+        'user_id' => $this->user->id,
+        'type' => CategoryType::Savings,
+    ]);
+
+    RecurringSeries::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $current->id,
+        'category_id' => $savings->id,
+        'expected_amount' => -20000,
+        'recent_amount' => -20000,
+        'currency_code' => 'EUR',
+        'next_expected_on' => CarbonImmutable::today()->addDays(5),
+    ]);
+
+    expect($this->project->forUser($this->user, 30)['expected_out'])->toBe(-20000);
+});

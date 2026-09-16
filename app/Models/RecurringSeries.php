@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\CategoryType;
 use App\Enums\RecurringCadence;
 use App\Enums\RecurringSeriesStatus;
 use App\Enums\RecurringSeriesUserState;
@@ -181,6 +182,24 @@ class RecurringSeries extends Model
         $aliases = $this->identity_aliases;
 
         return is_array($aliases) ? array_values(array_filter(array_map('strval', $aliases))) : [];
+    }
+
+    /**
+     * Whether this series only moves money between the user's own accounts.
+     *
+     * Read from the category rather than stored, so re-categorising a movement
+     * corrects the totals at once instead of waiting for the nightly scan — and
+     * re-categorising is exactly how a user fixes one that was filed wrong.
+     *
+     * Only `Transfer` counts here. A pension or savings contribution is also
+     * internal in the sense that the money is not gone, but it does leave the
+     * current account, so a runway has to keep counting it; net-worth projection
+     * makes the opposite call for the same rows, and reads them from its own
+     * list for that reason.
+     */
+    public function isInternal(): bool
+    {
+        return $this->category?->type === CategoryType::Transfer;
     }
 
     public function isIgnored(): bool
