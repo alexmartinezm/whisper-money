@@ -289,21 +289,21 @@ class DetectRecurringSeries
         float $noiseThreshold,
     ): array {
         $groups = [];
+        // A counterparty field holding the holder's own name is not a
+        // counterparty, and reading it as one files every such charge — a
+        // social-security direct debit, a sweep into savings — under one key.
+        $ownerName = $user->name;
 
         $this->candidates($user, $space, $since)
             ->select(['id', 'description', 'creditor_name', 'debtor_name', 'transaction_date', 'amount', 'currency_code', 'account_id'])
             ->lazyById()
-            ->each(function (Transaction $transaction) use (&$groups, $documentFrequency, $noiseThreshold, $user): void {
+            ->each(function (Transaction $transaction) use (&$groups, $documentFrequency, $noiseThreshold, $ownerName): void {
                 if ((int) $transaction->amount === 0 || ! filled($transaction->account_id)) {
                     return;
                 }
 
-                if ($this->isOwnHolderTransaction($transaction, $user)) {
-                    return;
-                }
-
-                $key = $this->merchantKeys->keyFor($transaction, $documentFrequency, $noiseThreshold);
-                $stableKey = $this->merchantKeys->stableKeyFor($transaction, $documentFrequency, $noiseThreshold);
+                $key = $this->merchantKeys->keyFor($transaction, $documentFrequency, $noiseThreshold, $ownerName);
+                $stableKey = $this->merchantKeys->stableKeyFor($transaction, $documentFrequency, $noiseThreshold, $ownerName);
 
                 if ($key === null || $stableKey === null) {
                     return;
@@ -322,14 +322,14 @@ class DetectRecurringSeries
                     'identity_aliases' => [],
                     'direction' => $direction,
                     'currency_code' => $currency,
-                    'display_name' => $this->merchantKeys->displayNameFor($transaction),
+                    'display_name' => $this->merchantKeys->displayNameFor($transaction, $ownerName),
                     'account_id' => $accountId,
                     'transactions' => [],
                 ];
 
                 $groups[$bucket]['identity_aliases'] = array_values(array_unique(array_merge(
                     $groups[$bucket]['identity_aliases'],
-                    $this->merchantKeys->aliasKeysFor($transaction, $documentFrequency, $noiseThreshold),
+                    $this->merchantKeys->aliasKeysFor($transaction, $documentFrequency, $noiseThreshold, $ownerName),
                 )));
                 $groups[$bucket]['transactions'][] = [
                     'id' => $transaction->id,
@@ -340,23 +340,6 @@ class DetectRecurringSeries
             });
 
         return $groups;
-    }
-
-    private function isOwnHolderTransaction(Transaction $transaction, User $user): bool
-    {
-        $ownerName = $user->getAttribute('name');
-
-        if (! is_string($ownerName) || trim($ownerName) === '') {
-            return false;
-        }
-
-        foreach ([$transaction->creditor_name, $transaction->debtor_name] as $counterparty) {
-            if (is_string($counterparty) && $this->merchantKeys->matchesCounterparty($counterparty, $ownerName)) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     /**

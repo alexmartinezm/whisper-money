@@ -126,6 +126,47 @@ it('does not treat a shared short token as a shared identity', function () {
     expect($builder->shareIdentity('UK', 'UK GYM LIMITED'))->toBeFalse();
 });
 
+it('reads identity from the description when the counterparty is the holder', function () {
+    $builder = recurringMerchantKeyBuilder();
+    $holder = 'Test Account Holder';
+
+    // A bank that labels a direct debit with the payer has named nobody. Two
+    // obligations arriving that way have to stay apart, or a social-security
+    // charge and a sweep into savings land in one bucket under the holder's
+    // own name — which is how a real monthly obligation goes missing.
+    $socialSecurity = new Transaction([
+        'amount' => -20586,
+        'creditor_name' => 'TEST ACCOUNT HOLDER',
+        'description' => 'SOCIAL SECURITY CONTRIBUTION',
+    ]);
+    $savings = new Transaction([
+        'amount' => -15000,
+        'creditor_name' => 'TEST ACCOUNT HOLDER',
+        'description' => 'TRANSFER TO SAVINGS',
+    ]);
+
+    expect($builder->keyFor($socialSecurity, [], 0.0, $holder))
+        ->toBe(['description', 'contribution security social'])
+        ->and($builder->keyFor($savings, [], 0.0, $holder))
+        ->toBe(['description', 'savings to'])
+        ->and($builder->displayNameFor($socialSecurity, $holder))
+        ->toBe('SOCIAL SECURITY CONTRIBUTION');
+});
+
+it('never stores the holder name as an identity alias', function () {
+    $builder = recurringMerchantKeyBuilder();
+    $transaction = new Transaction([
+        'amount' => -20586,
+        'creditor_name' => 'TEST ACCOUNT HOLDER',
+        'description' => 'SOCIAL SECURITY CONTRIBUTION',
+    ]);
+
+    // Stored as an alias, the holder's name would later recognise every other
+    // charge the bank labelled that way as the same provider.
+    expect($builder->aliasKeysFor($transaction, [], 0.0, 'Test Account Holder'))
+        ->not->toContain('account holder test');
+});
+
 it('matches a counterparty to the current user without a hardcoded personal name', function () {
     $builder = recurringMerchantKeyBuilder();
 

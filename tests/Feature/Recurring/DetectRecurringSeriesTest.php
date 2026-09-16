@@ -527,6 +527,62 @@ it('does not turn own-holder transfers and social contributions into a subscript
         ->and(RecurringSeries::query()->count())->toBe(0);
 });
 
+it('detects an obligation the bank labelled with the holder name', function () {
+    $anchor = CarbonImmutable::today()->subDays(3);
+
+    // A social-security direct debit arrives with the payer in the creditor
+    // field, month after month. Treating that name as the counterparty used to
+    // drop the charge entirely, so a real monthly obligation was simply absent
+    // from the screen.
+    foreach (range(0, 3) as $index) {
+        Transaction::factory()->plaintext()->create([
+            'user_id' => $this->user->id,
+            'account_id' => $this->account->id,
+            'category_id' => $this->category->id,
+            'creditor_name' => $this->user->name,
+            'description' => 'SOCIAL SECURITY CONTRIBUTION',
+            'transaction_date' => $anchor->subMonths(3 - $index)->toDateString(),
+            'amount' => -20586,
+            'currency_code' => 'EUR',
+        ]);
+    }
+
+    expect($this->detector->forUser($this->user))->toBe(1);
+
+    $series = RecurringSeries::query()->sole();
+
+    expect($series->match_field)->toBe('description')
+        ->and($series->expected_amount)->toBe(-20586)
+        ->and($series->display_name)->toBe('SOCIAL SECURITY CONTRIBUTION');
+});
+
+it('gives one identity to charges whose processor reference changes every month', function () {
+    $anchor = CarbonImmutable::today()->subDays(3);
+    $references = ['4F1A9B27', '35314369001', '4029357733', '3E7C2D91'];
+
+    // PayPal rewrites the reference on every charge, in more than one format.
+    // Keeping it in the identity left each charge alone under its own key, so
+    // none of them ever reached the three occurrences a series needs.
+    foreach ($references as $index => $reference) {
+        Transaction::factory()->plaintext()->create([
+            'user_id' => $this->user->id,
+            'account_id' => $this->account->id,
+            'category_id' => $this->category->id,
+            'creditor_name' => "PAYPAL *SPOTIFY {$reference}",
+            'description' => "PAYPAL *SPOTIFY {$reference}",
+            'transaction_date' => $anchor->subMonths(3 - $index)->toDateString(),
+            'amount' => -2099,
+            'currency_code' => 'EUR',
+        ]);
+    }
+
+    expect($this->detector->forUser($this->user))->toBe(1);
+
+    expect(RecurringSeries::query()->sole())
+        ->identity_key->toBe('spotify')
+        ->occurrence_count->toBe(4);
+});
+
 it('does not count a future transaction as an observed occurrence', function () {
     monthlyCharges($this->user, $this->account, 'Spotify', count: 3);
     Transaction::factory()->plaintext()->create([
