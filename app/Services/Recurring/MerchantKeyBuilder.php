@@ -20,6 +20,32 @@ class MerchantKeyBuilder
     /** Matches the `merchant_key` column width. */
     private const MAX_KEY_LENGTH = 191;
 
+    /**
+     * Bank and processor words carry no merchant identity in a payment
+     * description. This is deliberately a small, recognised vocabulary rather
+     * than a fuzzy or global stopword engine.
+     *
+     * @var list<string>
+     */
+    private const STRUCTURAL_TOKENS = [
+        'card',
+        'dd',
+        'debit',
+        'direct',
+        'payment',
+        'payments',
+        'paypal',
+        'pay',
+        'pal',
+        'pos',
+        'purchase',
+        'ref',
+        'reference',
+        'sepa',
+        'standing',
+        'transfer',
+    ];
+
     public function __construct(private readonly DescriptionTokenizer $tokenizer) {}
 
     /**
@@ -41,16 +67,104 @@ class MerchantKeyBuilder
     public function keyFor(Transaction $transaction, array $documentFrequency, float $noiseThreshold): ?array
     {
         [$field, $raw] = $this->signal($transaction);
+        $key = $this->canonicalKey($raw);
 
-        $key = $field === 'description'
-            ? $this->tokenizer->distinctiveKey($raw, $documentFrequency, $noiseThreshold)
-            : mb_strtolower($this->collapse($raw));
+        if ($key === '' && $field === 'description') {
+            $key = $this->tokenizer->distinctiveKey($raw, $documentFrequency, $noiseThreshold);
+        }
 
         if ($key === '') {
             return null;
         }
 
         return [$field, mb_substr($key, 0, self::MAX_KEY_LENGTH)];
+    }
+
+    /**
+     * Identity key independent of whether the bank populated a counterparty
+     * field on this occurrence.
+     *
+     * @param  array<string, int>  $documentFrequency
+     */
+    public function stableKeyFor(Transaction $transaction, array $documentFrequency, float $noiseThreshold): ?string
+    {
+        $key = $this->keyFor($transaction, $documentFrequency, $noiseThreshold);
+
+        return $key === null ? null : $key[1];
+    }
+
+    /**
+     * All deterministic aliases observed on a transaction. They are stored as
+     * metadata on the series so a later creditor-name change does not create a
+     * second UUID.
+     *
+     * @param  array<string, int>  $documentFrequency
+     * @return list<string>
+     */
+    public function aliasKeysFor(Transaction $transaction, array $documentFrequency, float $noiseThreshold): array
+    {
+        $rawValues = [
+            $this->signal($transaction)[1],
+            $transaction->description,
+            $transaction->creditor_name,
+            $transaction->debtor_name,
+        ];
+        $keys = [];
+
+        foreach ($rawValues as $raw) {
+            if (! filled($raw)) {
+                continue;
+            }
+
+            $key = $this->canonicalKey((string) $raw);
+
+            if ($key === '') {
+                $key = $this->tokenizer->distinctiveKey((string) $raw, $documentFrequency, $noiseThreshold);
+            }
+
+            if ($key !== '') {
+                $keys[] = mb_substr($key, 0, self::MAX_KEY_LENGTH);
+            }
+        }
+
+        return array_values(array_unique($keys));
+    }
+
+    /**
+     * Canonicalize an already stored legacy merchant key for compatibility
+     * matching. The result is intentionally exact and deterministic.
+     */
+    public function canonicalKey(string $value): string
+    {
+        $value = mb_strtolower(trim($value));
+        $value = preg_replace('/[^\p{L}\p{N}]+/u', ' ', $value) ?? $value;
+        $tokens = preg_split('/\s+/u', trim($value), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $tokens = array_values(array_filter($tokens, function (string $token): bool {
+            if (in_array($token, self::STRUCTURAL_TOKENS, true)) {
+                return false;
+            }
+
+            return true;
+        }));
+
+        $lastToken = array_key_last($tokens);
+        if ($lastToken !== null && $this->isRecognizedProcessorReference($tokens[$lastToken])) {
+            unset($tokens[$lastToken]);
+        }
+
+        $tokens = array_values(array_unique($tokens));
+        sort($tokens, SORT_STRING);
+
+        return mb_substr(implode(' ', $tokens), 0, self::MAX_KEY_LENGTH);
+    }
+
+    public function matchesCounterparty(string $observed, ?string $ownerName): bool
+    {
+        if (trim($observed) === '' || ! filled($ownerName)) {
+            return false;
+        }
+
+        return $this->canonicalKey($observed) === $this->canonicalKey((string) $ownerName);
     }
 
     /**
@@ -94,5 +208,10 @@ class MerchantKeyBuilder
     private function collapse(string $value): string
     {
         return trim(preg_replace('/\s+/', ' ', $value) ?? '');
+    }
+
+    private function isRecognizedProcessorReference(string $token): bool
+    {
+        return preg_match('/^(?=.*[a-z])(?=.*\d)[a-z0-9]{8}$/i', $token) === 1;
     }
 }

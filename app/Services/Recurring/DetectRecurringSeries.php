@@ -12,39 +12,130 @@ use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Transactions\EffectiveTransactionPostings;
 use Carbon\CarbonImmutable;
+use Closure;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use RuntimeException;
 
 /**
- * Finds the charges that repeat in a user's ledger — subscriptions, utility
- * bills, standing payments — and records them as series.
+ * Finds charges that repeat in a user's ledger and reconciles them into series.
  *
  * Detection is descriptive, never generative: it groups transactions that
- * already exist and never writes to the ledger, because the ledger is owned by
- * bank sync and import, which dedupe on their own fingerprints.
+ * already exist and never writes to the ledger. Identity planning is pure; the
+ * write path applies one plan atomically after the shared user lock is held.
  */
 class DetectRecurringSeries
 {
+    private const DETECTION_LOCK_TTL_SECONDS = 900;
+
     public function __construct(
         private readonly MerchantKeyBuilder $merchantKeys,
         private readonly CadenceClassifier $classifier,
         private readonly EffectiveTransactionPostings $postings,
+        private readonly ReconcileSeriesIdentity $identities,
     ) {}
 
     /**
      * Rebuild every series for a user, in each space where they hold
-     * transactions. Deriving the spaces from the ledger rather than from
-     * membership keeps the run proportional to the data that exists.
+     * transactions or existing series.
      *
-     * @return int the number of series that survived detection
+     * @return int the number of series applied
      */
     public function forUserEverywhere(User $user): int
     {
-        // Spaces that already hold series are visited too, not just those with
-        // transactions. A space whose ledger was emptied still needs a pass, or
-        // its series would stay active forever with nothing behind them.
-        $spaceIds = Transaction::query()
+        return $this->withDetectionLock($user, function () use ($user): int {
+            $spaceIds = $this->spaceIdsForUser($user);
+
+            if ($spaceIds->isEmpty()) {
+                return 0;
+            }
+
+            return (int) Space::query()
+                ->whereIn('id', $spaceIds)
+                ->get()
+                ->sum(fn (Space $space): int => $this->forUserUnlocked($user, $space));
+        });
+    }
+
+    /**
+     * Rebuild every series for one user in one space.
+     *
+     * @api Called by focused recurring tests and manual rescan integrations.
+     *
+     * @return int the number of series applied
+     */
+    public function forUser(User $user, ?Space $space = null): int
+    {
+        return $this->withDetectionLock($user, function () use ($user, $space): int {
+            return $this->forUserUnlocked($user, $space);
+        });
+    }
+
+    /**
+     * Calculate every space's plan without saving series, pivots, execution
+     * status, notifications or ledger rows.
+     *
+     * @return array{user_id: string, spaces: list<array<string, mixed>>, totals: array<string, mixed>}
+     */
+    public function previewForUserEverywhere(User $user): array
+    {
+        $spaceIds = $this->spaceIdsForUser($user);
+        $spaces = Space::query()
+            ->whereIn('id', $spaceIds)
+            ->get()
+            ->map(fn (Space $space): array => $this->previewForUser($user, $space))
+            ->values()
+            ->all();
+
+        return [
+            'user_id' => (string) $user->id,
+            'spaces' => $spaces,
+            'totals' => $this->sumPreviewReports($spaces),
+        ];
+    }
+
+    /**
+     * Calculate one space's pure reconciliation report.
+     *
+     * @return array<string, mixed>
+     */
+    public function previewForUser(User $user, ?Space $space = null): array
+    {
+        $space ??= $this->readOnlySpaceForUser($user);
+
+        if (! $space instanceof Space) {
+            return $this->emptyPreview($user);
+        }
+
+        return $this->previewReport($this->buildPlan($user, $space));
+    }
+
+    /**
+     * Lock key shared by the command and queued job.
+     *
+     * @api
+     */
+    public static function lockKeyForUser(string $userId): string
+    {
+        return "recurring_detection_lock_{$userId}";
+    }
+
+    private function forUserUnlocked(User $user, ?Space $space): int
+    {
+        $space ??= $user->activeSpace();
+
+        return $this->persist($this->buildPlan($user, $space));
+    }
+
+    /**
+     * @return Collection<int, string>
+     */
+    private function spaceIdsForUser(User $user): Collection
+    {
+        return Transaction::query()
             ->where('user_id', $user->id)
             ->distinct()
             ->pluck('space_id')
@@ -55,44 +146,119 @@ class DetectRecurringSeries
                     ->pluck('space_id'),
             )
             ->filter()
-            ->unique();
+            ->unique()
+            ->values();
+    }
 
-        if ($spaceIds->isEmpty()) {
-            return 0;
+    private function readOnlySpaceForUser(User $user): ?Space
+    {
+        if ($user->current_space_id !== null) {
+            $space = Space::query()->find($user->current_space_id);
+
+            if ($space instanceof Space && $space->hasMember($user)) {
+                return $space;
+            }
         }
 
-        return (int) Space::query()
-            ->whereIn('id', $spaceIds)
-            ->get()
-            ->sum(fn (Space $space): int => $this->forUser($user, $space));
+        return $user->accessibleSpaces()->first();
+    }
+
+    /** @return array<string, mixed> */
+    private function emptyPreview(User $user): array
+    {
+        return [
+            'user_id' => (string) $user->id,
+            'space_id' => null,
+            'created' => 0,
+            'updated' => 0,
+            'unchanged' => 0,
+            'merged' => 0,
+            'review_required' => 0,
+            'delta' => [],
+            'candidates' => [],
+        ];
     }
 
     /**
-     * Rebuild every series for one user in one space.
-     *
-     * @return int the number of series that survived detection
+     * @param  Closure(): int  $callback
      */
-    public function forUser(User $user, ?Space $space = null): int
+    private function withDetectionLock(User $user, Closure $callback): int
     {
-        $space ??= $user->activeSpace();
-        $since = CarbonImmutable::today()->subMonths((int) config('recurring.lookback_months'));
+        $lock = Cache::lock(self::lockKeyForUser((string) $user->id), self::DETECTION_LOCK_TTL_SECONDS);
 
+        if (! $lock->get()) {
+            throw new RuntimeException("Recurring detection already running for user {$user->id}.");
+        }
+
+        try {
+            return $callback();
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
+     * @return array{user: User, space: Space, candidates: list<array<string, mixed>>, plans: list<array{candidate: array<string, mixed>, resolution: array<string, mixed>}>, existing: EloquentCollection<int, RecurringSeries>, protected_existing_ids: list<string>}
+     */
+    private function buildPlan(User $user, Space $space): array
+    {
+        $since = CarbonImmutable::today()->subMonths((int) config('recurring.lookback_months'));
         $descriptions = $this->candidates($user, $space, $since)->pluck('description');
         $documentFrequency = $this->merchantKeys->documentFrequency($descriptions);
         $noiseThreshold = $descriptions->count() * (float) config('recurring.noise_token_fraction');
+        $candidates = $this->classify(
+            $this->group($user, $space, $since, $documentFrequency, $noiseThreshold),
+        );
+        $categories = $this->effectiveCategories($candidates);
 
-        $groups = $this->group($user, $space, $since, $documentFrequency, $noiseThreshold);
-        $series = $this->classify($groups);
+        foreach ($candidates as $index => $candidate) {
+            $candidates[$index]['category_id'] = $categories[$this->candidateIdentity($candidate)] ?? null;
+        }
 
-        return $this->persist($user, $space, $series);
+        $existing = RecurringSeries::withTrashed()
+            ->where('user_id', $user->id)
+            ->where('space_id', $space->id)
+            ->with(['transactions:id'])
+            ->orderBy('id')
+            ->get();
+        $plans = [];
+        $protectedExistingIds = [];
+
+        foreach ($candidates as $candidate) {
+            $resolution = $this->identities->planCandidate($candidate, $existing);
+            $plans[] = [
+                'candidate' => $candidate,
+                'resolution' => $resolution,
+            ];
+
+            if ($resolution['series'] instanceof RecurringSeries) {
+                $protectedExistingIds[] = (string) $resolution['series']->id;
+            }
+        }
+
+        foreach ($existing->reject->trashed() as $series) {
+            foreach ($candidates as $candidate) {
+                if ($this->couldBelongToCandidate($series, $candidate)) {
+                    $protectedExistingIds[] = (string) $series->id;
+                    break;
+                }
+            }
+        }
+
+        return [
+            'user' => $user,
+            'space' => $space,
+            'candidates' => $candidates,
+            'plans' => $plans,
+            'existing' => $existing,
+            'protected_existing_ids' => array_values(array_unique($protectedExistingIds)),
+        ];
     }
 
     /**
-     * The transactions detection is allowed to look at.
-     *
-     * Client-encrypted descriptions are skipped for the same reason every other
-     * server-side text analysis skips them (see
-     * `App\Services\Ai\RuleSuggestionAggregator`): the server cannot read them.
+     * The transactions detection is allowed to look at. Future postings and
+     * rows belonging to deleted or archived accounts are not observations for a
+     * new projection; existing pivots remain untouched by apply.
      *
      * @return Builder<Transaction>
      */
@@ -103,17 +269,17 @@ class DetectRecurringSeries
             ->where('space_id', $space->id)
             ->whereNull('description_iv')
             ->whereDate('transaction_date', '>=', $since->toDateString())
-            ->whereHas('account');
+            ->whereDate('transaction_date', '<=', CarbonImmutable::today()->toDateString())
+            ->whereHas('account', fn (Builder $query): Builder => $query->whereNull('archived_at'));
     }
 
     /**
-     * Bucket transactions by merchant identity. Direction and currency are part
-     * of the identity: a refund from a merchant is not an instalment of the
-     * subscription, and the same merchant billed in two currencies is two
-     * series that must not have their amounts mixed.
+     * Bucket transactions by stable merchant identity, account, direction and
+     * currency. Account is evidence for separating two contracts at one
+     * provider; observed field is deliberately not part of the bucket.
      *
      * @param  array<string, int>  $documentFrequency
-     * @return array<string, array{match_field: string, merchant_key: string, direction: string, currency_code: string, display_name: string, transactions: list<array{id: string, date: CarbonImmutable, amount: int, account_id: string|null}>}>
+     * @return array<string, array{match_field: string, merchant_key: string, stable_key: string, identity_aliases: list<string>, direction: string, currency_code: string, display_name: string, account_id: string, transactions: list<array{id: string, date: CarbonImmutable, amount: int, account_id: string}>}>
      */
     private function group(
         User $user,
@@ -127,44 +293,74 @@ class DetectRecurringSeries
         $this->candidates($user, $space, $since)
             ->select(['id', 'description', 'creditor_name', 'debtor_name', 'transaction_date', 'amount', 'currency_code', 'account_id'])
             ->lazyById()
-            ->each(function (Transaction $transaction) use (&$groups, $documentFrequency, $noiseThreshold): void {
-                if ((int) $transaction->amount === 0) {
+            ->each(function (Transaction $transaction) use (&$groups, $documentFrequency, $noiseThreshold, $user): void {
+                if ((int) $transaction->amount === 0 || ! filled($transaction->account_id)) {
+                    return;
+                }
+
+                if ($this->isOwnHolderTransaction($transaction, $user)) {
                     return;
                 }
 
                 $key = $this->merchantKeys->keyFor($transaction, $documentFrequency, $noiseThreshold);
+                $stableKey = $this->merchantKeys->stableKeyFor($transaction, $documentFrequency, $noiseThreshold);
 
-                if ($key === null) {
+                if ($key === null || $stableKey === null) {
                     return;
                 }
 
-                [$matchField, $merchantKey] = $key;
+                [$matchField] = $key;
                 $direction = $transaction->amount < 0 ? 'expense' : 'income';
                 $currency = (string) $transaction->currency_code;
-                $bucket = implode('|', [$matchField, $merchantKey, $direction, $currency]);
+                $accountId = (string) $transaction->account_id;
+                $bucket = implode('|', [$stableKey, $direction, $currency, $accountId]);
 
                 $groups[$bucket] ??= [
                     'match_field' => $matchField,
-                    'merchant_key' => $merchantKey,
+                    'merchant_key' => $stableKey,
+                    'stable_key' => $stableKey,
+                    'identity_aliases' => [],
                     'direction' => $direction,
                     'currency_code' => $currency,
                     'display_name' => $this->merchantKeys->displayNameFor($transaction),
+                    'account_id' => $accountId,
                     'transactions' => [],
                 ];
 
+                $groups[$bucket]['identity_aliases'] = array_values(array_unique(array_merge(
+                    $groups[$bucket]['identity_aliases'],
+                    $this->merchantKeys->aliasKeysFor($transaction, $documentFrequency, $noiseThreshold),
+                )));
                 $groups[$bucket]['transactions'][] = [
                     'id' => $transaction->id,
                     'date' => CarbonImmutable::parse($transaction->transaction_date),
                     'amount' => (int) $transaction->amount,
-                    'account_id' => $transaction->account_id,
+                    'account_id' => $accountId,
                 ];
             });
 
         return $groups;
     }
 
+    private function isOwnHolderTransaction(Transaction $transaction, User $user): bool
+    {
+        $ownerName = $user->getAttribute('name');
+
+        if (! is_string($ownerName) || trim($ownerName) === '') {
+            return false;
+        }
+
+        foreach ([$transaction->creditor_name, $transaction->debtor_name] as $counterparty) {
+            if (is_string($counterparty) && $this->merchantKeys->matchesCounterparty($counterparty, $ownerName)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /**
-     * Keep the groups that actually repeat, and describe how.
+     * Keep groups that repeat and describe how.
      *
      * @param  array<string, array<string, mixed>>  $groups
      * @return list<array<string, mixed>>
@@ -175,7 +371,7 @@ class DetectRecurringSeries
         $series = [];
 
         foreach ($groups as $group) {
-            /** @var list<array{id: string, date: CarbonImmutable, amount: int, account_id: string|null}> $occurrences */
+            /** @var list<array{id: string, date: CarbonImmutable, amount: int, account_id: string}> $occurrences */
             $occurrences = $group['transactions'];
 
             if (count($occurrences) < $minOccurrences) {
@@ -184,7 +380,6 @@ class DetectRecurringSeries
 
             usort($occurrences, fn (array $a, array $b): int => $a['date'] <=> $b['date']);
             $dates = array_map(fn (array $occurrence): CarbonImmutable => $occurrence['date'], $occurrences);
-
             $match = $this->classifier->classify($dates);
 
             if (! $match instanceof CadenceMatch) {
@@ -194,11 +389,12 @@ class DetectRecurringSeries
             $amounts = array_map(fn (array $occurrence): int => $occurrence['amount'], $occurrences);
             $firstOccurred = $dates[0];
             $lastOccurred = $dates[count($dates) - 1];
-            $nextExpected = $lastOccurred->addDays($match->medianGapDays);
 
             $series[] = [
                 'match_field' => $group['match_field'],
                 'merchant_key' => $group['merchant_key'],
+                'stable_key' => $group['stable_key'],
+                'identity_aliases' => $group['identity_aliases'],
                 'display_name' => $group['display_name'],
                 'direction' => $group['direction'],
                 'currency_code' => $group['currency_code'],
@@ -206,10 +402,10 @@ class DetectRecurringSeries
                 'interval_days' => $match->medianGapDays,
                 'expected_amount' => (int) round($this->median($amounts)),
                 'amount_is_variable' => $this->isVariable($amounts),
-                'account_id' => $this->dominantAccountId($occurrences),
+                'account_id' => $group['account_id'],
                 'first_occurred_on' => $firstOccurred,
                 'last_occurred_on' => $lastOccurred,
-                'next_expected_on' => $nextExpected,
+                'next_expected_on' => $lastOccurred->addDays($match->medianGapDays),
                 'occurrence_count' => count($occurrences),
                 'transaction_ids' => array_map(fn (array $occurrence): string => $occurrence['id'], $occurrences),
             ];
@@ -219,92 +415,119 @@ class DetectRecurringSeries
     }
 
     /**
-     * Write the run's result, preserving everything the user decided.
+     * Apply one pure plan atomically. Review-required candidates are not
+     * mutated; unmatched active series lapse but keep their history and pivots.
      *
-     * The whole assignment is rebuilt inside one transaction: pivot rows are
-     * cleared before they are rewritten so a transaction that moved between
-     * series cannot collide with the pivot's unique index mid-run.
-     *
-     * Deleted series are loaded too, and then left alone. Their identity still
-     * occupies the unique index, so ignoring them would make the next run
-     * collide; resurrecting them would undo a deletion the user asked for.
-     *
-     * @param  list<array<string, mixed>>  $series
+     * @param  array<string, mixed>  $plan
      */
-    private function persist(User $user, Space $space, array $series): int
+    private function persist(array $plan): int
     {
-        return DB::transaction(function () use ($user, $space, $series): int {
+        /** @var User $user */
+        $user = $plan['user'];
+        /** @var Space $space */
+        $space = $plan['space'];
+
+        return DB::transaction(function () use ($plan, $user, $space): int {
+            /** @var EloquentCollection<int, RecurringSeries> $existing */
             $existing = RecurringSeries::withTrashed()
                 ->where('user_id', $user->id)
                 ->where('space_id', $space->id)
+                ->orderBy('id')
+                ->lockForUpdate()
                 ->get()
-                ->keyBy(fn (RecurringSeries $row): string => $this->identity(
-                    $row->match_field,
-                    $row->merchant_key,
-                    $row->direction,
-                    $row->currency_code,
-                ));
-
-            RecurringSeriesTransaction::query()
-                ->whereIn('recurring_series_id', $existing->reject->trashed()->pluck('id'))
-                ->delete();
-
-            $categories = $this->effectiveCategories($series);
-            $seen = [];
+                ->keyBy('id');
+            $rows = [];
+            $appliedTransactionIds = [];
+            $protectedIds = $plan['protected_existing_ids'];
             $written = 0;
 
-            foreach ($series as $candidate) {
-                $identity = $this->identity(
-                    $candidate['match_field'],
-                    $candidate['merchant_key'],
-                    $candidate['direction'],
-                    $candidate['currency_code'],
-                );
-                $seen[] = $identity;
+            foreach ($plan['plans'] as $item) {
+                $candidate = $item['candidate'];
+                $resolution = $item['resolution'];
+                $series = $resolution['series'];
 
-                if ($existing->get($identity)?->trashed() === true) {
+                if ($resolution['action'] === 'review_required') {
                     continue;
                 }
 
-                $written++;
-                $row = $existing->get($identity) ?? new RecurringSeries([
-                    'user_id' => $user->id,
-                    'space_id' => $space->id,
-                    'match_field' => $candidate['match_field'],
-                    'merchant_key' => $candidate['merchant_key'],
-                    'direction' => $candidate['direction'],
-                    'currency_code' => $candidate['currency_code'],
-                    'display_name' => $candidate['display_name'],
-                    'user_state' => RecurringSeriesUserState::Detected,
-                ]);
+                if ($series instanceof RecurringSeries) {
+                    $row = $existing->get($series->id);
 
-                $row->fill([
-                    'cadence' => $candidate['cadence'],
-                    'interval_days' => $candidate['interval_days'],
-                    'expected_amount' => $candidate['expected_amount'],
-                    'amount_is_variable' => $candidate['amount_is_variable'],
-                    'account_id' => $candidate['account_id'],
-                    'category_id' => $categories[$identity] ?? null,
-                    'first_occurred_on' => $candidate['first_occurred_on'],
-                    'last_occurred_on' => $candidate['last_occurred_on'],
-                    'next_expected_on' => $candidate['next_expected_on'],
-                    'occurrence_count' => $candidate['occurrence_count'],
-                    'status' => $this->resolveStatus(
-                        $candidate['last_occurred_on'],
-                        $candidate['interval_days'],
-                        $row->user_state === RecurringSeriesUserState::Confirmed,
-                    ),
-                ]);
+                    if (! $row instanceof RecurringSeries || $row->trashed()) {
+                        continue;
+                    }
+
+                    $protectedIds[] = (string) $row->id;
+                    $aliases = $this->mergeAliases($row->identity_aliases, $candidate['identity_aliases']);
+                    $row->fill([
+                        'identity_key' => $this->identities->identityKey($candidate),
+                        'identity_aliases' => $aliases,
+                        'cadence' => $candidate['cadence'],
+                        'interval_days' => $candidate['interval_days'],
+                        'expected_amount' => $candidate['expected_amount'],
+                        'amount_is_variable' => $candidate['amount_is_variable'],
+                        'account_id' => $candidate['account_id'],
+                        'category_id' => $candidate['category_id'],
+                        'first_occurred_on' => $candidate['first_occurred_on'],
+                        'last_occurred_on' => $candidate['last_occurred_on'],
+                        'next_expected_on' => $candidate['next_expected_on'],
+                        'occurrence_count' => $candidate['occurrence_count'],
+                        'status' => $this->resolveStatus(
+                            $candidate['last_occurred_on'],
+                            $candidate['interval_days'],
+                            $row->user_state === RecurringSeriesUserState::Confirmed,
+                        ),
+                    ]);
+                } else {
+                    $row = new RecurringSeries([
+                        'user_id' => $user->id,
+                        'space_id' => $space->id,
+                        'match_field' => $candidate['match_field'],
+                        'merchant_key' => $candidate['merchant_key'],
+                        'identity_key' => $this->identities->identityKey($candidate),
+                        'identity_aliases' => $candidate['identity_aliases'],
+                        'display_name' => $candidate['display_name'],
+                        'user_state' => RecurringSeriesUserState::Detected,
+                        'cadence' => $candidate['cadence'],
+                        'interval_days' => $candidate['interval_days'],
+                        'expected_amount' => $candidate['expected_amount'],
+                        'amount_is_variable' => $candidate['amount_is_variable'],
+                        'account_id' => $candidate['account_id'],
+                        'category_id' => $candidate['category_id'],
+                        'direction' => $candidate['direction'],
+                        'currency_code' => $candidate['currency_code'],
+                        'first_occurred_on' => $candidate['first_occurred_on'],
+                        'last_occurred_on' => $candidate['last_occurred_on'],
+                        'next_expected_on' => $candidate['next_expected_on'],
+                        'occurrence_count' => $candidate['occurrence_count'],
+                        'status' => $this->resolveStatus(
+                            $candidate['last_occurred_on'],
+                            $candidate['interval_days'],
+                            false,
+                        ),
+                    ]);
+                }
 
                 $row->save();
-                $row->transactions()->attach($candidate['transaction_ids']);
+                $rows[] = ['row' => $row, 'transaction_ids' => $candidate['transaction_ids']];
+                $appliedTransactionIds = array_merge($appliedTransactionIds, $candidate['transaction_ids']);
+                $written++;
             }
 
-            // A series the run no longer substantiates keeps its history and its
-            // user state; it simply stops being current.
+            $appliedTransactionIds = array_values(array_unique($appliedTransactionIds));
+            if ($appliedTransactionIds !== []) {
+                RecurringSeriesTransaction::query()
+                    ->whereIn('transaction_id', $appliedTransactionIds)
+                    ->delete();
+
+                foreach ($rows as $item) {
+                    $item['row']->transactions()->attach(array_values(array_unique($item['transaction_ids'])));
+                }
+            }
+
             $existing
-                ->reject(fn (RecurringSeries $row, string $identity): bool => $row->trashed()
-                    || in_array($identity, $seen, true))
+                ->reject(fn (RecurringSeries $row, int|string $id): bool => $row->trashed()
+                    || in_array((string) $id, array_values(array_unique($protectedIds)), true))
                 ->each(function (RecurringSeries $row): void {
                     $row->update(['status' => RecurringSeriesStatus::Lapsed]);
                 });
@@ -314,9 +537,94 @@ class DetectRecurringSeries
     }
 
     /**
-     * The category each series should show, resolved through effective postings
-     * so a split charge is attributed to its largest line rather than to the
-     * null parent category.
+     * Report counts and signed expected-total deltas grouped by direction and
+     * currency. It contains no model instances and is safe to serialize.
+     *
+     * @param  array<string, mixed>  $plan
+     * @return array<string, mixed>
+     */
+    private function previewReport(array $plan): array
+    {
+        $counts = [
+            'created' => 0,
+            'updated' => 0,
+            'unchanged' => 0,
+            'merged' => 0,
+            'review_required' => 0,
+        ];
+        $candidateTotals = [];
+        $existingTotals = [];
+
+        foreach ($plan['existing']->reject->trashed() as $series) {
+            $key = $this->totalKey((string) $series->direction, (string) $series->currency_code);
+            $existingTotals[$key] = ($existingTotals[$key] ?? 0) + (int) $series->expected_amount;
+        }
+
+        foreach ($plan['plans'] as $item) {
+            $action = $item['resolution']['action'];
+            $counts[$action]++;
+            $candidate = $item['candidate'];
+            $key = $this->totalKey($candidate['direction'], $candidate['currency_code']);
+            $candidateTotals[$key] = ($candidateTotals[$key] ?? 0) + (int) $candidate['expected_amount'];
+        }
+
+        $delta = [];
+        foreach (array_unique(array_merge(array_keys($existingTotals), array_keys($candidateTotals))) as $key) {
+            $delta[$key] = ($candidateTotals[$key] ?? 0) - ($existingTotals[$key] ?? 0);
+        }
+
+        return [
+            'user_id' => (string) $plan['user']->id,
+            'space_id' => (string) $plan['space']->id,
+            ...$counts,
+            'delta' => $delta,
+            'candidates' => collect($plan['plans'])->map(fn (array $item): array => [
+                'action' => $item['resolution']['action'],
+                'reason' => $item['resolution']['reason'],
+                'stable_key' => $item['candidate']['stable_key'],
+                'direction' => $item['candidate']['direction'],
+                'currency_code' => $item['candidate']['currency_code'],
+                'account_id' => $item['candidate']['account_id'],
+                'transaction_count' => count($item['candidate']['transaction_ids']),
+            ])->values()->all(),
+        ];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $reports
+     * @return array<string, mixed>
+     */
+    private function sumPreviewReports(array $reports): array
+    {
+        $totals = [
+            'created' => 0,
+            'updated' => 0,
+            'unchanged' => 0,
+            'merged' => 0,
+            'review_required' => 0,
+            'delta' => [],
+        ];
+
+        foreach ($reports as $report) {
+            foreach (['created', 'updated', 'unchanged', 'merged', 'review_required'] as $key) {
+                $totals[$key] += (int) $report[$key];
+            }
+
+            foreach ($report['delta'] as $key => $value) {
+                $totals['delta'][$key] = ($totals['delta'][$key] ?? 0) + $value;
+            }
+        }
+
+        return $totals;
+    }
+
+    private function totalKey(string $direction, string $currency): string
+    {
+        return "{$direction}:{$currency}";
+    }
+
+    /**
+     * The category each series shows, resolved through effective postings.
      *
      * @param  list<array<string, mixed>>  $series
      * @return array<string, string|null>
@@ -335,7 +643,6 @@ class DetectRecurringSeries
             ->with(['splits'])
             ->get()
             ->keyBy('id');
-
         $categories = [];
 
         foreach ($series as $candidate) {
@@ -361,81 +668,64 @@ class DetectRecurringSeries
             }
 
             arsort($tally);
-
-            $categories[$this->identity(
-                $candidate['match_field'],
-                $candidate['merchant_key'],
-                $candidate['direction'],
-                $candidate['currency_code'],
-            )] = array_key_first($tally);
+            $categories[$this->candidateIdentity($candidate)] = array_key_first($tally);
         }
 
         return $categories;
     }
 
+    private function candidateIdentity(array $candidate): string
+    {
+        return implode('|', [
+            $candidate['stable_key'],
+            $candidate['direction'],
+            $candidate['currency_code'],
+            $candidate['account_id'],
+        ]);
+    }
+
+    private function couldBelongToCandidate(RecurringSeries $series, array $candidate): bool
+    {
+        if ($series->direction !== $candidate['direction'] || $series->currency_code !== $candidate['currency_code']) {
+            return false;
+        }
+
+        if ($series->identity_key === $candidate['stable_key']) {
+            return true;
+        }
+
+        $aliases = $series->getAttribute('identity_aliases');
+
+        if (is_string($aliases)) {
+            $aliases = json_decode($aliases, true);
+        }
+
+        return is_array($aliases) && in_array($candidate['stable_key'], $aliases, true)
+            || $this->merchantKeys->canonicalKey((string) $series->merchant_key) === $candidate['stable_key'];
+    }
+
+    private function mergeAliases(array|string|null $stored, array $observed): array
+    {
+        if (is_string($stored)) {
+            $stored = json_decode($stored, true);
+        }
+
+        return array_values(array_unique(array_filter(array_merge($stored ?? [], $observed))));
+    }
+
     /**
      * Whether a series still looks current.
-     *
-     * A series the user confirmed gets a longer grace period. They have told us
-     * the commitment is real, so a bill that arrives late — a renewal that
-     * slipped, an annual policy charged a few weeks off — should not be
-     * announced as cancelled on the strength of one missed cycle.
      */
     private function resolveStatus(CarbonImmutable $lastOccurred, int $intervalDays, bool $isConfirmed): RecurringSeriesStatus
     {
         $multiplier = (float) config($isConfirmed
             ? 'recurring.confirmed_lapse_interval_multiplier'
             : 'recurring.lapse_interval_multiplier');
-
         $cutoff = $lastOccurred->addDays((int) round($intervalDays * $multiplier));
 
         return CarbonImmutable::today()->greaterThan($cutoff)
             ? RecurringSeriesStatus::Lapsed
             : RecurringSeriesStatus::Active;
-    }
-
-    private function identity(string $matchField, string $merchantKey, string $direction, string $currencyCode): string
-    {
-        return implode('|', [$matchField, $merchantKey, $direction, $currencyCode]);
-    }
-
-    /**
-     * A series bills a variable amount when its spread around the median is a
-     * meaningful share of the median — a utility bill rather than a flat fee.
-     *
-     * @param  list<int>  $amounts
-     */
-    private function isVariable(array $amounts): bool
-    {
-        $median = $this->median($amounts);
-
-        if ((int) $median === 0) {
-            return false;
-        }
-
-        $deviations = array_map(fn (int $amount): float => abs($amount - $median), $amounts);
-
-        return ($this->median($deviations) / abs($median)) > (float) config('recurring.amount_variance_threshold');
-    }
-
-    /**
-     * @param  list<array{account_id: string|null}>  $occurrences
-     */
-    private function dominantAccountId(array $occurrences): ?string
-    {
-        $tally = [];
-
-        foreach ($occurrences as $occurrence) {
-            if ($occurrence['account_id'] === null) {
-                continue;
-            }
-
-            $tally[$occurrence['account_id']] = ($tally[$occurrence['account_id']] ?? 0) + 1;
-        }
-
-        arsort($tally);
-
-        return array_key_first($tally);
     }
 
     /** @param  list<int|float>  $values */
@@ -453,5 +743,19 @@ class DetectRecurringSeries
         return $count % 2 === 1
             ? (float) $values[$middle]
             : ($values[$middle - 1] + $values[$middle]) / 2;
+    }
+
+    /** @param  list<int>  $amounts */
+    private function isVariable(array $amounts): bool
+    {
+        $median = $this->median($amounts);
+
+        if ((int) $median === 0) {
+            return false;
+        }
+
+        $deviations = array_map(fn (int $amount): float => abs($amount - $median), $amounts);
+
+        return ($this->median($deviations) / abs($median)) > (float) config('recurring.amount_variance_threshold');
     }
 }

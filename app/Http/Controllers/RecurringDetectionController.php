@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use Laravel\Pennant\Feature;
+use Throwable;
 
 /**
  * Lets the recurring screen ask for a fresh scan. Detection walks a year of
@@ -26,32 +27,42 @@ class RecurringDetectionController extends Controller
 
         $jobId = (string) Str::uuid();
         $activeKey = DetectRecurringSeriesJob::activeJobKey($user->id);
+        $claimLock = Cache::lock(DetectRecurringSeriesJob::claimLockKey($user->id), 30);
 
-        // The job is unique per user, so a second request would otherwise get a
-        // job id whose job is dropped and whose status never leaves "queued".
-        // Claim atomically; if someone else holds the claim and their scan is
-        // still running, hand back their id so both callers poll the same run.
-        if (! Cache::add($activeKey, $jobId, now()->addMinutes(self::STATUS_TTL_MINUTES))) {
+        if (! $claimLock->get()) {
+            return response()->json(['message' => 'A recurring scan is already being claimed.'], 409);
+        }
+
+        try {
             $runningId = (string) Cache::get($activeKey);
-            $running = Cache::get(DetectRecurringSeriesJob::cacheKeyForJobId($user->id, $runningId));
+            $running = $runningId === ''
+                ? null
+                : Cache::get(DetectRecurringSeriesJob::cacheKeyForJobId($user->id, $runningId));
 
-            if ($running !== null && in_array($running['status'], ['queued', 'processing'], true)) {
+            if (is_array($running) && in_array($running['status'] ?? null, ['queued', 'processing'], true)) {
                 return response()->json(['job_id' => $runningId], 200);
             }
 
-            // The claim outlived its job; take it over.
             Cache::put($activeKey, $jobId, now()->addMinutes(self::STATUS_TTL_MINUTES));
+            Cache::put(
+                DetectRecurringSeriesJob::cacheKeyForJobId($user->id, $jobId),
+                ['status' => 'queued', 'series_count' => 0],
+                now()->addMinutes(self::STATUS_TTL_MINUTES),
+            );
+
+            DetectRecurringSeriesJob::dispatch($user, $jobId);
+
+            return response()->json(['job_id' => $jobId], 202);
+        } catch (Throwable $exception) {
+            if (Cache::get($activeKey) === $jobId) {
+                Cache::forget($activeKey);
+                Cache::forget(DetectRecurringSeriesJob::cacheKeyForJobId($user->id, $jobId));
+            }
+
+            throw $exception;
+        } finally {
+            $claimLock->release();
         }
-
-        Cache::put(
-            DetectRecurringSeriesJob::cacheKeyForJobId($user->id, $jobId),
-            ['status' => 'queued', 'series_count' => 0],
-            now()->addMinutes(self::STATUS_TTL_MINUTES),
-        );
-
-        DetectRecurringSeriesJob::dispatch($user, $jobId);
-
-        return response()->json(['job_id' => $jobId], 202);
     }
 
     public function status(Request $request, string $jobId): JsonResponse

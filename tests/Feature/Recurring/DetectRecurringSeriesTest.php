@@ -7,6 +7,7 @@ use App\Enums\RecurringSeriesUserState;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\RecurringSeries;
+use App\Models\RecurringSeriesTransaction;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Recurring\DetectRecurringSeries;
@@ -65,26 +66,26 @@ it('selects the merchant field according to transaction direction', function () 
         [
             'amount' => 250000,
             'creditor_name' => 'ACCOUNT HOLDER',
-            'debtor_name' => 'LATIVE LIMITED',
-            'expected' => ['debtor_name', 'lative limited'],
+            'debtor_name' => 'EXAMPLE EMPLOYER LTD',
+            'expected' => ['debtor_name', 'employer example ltd'],
         ],
         [
             'amount' => -250000,
-            'creditor_name' => 'LATIVE LIMITED',
+            'creditor_name' => 'EXAMPLE EMPLOYER LTD',
             'debtor_name' => 'ACCOUNT HOLDER',
-            'expected' => ['creditor_name', 'lative limited'],
+            'expected' => ['creditor_name', 'employer example ltd'],
         ],
         [
             'amount' => 250000,
             'creditor_name' => null,
-            'debtor_name' => 'LATIVE LIMITED',
-            'expected' => ['debtor_name', 'lative limited'],
+            'debtor_name' => 'EXAMPLE EMPLOYER LTD',
+            'expected' => ['debtor_name', 'employer example ltd'],
         ],
         [
             'amount' => -250000,
-            'creditor_name' => 'LATIVE LIMITED',
+            'creditor_name' => 'EXAMPLE EMPLOYER LTD',
             'debtor_name' => null,
-            'expected' => ['creditor_name', 'lative limited'],
+            'expected' => ['creditor_name', 'employer example ltd'],
         ],
     ];
 
@@ -274,7 +275,7 @@ it('groups income by debtor when both bank counterparty fields are populated', f
             'user_id' => $this->user->id,
             'account_id' => $this->account->id,
             'creditor_name' => 'ACCOUNT HOLDER',
-            'debtor_name' => 'LATIVE LIMITED',
+            'debtor_name' => 'EXAMPLE EMPLOYER LTD',
             'transaction_date' => $anchor->subMonths(3 - $index)->toDateString(),
             'amount' => 250000,
             'currency_code' => 'EUR',
@@ -286,8 +287,8 @@ it('groups income by debtor when both bank counterparty fields are populated', f
     $series = RecurringSeries::query()->sole();
 
     expect($series->match_field)->toBe('debtor_name')
-        ->and($series->merchant_key)->toBe('lative limited')
-        ->and($series->display_name)->toBe('LATIVE LIMITED')
+        ->and($series->merchant_key)->toBe('employer example ltd')
+        ->and($series->display_name)->toBe('EXAMPLE EMPLOYER LTD')
         ->and($series->direction)->toBe('income')
         ->and($series->expected_amount)->toBe(250000)
         ->and($series->currency_code)->toBe('EUR')
@@ -297,7 +298,7 @@ it('groups income by debtor when both bank counterparty fields are populated', f
 it('does not merge incoming counterparties that share the same creditor name', function () {
     $anchor = CarbonImmutable::today()->subDays(3);
 
-    foreach (['LATIVE LIMITED', 'Other Payer'] as $debtor) {
+    foreach (['EXAMPLE EMPLOYER LTD', 'Other Payer'] as $debtor) {
         foreach (range(0, 3) as $index) {
             Transaction::factory()->plaintext()->create([
                 'user_id' => $this->user->id,
@@ -305,7 +306,7 @@ it('does not merge incoming counterparties that share the same creditor name', f
                 'creditor_name' => 'ACCOUNT HOLDER',
                 'debtor_name' => $debtor,
                 'transaction_date' => $anchor->subMonths(3 - $index)->toDateString(),
-                'amount' => $debtor === 'LATIVE LIMITED' ? 250000 : 120000,
+                'amount' => $debtor === 'EXAMPLE EMPLOYER LTD' ? 250000 : 120000,
                 'currency_code' => 'EUR',
             ]);
         }
@@ -313,7 +314,7 @@ it('does not merge incoming counterparties that share the same creditor name', f
 
     expect($this->detector->forUser($this->user))->toBe(2);
     expect(RecurringSeries::query()->pluck('merchant_key')->sort()->values()->all())
-        ->toBe(['lative limited', 'other payer']);
+        ->toBe(['employer example ltd', 'other payer']);
 });
 
 it('keeps the same merchant billed in two currencies apart', function () {
@@ -420,4 +421,183 @@ it('ignores transactions older than the lookback window', function () {
     monthlyCharges($this->user, $this->account, 'Netflix', count: 4, monthsAgoEnd: 10);
 
     expect($this->detector->forUser($this->user))->toBe(0);
+});
+
+it('groups PayPal Spotify references into one stable obligation', function () {
+    $anchor = CarbonImmutable::today()->subDays(3);
+
+    foreach (range(0, 3) as $index) {
+        $reference = strtoupper(str_pad(dechex($index + 100), 8, '0', STR_PAD_LEFT));
+
+        Transaction::factory()->plaintext()->create([
+            'user_id' => $this->user->id,
+            'account_id' => $this->account->id,
+            'creditor_name' => "PAYPAL *SPOTIFY {$reference}",
+            'description' => "PAYPAL *SPOTIFY {$reference}",
+            'transaction_date' => $anchor->subMonths(3 - $index)->toDateString(),
+            'amount' => -2099,
+            'currency_code' => 'EUR',
+        ]);
+    }
+
+    expect($this->detector->forUser($this->user))->toBe(1);
+
+    expect(RecurringSeries::query()->sole()->merchant_key)->toBe('spotify')
+        ->and(RecurringSeries::query()->sole()->occurrence_count)->toBe(4);
+});
+
+it('keeps a description-only series when the creditor appears later', function () {
+    $anchor = CarbonImmutable::today()->subDays(3);
+
+    foreach (range(0, 3) as $index) {
+        Transaction::factory()->plaintext()->create([
+            'user_id' => $this->user->id,
+            'account_id' => $this->account->id,
+            'creditor_name' => null,
+            'description' => 'SEPA DD DIGI '.strtoupper(str_pad(dechex($index + 200), 8, '0', STR_PAD_LEFT)),
+            'transaction_date' => $anchor->subMonths(3 - $index)->toDateString(),
+            'amount' => -1899,
+            'currency_code' => 'EUR',
+        ]);
+    }
+
+    $this->detector->forUser($this->user);
+    $series = RecurringSeries::query()->sole();
+    $series->update([
+        'display_name' => 'Internet',
+        'user_state' => RecurringSeriesUserState::Ignored,
+    ]);
+    $seriesId = $series->id;
+
+    Transaction::factory()->plaintext()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'creditor_name' => 'DIGI',
+        'description' => 'SEPA DD DIGI 9A8B7C6D',
+        'transaction_date' => $anchor->addMonth()->toDateString(),
+        'amount' => -1899,
+        'currency_code' => 'EUR',
+    ]);
+
+    $this->detector->forUser($this->user);
+    $series = RecurringSeries::query()->sole();
+
+    expect($series->id)->toBe($seriesId)
+        ->and($series->display_name)->toBe('Internet')
+        ->and($series->user_state)->toBe(RecurringSeriesUserState::Ignored)
+        ->and($series->occurrence_count)->toBe(5);
+});
+
+it('keeps same-provider contracts on separate accounts', function () {
+    $otherAccount = Account::factory()->create([
+        'user_id' => $this->user->id,
+        'currency_code' => 'EUR',
+    ]);
+
+    monthlyCharges($this->user, $this->account, 'Acme', amount: -1200);
+    monthlyCharges($this->user, $otherAccount, 'Acme', amount: -8900);
+
+    expect($this->detector->forUser($this->user))->toBe(2);
+    expect(RecurringSeries::query()->pluck('account_id')->sort()->values()->all())
+        ->toBe([$this->account->id, $otherAccount->id]);
+});
+
+it('does not turn own-holder transfers and social contributions into a subscription', function () {
+    $anchor = CarbonImmutable::today()->subDays(3);
+    $descriptions = [
+        'TRANSFER TO SAVINGS',
+        'SOCIAL SECURITY CONTRIBUTION',
+        'TRANSFER TO SAVINGS',
+        'SOCIAL SECURITY CONTRIBUTION',
+    ];
+
+    foreach ($descriptions as $index => $description) {
+        Transaction::factory()->plaintext()->create([
+            'user_id' => $this->user->id,
+            'account_id' => $this->account->id,
+            'creditor_name' => $this->user->name,
+            'description' => $description,
+            'transaction_date' => $anchor->subMonths(3 - $index)->toDateString(),
+            'amount' => -5000,
+            'currency_code' => 'EUR',
+        ]);
+    }
+
+    expect($this->detector->forUser($this->user))->toBe(0)
+        ->and(RecurringSeries::query()->count())->toBe(0);
+});
+
+it('does not count a future transaction as an observed occurrence', function () {
+    monthlyCharges($this->user, $this->account, 'Spotify', count: 3);
+    Transaction::factory()->plaintext()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'creditor_name' => 'Spotify',
+        'transaction_date' => CarbonImmutable::today()->addDay()->toDateString(),
+        'amount' => -1299,
+        'currency_code' => 'EUR',
+    ]);
+
+    expect($this->detector->forUser($this->user))->toBe(1)
+        ->and(RecurringSeries::query()->sole()->occurrence_count)->toBe(3)
+        ->and(RecurringSeries::query()->sole()->last_occurred_on->isToday())->toBeFalse();
+});
+
+it('keeps pivots for historical charges when an account is archived', function () {
+    monthlyCharges($this->user, $this->account, 'Netflix');
+    $this->detector->forUser($this->user);
+
+    $series = RecurringSeries::query()->sole();
+    $pivotCount = $series->transactions()->count();
+    $this->account->update(['archived_at' => now()]);
+
+    $this->detector->forUser($this->user);
+
+    expect(RecurringSeries::query()->sole()->transactions()->count())->toBe($pivotCount)
+        ->and(RecurringSeries::query()->sole()->status)->toBe(RecurringSeriesStatus::Lapsed);
+});
+
+it('previews reconciliation without writing series or pivots', function () {
+    monthlyCharges($this->user, $this->account, 'Netflix');
+
+    $preview = $this->detector->previewForUser($this->user);
+
+    expect($preview['created'])->toBe(1)
+        ->and($preview['updated'])->toBe(0)
+        ->and($preview['review_required'])->toBe(0)
+        ->and(RecurringSeries::withTrashed()->count())->toBe(0)
+        ->and(RecurringSeriesTransaction::query()->count())->toBe(0);
+});
+
+it('reports no changes on a second preview after applying once', function () {
+    monthlyCharges($this->user, $this->account, 'Netflix');
+
+    $this->detector->previewForUser($this->user);
+    $this->detector->forUser($this->user);
+    $preview = $this->detector->previewForUser($this->user);
+
+    expect($preview['created'])->toBe(0)
+        ->and($preview['updated'])->toBe(0)
+        ->and($preview['merged'])->toBe(0)
+        ->and($preview['unchanged'])->toBe(1)
+        ->and(RecurringSeries::query()->count())->toBe(1);
+});
+
+it('assigns reused transactions to a new identity without resurrecting a deleted series', function () {
+    $charges = monthlyCharges($this->user, $this->account, 'Old Provider');
+    $this->detector->forUser($this->user);
+    $deleted = RecurringSeries::query()->sole();
+    $deleted->delete();
+
+    Transaction::query()
+        ->whereIn('id', collect($charges)->pluck('id'))
+        ->update(['creditor_name' => 'New Provider']);
+
+    $this->detector->forUser($this->user);
+
+    expect(RecurringSeries::query()->count())->toBe(1)
+        ->and(RecurringSeries::withTrashed()->count())->toBe(2)
+        ->and(RecurringSeries::withTrashed()->findOrFail($deleted->id)->trashed())->toBeTrue()
+        ->and(RecurringSeries::query()->sole()->merchant_key)->toBe('new provider')
+        ->and(RecurringSeries::query()->sole()->transactions)->toHaveCount(4);
 });
