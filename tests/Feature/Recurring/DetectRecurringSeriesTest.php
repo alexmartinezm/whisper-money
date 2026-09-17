@@ -538,6 +538,51 @@ it('keeps a description-only series when the creditor appears later', function (
         ->and($series->occurrence_count)->toBe(5);
 });
 
+it('follows an obligation onto the account still paying it', function () {
+    // A loan whose descriptor appears on two accounts: the one paying it now,
+    // and the one it moved off a year ago. Both answer to the stored series —
+    // one as a plain update, one as an account change — and applied in turn the
+    // account that stopped could win, writing a year-old date onto a live
+    // obligation. It then read as cancelled while its charges produced nothing.
+    $stopped = Account::factory()->create([
+        'user_id' => $this->user->id,
+        'currency_code' => 'EUR',
+    ]);
+
+    monthlyCharges($this->user, $this->account, 'Car loan', count: 11, amount: -20652);
+    monthlyCharges($this->user, $stopped, 'Car loan', count: 3, amount: -20652, monthsAgoEnd: 12);
+
+    $series = RecurringSeries::factory()->create([
+        'user_id' => $this->user->id,
+        'space_id' => $this->user->activeSpace()->id,
+        'account_id' => $stopped->id,
+        'merchant_key' => 'car loan',
+        'display_name' => 'Coche',
+        'currency_code' => 'EUR',
+        'direction' => 'expense',
+        'user_state' => RecurringSeriesUserState::Confirmed,
+        'status' => RecurringSeriesStatus::Lapsed,
+        'last_occurred_on' => CarbonImmutable::today()->subMonths(12),
+        'first_occurred_on' => CarbonImmutable::today()->subMonths(14),
+    ]);
+
+    $this->detector->forUser($this->user);
+
+    expect($series->fresh())
+        ->status->toBe(RecurringSeriesStatus::Active)
+        ->account_id->toBe($this->account->id)
+        ->occurrence_count->toBe(11)
+        // The name and the decision are the user's, and survive the move.
+        ->display_name->toBe('Coche')
+        ->user_state->toBe(RecurringSeriesUserState::Confirmed);
+
+    // The account that stopped keeps a series of its own, saying so.
+    $stale = RecurringSeries::query()->whereKeyNot($series->id)->sole();
+
+    expect($stale->status)->toBe(RecurringSeriesStatus::Lapsed)
+        ->and($stale->account_id)->toBe($stopped->id);
+});
+
 it('keeps same-provider contracts on separate accounts', function () {
     $otherAccount = Account::factory()->create([
         'user_id' => $this->user->id,
