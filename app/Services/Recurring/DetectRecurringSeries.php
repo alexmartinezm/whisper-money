@@ -294,18 +294,20 @@ class DetectRecurringSeries
         // A counterparty field holding the holder's own name is not a
         // counterparty, and reading it as one files every such charge — a
         // social-security direct debit, a sweep into savings — under one key.
-        $ownerName = $user->name;
+        // The spellings come from the user, because the name a bank prints is
+        // rarely the one they signed up with.
+        $ownerNames = $user->bankAliases();
 
         $this->candidates($user, $space, $since)
             ->select(['id', 'description', 'creditor_name', 'debtor_name', 'transaction_date', 'amount', 'currency_code', 'account_id'])
             ->lazyById()
-            ->each(function (Transaction $transaction) use (&$groups, $documentFrequency, $noiseThreshold, $ownerName): void {
+            ->each(function (Transaction $transaction) use (&$groups, $documentFrequency, $noiseThreshold, $ownerNames): void {
                 if ((int) $transaction->amount === 0 || ! filled($transaction->account_id)) {
                     return;
                 }
 
-                $key = $this->merchantKeys->keyFor($transaction, $documentFrequency, $noiseThreshold, $ownerName);
-                $stableKey = $this->merchantKeys->stableKeyFor($transaction, $documentFrequency, $noiseThreshold, $ownerName);
+                $key = $this->merchantKeys->keyFor($transaction, $documentFrequency, $noiseThreshold, $ownerNames);
+                $stableKey = $this->merchantKeys->stableKeyFor($transaction, $documentFrequency, $noiseThreshold, $ownerNames);
 
                 if ($key === null || $stableKey === null) {
                     return;
@@ -324,14 +326,14 @@ class DetectRecurringSeries
                     'identity_aliases' => [],
                     'direction' => $direction,
                     'currency_code' => $currency,
-                    'display_name' => $this->merchantKeys->displayNameFor($transaction, $ownerName),
+                    'display_name' => $this->merchantKeys->displayNameFor($transaction, $ownerNames),
                     'account_id' => $accountId,
                     'transactions' => [],
                 ];
 
                 $groups[$bucket]['identity_aliases'] = array_values(array_unique(array_merge(
                     $groups[$bucket]['identity_aliases'],
-                    $this->merchantKeys->aliasKeysFor($transaction, $documentFrequency, $noiseThreshold, $ownerName),
+                    $this->merchantKeys->aliasKeysFor($transaction, $documentFrequency, $noiseThreshold, $ownerNames),
                 )));
                 $groups[$bucket]['transactions'][] = [
                     'id' => $transaction->id,

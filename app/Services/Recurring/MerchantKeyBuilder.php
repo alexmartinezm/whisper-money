@@ -69,11 +69,12 @@ class MerchantKeyBuilder
 
     /**
      * @param  array<string, int>  $documentFrequency
+     * @param  list<string>  $ownerNames  spellings the bank uses for the account holder
      * @return array{0: string, 1: string}|null [matchField, merchantKey]
      */
-    public function keyFor(Transaction $transaction, array $documentFrequency, float $noiseThreshold, ?string $ownerName = null): ?array
+    public function keyFor(Transaction $transaction, array $documentFrequency, float $noiseThreshold, array $ownerNames = []): ?array
     {
-        [$field, $raw] = $this->signal($transaction, $ownerName);
+        [$field, $raw] = $this->signal($transaction, $ownerNames);
         $key = $this->canonicalKey($raw);
 
         if ($key === '' && $field === 'description') {
@@ -93,9 +94,9 @@ class MerchantKeyBuilder
      *
      * @param  array<string, int>  $documentFrequency
      */
-    public function stableKeyFor(Transaction $transaction, array $documentFrequency, float $noiseThreshold, ?string $ownerName = null): ?string
+    public function stableKeyFor(Transaction $transaction, array $documentFrequency, float $noiseThreshold, array $ownerNames = []): ?string
     {
-        $key = $this->keyFor($transaction, $documentFrequency, $noiseThreshold, $ownerName);
+        $key = $this->keyFor($transaction, $documentFrequency, $noiseThreshold, $ownerNames);
 
         return $key === null ? null : $key[1];
     }
@@ -108,16 +109,16 @@ class MerchantKeyBuilder
      * @param  array<string, int>  $documentFrequency
      * @return list<string>
      */
-    public function aliasKeysFor(Transaction $transaction, array $documentFrequency, float $noiseThreshold, ?string $ownerName = null): array
+    public function aliasKeysFor(Transaction $transaction, array $documentFrequency, float $noiseThreshold, array $ownerNames = []): array
     {
         // The holder's own name is left out on purpose: stored as an alias it
         // would later recognise every other charge the bank labelled that way
         // as the same provider.
         $rawValues = [
-            $this->signal($transaction, $ownerName)[1],
+            $this->signal($transaction, $ownerNames)[1],
             $transaction->description,
-            $this->counterpartyUnlessOwner($transaction->creditor_name, $ownerName),
-            $this->counterpartyUnlessOwner($transaction->debtor_name, $ownerName),
+            $this->counterpartyUnlessOwner($transaction->creditor_name, $ownerNames),
+            $this->counterpartyUnlessOwner($transaction->debtor_name, $ownerNames),
         ];
         $keys = [];
 
@@ -227,9 +228,9 @@ class MerchantKeyBuilder
      * The human-facing name for a series. Prefers the counterparty over the raw
      * description, which is usually padded with terminal ids and dates.
      */
-    public function displayNameFor(Transaction $transaction, ?string $ownerName = null): string
+    public function displayNameFor(Transaction $transaction, array $ownerNames = []): string
     {
-        [, $raw] = $this->signal($transaction, $ownerName);
+        [, $raw] = $this->signal($transaction, $ownerNames);
 
         return mb_substr($this->collapse($raw), 0, 255);
     }
@@ -237,11 +238,11 @@ class MerchantKeyBuilder
     /**
      * @return array{0: string, 1: string} [field, rawValue]
      */
-    private function signal(Transaction $transaction, ?string $ownerName = null): array
+    private function signal(Transaction $transaction, array $ownerNames = []): array
     {
         $amount = (int) $transaction->amount;
-        $creditor = $this->counterpartyUnlessOwner($transaction->creditor_name, $ownerName);
-        $debtor = $this->counterpartyUnlessOwner($transaction->debtor_name, $ownerName);
+        $creditor = $this->counterpartyUnlessOwner($transaction->creditor_name, $ownerNames);
+        $debtor = $this->counterpartyUnlessOwner($transaction->debtor_name, $ownerNames);
 
         if ($amount > 0 && $debtor !== null) {
             return ['debtor_name', $debtor];
@@ -272,13 +273,22 @@ class MerchantKeyBuilder
      * identity files every one of them under a single key, so the description
      * is the only signal left that tells them apart.
      */
-    private function counterpartyUnlessOwner(?string $value, ?string $ownerName): ?string
+    /**
+     * @param  list<string>  $ownerNames
+     */
+    private function counterpartyUnlessOwner(?string $value, array $ownerNames): ?string
     {
         if (! filled($value)) {
             return null;
         }
 
-        return $this->matchesCounterparty((string) $value, $ownerName) ? null : (string) $value;
+        foreach ($ownerNames as $ownerName) {
+            if ($this->matchesCounterparty((string) $value, $ownerName)) {
+                return null;
+            }
+        }
+
+        return (string) $value;
     }
 
     private function collapse(string $value): string

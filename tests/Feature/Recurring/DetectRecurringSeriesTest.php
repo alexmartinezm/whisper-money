@@ -577,6 +577,39 @@ it('does not turn own-holder transfers and social contributions into a subscript
         ->and(RecurringSeries::query()->count())->toBe(0);
 });
 
+it('recognises the holder under a spelling only the bank uses', function () {
+    // The profile name is rarely what a statement prints. Someone signed up as
+    // "Alex" is ALEXANDRE MARTINEZ MORON to their bank, and until the app is
+    // told so, every charge labelled that way groups under one key: the
+    // social-security debit, the transfer to savings and the rest together.
+    $this->user->update([
+        'name' => 'Alex',
+        'bank_aliases' => ['Alexandre Martínez Morón'],
+    ]);
+
+    $anchor = CarbonImmutable::today()->subDays(3);
+
+    foreach (range(0, 3) as $index) {
+        Transaction::factory()->plaintext()->create([
+            'user_id' => $this->user->id,
+            'account_id' => $this->account->id,
+            'category_id' => $this->category->id,
+            // Unaccented, as a second bank writes it.
+            'creditor_name' => 'ALEXANDRE MARTINEZ MORON',
+            'description' => 'SOCIAL SECURITY CONTRIBUTION',
+            'transaction_date' => $anchor->subMonths(3 - $index)->toDateString(),
+            'amount' => -20586,
+            'currency_code' => 'EUR',
+        ]);
+    }
+
+    expect($this->detector->forUser($this->user))->toBe(1);
+
+    expect(RecurringSeries::query()->sole())
+        ->match_field->toBe('description')
+        ->display_name->toBe('SOCIAL SECURITY CONTRIBUTION');
+});
+
 it('detects an obligation the bank labelled with the holder name', function () {
     $anchor = CarbonImmutable::today()->subDays(3);
 

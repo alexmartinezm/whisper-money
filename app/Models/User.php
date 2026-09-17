@@ -32,6 +32,7 @@ use Laravel\Sanctum\HasApiTokens;
 use Stripe\Subscription as StripeSubscription;
 
 /**
+ * @property ?array<int, string> $bank_aliases
  * @property ?Carbon $last_logged_in_at
  * @property ?Carbon $last_active_at
  * @property ?Carbon $transactions_last_visited_at
@@ -52,6 +53,7 @@ class User extends Authenticatable implements HasLocalePreference, MustVerifyEma
      */
     protected $fillable = [
         'name',
+        'bank_aliases',
         'email',
         'password',
         'encryption_salt',
@@ -92,6 +94,7 @@ class User extends Authenticatable implements HasLocalePreference, MustVerifyEma
     protected function casts(): array
     {
         return [
+            'bank_aliases' => 'array',
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'two_factor_confirmed_at' => 'datetime',
@@ -252,6 +255,28 @@ class User extends Authenticatable implements HasLocalePreference, MustVerifyEma
         }
 
         return $space;
+    }
+
+    /**
+     * Every name this person answers to on a bank statement.
+     *
+     * Some banks put the account holder in the counterparty field of a direct
+     * debit, where it says nothing about who was paid. Recognising that needs
+     * the spelling the bank uses, which is rarely the name someone signed up
+     * with — "Alex" on the profile against ALEXANDRE MARTINEZ MORON on the
+     * statement — so the extra spellings are the user's to declare. The profile
+     * name is always included, since for many people it is the only one needed.
+     *
+     * @return list<string>
+     */
+    public function bankAliases(): array
+    {
+        $aliases = is_array($this->bank_aliases) ? $this->bank_aliases : [];
+
+        return array_values(array_unique(array_filter(
+            array_map(fn (mixed $alias): string => trim((string) $alias), [$this->name, ...$aliases]),
+            fn (string $alias): bool => $alias !== '',
+        )));
     }
 
     /**

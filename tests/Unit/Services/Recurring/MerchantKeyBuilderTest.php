@@ -167,11 +167,11 @@ it('reads identity from the description when the counterparty is the holder', fu
         'description' => 'TRANSFER TO SAVINGS',
     ]);
 
-    expect($builder->keyFor($socialSecurity, [], 0.0, $holder))
+    expect($builder->keyFor($socialSecurity, [], 0.0, [$holder]))
         ->toBe(['description', 'contribution security social'])
-        ->and($builder->keyFor($savings, [], 0.0, $holder))
+        ->and($builder->keyFor($savings, [], 0.0, [$holder]))
         ->toBe(['description', 'savings to'])
-        ->and($builder->displayNameFor($socialSecurity, $holder))
+        ->and($builder->displayNameFor($socialSecurity, [$holder]))
         ->toBe('SOCIAL SECURITY CONTRIBUTION');
 });
 
@@ -185,7 +185,7 @@ it('never stores the holder name as an identity alias', function () {
 
     // Stored as an alias, the holder's name would later recognise every other
     // charge the bank labelled that way as the same provider.
-    expect($builder->aliasKeysFor($transaction, [], 0.0, 'Test Account Holder'))
+    expect($builder->aliasKeysFor($transaction, [], 0.0, ['Test Account Holder']))
         ->not->toContain('account holder test');
 });
 

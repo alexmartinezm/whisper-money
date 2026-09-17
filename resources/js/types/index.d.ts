@@ -102,6 +102,8 @@ export interface SharedData {
 export interface User {
     id: UUID;
     name: string;
+    /** Spellings a bank prints for this person, beyond their profile name. */
+    bank_aliases: string[] | null;
     email: string;
     currency_code: CurrencyCode;
     locale: string | null;
