@@ -227,14 +227,17 @@ class DetectRecurringSeries
         $protectedExistingIds = [];
 
         foreach ($candidates as $candidate) {
-            $resolution = $this->identities->planCandidate($candidate, $existing);
             $plans[] = [
                 'candidate' => $candidate,
-                'resolution' => $resolution,
+                'resolution' => $this->identities->planCandidate($candidate, $existing),
             ];
+        }
 
-            if ($resolution['series'] instanceof RecurringSeries) {
-                $protectedExistingIds[] = (string) $resolution['series']->id;
+        $plans = $this->oneCandidatePerSeries($plans);
+
+        foreach ($plans as $item) {
+            if ($item['resolution']['series'] instanceof RecurringSeries) {
+                $protectedExistingIds[] = (string) $item['resolution']['series']->id;
             }
         }
 
@@ -680,6 +683,69 @@ class DetectRecurringSeries
             $candidate['currency_code'],
             $candidate['account_id'],
         ]);
+    }
+
+    /**
+     * Leave at most one candidate holding each stored series.
+     *
+     * One obligation can answer to two candidates at once: a contract billed to
+     * a new account still matches the series through the old one, so the same
+     * row is claimed twice — once as a plain update and once as an account
+     * change. Applied in turn they overwrite each other, and whichever ran last
+     * describes the series. When that is the account which stopped paying, a
+     * live obligation is written back with a year-old date and reads as
+     * cancelled, while the charges still arriving produce nothing at all.
+     *
+     * The still-charging candidate keeps the series, history and user's
+     * decisions included. The others are left to stand on their own, which is
+     * what they would have done had the series never existed: the account that
+     * stopped gets a series that says so.
+     *
+     * @param  list<array{candidate: array<string, mixed>, resolution: array<string, mixed>}>  $plans
+     * @return list<array{candidate: array<string, mixed>, resolution: array<string, mixed>}>
+     */
+    private function oneCandidatePerSeries(array $plans): array
+    {
+        $holderIndexes = [];
+
+        foreach ($plans as $index => $item) {
+            $series = $item['resolution']['series'];
+
+            if (! $series instanceof RecurringSeries) {
+                continue;
+            }
+
+            $held = $holderIndexes[$series->id] ?? null;
+
+            if ($held === null || $this->chargesLaterThan($item, $plans[$held])) {
+                $holderIndexes[$series->id] = $index;
+            }
+        }
+
+        $holders = array_flip($holderIndexes);
+
+        foreach ($plans as $index => $item) {
+            if ($item['resolution']['series'] instanceof RecurringSeries && ! isset($holders[$index])) {
+                $plans[$index]['resolution'] = [
+                    'action' => 'created',
+                    'series' => null,
+                    'reason' => 'superseded_by_current_account',
+                    'absorbed' => [],
+                ];
+            }
+        }
+
+        return $plans;
+    }
+
+    /**
+     * @param  array{candidate: array<string, mixed>, resolution: array<string, mixed>}  $item
+     * @param  array{candidate: array<string, mixed>, resolution: array<string, mixed>}  $against
+     */
+    private function chargesLaterThan(array $item, array $against): bool
+    {
+        return CarbonImmutable::parse($item['candidate']['last_occurred_on'])
+            ->greaterThan(CarbonImmutable::parse($against['candidate']['last_occurred_on']));
     }
 
     /**
