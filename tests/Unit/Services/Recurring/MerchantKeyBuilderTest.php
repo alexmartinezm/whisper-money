@@ -81,6 +81,28 @@ it('drops a number from a merchant name but keeps a short alphanumeric one', fun
         ->and($builder->canonicalKey('O2 UK'))->toBe('o2 uk');
 });
 
+it('reads a name the same with or without its accents', function () {
+    $builder = recurringMerchantKeyBuilder();
+
+    // One bank sends MARTÍNEZ and the next MARTINEZ for the same counterparty,
+    // and a ledger that has both ends up with two identities for one person —
+    // which also stops the holder's own name being recognised as the holder's.
+    expect($builder->canonicalKey('ALEXANDRE MARTÍNEZ MORÓN'))
+        ->toBe($builder->canonicalKey('ALEXANDRE MARTINEZ MORON'))
+        ->and($builder->canonicalKey('Aportación a Fondos Gael'))
+        ->toBe($builder->canonicalKey('Aportacion a Fondos Gael'))
+        ->and($builder->matchesCounterparty('ALEXANDRE MARTINEZ MORON', 'Alexandre Martínez Morón'))
+        ->toBeTrue();
+});
+
+it('keeps a name written in a script it cannot transliterate', function () {
+    $builder = recurringMerchantKeyBuilder();
+
+    // Folding empties a script with no transliteration table, and an empty key
+    // is no key at all — the charge would drop out of detection entirely.
+    expect($builder->canonicalKey('東京ガス'))->not->toBe('');
+});
+
 it('gives every PayPal reference format the same identity', function () {
     $builder = recurringMerchantKeyBuilder();
 

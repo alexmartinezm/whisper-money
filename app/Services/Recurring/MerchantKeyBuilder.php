@@ -4,6 +4,7 @@ namespace App\Services\Recurring;
 
 use App\Models\Transaction;
 use App\Services\Ai\DescriptionTokenizer;
+use Illuminate\Support\Str;
 
 /**
  * Turns a transaction into a stable merchant identity two charges from the same
@@ -159,6 +160,16 @@ class MerchantKeyBuilder
     public function identityTokens(string $value): array
     {
         $value = mb_strtolower(trim($value));
+
+        // One bank writes MARTÍNEZ and the next MARTINEZ, for the same
+        // counterparty on the same contract, and an accent is not an identity.
+        // Folded only when something survives the fold: transliteration empties
+        // a script it has no table for, and an empty key is no key at all.
+        $folded = Str::ascii($value);
+        if (preg_match('/[\p{L}\p{N}]/u', $folded) === 1) {
+            $value = $folded;
+        }
+
         $value = preg_replace('/[^\p{L}\p{N}]+/u', ' ', $value) ?? $value;
         $tokens = preg_split('/\s+/u', trim($value), -1, PREG_SPLIT_NO_EMPTY) ?: [];
         $tokens = array_values(array_filter(
