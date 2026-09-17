@@ -27,6 +27,22 @@ class Statistics
     }
 
     /**
+     * The median of the most recent values: what a charge costs now, rather
+     * than what it has cost over its whole life.
+     *
+     * Takes fewer than the window when fewer exist. A quarterly premium or an
+     * annual renewal would otherwise never have enough history to answer the
+     * question at all, and those are exactly the charges whose old price is
+     * most out of date.
+     *
+     * @param  list<int>  $values  oldest first
+     */
+    public static function recentMedian(array $values, int $window): float
+    {
+        return self::median(array_slice($values, -max(1, $window)));
+    }
+
+    /**
      * How far the values typically sit from their own median — the spread, told
      * without letting a single outlier decide.
      *

@@ -7,7 +7,7 @@
 | {{ __('What') }} | {{ __('When') }} | {{ __('Amount') }} |
 | :--- | :--- | ---: |
 @foreach ($series as $row)
-| {{ $row->display_name }} | {{ $row->next_expected_on->translatedFormat('D, j M') }} | {{ $row->amount_is_variable ? __('approx.').' ' : '' }}{{ \App\Support\Money::format($row->expected_amount, $row->currency_code) }} |
+| {{ $row->display_name }} | {{ $row->next_expected_on->translatedFormat('D, j M') }} | {{ $row->amount_is_variable ? __('approx.').' ' : '' }}{{ \App\Support\Money::format($row->chargeAmount(), $row->currency_code) }} |
 @endforeach
 </x-mail::table>
 

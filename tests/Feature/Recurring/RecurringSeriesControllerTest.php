@@ -1,8 +1,10 @@
 <?php
 
+use App\Enums\CategoryType;
 use App\Enums\RecurringCadence;
 use App\Enums\RecurringSeriesUserState;
 use App\Features\RecurringTransactions;
+use App\Models\Category;
 use App\Models\RecurringSeries;
 use App\Models\User;
 use Carbon\CarbonImmutable;
@@ -213,4 +215,47 @@ it('requires authentication', function () {
     // The guest entry point is chosen by AuthEntryPointService, so assert only
     // that an anonymous visitor is bounced rather than pinning the target.
     $this->get('/recurring')->assertRedirect();
+});
+
+it('keeps money moving between your own accounts out of both totals', function () {
+    $transfers = Category::factory()->create([
+        'user_id' => $this->user->id,
+        'type' => CategoryType::Transfer,
+    ]);
+
+    // The same 150 € contribution, recorded on both sides as the bank reports
+    // it. Counted, it raised what the screen said was spent and earned alike.
+    RecurringSeries::factory()->create([
+        'user_id' => $this->user->id,
+        'category_id' => $transfers->id,
+        'expected_amount' => -15000,
+        'recent_amount' => -15000,
+        'direction' => 'expense',
+        'currency_code' => 'EUR',
+    ]);
+    RecurringSeries::factory()->create([
+        'user_id' => $this->user->id,
+        'category_id' => $transfers->id,
+        'expected_amount' => 15000,
+        'recent_amount' => 15000,
+        'direction' => 'income',
+        'currency_code' => 'EUR',
+    ]);
+    RecurringSeries::factory()->create([
+        'user_id' => $this->user->id,
+        'expected_amount' => -1299,
+        'recent_amount' => -1299,
+        'direction' => 'expense',
+        'currency_code' => 'EUR',
+    ]);
+
+    $this->actingAs($this->user)
+        ->get('/recurring')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('recurring/index')
+            ->has('series', 3)
+            ->where('summary.0.monthly_expense', -1299)
+            ->where('summary.0.monthly_income', 0)
+            ->where('summary.0.active_count', 1));
 });

@@ -2,12 +2,14 @@
 
 namespace App\Jobs;
 
+use App\Features\RecurringTransactions;
 use App\Models\User;
 use App\Services\Recurring\DetectRecurringSeries;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Cache;
+use Laravel\Pennant\Feature;
 use Throwable;
 
 /**
@@ -43,8 +45,21 @@ class DetectRecurringSeriesJob implements ShouldBeUnique, ShouldQueue
         return "detect_recurring_series_active_{$userId}";
     }
 
+    public static function claimLockKey(string $userId): string
+    {
+        return "detect_recurring_series_claim_lock_{$userId}";
+    }
+
     public function handle(DetectRecurringSeries $detector): void
     {
+        if (! config('recurring.enabled')
+            || ! Feature::for($this->user)->active(RecurringTransactions::class)) {
+            $this->publish(['status' => 'skipped', 'series_count' => 0]);
+            $this->release();
+
+            return;
+        }
+
         $this->publish(['status' => 'processing', 'series_count' => 0]);
 
         try {
@@ -71,7 +86,19 @@ class DetectRecurringSeriesJob implements ShouldBeUnique, ShouldQueue
      */
     private function release(): void
     {
-        Cache::forget(self::activeJobKey($this->user->id));
+        $lock = Cache::lock(self::claimLockKey($this->user->id), 5);
+
+        if (! $lock->get()) {
+            return;
+        }
+
+        try {
+            if (Cache::get(self::activeJobKey($this->user->id)) === $this->jobId) {
+                Cache::forget(self::activeJobKey($this->user->id));
+            }
+        } finally {
+            $lock->release();
+        }
     }
 
     /** @param  array{status: string, series_count: int}  $progress */

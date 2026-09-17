@@ -43,3 +43,33 @@ export function daysUntil(isoDate: string, today: Date = new Date()): number {
 
     return Math.round((targetMidnight - todayMidnight) / 86_400_000);
 }
+
+/**
+ * What the series charges now. `expected_amount` is the median of its whole
+ * history, which still reads as the old price for as long as the old charges
+ * outnumber the new ones.
+ */
+export function chargeAmount(series: {
+    expected_amount: number;
+    recent_amount: number | null;
+}): number {
+    return series.recent_amount ?? series.expected_amount;
+}
+
+/**
+ * Whether the history is far enough from the current charge to be worth
+ * showing. Mirrors the server's price-change thresholds: a tenth of the old
+ * figure, and at least a unit of currency, so a few cents on a small charge
+ * stays quiet.
+ */
+export function hasMovedPrice(series: {
+    expected_amount: number;
+    recent_amount: number | null;
+}): boolean {
+    if (series.recent_amount === null) return false;
+
+    const previous = Math.abs(series.expected_amount);
+    const change = Math.abs(Math.abs(series.recent_amount) - previous);
+
+    return previous > 0 && change >= 100 && change / previous >= 0.1;
+}

@@ -30,6 +30,7 @@ export interface RecurringSeries {
     cadence: RecurringCadence;
     interval_days: number;
     expected_amount: number;
+    recent_amount: number | null;
     amount_is_variable: boolean;
     currency_code: string;
     category_id: UUID | null;

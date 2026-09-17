@@ -23,6 +23,11 @@ class ProfileUpdateRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:255'],
 
+            // The spellings a bank prints for this person, which detection uses
+            // to tell "the holder" from "a merchant" in a counterparty field.
+            'bank_aliases' => ['nullable', 'array', 'max:10'],
+            'bank_aliases.*' => ['required', 'string', 'max:255'],
+
             'email' => [
                 'required',
                 'string',

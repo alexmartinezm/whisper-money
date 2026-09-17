@@ -55,6 +55,12 @@ it('can be restricted to a single user', function () {
         ->and(RecurringSeries::query()->where('user_id', $other->id)->count())->toBe(0);
 });
 
+it('rejects a malformed user id before scanning', function () {
+    $this->artisan('recurring:detect', ['--user' => 'not-a-uuid'])
+        ->expectsOutputToContain('The --user option must be a valid user UUID.')
+        ->assertExitCode(1);
+});
+
 it('writes nothing while the feature is switched off', function () {
     config()->set('recurring.enabled', false);
     seedMonthlySubscription(User::factory()->create());
@@ -85,4 +91,15 @@ it('succeeds when a user has no transactions', function () {
     $this->artisan('recurring:detect')->assertSuccessful();
 
     expect(RecurringSeries::query()->count())->toBe(0);
+});
+
+it('previews detection without writing series', function () {
+    $user = User::factory()->create();
+    seedMonthlySubscription($user, 'Spotify');
+
+    $this->artisan('recurring:detect', ['--preview' => true])
+        ->expectsOutputToContain('"created":1')
+        ->assertSuccessful();
+
+    expect(RecurringSeries::withTrashed()->where('user_id', $user->id)->count())->toBe(0);
 });

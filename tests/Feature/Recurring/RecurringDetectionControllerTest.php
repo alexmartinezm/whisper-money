@@ -3,6 +3,7 @@
 use App\Features\RecurringTransactions;
 use App\Jobs\DetectRecurringSeriesJob;
 use App\Models\User;
+use App\Services\Recurring\DetectRecurringSeries;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Pennant\Feature;
@@ -117,4 +118,17 @@ it('returns 404 when the feature is disabled', function () {
     Feature::for($this->user)->deactivate(RecurringTransactions::class);
 
     $this->actingAs($this->user)->postJson('/recurring/detect')->assertNotFound();
+});
+
+it('rechecks the feature before a queued job writes', function () {
+    Queue::fake();
+
+    $jobId = $this->actingAs($this->user)->postJson('/recurring/detect')->json('job_id');
+    $job = Queue::pushed(DetectRecurringSeriesJob::class)->sole();
+    Feature::for($this->user)->deactivate(RecurringTransactions::class);
+
+    $job->handle(app(DetectRecurringSeries::class));
+
+    expect(Cache::get(DetectRecurringSeriesJob::cacheKeyForJobId($this->user->id, $jobId)))
+        ->toMatchArray(['status' => 'skipped', 'series_count' => 0]);
 });

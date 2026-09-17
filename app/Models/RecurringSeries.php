@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\CategoryType;
 use App\Enums\RecurringCadence;
 use App\Enums\RecurringSeriesStatus;
 use App\Enums\RecurringSeriesUserState;
@@ -22,6 +23,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * already exist in the ledger; it never creates ledger rows of its own.
  *
  * @property RecurringCadence $cadence
+ * @property ?array<int, string> $identity_aliases
  * @property RecurringSeriesStatus $status
  * @property RecurringSeriesUserState $user_state
  * @property Carbon $first_occurred_on
@@ -41,10 +43,15 @@ class RecurringSeries extends Model
         'space_id',
         'match_field',
         'merchant_key',
+        'identity_key',
+        'identity_aliases',
+        'merged_into_id',
         'display_name',
         'cadence',
         'interval_days',
+        'anchor_day',
         'expected_amount',
+        'recent_amount',
         'price_alerted_amount',
         'amount_is_variable',
         'currency_code',
@@ -70,10 +77,13 @@ class RecurringSeries extends Model
             'status' => RecurringSeriesStatus::class,
             'user_state' => RecurringSeriesUserState::class,
             'interval_days' => 'integer',
+            'anchor_day' => 'integer',
             'expected_amount' => 'integer',
+            'recent_amount' => 'integer',
             'price_alerted_amount' => 'integer',
             'occurrence_count' => 'integer',
             'amount_is_variable' => 'boolean',
+            'identity_aliases' => 'array',
             'first_occurred_on' => 'date',
             'last_occurred_on' => 'date',
             'next_expected_on' => 'date',
@@ -137,12 +147,59 @@ class RecurringSeries extends Model
     }
 
     /**
-     * The expected amount rescaled to a month, so cadences can be summed and
-     * ranked against each other.
+     * What this series charges, as against what it has charged.
+     *
+     * `expected_amount` is the median of the whole history, which answers a
+     * different question and answers it badly once a price moves: a policy that
+     * went from 24 to 104 euros still reads as 24 for as long as the cheap years
+     * outnumber the dear ones. Everything that asks "how much will leave the
+     * account" — the forecast, the summary, the reminder — wants this instead.
+     * The history stays available for saying what changed.
+     */
+    public function chargeAmount(): int
+    {
+        return (int) ($this->recent_amount ?? $this->expected_amount);
+    }
+
+    /**
+     * The charge rescaled to a month, so cadences can be summed and ranked
+     * against each other.
      */
     public function monthlyEquivalentAmount(): int
     {
-        return (int) round($this->expected_amount * $this->cadence->monthlyFactor());
+        return (int) round($this->chargeAmount() * $this->cadence->monthlyFactor());
+    }
+
+    /**
+     * The identity keys seen on this series' charges, whatever the column
+     * happens to hold. The cast gives an array, but a row written before the
+     * column existed gives null, and every caller was repeating the same guard.
+     *
+     * @return list<string>
+     */
+    public function identityAliases(): array
+    {
+        $aliases = $this->identity_aliases;
+
+        return is_array($aliases) ? array_values(array_filter(array_map('strval', $aliases))) : [];
+    }
+
+    /**
+     * Whether this series only moves money between the user's own accounts.
+     *
+     * Read from the category rather than stored, so re-categorising a movement
+     * corrects the totals at once instead of waiting for the nightly scan — and
+     * re-categorising is exactly how a user fixes one that was filed wrong.
+     *
+     * Only `Transfer` counts here. A pension or savings contribution is also
+     * internal in the sense that the money is not gone, but it does leave the
+     * current account, so a runway has to keep counting it; net-worth projection
+     * makes the opposite call for the same rows, and reads them from its own
+     * list for that reason.
+     */
+    public function isInternal(): bool
+    {
+        return $this->category?->type === CategoryType::Transfer;
     }
 
     public function isIgnored(): bool

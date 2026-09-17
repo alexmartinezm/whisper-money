@@ -1,4 +1,9 @@
-import { daysUntil, monthlyEquivalent } from '@/lib/recurring';
+import {
+    chargeAmount,
+    daysUntil,
+    hasMovedPrice,
+    monthlyEquivalent,
+} from '@/lib/recurring';
 import { describe, expect, it } from 'vitest';
 
 describe('monthlyEquivalent', () => {
@@ -44,5 +49,39 @@ describe('daysUntil', () => {
 
     it('ignores the time of day on the target', () => {
         expect(daysUntil('2026-08-01T23:45:00.000000Z', today)).toBe(1);
+    });
+});
+
+describe('chargeAmount', () => {
+    it('prefers the current charge over the lifetime median', () => {
+        expect(
+            chargeAmount({ expected_amount: -2478, recent_amount: -10382 }),
+        ).toBe(-10382);
+    });
+
+    it('falls back to the median before any scan has recorded one', () => {
+        expect(
+            chargeAmount({ expected_amount: -1299, recent_amount: null }),
+        ).toBe(-1299);
+    });
+});
+
+describe('hasMovedPrice', () => {
+    it('reports a price that moved materially', () => {
+        expect(
+            hasMovedPrice({ expected_amount: -2478, recent_amount: -10382 }),
+        ).toBe(true);
+    });
+
+    it('stays quiet about a few cents on a small charge', () => {
+        expect(
+            hasMovedPrice({ expected_amount: -999, recent_amount: -1020 }),
+        ).toBe(false);
+    });
+
+    it('stays quiet when there is no current charge to compare', () => {
+        expect(
+            hasMovedPrice({ expected_amount: -999, recent_amount: null }),
+        ).toBe(false);
     });
 });

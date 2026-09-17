@@ -64,6 +64,12 @@ export default function Account({
         errors: twoFactorErrors,
     } = useTwoFactorAuth();
     const [showSetupModal, setShowSetupModal] = useState<boolean>(false);
+    // Always one blank row at the end, so there is somewhere to type without
+    // needing an "add another" button.
+    const [bankAliases, setBankAliases] = useState<string[]>([
+        ...(auth.user.bank_aliases ?? []),
+        '',
+    ]);
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
@@ -101,6 +107,63 @@ export default function Account({
                                     <InputError
                                         className="mt-2"
                                         message={errors.name}
+                                    />
+                                </div>
+
+                                <div className="grid gap-2">
+                                    <Label htmlFor="bank_aliases">
+                                        {__('How your bank writes your name')}
+                                    </Label>
+
+                                    <p className="text-sm text-muted-foreground">
+                                        {__(
+                                            'Some banks put your own name where the payee goes. Add the spellings yours prints, one per line, so those charges are read by their description instead of being filed under you.',
+                                        )}
+                                    </p>
+
+                                    {bankAliases.map((alias, index) => (
+                                        <Input
+                                            key={index}
+                                            id={
+                                                index === 0
+                                                    ? 'bank_aliases'
+                                                    : undefined
+                                            }
+                                            className="mt-1 block w-full"
+                                            // An empty row carries no name, so it
+                                            // is never submitted and cannot fail
+                                            // the "each one is required" rule.
+                                            name={
+                                                alias.trim() === ''
+                                                    ? undefined
+                                                    : `bank_aliases[${index}]`
+                                            }
+                                            value={alias}
+                                            onChange={(event) =>
+                                                setBankAliases((current) => {
+                                                    const next = [...current];
+                                                    next[index] =
+                                                        event.target.value;
+
+                                                    return [
+                                                        ...next.filter(
+                                                            (value) =>
+                                                                value.trim() !==
+                                                                '',
+                                                        ),
+                                                        '',
+                                                    ];
+                                                })
+                                            }
+                                            // A sample spelling, not copy: a
+                                            // name is the same in every locale.
+                                            placeholder="ALEXANDRE MARTINEZ MORON"
+                                        />
+                                    ))}
+
+                                    <InputError
+                                        className="mt-2"
+                                        message={errors.bank_aliases}
                                     />
                                 </div>
 
