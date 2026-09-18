@@ -2537,5 +2537,6 @@
     "Number and date format": "Format des nombres et des dates",
     "Select a region": "Sélectionner une région",
     ":name (refund)": ":name (remboursement)",
-    ":name (reversal)": ":name (annulation)"
+    ":name (reversal)": ":name (annulation)",
+    "Rules with a lower priority are evaluated first": "Les règles avec une priorité inférieure sont évaluées en premier"
 }
