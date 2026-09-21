@@ -2932,5 +2932,6 @@
     "Select a region": "Seleccionar región",
     ":name (refund)": ":name (devolución)",
     ":name (reversal)": ":name (reintegro)",
-    "Rules with a lower priority are evaluated first": "Las reglas con menor prioridad se evalúan primero"
+    "Rules with a lower priority are evaluated first": "Las reglas con menor prioridad se evalúan primero",
+    ":percent of income": ":percent del ingreso"
 }
