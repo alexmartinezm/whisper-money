@@ -324,6 +324,7 @@ interface AccountDailyBalanceData {
 export interface ChartComputedData {
     chartData: BalanceDataPoint[];
     currentBalance: number;
+    currentInvestedAmount: number | null;
     currentMortgageBalance: number | null;
     currencyCode: string;
     hasMortgageData: boolean;
@@ -641,6 +642,7 @@ export function AccountBalanceChart({
             onDataLoaded({
                 chartData: activeChartData,
                 currentBalance: activeCurrentBalance,
+                currentInvestedAmount: activeCurrentInvestedAmount,
                 currentMortgageBalance: activeCurrentMortgageBalance,
                 currencyCode: activeCurrencyCode,
                 hasMortgageData,
@@ -651,6 +653,7 @@ export function AccountBalanceChart({
     }, [
         activeChartData,
         activeCurrentBalance,
+        activeCurrentInvestedAmount,
         activeCurrentMortgageBalance,
         activeCurrencyCode,
         hasMortgageData,

@@ -1,11 +1,12 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { AccountForm } from './account-form';
 
-vi.mock('@inertiajs/react', () => ({
-    usePage: () => ({
-        props: {
+const { pageProps } = vi.hoisted(() => ({
+    pageProps: {
+        current: {
+            auth: { user: { currency_code: 'EUR' } },
             currencies: {
                 accounts: [
                     { code: 'EUR', name: 'Euro' },
@@ -13,8 +14,12 @@ vi.mock('@inertiajs/react', () => ({
                 ],
                 profile: [{ code: 'EUR', name: 'Euro' }],
             },
-        },
-    }),
+        } as Record<string, unknown>,
+    },
+}));
+
+vi.mock('@inertiajs/react', () => ({
+    usePage: () => ({ props: pageProps.current }),
 }));
 
 vi.mock('./bank-combobox', () => ({
@@ -77,5 +82,70 @@ describe('AccountForm', () => {
                 'Leave empty for cash or any account without a bank.',
             ),
         ).toBeInTheDocument();
+    });
+
+    /**
+     * What a fund is worth says nothing on its own: without what went in there
+     * is no gain to read on the account page.
+     */
+    it('asks an investment account what has been put into it', () => {
+        const onChange = vi.fn();
+
+        render(
+            <AccountForm forceAccountType="investment" onChange={onChange} />,
+        );
+
+        const invested = screen.getByLabelText('Invested amount');
+
+        fireEvent.change(invested, { target: { value: '1200' } });
+        fireEvent.blur(invested);
+
+        expect(onChange).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                type: 'investment',
+                investedAmount: 120000,
+            }),
+        );
+    });
+
+    it('does not ask a current account what has been put into it', () => {
+        render(<AccountForm forceAccountType="checking" onChange={() => {}} />);
+
+        expect(
+            screen.queryByLabelText('Invested amount'),
+        ).not.toBeInTheDocument();
+    });
+
+    it('keeps a loan asking for what is owed rather than a balance', () => {
+        render(<AccountForm forceAccountType="loan" onChange={() => {}} />);
+
+        expect(screen.getByLabelText('Owed Amount')).toBeInTheDocument();
+    });
+
+    // The reader's own currency was already on their profile; the select opened
+    // empty anyway, on every account they added.
+    it('opens on the currency the reader already keeps their money in', () => {
+        const onChange = vi.fn();
+
+        render(<AccountForm forceAccountType="checking" onChange={onChange} />);
+
+        expect(onChange).toHaveBeenLastCalledWith(
+            expect.objectContaining({ currencyCode: 'EUR' }),
+        );
+    });
+
+    it('leaves the currency unpicked when the list does not offer the reader theirs', () => {
+        pageProps.current = {
+            ...pageProps.current,
+            auth: { user: { currency_code: 'ZWL' } },
+        };
+
+        const onChange = vi.fn();
+
+        render(<AccountForm forceAccountType="checking" onChange={onChange} />);
+
+        expect(onChange).toHaveBeenLastCalledWith(
+            expect.objectContaining({ currencyCode: null }),
+        );
     });
 });
