@@ -3190,5 +3190,13 @@
     "Transaction saved": "Transacción guardada",
     "A rule categorized it as :category": "Una regla la ha categorizado como :category",
     "You need an account to record transactions": "Necesitas una cuenta para registrar transacciones",
-    "Save the transaction": "Guardar la transacción"
+    "Save the transaction": "Guardar la transacción",
+    "Manage your connected accounts for automatic transaction syncing.": "Gestiona tus cuentas conectadas para sincronizar movimientos automáticamente.",
+    "Connect account": "Conectar cuenta",
+    "No connections yet. Connect a broker or an exchange to automatically sync your balances.": "Aún no hay conexiones. Conecta un bróker o un exchange para sincronizar automáticamente tus saldos.",
+    "Connect a broker or an exchange and sync it automatically.": "Conecta un bróker o un exchange y sincronízalo automáticamente.",
+    "Connect an account": "Conectar una cuenta",
+    "Select the country you are in.": "Selecciona el país en el que estás.",
+    "Select a provider.": "Selecciona un proveedor.",
+    "Search providers...": "Buscar proveedores..."
 }
