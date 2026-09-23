@@ -235,7 +235,11 @@ export function ConnectAccountInline({
                         </div>
                     </div>
 
-                    {selectedBank.beta && <BetaConnectorNotice />}
+                    {selectedBank.beta && (
+                        <BetaConnectorNotice
+                            source={provider ? 'native' : 'provider'}
+                        />
+                    )}
 
                     {isAlreadyConnected && (
                         <ReplaceConnectionWarning

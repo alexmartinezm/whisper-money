@@ -85,6 +85,8 @@ export interface SharedData {
     demoEnabled: boolean;
     /** False when the install carries no EnableBanking credentials. */
     openBankingEnabled: boolean;
+    /** API-key providers on our curated beta list (`banking.beta_banks`). */
+    betaProviders: string[];
     aiCategorizationUpsellRate: number;
     subscriptionPaymentIssue: SubscriptionPaymentIssueNotification | null;
     pricing: PricingConfig;

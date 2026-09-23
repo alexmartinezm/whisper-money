@@ -9,7 +9,12 @@ globalThis.ResizeObserver ??= class {
     disconnect() {}
 };
 
-const pageProps = { features: {}, locale: 'es', openBankingEnabled: true };
+const pageProps = {
+    features: {},
+    locale: 'es',
+    openBankingEnabled: true,
+    betaProviders: ['kraken'],
+};
 
 vi.mock('@inertiajs/react', () => ({
     usePage: () => ({ props: pageProps }),
@@ -124,6 +129,7 @@ describe('ConnectAccountDialog', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         pageProps.openBankingEnabled = true;
+        pageProps.betaProviders = ['kraken'];
     });
 
     it('names the countries in the active locale', () => {
@@ -264,6 +270,33 @@ describe('ConnectAccountDialog', () => {
         ).toBeInTheDocument();
         // Still connectable: beta informs, it does not gate.
         expect(screen.getByRole('button', { name: 'Connect' })).toBeEnabled();
+    });
+
+    // The beta list is the server's (`banking.beta_banks`, shared as
+    // `betaProviders`), the same one the connections page badges from.
+    it('flags a native integration in beta with its own caveat', async () => {
+        await reachBankStep([], [institution('BBVA')]);
+
+        const kraken = screen.getByRole('button', { name: /Kraken/ });
+        expect(kraken).toHaveTextContent('Beta');
+
+        fireEvent.click(kraken);
+        fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+        expect(screen.getByText('New integration in beta')).toBeInTheDocument();
+        expect(
+            screen.queryByText('This bank is still in beta'),
+        ).not.toBeInTheDocument();
+    });
+
+    it('drops the beta badge once the provider leaves the beta list', async () => {
+        pageProps.betaProviders = [];
+
+        await reachBankStep([], [institution('BBVA')]);
+
+        expect(
+            screen.getByRole('button', { name: /Kraken/ }),
+        ).not.toHaveTextContent('Beta');
     });
 
     // With no open-banking credentials the catalogue comes back empty, so the

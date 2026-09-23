@@ -27,6 +27,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property BankingConnectionStatus $status
  * @property Carbon|null $valid_until
  * @property Carbon|null $last_synced_at
+ * @property Carbon|null $ledger_synced_until
  * @property Carbon|null $bank_transactions_email_cutoff_at
  * @property Carbon|null $rate_limited_until
  * @property Carbon|null $interactive_rate_limited_until
@@ -58,6 +59,7 @@ class BankingConnection extends Model
         'status',
         'valid_until',
         'last_synced_at',
+        'ledger_synced_until',
         'bank_transactions_email_cutoff_at',
         'error_message',
         'rate_limited_until',
@@ -113,6 +115,7 @@ class BankingConnection extends Model
             'status' => BankingConnectionStatus::class,
             'valid_until' => 'datetime',
             'last_synced_at' => 'datetime',
+            'ledger_synced_until' => 'datetime',
             'bank_transactions_email_cutoff_at' => 'datetime',
             'rate_limited_until' => 'datetime',
             'interactive_rate_limited_until' => 'datetime',

@@ -9,6 +9,7 @@ enum BankingProvider: string
     case IndexaCapital = 'indexacapital';
     case Binance = 'binance';
     case Bitpanda = 'bitpanda';
+    case Kraken = 'kraken';
     case Coinbase = 'coinbase';
     case InteractiveBrokers = 'interactivebrokers';
     case Wise = 'wise';
@@ -43,15 +44,40 @@ enum BankingProvider: string
      */
     public function isBetaBank(string $aspspName, ?string $country): bool
     {
-        $banks = config('banking.beta_banks')[$this->value] ?? [];
-
-        if ($banks === '*') {
+        if ($this->isBetaProvider()) {
             return true;
         }
 
-        $countries = $banks[$aspspName] ?? [];
+        $countries = config('banking.beta_banks')[$this->value][$aspspName] ?? [];
 
         return $countries === '*' || in_array($country, $countries, true);
+    }
+
+    /**
+     * Whether the provider as a whole is on our curated beta list: an entry
+     * set to `*` in `banking.beta_banks`, as a new native integration is.
+     */
+    public function isBetaProvider(): bool
+    {
+        return (config('banking.beta_banks')[$this->value] ?? []) === '*';
+    }
+
+    /**
+     * The API-key providers on our curated beta list. The bank picker lists
+     * them by itself, not from the provider's catalogue, so it needs them
+     * spelled out to badge them the way the connections page does.
+     *
+     * @return list<string>
+     */
+    public static function betaApiKeyProviders(): array
+    {
+        return array_values(array_map(
+            fn (self $provider): string => $provider->value,
+            array_filter(
+                self::cases(),
+                fn (self $provider): bool => $provider->usesApiKey() && $provider->isBetaProvider(),
+            ),
+        ));
     }
 
     /**
@@ -60,7 +86,7 @@ enum BankingProvider: string
     public function defaultAccountType(): AccountType
     {
         return match ($this) {
-            self::IndexaCapital, self::Binance, self::Bitpanda, self::Coinbase, self::InteractiveBrokers => AccountType::Investment,
+            self::IndexaCapital, self::Binance, self::Bitpanda, self::Kraken, self::Coinbase, self::InteractiveBrokers => AccountType::Investment,
             self::Wise, self::EnableBanking => AccountType::Checking,
         };
     }
@@ -82,7 +108,7 @@ enum BankingProvider: string
             self::IndexaCapital, self::Wise => [
                 new CredentialField('api_token', 'api_token', ['required', 'string', 'min:10']),
             ],
-            self::Binance => [
+            self::Binance, self::Kraken => [
                 new CredentialField('api_key', 'api_token', ['required', 'string', 'min:10']),
                 new CredentialField('api_secret', 'api_secret', ['required', 'string', 'min:10']),
             ],

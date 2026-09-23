@@ -99,6 +99,7 @@ class HandleInertiaRequests extends Middleware
             ] : null,
             'demoEnabled' => (bool) config('app.demo.enabled'),
             'openBankingEnabled' => (bool) config('services.enablebanking.enabled'),
+            'betaProviders' => BankingProvider::betaApiKeyProviders(),
             'demoCredentials' => $this->demoCredentials($request, $user),
             'subscriptionsEnabled' => config('subscriptions.enabled', false),
             'aiCategorizationUpsellRate' => (int) config('ai_categorization.upsell_sample_rate'),

@@ -26,6 +26,7 @@ use App\Http\Controllers\OpenBanking\ConnectionAccountController;
 use App\Http\Controllers\OpenBanking\IndexaCapitalController;
 use App\Http\Controllers\OpenBanking\InstitutionController;
 use App\Http\Controllers\OpenBanking\InteractiveBrokersController;
+use App\Http\Controllers\OpenBanking\KrakenController;
 use App\Http\Controllers\OpenBanking\WiseController;
 use App\Http\Controllers\RealEstateDetailController;
 use App\Http\Controllers\RecurringDetectionController;
@@ -236,6 +237,7 @@ Route::middleware(['auth', 'verified'])->prefix('open-banking')->group(function 
     Route::post('indexa-capital/connect', [IndexaCapitalController::class, 'store'])->name('open-banking.indexa-capital.connect');
     Route::post('binance/connect', [BinanceController::class, 'store'])->name('open-banking.binance.connect');
     Route::post('bitpanda/connect', [BitpandaController::class, 'store'])->name('open-banking.bitpanda.connect');
+    Route::post('kraken/connect', [KrakenController::class, 'store'])->name('open-banking.kraken.connect');
     Route::post('coinbase/connect', [CoinbaseController::class, 'store'])
         ->name('open-banking.coinbase.connect');
     Route::post('wise/connect', [WiseController::class, 'store'])
