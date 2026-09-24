@@ -308,6 +308,8 @@ class CashflowAnalyticsController extends Controller
      * split transaction is replaced by one row per split line, so each line
      * nets against its own category. The exchange rates the conversion needs
      * are primed first so the callers never hit the rate service per row.
+     * Savings and investment postings on a savings account are left out: the
+     * leg on the other account already counts that money.
      *
      * @return Collection<int, Transaction>
      */
@@ -322,7 +324,9 @@ class CashflowAnalyticsController extends Controller
 
         $this->preloadExchangeRates($transactions, $userCurrency);
 
-        return $this->effectiveTransactions($transactions, $userCurrency);
+        return $this->effectiveTransactions($transactions, $userCurrency)
+            ->reject(fn (Transaction $transaction): bool => $transaction->isSavingsAccountLeg())
+            ->values();
     }
 
     /**
@@ -380,9 +384,11 @@ class CashflowAnalyticsController extends Controller
         }
 
         return (clone $category)->forceFill([
-            'name' => $side === CategoryType::Income
-                ? __(':name (refund)', ['name' => $category->name])
-                : __(':name (reversal)', ['name' => $category->name]),
+            'name' => match (true) {
+                $side === CategoryType::Expense => __(':name (reversal)', ['name' => $category->name]),
+                $category->type->isSetAside() => __(':name (withdrawal)', ['name' => $category->name]),
+                default => __(':name (refund)', ['name' => $category->name]),
+            },
         ]);
     }
 
