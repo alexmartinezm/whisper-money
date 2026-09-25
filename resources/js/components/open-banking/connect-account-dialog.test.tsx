@@ -287,6 +287,9 @@ describe('ConnectAccountDialog', () => {
         expect(
             screen.queryByText('This bank is still in beta'),
         ).not.toBeInTheDocument();
+        expect(
+            screen.getByText('Account → Connections & APIs'),
+        ).toBeInTheDocument();
     });
 
     it('drops the beta badge once the provider leaves the beta list', async () => {
