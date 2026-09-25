@@ -15,12 +15,43 @@ enum BankingProvider: string
     case EnableBanking = 'enablebanking';
 
     /**
+     * The provider's name as a person reads it, for log lines and error
+     * messages. The case name would do for most of them but not all:
+     * `IndexaCapital` is one word, the company is two.
+     */
+    public function label(): string
+    {
+        return match ($this) {
+            self::IndexaCapital => 'Indexa Capital',
+            self::InteractiveBrokers => 'Interactive Brokers',
+            self::EnableBanking => 'Enable Banking',
+            default => $this->name,
+        };
+    }
+
+    /**
      * Whether the provider authenticates with user-supplied API keys
      * rather than EnableBanking's hosted OAuth flow.
      */
     public function usesApiKey(): bool
     {
         return $this !== self::EnableBanking;
+    }
+
+    /**
+     * Whether a bank is on our curated beta list, `banking.beta_banks`.
+     */
+    public function isBetaBank(string $aspspName, ?string $country): bool
+    {
+        $banks = config('banking.beta_banks')[$this->value] ?? [];
+
+        if ($banks === '*') {
+            return true;
+        }
+
+        $countries = $banks[$aspspName] ?? [];
+
+        return $countries === '*' || in_array($country, $countries, true);
     }
 
     /**

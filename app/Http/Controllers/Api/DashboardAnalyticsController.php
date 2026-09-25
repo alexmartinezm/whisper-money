@@ -77,22 +77,6 @@ class DashboardAnalyticsController extends Controller
         ]);
     }
 
-    public function cashFlow(Request $request)
-    {
-        $validated = $request->validate([
-            'from' => 'required|date',
-            'to' => 'required|date',
-        ]);
-
-        $period = PeriodComparator::fromRequest($validated);
-        $previousPeriod = $period->previous();
-
-        return response()->json([
-            'current' => $this->calculateCashFlow($period->from, $period->to),
-            'previous' => $this->calculateCashFlow($previousPeriod->from, $previousPeriod->to),
-        ]);
-    }
-
     public function netWorthEvolution(Request $request)
     {
         $validated = $request->validate([
@@ -243,18 +227,6 @@ class DashboardAnalyticsController extends Controller
     private function calculateSpending(Carbon $from, Carbon $to): int
     {
         return max(0, -$this->sumByCategoryType(CategoryType::Expense, $from, $to));
-    }
-
-    private function calculateCashFlow(Carbon $from, Carbon $to): array
-    {
-        // One load for both sides: calling sumByCategoryType twice would read the
-        // same transactions, categories and splits over again.
-        $postings = $this->ownedPostings($from, $to);
-
-        return [
-            'income' => max(0, $this->sumOfType($postings, CategoryType::Income)),
-            'expense' => max(0, -$this->sumOfType($postings, CategoryType::Expense)),
-        ];
     }
 
     /**

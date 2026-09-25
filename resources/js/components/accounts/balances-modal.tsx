@@ -36,15 +36,14 @@ import {
 } from '@/components/ui/table';
 import { useLocale } from '@/hooks/use-locale';
 import { getCsrfToken } from '@/lib/csrf';
-import type { SharedData } from '@/types';
 import type { Account, AccountBalance } from '@/types/account';
 import {
     balanceTermCapitalized,
     supportsInvestedAmount,
 } from '@/types/account';
 import { formatCurrency } from '@/utils/currency';
+import { formatDateMedium } from '@/utils/date';
 import { __ } from '@/utils/i18n';
-import { usePage } from '@inertiajs/react';
 import { Pencil, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
@@ -92,11 +91,6 @@ export function BalancesModal({
 
     const formatBalance = (valueInCents: number) =>
         formatCurrency(valueInCents, account.currency_code, locale);
-
-    const userCurrencyCode =
-        usePage<SharedData>().props.auth.user.currency_code;
-    const formatInvestedAmount = (valueInCents: number) =>
-        formatCurrency(valueInCents, userCurrencyCode, locale);
 
     const showInvestedAmount = supportsInvestedAmount(account);
     const isLoan = account.type === 'loan';
@@ -219,15 +213,6 @@ export function BalancesModal({
         }
     }
 
-    function formatDate(dateString: string): string {
-        const date = new Date(dateString);
-        return date.toLocaleDateString(locale, {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-        });
-    }
-
     return (
         <>
             <Dialog open={open} onOpenChange={onOpenChange}>
@@ -320,8 +305,9 @@ export function BalancesModal({
                                                 className="[&>td]:align-middle"
                                             >
                                                 <TableCell>
-                                                    {formatDate(
+                                                    {formatDateMedium(
                                                         balance.balance_date,
+                                                        locale,
                                                     )}
                                                 </TableCell>
                                                 <TableCell className="text-right font-mono">
@@ -333,7 +319,7 @@ export function BalancesModal({
                                                     <TableCell className="text-right font-mono text-muted-foreground">
                                                         {balance.invested_amount !==
                                                         null
-                                                            ? formatInvestedAmount(
+                                                            ? formatBalance(
                                                                   balance.invested_amount,
                                                               )
                                                             : '—'}
@@ -474,7 +460,7 @@ export function BalancesModal({
                                     onChange={(value) =>
                                         setEditInvestedAmount(value || null)
                                     }
-                                    currencyCode={userCurrencyCode}
+                                    currencyCode={account.currency_code}
                                 />
                             </div>
                         )}

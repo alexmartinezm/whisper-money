@@ -17,7 +17,9 @@ class DeleteUserCommand extends Command
      *
      * @var string
      */
-    protected $signature = 'user:delete {email : The email address of the user to delete}';
+    protected $signature = 'user:delete
+                            {email : The email address of the user to delete}
+                            {--force : Skip the confirmation prompts}';
 
     /**
      * The console command description.
@@ -57,7 +59,7 @@ class DeleteUserCommand extends Command
         // able to back out after seeing the subscription and the connections,
         // with nothing cancelled or revoked yet.
         if (! $this->confirmDeletion($user, $subscription, $enableBankingConnections)) {
-            $this->info('Deletion cancelled.');
+            $this->info('Deletion cancelled. Pass --force to confirm without being prompted.');
 
             return self::SUCCESS;
         }
@@ -83,10 +85,16 @@ class DeleteUserCommand extends Command
     }
 
     /**
+     * Ask about everything the deletion takes with it, unless --force answers yes to all of it.
+     *
      * @param  Collection<int, BankingConnection>  $enableBankingConnections
      */
     private function confirmDeletion(User $user, ?Subscription $subscription, Collection $enableBankingConnections): bool
     {
+        if ($this->option('force')) {
+            return true;
+        }
+
         if (! $this->confirm("Are you sure you want to mark user '{$user->name}' ({$user->email}) as deleted? Their data will be preserved.")) {
             return false;
         }
@@ -95,11 +103,8 @@ class DeleteUserCommand extends Command
             return false;
         }
 
-        if ($enableBankingConnections->isNotEmpty() && ! $this->confirm("User '{$user->email}' has {$enableBankingConnections->count()} Enable Banking connection(s). Revoke them and keep linked accounts as manual accounts?")) {
-            return false;
-        }
-
-        return true;
+        return $enableBankingConnections->isEmpty()
+            || $this->confirm("User '{$user->email}' has {$enableBankingConnections->count()} Enable Banking connection(s). Revoke them and keep linked accounts as manual accounts?");
     }
 
     private function cancelSubscription(User $user, Subscription $subscription): void

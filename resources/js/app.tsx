@@ -34,6 +34,7 @@ import {
     isBrowserExtensionNoise,
     isChunkLoadErrorEvent,
     isFacebookInAppBrowserJavaBridgeNoise,
+    isOutlookSafeLinksNoise,
     isPageLeaveAbortNoise,
     isPostMessageDataCloneNoise,
     isSafariCashbackExtensionNoise,
@@ -64,7 +65,8 @@ Sentry.init({
             isBrowserExtensionNoise(event) ||
             isPostMessageDataCloneNoise(event) ||
             isFacebookInAppBrowserJavaBridgeNoise(event) ||
-            isSafariCashbackExtensionNoise(event)
+            isSafariCashbackExtensionNoise(event) ||
+            isOutlookSafeLinksNoise(event)
         ) {
             return null;
         }

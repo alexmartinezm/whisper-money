@@ -142,7 +142,9 @@ export function ConnectAccountInline({
                     </div>
 
                     {filteredInstitutions.length > 0 ? (
-                        <StepList>
+                        // ~300 banks in some countries; 35vh keeps the last
+                        // rows clear of the pinned footer on short phones.
+                        <StepList className="max-h-[35vh] overflow-y-auto">
                             {filteredInstitutions.map((institution, index) => {
                                 const isSelected =
                                     selectedBank?.name === institution.name;

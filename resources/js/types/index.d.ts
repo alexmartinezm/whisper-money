@@ -96,6 +96,11 @@ export interface SharedData {
         profile: CurrencyOption[];
         accounts: CurrencyOption[];
     };
+    /**
+     * The regions offered in settings, as bare tags: the picker writes each
+     * one's country name and live example with `Intl`.
+     */
+    formatLocales: string[];
     [key: string]: unknown;
 }
 
@@ -107,6 +112,8 @@ export interface User {
     email: string;
     currency_code: CurrencyCode;
     locale: string | null;
+    /** The region amounts and dates are written in, e.g. `es-MX`. */
+    format_locale: string | null;
     timezone: string | null;
     avatar?: string;
     email_verified_at: string | null;

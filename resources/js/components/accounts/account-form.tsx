@@ -21,12 +21,14 @@ import {
     formatAccountType,
     formatAreaUnit,
     formatPropertyType,
+    supportsInvestedAmount,
     type AccountType,
     type AreaUnit,
     type Bank,
     type CurrencyCode,
     type PropertyType,
 } from '@/types/account';
+import { toLocalDate } from '@/utils/date';
 import { __ } from '@/utils/i18n';
 import { usePage } from '@inertiajs/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -68,6 +70,7 @@ export interface AccountFormData {
     currencyCode: CurrencyCode | null;
     customBank: CustomBankData | null;
     balance: number | null;
+    investedAmount: number | null;
     realEstate: RealEstateFormData | null;
     loan: LoanFormData | null;
 }
@@ -85,7 +88,7 @@ interface AccountFormProps {
     hiddenAccountTypes?: AccountType[];
     availableLoanAccounts?: Account[];
     usePrimaryCurrenciesOnly?: boolean;
-    bankClearable?: boolean;
+    isConnected?: boolean;
     onChange: (data: AccountFormData) => void;
     errors?: Record<string, string>;
 }
@@ -122,11 +125,11 @@ export function AccountForm({
     hiddenAccountTypes = [],
     availableLoanAccounts = [],
     usePrimaryCurrenciesOnly = false,
-    bankClearable = true,
+    isConnected = false,
     onChange,
     errors = {},
 }: AccountFormProps) {
-    const { currencies } = usePage<SharedData>().props;
+    const { auth, currencies } = usePage<SharedData>().props;
     const currencyOptions = usePrimaryCurrenciesOnly
         ? currencies.profile
         : currencies.accounts;
@@ -139,13 +142,25 @@ export function AccountForm({
     const [selectedType, setSelectedType] = useState<AccountType | null>(
         initialValues?.type ?? forceAccountType ?? null,
     );
+    // A new account opens on the currency the reader already keeps their money
+    // in, when the list offers it; the select used to open empty every time.
     const [selectedCurrency, setSelectedCurrency] =
-        useState<CurrencyCode | null>(initialValues?.currencyCode ?? null);
+        useState<CurrencyCode | null>(
+            () =>
+                initialValues?.currencyCode ??
+                (currencyOptions.some(
+                    (currency: CurrencyOption) =>
+                        currency.code === auth?.user?.currency_code,
+                )
+                    ? (auth.user.currency_code as CurrencyCode)
+                    : null),
+        );
     const [isCreatingCustomBank, setIsCreatingCustomBank] = useState(false);
     const [customBankData, setCustomBankData] = useState<CustomBankData>(
         initialCustomBankData,
     );
     const [balance, setBalance] = useState<number | null>(null);
+    const [investedAmount, setInvestedAmount] = useState<number | null>(null);
     const [realEstateData, setRealEstateData] = useState<RealEstateFormData>(
         initialValues?.realEstate ?? initialRealEstateData,
     );
@@ -156,6 +171,10 @@ export function AccountForm({
 
     const showBalanceField =
         selectedType !== null && BALANCE_ACCOUNT_TYPES.includes(selectedType);
+    // What the account is worth is only half the story on the types that grow:
+    // without what went in there is no gain to read anywhere.
+    const showInvestedAmountField =
+        selectedType !== null && supportsInvestedAmount({ type: selectedType });
     const isRealEstate = selectedType === 'real_estate';
     const isLoan = selectedType === 'loan';
     const availableRealEstateAccounts = availableLoanAccounts.filter(
@@ -185,7 +204,7 @@ export function AccountForm({
             return;
         }
 
-        const purchaseDateObj = new Date(purchaseDate);
+        const purchaseDateObj = toLocalDate(purchaseDate);
         const today = new Date();
         const diffMs = today.getTime() - purchaseDateObj.getTime();
         const years = diffMs / (365.25 * 24 * 60 * 60 * 1000);
@@ -218,6 +237,7 @@ export function AccountForm({
             currencyCode: selectedCurrency,
             customBank: isCreatingCustomBank ? customBankData : null,
             balance: showBalanceField ? balance : null,
+            investedAmount: showInvestedAmountField ? investedAmount : null,
             realEstate: isRealEstate ? realEstateData : null,
             loan: isLoan ? loanData : null,
         });
@@ -230,6 +250,8 @@ export function AccountForm({
         customBankData,
         balance,
         showBalanceField,
+        investedAmount,
+        showInvestedAmountField,
         isRealEstate,
         isLoan,
         realEstateData,
@@ -335,7 +357,9 @@ export function AccountForm({
 
             {!isRealEstate && (
                 <div className="space-y-2">
-                    <Label htmlFor="bank_id">{__('Bank (optional)')}</Label>
+                    <Label htmlFor="bank_id">
+                        {isConnected ? __('Bank') : __('Bank (optional)')}
+                    </Label>
                     <div className="mt-1">
                         {isCreatingCustomBank ? (
                             <CustomBankForm
@@ -359,16 +383,20 @@ export function AccountForm({
                                         initialValues?.bank ?? undefined
                                     }
                                     onCreateCustomBank={handleCreateCustomBank}
-                                    clearable={bankClearable}
+                                    disabled={isConnected}
                                 />
                             </>
                         )}
                     </div>
                     {!isCreatingCustomBank && (
                         <p className="pl-1 text-xs text-muted-foreground">
-                            {__(
-                                'Leave empty for cash or any account without a bank.',
-                            )}
+                            {isConnected
+                                ? __(
+                                      'A connected account keeps the bank of its connection.',
+                                  )
+                                : __(
+                                      'Leave empty for cash or any account without a bank.',
+                                  )}
                         </p>
                     )}
                 </div>
@@ -380,6 +408,7 @@ export function AccountForm({
                     <Select
                         name="currency_code"
                         value={selectedCurrency ?? undefined}
+                        disabled={isConnected}
                         onValueChange={(value) =>
                             setSelectedCurrency(value as CurrencyCode)
                         }
@@ -400,6 +429,13 @@ export function AccountForm({
                         </SelectContent>
                     </Select>
                 </div>
+                {isConnected && (
+                    <p className="pl-1 text-xs text-muted-foreground">
+                        {__(
+                            'Your bank sets the currency of a connected account.',
+                        )}
+                    </p>
+                )}
             </div>
 
             {showBalanceField && selectedCurrency && !initialValues && (
@@ -418,6 +454,27 @@ export function AccountForm({
                     <p className="pl-1 text-xs text-muted-foreground">
                         {__(
                             'Optional. Set the current balance for this account.',
+                        )}
+                    </p>
+                </div>
+            )}
+
+            {showInvestedAmountField && selectedCurrency && !initialValues && (
+                <div className="space-y-2">
+                    <Label htmlFor="invested_amount">
+                        {__('Invested amount')}
+                    </Label>
+                    <div className="mt-1">
+                        <AmountInput
+                            id="invested_amount"
+                            value={investedAmount ?? 0}
+                            onChange={setInvestedAmount}
+                            currencyCode={selectedCurrency}
+                        />
+                    </div>
+                    <p className="pl-1 text-xs text-muted-foreground">
+                        {__(
+                            'Total money you put into this account. Used to calculate gains/losses.',
                         )}
                     </p>
                 </div>

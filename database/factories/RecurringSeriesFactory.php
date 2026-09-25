@@ -33,7 +33,7 @@ class RecurringSeriesFactory extends Factory
             'display_name' => $merchant,
             'cadence' => $cadence,
             'interval_days' => $cadence->intervalDays(),
-            'anchor_day' => $cadence->monthsPerOccurrence() === null ? null : $lastOccurred->day,
+            'anchor_day' => $this->anchorDayFor(...),
             'expected_amount' => -fake()->numberBetween(500, 9000),
             'amount_is_variable' => false,
             'currency_code' => 'EUR',
@@ -47,6 +47,39 @@ class RecurringSeriesFactory extends Factory
         ];
     }
 
+    /**
+     * The billing day of a calendar cadence, worked out from the dates the
+     * series ends up with once every state and override is applied.
+     *
+     * A test that pins `next_expected_on` without an anchor used to keep the
+     * day of the last occurrence as the anchor, and the two disagree: on the
+     * one day a month when the pinned date is a month end, the cadence reads
+     * it as a clipped charge and jumps back to the anchor, so a monthly charge
+     * landed twice inside a 30-day window. The anchor follows the pinned date
+     * instead, unless that date is exactly where the last occurrence bills
+     * next, which is how a charge on the 31st keeps its anchor through a
+     * shorter month. An explicit `anchor_day` still wins.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    private function anchorDayFor(array $attributes): ?int
+    {
+        $cadence = $attributes['cadence'] instanceof RecurringCadence
+            ? $attributes['cadence']
+            : RecurringCadence::from((string) $attributes['cadence']);
+
+        if ($cadence->monthsPerOccurrence() === null) {
+            return null;
+        }
+
+        $lastOccurred = CarbonImmutable::parse($attributes['last_occurred_on']);
+        $nextExpected = CarbonImmutable::parse($attributes['next_expected_on']);
+
+        return $nextExpected->isSameDay($cadence->advance($lastOccurred, $lastOccurred->day))
+            ? $lastOccurred->day
+            : $nextExpected->day;
+    }
+
     public function cadence(RecurringCadence $cadence): static
     {
         return $this->state(function (array $attributes) use ($cadence) {
@@ -55,7 +88,7 @@ class RecurringSeriesFactory extends Factory
             return [
                 'cadence' => $cadence,
                 'interval_days' => $cadence->intervalDays(),
-                'anchor_day' => $cadence->monthsPerOccurrence() === null ? null : $lastOccurred->day,
+                'anchor_day' => $this->anchorDayFor(...),
                 'next_expected_on' => $cadence->advance($lastOccurred, $lastOccurred->day),
             ];
         });
@@ -73,7 +106,7 @@ class RecurringSeriesFactory extends Factory
             return [
                 'status' => RecurringSeriesStatus::Lapsed,
                 'last_occurred_on' => $lastOccurred,
-                'anchor_day' => $cadence->monthsPerOccurrence() === null ? null : $lastOccurred->day,
+                'anchor_day' => $this->anchorDayFor(...),
                 'next_expected_on' => $cadence->advance($lastOccurred, $lastOccurred->day),
             ];
         });

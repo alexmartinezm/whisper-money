@@ -16,15 +16,14 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { getCsrfToken } from '@/lib/csrf';
-import type { SharedData } from '@/types';
 import {
     type Account,
     type AccountBalance,
     balanceTermCapitalized,
     supportsInvestedAmount,
 } from '@/types/account';
+import { todayDateString } from '@/utils/date';
 import { __ } from '@/utils/i18n';
-import { usePage } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
 
 interface UpdateBalanceDialogProps {
@@ -32,11 +31,6 @@ interface UpdateBalanceDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     onSuccess?: () => void;
-}
-
-function getTodayDate(): string {
-    const today = new Date();
-    return today.toISOString().split('T')[0];
 }
 
 interface PaginatedBalanceResponse {
@@ -49,7 +43,7 @@ export function UpdateBalanceDialog({
     onOpenChange,
     onSuccess,
 }: UpdateBalanceDialogProps) {
-    const [date, setDate] = useState(getTodayDate());
+    const [date, setDate] = useState(todayDateString());
     const [balance, setBalance] = useState(0);
     const [investedAmount, setInvestedAmount] = useState<number | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -64,8 +58,6 @@ export function UpdateBalanceDialog({
     const countsPartially =
         (account.ownership_applies_to_balance ?? false) &&
         (account.ownership_percentage ?? 100) < 100;
-    const userCurrencyCode =
-        usePage<SharedData>().props.auth.user.currency_code;
 
     useEffect(() => {
         async function fetchLastBalance() {
@@ -104,7 +96,7 @@ export function UpdateBalanceDialog({
         }
 
         if (open) {
-            setDate(getTodayDate());
+            setDate(todayDateString());
             setError(null);
             fetchLastBalance();
         }
@@ -248,7 +240,7 @@ export function UpdateBalanceDialog({
                                             value === 0 ? null : value,
                                         )
                                     }
-                                    currencyCode={userCurrencyCode}
+                                    currencyCode={account.currency_code}
                                 />
                             )}
                         </div>

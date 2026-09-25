@@ -4,7 +4,11 @@ import { SankeyCategory, SankeyData } from '@/hooks/use-cashflow-data';
 import { useChartColors } from '@/hooks/use-chart-color-scheme';
 import { useLocale } from '@/hooks/use-locale';
 import { fetchJson } from '@/lib/fetch-json';
-import { groupSmallCategories } from '@/lib/sankey-utils';
+import {
+    type GroupedCategory,
+    formatShare,
+    groupSmallCategories,
+} from '@/lib/sankey-utils';
 import { cn } from '@/lib/utils';
 import { formatCurrency } from '@/utils/currency';
 import { __ } from '@/utils/i18n';
@@ -41,6 +45,9 @@ interface FlowNode {
     color: string;
     kind: FlowKind;
     labelSide: LabelSide;
+    // Pre-formatted share of this node's denominator (its side total, or its
+    // parent's amount when it is a drill-down child). Null when there is none.
+    share: string | null;
     categoryId?: string;
     expandable?: boolean;
     expanded?: boolean;
@@ -59,9 +66,12 @@ const LABEL_HEIGHT = 30;
 // bars end up NODE_PADDING apart regardless of the canvas height. Keep it above
 // LABEL_HEIGHT (+ breathing room) so two adjacent labels can never overlap.
 const NODE_PADDING = LABEL_HEIGHT + 6;
-// On-bar labels (the hub, and an expanded parent) are bordered pills with two
-// lines, so they need a little more room than the plain side labels.
-const PILL_LABEL_HEIGHT = 44;
+// On-bar labels are bordered pills, so they need a little more room than the
+// plain side labels. The hub carries a third line with the savings rate; an
+// expanded parent is the plain label plus the pill's border and padding, and
+// keeping it to that is what stops it from covering the node below.
+const PILL_LABEL_HEIGHT = 58;
+const PARENT_PILL_HEIGHT = LABEL_HEIGHT + 10;
 // A Sankey is inherently horizontal, so on narrow screens we let it scroll
 // sideways (same pattern as the trend chart) rather than crushing the flows.
 const MIN_CHART_WIDTH = 560;
@@ -70,6 +80,9 @@ const EXPANDED_MIN_CHART_WIDTH = 760;
 // Gives each node enough vertical room that its two-line label stays legible
 // even when a category's bar is tiny.
 const ROW_HEIGHT = 46;
+// "Other" is a bucket, not a category, so it opens on a sentinel id. Nothing
+// may look it up on the API: `parent` only takes a uuid there.
+const OTHER_ID = 'other';
 const MUTED_COLOR = 'var(--color-muted)';
 const CENTER_COLOR = 'var(--color-chart-1)';
 
@@ -147,7 +160,12 @@ export function SankeyChart({
 
     // Lazily fetch the subcategories of the expanded parent.
     useEffect(() => {
-        if (!period || !expandedId || childrenById[expandedId]) {
+        if (
+            !period ||
+            !expandedId ||
+            expandedId === OTHER_ID ||
+            childrenById[expandedId]
+        ) {
             return;
         }
 
@@ -209,6 +227,7 @@ export function SankeyChart({
                 kind === 'income' ? 'left' : 'right';
             const childrenKey =
                 kind === 'income' ? 'income_categories' : 'expense_categories';
+            const sideTotal = kind === 'income' ? total_income : total_expense;
 
             items.forEach((item, index) => {
                 if (item.amount <= 0) {
@@ -232,6 +251,7 @@ export function SankeyChart({
                     color: categoryBarColor(item.category.color, index),
                     kind,
                     labelSide: childrenLoaded ? 'onbar' : collapsedSide,
+                    share: formatShare(item.amount, sideTotal),
                     categoryId: item.category.id,
                     expandable: !!item.has_children,
                     expanded: isExpanded,
@@ -239,15 +259,33 @@ export function SankeyChart({
             });
         };
 
-        pushCategoryNodes(groupedIncome.main, 'income');
-        if (groupedIncome.other) {
+        // "Other" expands like a parent, except its children are already in
+        // memory: they are the categories the grouping folded away.
+        const pushOtherNode = (
+            other: GroupedCategory,
+            kind: 'income' | 'expense',
+        ) => {
+            const isExpanded = expandedKind === kind && expandedId === OTHER_ID;
+            const collapsedSide: LabelSide =
+                kind === 'income' ? 'left' : 'right';
+            const sideTotal = kind === 'income' ? total_income : total_expense;
+
             nodes.push({
                 name: __('Other'),
-                amount: groupedIncome.other.total,
+                amount: other.total,
                 color: MUTED_COLOR,
-                kind: 'income',
-                labelSide: 'left',
+                kind,
+                labelSide: isExpanded ? 'onbar' : collapsedSide,
+                share: formatShare(other.total, sideTotal),
+                categoryId: OTHER_ID,
+                expandable: true,
+                expanded: isExpanded,
             });
+        };
+
+        pushCategoryNodes(groupedIncome.main, 'income');
+        if (groupedIncome.other) {
+            pushOtherNode(groupedIncome.other, 'income');
         }
 
         const centerIndex = nodes.length;
@@ -259,6 +297,9 @@ export function SankeyChart({
             color: CENTER_COLOR,
             kind: 'center',
             labelSide: 'onbar',
+            // The hub's share is the savings rate, so it reads against income
+            // rather than against a side total.
+            share: formatShare(total_income - total_expense, total_income),
         });
 
         const groupedExpense = groupSmallCategories(
@@ -268,13 +309,7 @@ export function SankeyChart({
         );
         pushCategoryNodes(groupedExpense.main, 'expense');
         if (groupedExpense.other) {
-            nodes.push({
-                name: __('Other'),
-                amount: groupedExpense.other.total,
-                color: MUTED_COLOR,
-                kind: 'expense',
-                labelSide: 'right',
-            });
+            pushOtherNode(groupedExpense.other, 'expense');
         }
 
         nodes.forEach((node, index) => {
@@ -308,10 +343,16 @@ export function SankeyChart({
                     node.kind === expandedKind &&
                     node.categoryId === expandedId,
             );
+            const fetched =
+                expandedKind === 'income'
+                    ? childrenById[expandedId]?.income_categories
+                    : childrenById[expandedId]?.expense_categories;
+            const grouped =
+                expandedKind === 'income' ? groupedIncome : groupedExpense;
             const kids = [
-                ...(expandedKind === 'income'
-                    ? (childrenById[expandedId]?.income_categories ?? [])
-                    : (childrenById[expandedId]?.expense_categories ?? [])),
+                ...(expandedId === OTHER_ID
+                    ? (grouped.other?.categories ?? [])
+                    : (fetched ?? [])),
             ].sort((a, b) => b.amount - a.amount);
 
             if (parentIndex >= 0) {
@@ -327,6 +368,13 @@ export function SankeyChart({
                         color: categoryBarColor(kid.category.color, index),
                         kind: expandedKind,
                         labelSide: expandedKind === 'income' ? 'left' : 'right',
+                        // A subcategory answers "how much of this parent",
+                        // not "how much of everything", so the parent's
+                        // amount is the denominator.
+                        share: formatShare(
+                            kid.amount,
+                            nodes[parentIndex].amount,
+                        ),
                         categoryId: kid.category.id,
                     });
                     links.push(
@@ -436,6 +484,7 @@ export function SankeyChart({
     }) => {
         const node = payload;
         const isPill = node.labelSide === 'onbar';
+        const isNet = node.kind === 'center';
         const expandable = !!node.expandable && !!node.categoryId && !!period;
         const navigable = !expandable && !!node.categoryId && !!period;
         const interactive = expandable || navigable;
@@ -448,8 +497,17 @@ export function SankeyChart({
             }
         };
 
-        const labelBoxHeight = isPill ? PILL_LABEL_HEIGHT : LABEL_HEIGHT;
-        const labelY = y + nodeHeight / 2 - labelBoxHeight / 2;
+        const pillHeight = isNet ? PILL_LABEL_HEIGHT : PARENT_PILL_HEIGHT;
+        const labelBoxHeight = isPill ? pillHeight : LABEL_HEIGHT;
+        // Centred on its bar, except at the very edges: the first and last
+        // node of a column sit flush against the canvas, so half of a label
+        // taller than the bar would hang outside it and get clipped. "Other"
+        // is always the last of its column, and expanding it makes its label
+        // a pill, so that is the rule rather than the exception.
+        const labelY = Math.min(
+            Math.max(0, y + nodeHeight / 2 - labelBoxHeight / 2),
+            chartHeight - labelBoxHeight,
+        );
         let labelX: number;
         let labelBoxWidth: number;
         let alignClass: string;
@@ -558,7 +616,18 @@ export function SankeyChart({
                         </div>
                         <span className="text-[11px] text-muted-foreground">
                             {maskIfPrivate(node.amount)}
+                            {/* A share gives no amount away, so privacy mode
+                                leaves it readable — it is what keeps the chart
+                                useful with the numbers masked. */}
+                            {!isNet && node.share && ` · ${node.share}`}
                         </span>
+                        {isNet && node.share && (
+                            <span className="text-[11px] text-muted-foreground">
+                                {__(':percent of income', {
+                                    percent: node.share,
+                                })}
+                            </span>
+                        )}
                     </div>
                 </foreignObject>
             </Layer>

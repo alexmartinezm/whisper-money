@@ -55,7 +55,7 @@ import {
     type TransactionSplit,
 } from '@/types/transaction';
 import { formatCurrency } from '@/utils/currency';
-import { formatDate } from '@/utils/date';
+import { formatDate, todayDateString } from '@/utils/date';
 import { __ } from '@/utils/i18n';
 import { router, usePage } from '@inertiajs/react';
 import axios from 'axios';
@@ -282,7 +282,7 @@ export function EditTransactionDialog({
             setNotes(transaction.decryptedNotes || '');
             setShowNotes(!!transaction.decryptedNotes);
         } else if (mode === 'create' && open) {
-            const today = new Date().toISOString().split('T')[0];
+            const today = todayDateString();
             setTransactionDate(today);
             setDescription('');
             setUnsignedAmount(0);

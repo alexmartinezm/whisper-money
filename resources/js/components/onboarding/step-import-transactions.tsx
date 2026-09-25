@@ -32,7 +32,8 @@ export function StepImportTransactions({
     onComplete,
 }: StepImportTransactionsProps) {
     const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-    const [hasImported, setHasImported] = useState(false);
+    const [hasClosedDrawer, setHasClosedDrawer] = useState(false);
+    const [importedCount, setImportedCount] = useState(0);
     const { accounts, categories, banks, automationRules } = usePage<{
         accounts: Account[];
         categories: Category[];
@@ -49,18 +50,31 @@ export function StepImportTransactions({
         }
     }, [accounts.length]);
 
-    const handleDrawerClose = (open: boolean) => {
+    // The count comes from the import itself: closing the drawer says nothing
+    // about whether anything was imported.
+    const handleImportComplete = (count: number) => {
+        setImportedCount((previous) => previous + count);
+    };
+
+    // Closing the drawer is what unlocks the way out, and nothing else: the
+    // step leads with the import, and only a user who has seen it and backed
+    // out of it is offered a way past.
+    const handleDrawerOpenChange = (open: boolean) => {
         setIsDrawerOpen(open);
+
         if (!open) {
-            setHasImported(true);
+            setHasClosedDrawer(true);
         }
     };
 
+    // A partial import leaves the drawer open so the failed rows can be
+    // retried, so the step waits for the drawer to be gone — and only then
+    // moves on if something actually made it in. Closing with the X does not.
     useEffect(() => {
-        if (hasImported) {
+        if (!isDrawerOpen && importedCount > 0) {
             onComplete();
         }
-    }, [hasImported, onComplete]);
+    }, [isDrawerOpen, importedCount, onComplete]);
 
     const description = useMemo(() => {
         return account
@@ -83,9 +97,13 @@ export function StepImportTransactions({
                         icon={Upload}
                         onClick={() => setIsDrawerOpen(true)}
                     />
-                    {hasImported && (
+                    {(importedCount > 0 || hasClosedDrawer) && (
                         <StepButton
-                            text={__('Continue')}
+                            text={
+                                importedCount > 0
+                                    ? __('Continue')
+                                    : __('Skip for now')
+                            }
                             variant="ghost"
                             onClick={onComplete}
                         />
@@ -111,7 +129,7 @@ export function StepImportTransactions({
                             {__('Supported formats')}
                         </p>
                         <p className="text-sm text-muted-foreground">
-                            {__('CSV, XLS, XLSX files')}
+                            {__('CSV, XLS, XLSX, Numbers files')}
                         </p>
                     </div>
                 </div>
@@ -119,7 +137,8 @@ export function StepImportTransactions({
 
             <ImportTransactionsDrawer
                 open={isDrawerOpen}
-                onOpenChange={handleDrawerClose}
+                onOpenChange={handleDrawerOpenChange}
+                onImportComplete={handleImportComplete}
                 accounts={accounts}
                 categories={categories}
                 banks={banks}

@@ -440,6 +440,119 @@ it('preserves split lines through soft delete and restore and cascades them on f
     expect(TransactionSplit::query()->whereIn('id', $splitIds)->count())->toBe(0);
 });
 
+it('keeps the currency of a connected account', function () {
+    actingAs($this->user);
+
+    $account = Account::factory()->connected()->create([
+        'user_id' => $this->user->id,
+        'bank_id' => $this->bank->id,
+        'currency_code' => 'EUR',
+        'type' => AccountType::Checking,
+    ]);
+
+    $response = $this->patch(route('accounts.update', $account), [
+        'name' => 'Renamed',
+        'bank_id' => $this->bank->id,
+        'currency_code' => 'USD',
+        'type' => AccountType::Checking->value,
+    ]);
+
+    $response->assertSessionHasErrors(['currency_code']);
+    assertDatabaseHas('accounts', [
+        'id' => $account->id,
+        'currency_code' => 'EUR',
+    ]);
+});
+
+it('keeps the bank of a connected account', function () {
+    actingAs($this->user);
+
+    $account = Account::factory()->connected()->create([
+        'user_id' => $this->user->id,
+        'bank_id' => $this->bank->id,
+        'currency_code' => 'EUR',
+        'type' => AccountType::Checking,
+    ]);
+    $otherBank = Bank::factory()->create();
+
+    $response = $this->patch(route('accounts.update', $account), [
+        'name' => 'Renamed',
+        'bank_id' => $otherBank->id,
+        'currency_code' => 'EUR',
+        'type' => AccountType::Checking->value,
+    ]);
+
+    $response->assertSessionHasErrors(['bank_id']);
+    assertDatabaseHas('accounts', [
+        'id' => $account->id,
+        'bank_id' => $this->bank->id,
+    ]);
+});
+
+it('refuses to clear the bank of a connected account', function () {
+    actingAs($this->user);
+
+    $account = Account::factory()->connected()->create([
+        'user_id' => $this->user->id,
+        'bank_id' => $this->bank->id,
+        'currency_code' => 'EUR',
+        'type' => AccountType::Checking,
+    ]);
+
+    $response = $this->patch(route('accounts.update', $account), [
+        'name' => 'Renamed',
+        'bank_id' => null,
+        'currency_code' => 'EUR',
+        'type' => AccountType::Checking->value,
+    ]);
+
+    $response->assertSessionHasErrors(['bank_id']);
+    assertDatabaseHas('accounts', [
+        'id' => $account->id,
+        'bank_id' => $this->bank->id,
+    ]);
+});
+
+it('still updates a connected account when the currency is left alone', function () {
+    actingAs($this->user);
+
+    $account = Account::factory()->connected()->create([
+        'user_id' => $this->user->id,
+        'bank_id' => $this->bank->id,
+        'currency_code' => 'EUR',
+        'type' => AccountType::Checking,
+    ]);
+
+    $response = $this->patch(route('accounts.update', $account), [
+        'name' => 'Renamed',
+        'bank_id' => $this->bank->id,
+        'currency_code' => 'EUR',
+        'type' => AccountType::Checking->value,
+    ]);
+
+    $response->assertRedirect(route('accounts.index'));
+    assertDatabaseHas('accounts', [
+        'id' => $account->id,
+        'name' => 'Renamed',
+    ]);
+});
+
+// Archiving is what detaches an account from the bank (see AccountControllerTest),
+// and an archived account is no longer connected, so it can then be deleted.
+it('prevents deleting a connected account', function () {
+    actingAs($this->user);
+
+    $account = Account::factory()->connected()->create([
+        'user_id' => $this->user->id,
+        'bank_id' => $this->bank->id,
+    ]);
+
+    $response = $this->delete(route('accounts.destroy', $account));
+
+    $response->assertForbidden();
+    assertDatabaseHas('accounts', ['id' => $account->id, 'deleted_at' => null]);
+});
+
 it('prevents deleting another users account', function () {
     $otherUser = User::factory()->create();
     $account = Account::factory()->create([
@@ -505,6 +618,82 @@ it('creates account without balance record when balance is not provided', functi
 
     assertDatabaseMissing('account_balances', [
         'account_id' => $account->id,
+    ]);
+});
+
+it('records the invested amount on the opening balance of an investment account', function () {
+    actingAs($this->user);
+
+    $response = $this->post(route('accounts.store'), [
+        'name' => 'My Index Fund',
+        'bank_id' => $this->bank->id,
+        'currency_code' => 'USD',
+        'type' => AccountType::Investment->value,
+        'balance' => 150000,
+        'invested_amount' => 120000,
+    ]);
+
+    $response->assertRedirect();
+
+    $account = Account::where('user_id', $this->user->id)
+        ->where('name', 'My Index Fund')
+        ->first();
+
+    assertDatabaseHas('account_balances', [
+        'account_id' => $account->id,
+        'balance' => 150000,
+        'invested_amount' => 120000,
+    ]);
+
+    expect($account->balances()->count())->toBe(1);
+});
+
+it('opens the balance at the invested amount when only that is known', function () {
+    actingAs($this->user);
+
+    $response = $this->post(route('accounts.store'), [
+        'name' => 'My Pension Plan',
+        'bank_id' => $this->bank->id,
+        'currency_code' => 'USD',
+        'type' => AccountType::Retirement->value,
+        'invested_amount' => 120000,
+    ]);
+
+    $response->assertRedirect();
+
+    $account = Account::where('user_id', $this->user->id)
+        ->where('name', 'My Pension Plan')
+        ->first();
+
+    assertDatabaseHas('account_balances', [
+        'account_id' => $account->id,
+        'balance' => 120000,
+        'invested_amount' => 120000,
+    ]);
+});
+
+it('ignores an invested amount on a type that does not track one', function () {
+    actingAs($this->user);
+
+    $response = $this->post(route('accounts.store'), [
+        'name' => 'My Current Account',
+        'bank_id' => $this->bank->id,
+        'currency_code' => 'USD',
+        'type' => AccountType::Checking->value,
+        'balance' => 150000,
+        'invested_amount' => 120000,
+    ]);
+
+    $response->assertRedirect();
+
+    $account = Account::where('user_id', $this->user->id)
+        ->where('name', 'My Current Account')
+        ->first();
+
+    assertDatabaseHas('account_balances', [
+        'account_id' => $account->id,
+        'balance' => 150000,
+        'invested_amount' => null,
     ]);
 });
 

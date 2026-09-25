@@ -66,6 +66,7 @@ export function EditAccountDialog({
         currencyCode: account.currency_code,
         customBank: null,
         balance: null,
+        investedAmount: null,
         realEstate: null,
         loan: null,
     });
@@ -343,7 +344,7 @@ export function EditAccountDialog({
                         <>
                             <AccountForm
                                 initialValues={initialValues}
-                                bankClearable={!account.banking_connection_id}
+                                isConnected={!!account.banking_connection_id}
                                 onChange={handleFormChange}
                                 errors={errors}
                             />

@@ -216,7 +216,6 @@ export function useConnectFlow(connections: BankingConnection[]) {
                       aspsp_name: selectedBank.name,
                       country,
                       logo: selectedBank.logo,
-                      beta: selectedBank.beta ?? false,
                   };
 
             const response = await fetch(url, {

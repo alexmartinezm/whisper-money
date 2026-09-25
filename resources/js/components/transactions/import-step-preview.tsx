@@ -74,8 +74,10 @@ export function ImportStepPreview({
     }, [accountId]);
 
     const stats = useMemo(() => {
+        // A row a partial import already created cannot be picked again, the
+        // same way a duplicate cannot.
         const selectableTransactions = transactions.filter(
-            (t) => !t.isDuplicate,
+            (t) => !t.isDuplicate && !t.imported,
         );
         const selectedCount = selectableTransactions.filter(
             (t) => t.selected,
@@ -207,12 +209,19 @@ export function ImportStepPreview({
                                                     checked === true,
                                                 )
                                             }
-                                            disabled={transaction.isDuplicate}
+                                            disabled={
+                                                transaction.isDuplicate ||
+                                                transaction.imported
+                                            }
                                             aria-label={`Select transaction: ${transaction.description}`}
                                         />
                                     </TableCell>
                                     <TableCell className="text-center">
-                                        {transaction.isDuplicate ? (
+                                        {transaction.imported ? (
+                                            <Badge variant="outline">
+                                                {__('Imported')}
+                                            </Badge>
+                                        ) : transaction.isDuplicate ? (
                                             <Badge variant="secondary">
                                                 {__('Duplicate')}
                                             </Badge>

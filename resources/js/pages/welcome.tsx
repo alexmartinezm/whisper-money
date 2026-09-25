@@ -931,7 +931,7 @@ function CashflowChartPreview() {
  * number the server stopped serving.
  */
 const MCP_READ_TOOL_COUNT = 13;
-const MCP_WRITE_TOOL_COUNT = 20;
+const MCP_WRITE_TOOL_COUNT = 22;
 
 /**
  * The figures the assistant reports on in the preview conversation. The budgets

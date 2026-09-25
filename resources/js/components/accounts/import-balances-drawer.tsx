@@ -30,6 +30,7 @@ import {
 } from '@/types/balance-import';
 import { DateFormat } from '@/types/import';
 import type { UUID } from '@/types/uuid';
+import { formatLocalDate } from '@/utils/date';
 import { __ } from '@/utils/i18n';
 import { usePage } from '@inertiajs/react';
 import { Check } from 'lucide-react';
@@ -66,8 +67,7 @@ export function ImportBalancesDrawer({
     accountId,
     onSuccess,
 }: ImportBalancesDrawerProps) {
-    const { locale, auth } = usePage<SharedData>().props;
-    const userCurrencyCode = auth.user.currency_code;
+    const { locale } = usePage<SharedData>().props;
     const [isImporting, setIsImporting] = useState(false);
     const [importProgress, setImportProgress] = useState(0);
     const [importTotal, setImportTotal] = useState(0);
@@ -377,7 +377,7 @@ export function ImportBalancesDrawer({
                     continue;
                 }
 
-                const formattedDate = date.toISOString().split('T')[0];
+                const formattedDate = formatLocalDate(date);
 
                 let investedAmount: number | null = null;
                 if (state.columnMapping.invested_amount) {
@@ -657,7 +657,6 @@ export function ImportBalancesDrawer({
                         dateFormatDetected={state.dateFormatDetected}
                         parsedData={state.parsedData}
                         currencyCode={selectedAccount?.currency_code || 'USD'}
-                        investedAmountCurrencyCode={userCurrencyCode}
                         showInvestedAmount={showInvestedAmount}
                         isLoan={selectedAccount?.type === 'loan'}
                         onMappingChange={handleMappingChange}
@@ -672,7 +671,6 @@ export function ImportBalancesDrawer({
                     <ImportBalanceStepPreview
                         balances={state.balances}
                         currencyCode={selectedAccount?.currency_code || 'USD'}
-                        investedAmountCurrencyCode={userCurrencyCode}
                         showInvestedAmount={showInvestedAmount}
                         isLoan={selectedAccount?.type === 'loan'}
                         onConfirm={handleConfirmImport}

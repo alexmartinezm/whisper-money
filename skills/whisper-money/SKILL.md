@@ -36,9 +36,39 @@ hand: `create_automation_rule` for future ones, then `apply_automation_rule`
 for the history — it previews by default, so show the user the match count and
 the sample before calling it again with `dry_run: false`.
 
+**"Always file X under Y"** — build the rule instead of categorizing by hand.
+Get the category and label ids from `list_categories` / `list_labels` first,
+then write the condition in plain language ("description mentions amazon, but
+not amazon prime") and only then map it to JsonLogic:
+
+- contains → `{"in":["amazon",{"var":"description"}]}`, and does not contain →
+  the same wrapped in a negation, `{"!":{"in":["amazon prime",{"var":"description"}]}}`.
+- equals / is not → `{"==":[{"var":"creditor_name"},"netflix"]}` and
+  `{"!=":[...]}`; empty / not empty are the same two against `null`.
+- Join them with `{"and":[...]}` or `{"or":[...]}`, which nest: "any of these
+  merchants, but not that one" is one `and` holding an `or` and a `!`.
+- Values are compared lowercased, and amounts inside `rules_json` are in major
+  units. "Does not contain" is also true when the field is empty.
+
+Then `create_automation_rule`, and `apply_automation_rule` with `dry_run: true`
+before anything else — the match list is the only way to find out the rule says
+what you meant. A rule that is merely wrong (bad nesting, a variable that does
+not exist, a token that never appears) saves happily and matches nothing, so a
+dry run returning 0 matches is a bug in the rule, not an empty history. Fix it
+with `update_automation_rule`, dry-run again, then commit with `dry_run: false`.
+
 **"This charge was for two things"** — `split_transaction` with parts that add
 up to the original and share its sign. The parts replace it everywhere; to undo
 it, `merge_transaction_splits` with any part.
+
+**"Add my savings account / my mortgage / my flat"** — `create_account` with
+the type, a currency and, if the user knows it, today's `balance`. A `loan` or a
+`real_estate` account is worth doing properly in one call: pass
+`annual_interest_rate`, `loan_term_months` and `original_amount` (or
+`purchase_price` and `purchase_date`), and with a balance the monthly history in
+between is generated for the chart. Link a mortgage to the property it pays for
+with `linked_real_estate_account_id`. Renaming, retyping or reweighing an
+account later is `update_account`, which touches only the fields you pass.
 
 **"Am I overspending?"** — `list_budgets` already reports allocated, spent and
 remaining for the period in progress. Say `current_period: null` means no
@@ -59,6 +89,16 @@ creating, because changing them later means deleting and recreating the budget.
   the user ends up with the charge twice.
 - Balances (`create_balance`) work on manual accounts only; a connected
   account's balances come from the bank.
+- Bank-connected accounts cannot be created: only the user can, in the app,
+  through the bank's consent flow. Offer that instead of building a manual
+  lookalike, which would never sync. On one that already exists,
+  `update_account` takes the name and the ownership fields and refuses the
+  currency, the bank and any type without a transaction ledger.
+- Neither account tool archives, hides or deletes. Archiving in particular also
+  revokes the bank connection, so it stays in the app where the user can see
+  what they are agreeing to.
+- `list_accounts` shows every account in a shared space, but only the owner can
+  edit one — `update_account` refuses a housemate's account.
 - Ask first before anything that destroys data: `delete_budget` (takes the
   spending history with it), `merge_transaction_splits` (loses the categories,
   labels and notes on every part), `delete_category` with
