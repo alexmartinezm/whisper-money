@@ -2694,8 +2694,6 @@
     "If something got in the way, your bank is missing, the import failed, or Whisper Money just is not what you were looking for, reply to this email and tell us. We read every reply ourselves.": "Si algo se ha puesto por medio, falta tu banco, la importación ha fallado o simplemente Whisper Money no es lo que buscabas, responde a este email y cuéntanoslo. Leemos todas las respuestas personalmente.",
     "Beta": "Beta",
     "This bank is still in beta": "Este banco todavía está en beta",
-    "Our banking provider marks this connection as beta, so syncing can fail or pause more often than with other banks. It usually works, and you can reconnect or disconnect whenever you want.": "Nuestro proveedor bancario marca esta conexión como beta, así que la sincronización puede fallar o pausarse más a menudo que con otros bancos. Normalmente funciona, y puedes reconectar o desconectar cuando quieras.",
-    "This bank is still in beta at our banking provider, so it fails more often than others. Retrying usually helps.": "Este banco todavía está en beta en nuestro proveedor bancario, así que falla más a menudo que otros. Reintentar suele ayudar.",
     ":bank did not share any accounts through open banking. Not every account type is available this way — contact us if yours should be.": ":bank no ha compartido ninguna cuenta a través de open banking. No todos los tipos de cuenta están disponibles por esta vía; escríbenos si la tuya debería estarlo.",
     "Failed to connect to your bank. Please try again.": "No hemos podido conectar con tu banco. Inténtalo de nuevo.",
     "We could not load these figures. Try again in a moment.": "No hemos podido cargar estas cifras. Vuelve a intentarlo en un momento.",
@@ -2937,5 +2935,7 @@
     ":name (reversal)": ":name (reintegro)",
     "Rules with a lower priority are evaluated first": "Las reglas con menor prioridad se evalúan primero",
     ":percent of income": ":percent del ingreso",
-    ":name (withdrawal)": ":name (retirada)"
+    ":name (withdrawal)": ":name (retirada)",
+    "Connections to this bank fail or pause more often than with other banks. It usually works, and you can reconnect or disconnect whenever you want.": "La conexión con este banco falla o se pausa más a menudo que con otros bancos. Normalmente funciona, y puedes reconectar o desconectar cuando quieras.",
+    "This bank is still in beta: its connection fails more often than others. Retrying usually helps.": "Este banco todavía está en beta: su conexión falla más a menudo que otras. Reintentar suele ayudar."
 }
