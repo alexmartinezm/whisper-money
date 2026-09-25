@@ -92,8 +92,11 @@ test('dashboard cashflow uses split category types instead of the parent sign', 
         'X-Inertia-Partial-Component' => 'dashboard',
         'X-Inertia-Partial-Data' => 'cashflowSummary',
     ])->assertOk()
+        // The parent's positive sign never makes it income: its lines are
+        // expense categories. Money coming back into expense categories is a
+        // refund, and refunds net against spending even below zero (#987).
         ->assertJsonPath('props.cashflowSummary.current.income', 0)
-        ->assertJsonPath('props.cashflowSummary.current.expense', 0);
+        ->assertJsonPath('props.cashflowSummary.current.expense', -10000);
 });
 
 function labelledTransaction(User $user, Label $label, array $attributes = []): Transaction
