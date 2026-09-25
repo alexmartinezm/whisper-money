@@ -20,10 +20,6 @@ Schedule::command('banks:check-logos')->weekly();
 // exits zero, so a scheduled run would stay silent about whatever it found.
 Schedule::command('transactions:audit-splits --fail-on-invalid')->dailyAt('03:30');
 
-// Connectors move in and out of beta at the provider, so the flag stored on
-// each connection goes stale on its own. Weekly is plenty: it is 17 catalogue
-// calls and a badge, not something a user is waiting on.
-Schedule::command('banking:sync-aspsp-beta')->weekly();
 Schedule::command('banking:cancel-free-enablebanking')->lastDayOfMonth('18:00');
 Schedule::command('real-estate:apply-revaluation')->monthlyOn(1, '00:00');
 Schedule::command('loans:generate-balances')->monthlyOn(1, '00:00');
