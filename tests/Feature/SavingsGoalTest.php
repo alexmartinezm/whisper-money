@@ -311,6 +311,7 @@ test('the starting amount cannot be negative', function () {
 
 test('a target date with an out-of-range year is rejected when creating', function () {
     $user = onboardedSavingsUser();
+    Feature::for($user)->activate(SavingsGoals::class);
 
     $this->actingAs($user)->post('/savings-goals', [
         'name' => 'Typo',
@@ -323,6 +324,7 @@ test('a target date with an out-of-range year is rejected when creating', functi
 
 test('a target date with an out-of-range year is rejected when editing', function (string $targetDate) {
     $user = onboardedSavingsUser();
+    Feature::for($user)->activate(SavingsGoals::class);
 
     $goal = SavingsGoal::factory()->create([
         'user_id' => $user->id,
@@ -338,6 +340,7 @@ test('a target date with an out-of-range year is rejected when editing', functio
 
 test('editing a goal accepts a normal future target date', function () {
     $user = onboardedSavingsUser();
+    Feature::for($user)->activate(SavingsGoals::class);
 
     $goal = SavingsGoal::factory()->create(['user_id' => $user->id]);
     $targetDate = now()->addYear()->toDateString();
