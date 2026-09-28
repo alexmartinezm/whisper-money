@@ -308,8 +308,9 @@ class CashflowAnalyticsController extends Controller
      * split transaction is replaced by one row per split line, so each line
      * nets against its own category. The exchange rates the conversion needs
      * are primed first so the callers never hit the rate service per row.
-     * Savings and investment postings on a savings account are left out: the
-     * leg on the other account already counts that money.
+     * Savings and investment postings on a savings, investment or retirement
+     * account are left out: the leg on the other account already counts that
+     * money.
      *
      * @return Collection<int, Transaction>
      */
@@ -325,7 +326,7 @@ class CashflowAnalyticsController extends Controller
         $this->preloadExchangeRates($transactions, $userCurrency);
 
         return $this->effectiveTransactions($transactions, $userCurrency)
-            ->reject(fn (Transaction $transaction): bool => $transaction->isSavingsAccountLeg())
+            ->reject(fn (Transaction $transaction): bool => $transaction->isSetAsideAccountLeg())
             ->values();
     }
 
