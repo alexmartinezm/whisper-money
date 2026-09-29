@@ -109,3 +109,13 @@ export function isExpiringSoon(connection: BankingConnection): boolean {
 export function canSyncManually(connection: BankingConnection): boolean {
     return connection.can_sync_manually !== false;
 }
+
+/**
+ * Whether the bank told us to back off and the window is still open, however
+ * long the connection has been syncing. {@link isWaitingForBank} only catches a
+ * connection that never synced; one that has is refused just the same, and
+ * without this its card drops "Sync Now" with no word of why or until when.
+ */
+export function isBackingOff(connection: BankingConnection): boolean {
+    return connection.status === 'active' && !canSyncManually(connection);
+}

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
     alreadyConnectedBankNames,
     hasLiveConnectionForProvider,
+    isBackingOff,
     isExpiringSoon,
 } from './banking-connections';
 
@@ -127,6 +128,34 @@ describe('isExpiringSoon', () => {
         expect(
             isExpiringSoon(
                 connection({ status: 'error', valid_until: inDays(2) }),
+            ),
+        ).toBe(false);
+    });
+});
+
+describe('isBackingOff', () => {
+    it('is true for an active connection the bank told us to leave alone', () => {
+        expect(
+            isBackingOff(
+                connection({
+                    last_synced_at: '2026-01-01T00:00:00Z',
+                    can_sync_manually: false,
+                }),
+            ),
+        ).toBe(true);
+    });
+
+    it('is false once the window has closed or where the flag is not sent', () => {
+        expect(isBackingOff(connection({ can_sync_manually: true }))).toBe(
+            false,
+        );
+        expect(isBackingOff(connection())).toBe(false);
+    });
+
+    it('is false for an errored connection, which keeps its Retry', () => {
+        expect(
+            isBackingOff(
+                connection({ status: 'error', can_sync_manually: false }),
             ),
         ).toBe(false);
     });

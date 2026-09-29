@@ -25,6 +25,7 @@ import AppLayout from '@/layouts/app-layout';
 import SettingsLayout from '@/layouts/settings/layout';
 import {
     canSyncManually,
+    isBackingOff,
     isExpiringSoon,
     isFirstSyncRunning,
     isWaitingForBank,
@@ -462,7 +463,8 @@ export default function ConnectionsPage({ connections }: Props) {
                                                 </span>
                                             )}
                                         </div>
-                                        {isWaitingForBank(connection) && (
+                                        {(isWaitingForBank(connection) ||
+                                            isBackingOff(connection)) && (
                                             <AmberNotice>
                                                 <p>
                                                     {__(
