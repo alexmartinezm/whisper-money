@@ -240,6 +240,25 @@ describe('ConnectionsPage', () => {
         ).toBeInTheDocument();
     });
 
+    it('says why Sync Now is gone on a connection that has synced before', () => {
+        render(
+            <ConnectionsPage
+                connections={[
+                    makeConnection({
+                        can_sync_manually: false,
+                        next_sync_attempt_at: '2999-01-01T12:00:00.000000Z',
+                    }),
+                ]}
+            />,
+        );
+
+        expect(screen.getByText(/last synced/i)).toBeInTheDocument();
+        expect(
+            screen.getByText(/your bank limits how often/i),
+        ).toBeInTheDocument();
+        expect(screen.getByText(/next attempt/i)).toBeInTheDocument();
+    });
+
     it('keeps Retry on an errored connection even while a backoff is set', () => {
         render(
             <ConnectionsPage
@@ -271,6 +290,9 @@ describe('ConnectionsPage', () => {
         expect(
             screen.getByRole('menuitem', { name: /sync now/i }),
         ).toBeInTheDocument();
+        expect(
+            screen.queryByText(/your bank limits how often/i),
+        ).not.toBeInTheDocument();
     });
 
     it('badges a connection whose bank is a beta connector', () => {

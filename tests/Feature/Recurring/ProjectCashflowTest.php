@@ -357,13 +357,14 @@ it('orders the charges by the day they land', function () {
 
 it('keeps the outlook clear of the projection window', function () {
     accountWithBalance($this->user, 100000);
+    $nextExpected = CarbonImmutable::today()->addDays(5);
 
     RecurringSeries::factory()->cadence(RecurringCadence::Quarterly)->create([
         'user_id' => $this->user->id,
         'display_name' => 'Seguro Coche',
         'expected_amount' => -14550,
         'currency_code' => 'EUR',
-        'next_expected_on' => CarbonImmutable::today()->addDays(5),
+        'next_expected_on' => $nextExpected,
         'interval_days' => 91,
     ]);
 
@@ -371,9 +372,11 @@ it('keeps the outlook clear of the projection window', function () {
     $firstOutlookDate = collect($forecast['later'])->first()['charges'][0]['date'];
 
     // Nothing is counted twice: the outlook starts after the window ends.
+    // A quarter is three calendar months, not 91 days, so the date comes from
+    // the cadence: a fixed day count only matches it on some run dates.
     expect($forecast['occurrences'])->toHaveCount(1)
         ->and($firstOutlookDate)->toBe(
-            CarbonImmutable::today()->addDays(96)->toDateString(),
+            RecurringCadence::Quarterly->advance($nextExpected, $nextExpected->day)->toDateString(),
         );
 });
 
