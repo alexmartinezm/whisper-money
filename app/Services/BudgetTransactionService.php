@@ -42,8 +42,9 @@ class BudgetTransactionService
             $locked = Transaction::query()
                 ->whereKey($transaction->id)
                 ->lockForUpdate()
-                ->with(['account' => fn ($query) => $query->withTrashed(), 'labels', 'category', 'splits.category'])
+                ->with(['labels', 'category', 'splits.category'])
                 ->firstOrFail();
+            $this->reuseLoadedAccount($locked, $transaction);
             $periods = BudgetPeriod::query()
                 // An archived budget stops taking in new data from the day it
                 // was archived; what it already counted stays as it was.
@@ -228,6 +229,26 @@ class BudgetTransactionService
         return -$postings
             ->filter(fn ($posting): bool => $posting->category?->type === CategoryType::Expense && ! in_array($posting->categoryId, $claimed, true))
             ->sum(fn ($posting): int => $this->ownedAmount($transaction, $posting->amount));
+    }
+
+    /**
+     * Hand the locked copy the account the caller already loaded, so a job that
+     * eager loads a chunk's accounts does not pay one lookup per row again. The
+     * row lock does not guard the account, so reading it before the lock is no
+     * staler than reading it after. A relation loaded as null (a trashed account
+     * read without withTrashed()) is not trusted: the copy loads its own.
+     */
+    private function reuseLoadedAccount(Transaction $locked, Transaction $loaded): void
+    {
+        $account = $loaded->relationLoaded('account') ? $loaded->account : null;
+
+        if ($account !== null && $account->id === $locked->account_id) {
+            $locked->setRelation('account', $account);
+
+            return;
+        }
+
+        $locked->load(['account' => fn ($query) => $query->withTrashed()]);
     }
 
     /**
