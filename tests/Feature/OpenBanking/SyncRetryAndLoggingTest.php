@@ -950,6 +950,7 @@ test('manual sync is refused under a live backoff rather than silently swallowed
     $until = now()->addHours(20);
     $connection = BankingConnection::factory()->create([
         'user_id' => $user->id,
+        'provider' => 'binance',
         'rate_limited_until' => $until,
     ]);
 

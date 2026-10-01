@@ -297,7 +297,9 @@ test('EnableBanking backoff still blocks manual sync without PSU request identit
         'rate_limited_until' => $backoff,
     ]);
 
-    $response = $this->actingAs($user)->post("/settings/connections/{$connection->id}/sync");
+    $response = $this->actingAs($user)
+        ->withHeader('User-Agent', '')
+        ->post("/settings/connections/{$connection->id}/sync");
 
     $response->assertSessionHas('error');
     Queue::assertNothingPushed();

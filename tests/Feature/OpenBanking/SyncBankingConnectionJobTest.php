@@ -1872,9 +1872,9 @@ test('manual EnableBanking sync preserves a background cooldown and clears its P
 
     $transactionSync = Mockery::mock(TransactionSyncService::class);
     $transactionSync->shouldReceive('sync')->once()->andReturn(0);
-    $transactionSync->shouldReceive('calculateHistoricalBalances')->once();
     $balanceSync = Mockery::mock(BalanceSyncService::class);
     $balanceSync->shouldReceive('sync')->once();
+    $balanceSync->shouldReceive('calculateHistoricalBalances')->once();
 
     $job = new SyncBankingConnectionJob(
         $connection,
