@@ -30,6 +30,12 @@ function assertSyntheticPsuHeaders(Request $request): void
 
 afterEach(function () {
     app()->forgetInstance(EnableBankingPsuContext::class);
+
+    // The key has to sit under base_path() for the service provider to find it,
+    // so it is removed here rather than left in the app's cache directory.
+    foreach (glob(storage_path('framework/cache/enablebanking-psu-*.pem')) ?: [] as $key) {
+        unlink($key);
+    }
 });
 
 it('sends PSU identity on every paginated transaction and balance request', function () {

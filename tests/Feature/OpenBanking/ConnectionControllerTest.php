@@ -282,7 +282,8 @@ test('users can manually sync EnableBanking through an active background backoff
     $connection->refresh();
     expect($connection->rate_limited_until->toDateTimeString())
         ->toBe($backoff->toDateTimeString())
-        ->and($connection->error_message)->toBe($rateLimitMessage);
+        ->and($connection->error_message)->toBe($rateLimitMessage)
+        ->and($connection->interactive_rate_limited_until)->toBeNull();
 });
 
 test('EnableBanking backoff still blocks manual sync without PSU request identity', function () {
@@ -305,6 +306,28 @@ test('EnableBanking backoff still blocks manual sync without PSU request identit
     Queue::assertNothingPushed();
     expect($connection->refresh()->rate_limited_until->toDateTimeString())
         ->toBe($backoff->toDateTimeString());
+});
+
+test('Sync Now stays refused while the bank limits user-present access too', function () {
+    Queue::fake();
+
+    $user = User::factory()->onboarded()->create();
+    $connection = BankingConnection::factory()->create([
+        'user_id' => $user->id,
+        'provider' => 'enablebanking',
+        'status' => BankingConnectionStatus::Active,
+        'rate_limited_until' => now()->addHour(),
+        // A 429 to the last Sync Now, with its own Retry-After.
+        'interactive_rate_limited_until' => now()->addMinutes(2),
+    ]);
+
+    $response = $this->actingAs($user)
+        ->withServerVariables(['REMOTE_ADDR' => '192.0.2.44'])
+        ->withHeader('User-Agent', 'SyntheticBrowser/1.0')
+        ->post("/settings/connections/{$connection->id}/sync");
+
+    $response->assertSessionHas('error');
+    Queue::assertNothingPushed();
 });
 
 test('users cannot manually sync another users connection', function () {
@@ -351,6 +374,7 @@ test('a stranded connection can still be retried while a backoff is set', functi
         'user_id' => $user->id,
         'status' => BankingConnectionStatus::Error,
         'rate_limited_until' => now()->addHour(),
+        'interactive_rate_limited_until' => now()->addHour(),
         'consecutive_sync_failures' => 3,
     ]);
 
@@ -359,7 +383,10 @@ test('a stranded connection can still be retried while a backoff is set', functi
     $response->assertSessionHas('success');
 
     Queue::assertPushed(SyncBankingConnectionJob::class);
-    expect($connection->refresh()->rate_limited_until)->toBeNull();
+
+    $connection->refresh();
+    expect($connection->rate_limited_until)->toBeNull()
+        ->and($connection->interactive_rate_limited_until)->toBeNull();
 });
 
 test('connections page reports whether each connection can be synced on demand', function () {
@@ -383,8 +410,10 @@ test('connections page reports whether each connection can be synced on demand',
     $response->assertInertia(fn ($page) => $page
         ->where('connections.0.aspsp_name', 'Backed off bank')
         ->where('connections.0.can_sync_manually', false)
+        ->where('connections.0.is_rate_limited', true)
         ->where('connections.1.aspsp_name', 'Healthy bank')
         ->where('connections.1.can_sync_manually', true)
+        ->where('connections.1.is_rate_limited', false)
     );
 });
 
@@ -399,8 +428,28 @@ test('EnableBanking connections remain manually syncable during a background bac
 
     $response = $this->actingAs($user)->get('/settings/connections');
 
+    // Sync Now stays, and so does the notice that the automatic sync is waiting.
     $response->assertInertia(fn ($page) => $page
         ->where('connections.0.can_sync_manually', true)
+        ->where('connections.0.is_rate_limited', true)
+    );
+});
+
+test('EnableBanking connections lose Sync Now while the bank limits user-present access too', function () {
+    $user = User::factory()->onboarded()->create();
+    BankingConnection::factory()->create([
+        'user_id' => $user->id,
+        'provider' => 'enablebanking',
+        'status' => BankingConnectionStatus::Active,
+        'rate_limited_until' => now()->addHour(),
+        'interactive_rate_limited_until' => now()->addMinutes(2),
+    ]);
+
+    $response = $this->actingAs($user)->get('/settings/connections');
+
+    $response->assertInertia(fn ($page) => $page
+        ->where('connections.0.can_sync_manually', false)
+        ->where('connections.0.is_rate_limited', true)
     );
 });
 

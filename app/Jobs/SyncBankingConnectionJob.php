@@ -132,6 +132,14 @@ class SyncBankingConnectionJob implements ShouldBeUnique, ShouldQueue
     public ?Carbon $psuContextDispatchedAt = null;
 
     /**
+     * Whether this run goes out with the user present, settled once as it starts.
+     * The freshness check behind it reads the clock, so asking again as the run
+     * ends could get a different answer and treat a user-present run as a
+     * background one - wiping the background backoff it was careful to keep.
+     */
+    private bool $userPresent = false;
+
+    /**
      * @param  bool  $fullSync  Force the historical window on this run.
      * @param  BankingSyncTrigger  $trigger  Why this job was dispatched.
      * @param  ?string  $psuIpAddress  Interactive EnableBanking request IP.
@@ -158,9 +166,12 @@ class SyncBankingConnectionJob implements ShouldBeUnique, ShouldQueue
         return $this->bankingConnection->id;
     }
 
-    public function handle(BankingConnectionSyncerFactory $syncerFactory, ?EnableBankingPsuContext $psuContext = null): void
+    public function handle(BankingConnectionSyncerFactory $syncerFactory): void
     {
-        $psuContext ??= app(EnableBankingPsuContext::class);
+        // Resolved here rather than injected: the provider reads the headers off
+        // the container's instance, so an instance handed in would be set and
+        // cleared while every request still went out without them.
+        $psuContext = app(EnableBankingPsuContext::class);
         $psuContext->clear();
 
         try {
@@ -187,13 +198,12 @@ class SyncBankingConnectionJob implements ShouldBeUnique, ShouldQueue
             $isFirstSync = ! $connection->last_synced_at || $this->fullSync;
 
             $metadata = $syncer->sync($connection, $isFirstSync);
-            $rateLimitedUntil = $this->balanceRateLimitBackoff($connection, $metadata);
 
             $connection->update([
+                ...$this->balanceRateLimitBackoff($connection, $metadata),
                 'status' => BankingConnectionStatus::Active,
                 'last_synced_at' => $syncedAt,
                 'error_message' => null,
-                'rate_limited_until' => $rateLimitedUntil,
                 'consecutive_sync_failures' => 0,
             ]);
 
@@ -213,11 +223,11 @@ class SyncBankingConnectionJob implements ShouldBeUnique, ShouldQueue
         EnableBankingPsuContext $psuContext,
         float $startTime,
     ): ?BankingConnectionSyncer {
-        $interactivePsuSync = $this->hasInteractivePsuContext($connection);
+        $this->userPresent = $this->hasInteractivePsuContext($connection);
 
         $psuContext->set(
-            $interactivePsuSync ? $this->psuIpAddress : null,
-            $interactivePsuSync ? $this->psuUserAgent : null,
+            $this->userPresent ? $this->psuIpAddress : null,
+            $this->userPresent ? $this->psuUserAgent : null,
         );
 
         $connection->loadMissing('user');
@@ -244,7 +254,7 @@ class SyncBankingConnectionJob implements ShouldBeUnique, ShouldQueue
             return null;
         }
 
-        if ($this->shouldSkipRateLimited($connection, $interactivePsuSync)) {
+        if ($connection->isRateLimitedFor($this->userPresent)) {
             $this->logRateLimitedSkip($connection, $startTime);
 
             return null;
@@ -256,11 +266,6 @@ class SyncBankingConnectionJob implements ShouldBeUnique, ShouldQueue
     private function shouldSkipExpired(BankingConnection $connection, BankingConnectionSyncer $syncer): bool
     {
         return $syncer->expires() && $connection->isExpired();
-    }
-
-    private function shouldSkipRateLimited(BankingConnection $connection, bool $interactivePsuSync): bool
-    {
-        return $connection->isRateLimited() && ! $interactivePsuSync;
     }
 
     private function logRateLimitedSkip(BankingConnection $connection, float $startTime): void
@@ -276,19 +281,25 @@ class SyncBankingConnectionJob implements ShouldBeUnique, ShouldQueue
         ]);
     }
 
+    /**
+     * Whether the user is present for this run, so it may send their PSU headers.
+     *
+     * Only a manual EnableBanking sync carries them, and only while the click is
+     * recent: a payload that sat in the queue past that, or one serialized before
+     * the timestamp existed, must not vouch for a user who has likely left. The
+     * retry after a transient failure is still inside the window, and it is the
+     * same click's request - sent as background access instead, it would spend
+     * the allowance the scheduled sync needs, or skip under its backoff.
+     */
     private function hasInteractivePsuContext(BankingConnection $connection): bool
     {
         return $connection->isEnableBanking()
             && $this->trigger === BankingSyncTrigger::Manual
-            && $this->attempts() === 1
-            && $this->psuContextDispatchedAt !== null
-            && $this->psuContextDispatchedAt->greaterThanOrEqualTo(
+            && $this->psuContextDispatchedAt?->greaterThanOrEqualTo(
                 now()->subSeconds(self::PSU_CONTEXT_MAX_AGE_SECONDS)
-            )
-            && $this->psuIpAddress !== null
-            && $this->psuIpAddress !== ''
-            && $this->psuUserAgent !== null
-            && $this->psuUserAgent !== '';
+            ) === true
+            && filled($this->psuIpAddress)
+            && filled($this->psuUserAgent);
     }
 
     /**
@@ -545,8 +556,14 @@ class SyncBankingConnectionJob implements ShouldBeUnique, ShouldQueue
                 ? null
                 : (int) round((microtime(true) - $startTime) * 1000),
             // On every row, including the ones that carry nothing else, so the
-            // trigger can be counted without a join or a null branch.
-            'metadata' => ['trigger' => $this->trigger->value, ...($metadata ?? [])],
+            // trigger can be counted without a join or a null branch. A run that
+            // sent the PSU headers says so: whether the bank still refuses those
+            // is the one thing about them only production can tell.
+            'metadata' => [
+                'trigger' => $this->trigger->value,
+                ...($this->userPresent ? ['user_present' => true] : []),
+                ...($metadata ?? []),
+            ],
             'created_at' => now(),
         ]);
     }
@@ -704,10 +721,10 @@ class SyncBankingConnectionJob implements ShouldBeUnique, ShouldQueue
      */
     private function applyRateLimitBackoff(BankingConnection $connection, \Throwable $e, array $context): void
     {
-        $until = $this->resolveRateLimitBackoffUntil($connection, $e);
+        $backoff = $this->rateLimitBackoff($connection, $this->resolveRateLimitBackoffUntil($e));
 
         $connection->update([
-            'rate_limited_until' => $until,
+            ...$backoff,
             'error_message' => $this->friendlyErrorMessage($e),
         ]);
 
@@ -716,64 +733,83 @@ class SyncBankingConnectionJob implements ShouldBeUnique, ShouldQueue
         // the full context for that reason.
         Log::warning('Banking connection rate limited, backing off', [
             ...$context,
-            'rate_limited_until' => $until->toIso8601String(),
+            'user_present' => $this->userPresent,
+            'rate_limited_until' => $backoff['rate_limited_until']->toIso8601String(),
         ]);
     }
 
-    private function resolveRateLimitBackoffUntil(BankingConnection $connection, \Throwable $e): Carbon
+    private function resolveRateLimitBackoffUntil(\Throwable $e): Carbon
     {
         if (! $e instanceof RequestException) {
-            $until = $this->backoffUntil(null, '');
-
-            return $this->resolveRateLimitUntil($connection, $until) ?? $until;
+            return $this->backoffUntil(null, '');
         }
 
         $body = $e->response->json();
-        $until = $this->backoffUntil(
+
+        return $this->backoffUntil(
             $e->response->header('Retry-After'),
             is_array($body) ? (string) ($body['message'] ?? '') : '',
         );
-
-        return $this->resolveRateLimitUntil($connection, $until) ?? $until;
-    }
-
-    private function resolveRateLimitUntil(BankingConnection $connection, ?Carbon $candidate): ?Carbon
-    {
-        if (! $this->hasInteractivePsuContext($connection) || ! $connection->isRateLimited()) {
-            return $candidate;
-        }
-
-        $existing = $connection->rate_limited_until;
-
-        if ($candidate === null || $existing->greaterThan($candidate)) {
-            return Carbon::instance($existing);
-        }
-
-        return $candidate;
     }
 
     /**
-     * The backoff a *successful* run still has to carry, because the provider
-     * rate limited the balance call after the transactions had already been
-     * persisted. An interactive manual run also keeps a later existing cooldown.
+     * The backoff columns a 429 leaves, given when the provider said to come back.
+     *
+     * A refusal to a run the user was present for limits that kind of access too,
+     * so it is kept apart for Sync Now to respect. It does not shorten the
+     * background backoff already running, though: that one usually lasts until
+     * midnight, while a Retry-After on a user-present call can be seconds.
+     *
+     * @return array{rate_limited_until: Carbon, interactive_rate_limited_until?: Carbon}
+     */
+    private function rateLimitBackoff(BankingConnection $connection, Carbon $until): array
+    {
+        if (! $this->userPresent) {
+            return ['rate_limited_until' => $until];
+        }
+
+        return [
+            'rate_limited_until' => $connection->isRateLimited() && $connection->rate_limited_until->greaterThan($until)
+                ? Carbon::instance($connection->rate_limited_until)
+                : $until,
+            'interactive_rate_limited_until' => $until,
+        ];
+    }
+
+    /**
+     * The backoff columns a *successful* run leaves.
+     *
+     * Usually none, which is what clears an old backoff. Two runs carry one: the
+     * one whose balance call the provider rate limited after the transactions had
+     * already been persisted, and the one the user was present for while a
+     * background backoff ran - the bank still meters our own access as before,
+     * so the scheduled sync has to keep waiting it out.
      *
      * The exception cannot travel in the metadata - it is persisted as JSON on
      * the sync log - so the syncer reports the two facts the policy keys on.
      *
      * @param  array<string, mixed>  $metadata
+     * @return array{rate_limited_until: ?Carbon, interactive_rate_limited_until?: ?Carbon}
      */
-    private function balanceRateLimitBackoff(BankingConnection $connection, array $metadata): ?Carbon
+    private function balanceRateLimitBackoff(BankingConnection $connection, array $metadata): array
     {
         $rateLimit = $metadata['balance_rate_limit'] ?? null;
 
         if (! is_array($rateLimit)) {
-            return $this->resolveRateLimitUntil($connection, null);
+            return [
+                'rate_limited_until' => $this->userPresent && $connection->isRateLimited()
+                    ? Carbon::instance($connection->rate_limited_until)
+                    : null,
+                'interactive_rate_limited_until' => null,
+            ];
         }
 
         $retryAfter = $rateLimit['retry_after'] ?? null;
         $message = (string) ($rateLimit['message'] ?? '');
-        $candidate = $this->backoffUntil(is_string($retryAfter) ? $retryAfter : null, $message);
-        $until = $this->resolveRateLimitUntil($connection, $candidate) ?? $candidate;
+        $backoff = $this->rateLimitBackoff(
+            $connection,
+            $this->backoffUntil(is_string($retryAfter) ? $retryAfter : null, $message),
+        );
 
         // Same message as the failed-run path, which is what these get searched
         // for. It carries what the failed path reads off the response - which of
@@ -786,11 +822,12 @@ class SyncBankingConnectionJob implements ShouldBeUnique, ShouldQueue
             'status_code' => 429,
             'provider_message' => $message,
             'retry_after' => $retryAfter,
-            'rate_limited_until' => $until->toIso8601String(),
+            'user_present' => $this->userPresent,
+            'rate_limited_until' => $backoff['rate_limited_until']->toIso8601String(),
             'run_recorded_as' => BankingSyncLogStatus::Success->value,
         ]);
 
-        return $until;
+        return $backoff;
     }
 
     /**
