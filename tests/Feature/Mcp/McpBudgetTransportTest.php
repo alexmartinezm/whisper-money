@@ -32,5 +32,5 @@ it('exposes budget tools through the paginated JSON-RPC transport', function () 
     // tools, and needing more than one page was the bug, not the contract.
     // What matters is that walking the cursor terminates and surfaces them.
     expect($pageCount)->toBeGreaterThanOrEqual(1)
-        ->and($tools->pluck('name'))->toContain('list_budgets', 'create_budget', 'update_budget', 'delete_budget');
+        ->and($tools->pluck('name'))->toContain('list_budgets', 'create_budget', 'update_budget', 'update_budget_period', 'delete_budget');
 });

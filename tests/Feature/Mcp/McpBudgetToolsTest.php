@@ -8,11 +8,13 @@ use App\Mcp\Tools\CreateBudget;
 use App\Mcp\Tools\DeleteBudget;
 use App\Mcp\Tools\ListBudgets;
 use App\Mcp\Tools\UpdateBudget;
+use App\Mcp\Tools\UpdateBudgetPeriod;
 use App\Models\Budget;
 use App\Models\Category;
 use App\Models\Label;
 use App\Models\Space;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Mcp\Server\Testing\TestResponse;
 
@@ -140,6 +142,77 @@ it('rejects budget tracking references from another space through MCP', function
     ])->assertHasErrors();
 
     expect($budget->fresh()->categories->modelKeys())->toBe([$oldCategory->id]);
+});
+
+it('sets the allocation of a single period through MCP', function () {
+    Queue::fake();
+    $this->travelTo(CarbonImmutable::parse('2026-10-15'));
+    $user = User::factory()->create();
+    $space = $user->personalSpace;
+    $category = Category::factory()->create(['user_id' => $user->id, 'space_id' => $space->id]);
+
+    callBudgetWriteTool($user, CreateBudget::class, [
+        'name' => 'Trips',
+        'period_type' => BudgetPeriodType::Monthly->value,
+        'period_start_day' => 1,
+        'category_ids' => [$category->id],
+        'rollover_type' => RolloverType::Reset->value,
+        'allocated_amount' => 50000,
+    ])->assertOk();
+    $budget = Budget::query()->where('name', 'Trips')->firstOrFail();
+
+    callBudgetWriteTool($user, UpdateBudgetPeriod::class, [
+        'budget_id' => $budget->id,
+        'date' => '2026-10-01',
+        'allocated_amount' => 70000,
+    ])->assertOk()->assertSee('following_period')->assertSee('2026-11-01');
+
+    expect($budget->periods()->whereDate('start_date', '2026-10-01')->value('allocated_amount'))->toBe(70000)
+        ->and($budget->periods()->whereDate('start_date', '2026-11-01')->value('allocated_amount'))->toBe(50000);
+});
+
+it('rejects a one-off allocation the tool cannot apply', function (string $date) {
+    $this->travelTo(CarbonImmutable::parse('2026-10-15'));
+    $user = User::factory()->create();
+    $budget = Budget::factory()->monthly()->create([
+        'user_id' => $user->id,
+        'space_id' => $user->personalSpace->id,
+        'period_start_day' => 1,
+    ]);
+    $budget->periods()->create([
+        'start_date' => '2026-10-01',
+        'end_date' => '2026-10-31',
+        'allocated_amount' => 50000,
+        'carried_over_amount' => 0,
+    ]);
+
+    callBudgetWriteTool($user, UpdateBudgetPeriod::class, [
+        'budget_id' => $budget->id,
+        'date' => $date,
+        'allocated_amount' => 70000,
+    ])->assertHasErrors();
+
+    expect($budget->periods()->where('allocated_amount', 70000)->exists())->toBeFalse();
+})->with([
+    'a closed period' => '2026-09-10',
+    'a malformed date' => '01/10/2026',
+]);
+
+it('rejects a one-off allocation on a budget outside the selected space', function () {
+    $user = User::factory()->create();
+    $other = User::factory()->create();
+    $budget = Budget::factory()->monthly()->create([
+        'user_id' => $other->id,
+        'space_id' => $other->personalSpace->id,
+    ]);
+
+    callBudgetWriteTool($user, UpdateBudgetPeriod::class, [
+        'budget_id' => $budget->id,
+        'date' => now()->toDateString(),
+        'allocated_amount' => 70000,
+    ])->assertHasErrors();
+
+    expect($budget->periods()->count())->toBe(0);
 });
 
 it('does not materialize periods while listing budgets', function () {

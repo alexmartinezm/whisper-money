@@ -21,6 +21,11 @@ use Illuminate\Validation\ValidationException;
 
 class BudgetManagementService
 {
+    /**
+     * How far ahead of today a one-off allocation may land.
+     */
+    private const ONE_OFF_ALLOCATION_HORIZON_MONTHS = 12;
+
     public function __construct(private readonly BudgetPeriodService $periods) {}
 
     /**
@@ -361,16 +366,107 @@ class BudgetManagementService
                 throw (new ModelNotFoundException)->setModel(BudgetPeriod::class, [$periodId]);
             }
 
-            $this->periods->ensureSuccessor(
-                $budget,
-                $planningPeriod,
-                $planningPeriod->allocated_amount,
-            );
-
-            $planningPeriod->update(['allocated_amount' => $allocatedAmount]);
+            $this->writeSinglePeriodAllocation($budget, $planningPeriod, $allocatedAmount, isCurrentPeriod: false);
 
             return $planningPeriod->fresh();
         }, attempts: 5);
+    }
+
+    /**
+     * Give one period its own allocation, the one in progress or a future one,
+     * and leave every other period on the figure it had: a one-off month.
+     *
+     * The chain is walked forward one period at a time up to the target, so a
+     * date further out than the periods generated so far leaves no gap behind -
+     * generatePeriod() without a start date anchors at the end of the chain and
+     * would never fill one.
+     *
+     * @return array{budget: Budget, period: BudgetPeriod, following_period: BudgetPeriod, current_period_changed: bool}
+     */
+    public function updatePeriodAllocation(
+        User $user,
+        Space $space,
+        string $budgetId,
+        CarbonImmutable $periodDate,
+        int $allocatedAmount,
+        CarbonImmutable $applicationDate,
+    ): array {
+        return DB::transaction(function () use ($user, $space, $budgetId, $periodDate, $allocatedAmount, $applicationDate): array {
+            $this->assertSpaceAccess($user, $space);
+            $budget = $this->ownedBudget($user, $space, $budgetId, lock: true);
+            $this->assertMutable($budget);
+
+            $currentPeriod = $budget->getCurrentPeriod($applicationDate)
+                ?? $this->periods->generatePeriod($budget, null, $applicationDate);
+            $this->assertWithinOneOffWindow($periodDate, $currentPeriod, $applicationDate);
+
+            $period = $this->chainPeriodCovering($budget, $currentPeriod, $periodDate);
+            $isCurrentPeriod = $period->is($currentPeriod);
+            $followingPeriod = $this->writeSinglePeriodAllocation($budget, $period, $allocatedAmount, $isCurrentPeriod);
+
+            return [
+                'budget' => $budget->fresh()->load(['categories', 'labels']),
+                'period' => $period->fresh(),
+                'following_period' => $followingPeriod,
+                'current_period_changed' => $isCurrentPeriod,
+            ];
+        }, attempts: 5);
+    }
+
+    /**
+     * Periods that have closed keep the figure they ran on, and the window ahead
+     * is capped so a mistyped year cannot generate decades of periods.
+     */
+    private function assertWithinOneOffWindow(CarbonImmutable $periodDate, BudgetPeriod $currentPeriod, CarbonImmutable $applicationDate): void
+    {
+        if ($periodDate->lessThan($currentPeriod->start_date)) {
+            throw ValidationException::withMessages(['date' => 'That period has already closed; only the period in progress and future ones can change.']);
+        }
+
+        if ($periodDate->greaterThan($applicationDate->addMonths(self::ONE_OFF_ALLOCATION_HORIZON_MONTHS))) {
+            throw ValidationException::withMessages(['date' => 'A one-off allocation can be set at most '.self::ONE_OFF_ALLOCATION_HORIZON_MONTHS.' months ahead.']);
+        }
+    }
+
+    /**
+     * Walk the chain forward from $period until one covers $date, creating the
+     * periods that do not exist yet with the allocation of the one before them,
+     * the same way the nightly generation would.
+     */
+    private function chainPeriodCovering(Budget $budget, BudgetPeriod $period, CarbonImmutable $date): BudgetPeriod
+    {
+        while ($period->end_date->lessThan($date)) {
+            $successor = $this->periods->ensureSuccessor($budget, $period, $period->allocated_amount);
+
+            // A stored successor that does not end later would loop forever.
+            if (! $successor->end_date->greaterThan($period->end_date)) {
+                throw ValidationException::withMessages(['date' => 'The budget periods leading to that date could not be resolved.']);
+            }
+
+            $period = $successor;
+        }
+
+        return $period;
+    }
+
+    /**
+     * Write an allocation to one period without it leaking into the next.
+     *
+     * The successor is created before the write, seeded with the figure this
+     * period had until now: a successor generated later copies the period
+     * before it, and would carry the one-off amount forward.
+     */
+    private function writeSinglePeriodAllocation(Budget $budget, BudgetPeriod $period, int $allocatedAmount, bool $isCurrentPeriod): BudgetPeriod
+    {
+        $followingPeriod = $this->periods->ensureSuccessor($budget, $period, $period->allocated_amount);
+
+        $period->update(['allocated_amount' => $allocatedAmount]);
+
+        if ($isCurrentPeriod) {
+            $this->reconcileNotificationFlags($period->fresh());
+        }
+
+        return $followingPeriod;
     }
 
     /**

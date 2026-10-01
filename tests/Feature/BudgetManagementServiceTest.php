@@ -435,6 +435,145 @@ it('rejects planning updates for a period belonging to another budget', function
     ))->toThrow(ModelNotFoundException::class);
 });
 
+it('sets a one-off allocation on the period in progress and leaves the others', function () {
+    $user = User::factory()->create();
+    $budget = managedBudgetWithPeriods($user, $user->personalSpace->id);
+    $august = addManagedPeriod($budget, '2026-08-01', '2026-08-31', 40000);
+    $september = addManagedPeriod($budget, '2026-09-01', '2026-09-30', 40000);
+    $october = addManagedPeriod($budget, '2026-10-01', '2026-10-31', 40000);
+    $august->update(['close_to_limit_notified' => true, 'over_limit_notified' => true]);
+
+    $result = app(BudgetManagementService::class)->updatePeriodAllocation(
+        $user,
+        $user->personalSpace,
+        $budget->id,
+        CarbonImmutable::parse('2026-08-20'),
+        70000,
+        CarbonImmutable::parse('2026-08-15'),
+    );
+
+    expect($result['current_period_changed'])->toBeTrue()
+        ->and($result['period']->id)->toBe($august->id)
+        ->and($result['following_period']->id)->toBe($september->id)
+        ->and($august->fresh()->allocated_amount)->toBe(70000)
+        ->and($august->fresh()->close_to_limit_notified)->toBeFalse()
+        ->and($august->fresh()->over_limit_notified)->toBeFalse()
+        ->and($september->fresh()->allocated_amount)->toBe(40000)
+        ->and($october->fresh()->allocated_amount)->toBe(40000);
+});
+
+it('walks the chain to a future one-off period without leaving gaps', function () {
+    $user = User::factory()->create();
+    $budget = managedBudgetWithPeriods($user, $user->personalSpace->id);
+    addManagedPeriod($budget, '2026-08-01', '2026-08-31', 40000);
+    addManagedPeriod($budget, '2026-09-01', '2026-09-30', 40000);
+
+    $result = app(BudgetManagementService::class)->updatePeriodAllocation(
+        $user,
+        $user->personalSpace,
+        $budget->id,
+        CarbonImmutable::parse('2026-12-10'),
+        70000,
+        CarbonImmutable::parse('2026-08-15'),
+    );
+
+    $allocations = $budget->periods()->orderBy('start_date')->get()
+        ->mapWithKeys(fn (BudgetPeriod $period): array => [$period->start_date->toDateString() => $period->allocated_amount])
+        ->all();
+
+    expect($result['current_period_changed'])->toBeFalse()
+        ->and($allocations)->toBe([
+            '2026-08-01' => 40000,
+            '2026-09-01' => 40000,
+            '2026-10-01' => 40000,
+            '2026-11-01' => 40000,
+            '2026-12-01' => 70000,
+            '2027-01-01' => 40000,
+        ]);
+});
+
+it('keeps a one-off allocation out of the periods generated after it', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-08-15'));
+    $user = User::factory()->create();
+    $budget = managedBudgetWithPeriods($user, $user->personalSpace->id);
+    addManagedPeriod($budget, '2026-08-01', '2026-08-31', 40000);
+    $september = addManagedPeriod($budget, '2026-09-01', '2026-09-30', 40000);
+
+    app(BudgetManagementService::class)->updatePeriodAllocation(
+        $user,
+        $user->personalSpace,
+        $budget->id,
+        CarbonImmutable::parse('2026-09-01'),
+        70000,
+        CarbonImmutable::parse('2026-08-15'),
+    );
+    $this->artisan('budgets:generate-periods')->assertSuccessful();
+
+    expect($september->fresh()->allocated_amount)->toBe(70000)
+        ->and($budget->periods()->whereDate('start_date', '2026-10-01')->value('allocated_amount'))->toBe(40000);
+});
+
+it('creates the period in progress when the chain has not reached it yet', function () {
+    $user = User::factory()->create();
+    $budget = managedBudgetWithPeriods($user, $user->personalSpace->id);
+    addManagedPeriod($budget, '2026-07-01', '2026-07-31', 40000);
+
+    $result = app(BudgetManagementService::class)->updatePeriodAllocation(
+        $user,
+        $user->personalSpace,
+        $budget->id,
+        CarbonImmutable::parse('2026-08-15'),
+        70000,
+        CarbonImmutable::parse('2026-08-15'),
+    );
+
+    expect($result['current_period_changed'])->toBeTrue()
+        ->and($result['period']->start_date->toDateString())->toBe('2026-08-01')
+        ->and($result['period']->allocated_amount)->toBe(70000)
+        ->and($result['following_period']->start_date->toDateString())->toBe('2026-09-01')
+        ->and($result['following_period']->allocated_amount)->toBe(40000);
+});
+
+it('rejects one-off allocations outside the open window', function (string $date) {
+    $user = User::factory()->create();
+    $budget = managedBudgetWithPeriods($user, $user->personalSpace->id);
+    addManagedPeriod($budget, '2026-07-01', '2026-07-31', 40000);
+    addManagedPeriod($budget, '2026-08-01', '2026-08-31', 40000);
+
+    expect(fn () => app(BudgetManagementService::class)->updatePeriodAllocation(
+        $user,
+        $user->personalSpace,
+        $budget->id,
+        CarbonImmutable::parse($date),
+        70000,
+        CarbonImmutable::parse('2026-08-15'),
+    ))->toThrow(ValidationException::class);
+
+    expect($budget->periods()->count())->toBe(2)
+        ->and($budget->periods()->where('allocated_amount', 70000)->exists())->toBeFalse();
+})->with([
+    'a closed period' => '2026-07-20',
+    'beyond the horizon' => '2027-08-16',
+]);
+
+it('rejects one-off allocations on an archived budget', function () {
+    $user = User::factory()->create();
+    $budget = managedBudgetWithPeriods($user, $user->personalSpace->id);
+    $august = addManagedPeriod($budget, '2026-08-01', '2026-08-31', 40000);
+    $budget->update(['archived_at' => CarbonImmutable::parse('2026-08-10')]);
+
+    expect(fn () => app(BudgetManagementService::class)->updatePeriodAllocation(
+        $user,
+        $user->personalSpace,
+        $budget->id,
+        CarbonImmutable::parse('2026-08-20'),
+        70000,
+        CarbonImmutable::parse('2026-08-15'),
+    ))->toThrow(ValidationException::class);
+
+    expect($august->fresh()->allocated_amount)->toBe(40000);
+});
+
 it('stamps the reconciled periods with a token the job can recognise', function () {
     Queue::fake();
     CarbonImmutable::setTestNow('2026-08-10');
