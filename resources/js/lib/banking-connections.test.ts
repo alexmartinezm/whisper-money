@@ -139,14 +139,27 @@ describe('isBackingOff', () => {
             isBackingOff(
                 connection({
                     last_synced_at: '2026-01-01T00:00:00Z',
+                    is_rate_limited: true,
                     can_sync_manually: false,
                 }),
             ),
         ).toBe(true);
     });
 
+    it('stays true while Sync Now still works for a sync the user is present for', () => {
+        expect(
+            isBackingOff(
+                connection({
+                    last_synced_at: '2026-01-01T00:00:00Z',
+                    is_rate_limited: true,
+                    can_sync_manually: true,
+                }),
+            ),
+        ).toBe(true);
+    });
+
     it('is false once the window has closed or where the flag is not sent', () => {
-        expect(isBackingOff(connection({ can_sync_manually: true }))).toBe(
+        expect(isBackingOff(connection({ is_rate_limited: false }))).toBe(
             false,
         );
         expect(isBackingOff(connection())).toBe(false);
@@ -155,7 +168,7 @@ describe('isBackingOff', () => {
     it('is false for an errored connection, which keeps its Retry', () => {
         expect(
             isBackingOff(
-                connection({ status: 'error', can_sync_manually: false }),
+                connection({ status: 'error', is_rate_limited: true }),
             ),
         ).toBe(false);
     });

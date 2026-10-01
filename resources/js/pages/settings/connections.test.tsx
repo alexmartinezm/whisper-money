@@ -228,7 +228,12 @@ describe('ConnectionsPage', () => {
     it('hides the manual sync while the bank has told us to back off', () => {
         render(
             <ConnectionsPage
-                connections={[makeConnection({ can_sync_manually: false })]}
+                connections={[
+                    makeConnection({
+                        provider: 'binance',
+                        can_sync_manually: false,
+                    }),
+                ]}
             />,
         );
 
@@ -240,12 +245,36 @@ describe('ConnectionsPage', () => {
         ).toBeInTheDocument();
     });
 
+    it('keeps Sync Now and says the automatic sync is waiting when only background access is limited', () => {
+        render(
+            <ConnectionsPage
+                connections={[
+                    makeConnection({
+                        provider: 'enablebanking',
+                        can_sync_manually: true,
+                        is_rate_limited: true,
+                        next_sync_attempt_at: '2999-01-01T12:00:00.000000Z',
+                    }),
+                ]}
+            />,
+        );
+
+        expect(
+            screen.getByRole('menuitem', { name: /sync now/i }),
+        ).toBeInTheDocument();
+        expect(
+            screen.getByText(/your bank limits how often/i),
+        ).toBeInTheDocument();
+        expect(screen.getByText(/next attempt/i)).toBeInTheDocument();
+    });
+
     it('says why Sync Now is gone on a connection that has synced before', () => {
         render(
             <ConnectionsPage
                 connections={[
                     makeConnection({
                         can_sync_manually: false,
+                        is_rate_limited: true,
                         next_sync_attempt_at: '2999-01-01T12:00:00.000000Z',
                     }),
                 ]}

@@ -18,6 +18,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 /**
  * @property bool $has_pending_accounts
  * @property bool $can_sync_manually
+ * @property bool $is_rate_limited
  * @property bool $is_beta
  * @property Carbon|null $next_sync_attempt_at
  * @property string|null $aspsp_name
@@ -28,6 +29,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property Carbon|null $last_synced_at
  * @property Carbon|null $bank_transactions_email_cutoff_at
  * @property Carbon|null $rate_limited_until
+ * @property Carbon|null $interactive_rate_limited_until
  * @property int $consecutive_sync_failures
  * @property array<int, array<string, mixed>>|null $pending_accounts_data
  */
@@ -59,6 +61,7 @@ class BankingConnection extends Model
         'bank_transactions_email_cutoff_at',
         'error_message',
         'rate_limited_until',
+        'interactive_rate_limited_until',
         'consecutive_sync_failures',
         'pending_accounts_data',
         'api_token',
@@ -112,6 +115,7 @@ class BankingConnection extends Model
             'last_synced_at' => 'datetime',
             'bank_transactions_email_cutoff_at' => 'datetime',
             'rate_limited_until' => 'datetime',
+            'interactive_rate_limited_until' => 'datetime',
             'pending_accounts_data' => 'array',
             'api_token' => 'encrypted',
             'api_secret' => 'encrypted',
@@ -246,5 +250,25 @@ class BankingConnection extends Model
     {
         return $this->rate_limited_until !== null
             && $this->rate_limited_until->isFuture();
+    }
+
+    /**
+     * Whether the backoff stops a sync, given whether the user is present for it.
+     *
+     * PSD2 meters the access we make on our own - around four calls a day per
+     * account - apart from the access the user asks for while using the app, and
+     * Enable Banking tells the two apart by the PSU headers. So the backoff a
+     * refused background sync left does not stop an EnableBanking sync the user
+     * is present for; only a refusal to such a sync does, and that one is kept in
+     * `interactive_rate_limited_until`.
+     */
+    public function isRateLimitedFor(bool $userPresent): bool
+    {
+        if (! $userPresent || ! $this->isEnableBanking()) {
+            return $this->isRateLimited();
+        }
+
+        return $this->interactive_rate_limited_until !== null
+            && $this->interactive_rate_limited_until->isFuture();
     }
 }

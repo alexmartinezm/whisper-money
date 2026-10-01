@@ -113,9 +113,15 @@ export function canSyncManually(connection: BankingConnection): boolean {
 /**
  * Whether the bank told us to back off and the window is still open, however
  * long the connection has been syncing. {@link isWaitingForBank} only catches a
- * connection that never synced; one that has is refused just the same, and
- * without this its card drops "Sync Now" with no word of why or until when.
+ * connection that never synced; one that has is held back just the same, and
+ * without this its card says nothing of why or until when.
+ *
+ * Not the same as Sync Now being gone: an EnableBanking sync the user asks for
+ * goes out with them present, which the bank meters apart from our automatic
+ * one, so it can stay while the automatic sync waits.
  */
 export function isBackingOff(connection: BankingConnection): boolean {
-    return connection.status === 'active' && !canSyncManually(connection);
+    return (
+        connection.status === 'active' && connection.is_rate_limited === true
+    );
 }

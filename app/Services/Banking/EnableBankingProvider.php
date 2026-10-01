@@ -37,6 +37,7 @@ class EnableBankingProvider implements BankingProviderInterface
     public function __construct(
         private string $appId,
         private string $privateKeyPath,
+        private ?EnableBankingPsuContext $psuContext = null,
     ) {}
 
     public function getInstitutions(string $countryCode): array
@@ -455,7 +456,15 @@ class EnableBankingProvider implements BankingProviderInterface
 
     private function client(): PendingRequest
     {
-        return Http::baseUrl(self::BASE_URL)
+        $client = Http::baseUrl(self::BASE_URL);
+
+        $psuHeaders = $this->psuContext?->headers() ?? [];
+
+        if ($psuHeaders !== []) {
+            $client = $client->withHeaders($psuHeaders);
+        }
+
+        return $client
             ->timeout(20)
             ->connectTimeout(5)
             ->withToken($this->generateJwt())

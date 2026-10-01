@@ -426,6 +426,8 @@ it('keeps the source date when a bank transaction is moved to another month', fu
 })->group('sync');
 
 it('stops counting an archived account from its archive date but keeps the history', function () {
+    $this->travelTo(now()->startOfMonth()->addDays(14));
+
     [$user, , $accounts, $categories] = syncWorld();
 
     syncPostedTransaction($user, $accounts['own'], [

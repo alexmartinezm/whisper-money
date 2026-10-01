@@ -16,6 +16,7 @@ use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Banking\BalanceSyncService;
 use App\Services\Banking\EnableBankingProvider;
+use App\Services\Banking\EnableBankingPsuContext;
 use App\Services\Banking\Sync\BankingConnectionSyncerFactory;
 use App\Services\Banking\TransactionSyncService;
 use Carbon\Carbon;
@@ -385,7 +386,8 @@ function createAccountViaUI($page, string $displayName, string $bankName, string
 
 /**
  * An EnableBankingProvider signing with a throwaway key, for tests that drive
- * the real provider against a faked HTTP layer.
+ * the real provider against a faked HTTP layer. Wired to the container's PSU
+ * context as in production, so a manual job's headers reach the faked requests.
  */
 function enableBankingProviderForTest(): EnableBankingProvider
 {
@@ -404,7 +406,7 @@ function enableBankingProviderForTest(): EnableBankingProvider
         file_put_contents($path, $privateKey);
     }
 
-    return new EnableBankingProvider('test-app-id', $path);
+    return new EnableBankingProvider('test-app-id', $path, app(EnableBankingPsuContext::class));
 }
 
 /**

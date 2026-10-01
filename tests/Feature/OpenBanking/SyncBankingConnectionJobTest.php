@@ -2,6 +2,7 @@
 
 use App\Enums\BankingConnectionStatus;
 use App\Enums\BankingSyncLogStatus;
+use App\Enums\BankingSyncTrigger;
 use App\Enums\DripEmailType;
 use App\Enums\TransactionSource;
 use App\Exceptions\Banking\ExpiredBankingSessionException;
@@ -19,6 +20,7 @@ use App\Models\Transaction;
 use App\Models\User;
 use App\Models\UserMailLog;
 use App\Services\Banking\BalanceSyncService;
+use App\Services\Banking\EnableBankingPsuContext;
 use App\Services\Banking\TransactionSyncService;
 use Carbon\Carbon;
 use GuzzleHttp\Psr7\Response;
@@ -1852,6 +1854,99 @@ test('rate limit backoff honours Retry-After header', function () {
     expect($connection->rate_limited_until)->not->toBeNull();
     expect($connection->rate_limited_until->diffInMinutes(now(), true))->toBeGreaterThanOrEqual(29)
         ->toBeLessThanOrEqual(31);
+});
+
+test('manual EnableBanking sync preserves a background cooldown and clears its PSU context', function () {
+    $user = User::factory()->onboarded()->create();
+    $backoff = now()->addHour();
+    $connection = BankingConnection::factory()->create([
+        'user_id' => $user->id,
+        'last_synced_at' => null,
+        'rate_limited_until' => $backoff,
+    ]);
+    Account::factory()->connected()->create([
+        'user_id' => $user->id,
+        'banking_connection_id' => $connection->id,
+        'external_account_id' => 'ext-123',
+    ]);
+
+    $transactionSync = Mockery::mock(TransactionSyncService::class);
+    $transactionSync->shouldReceive('sync')->once()->andReturn(0);
+    $balanceSync = Mockery::mock(BalanceSyncService::class);
+    $balanceSync->shouldReceive('sync')->once();
+    $balanceSync->shouldReceive('calculateHistoricalBalances')->once();
+
+    $job = new SyncBankingConnectionJob(
+        $connection,
+        trigger: BankingSyncTrigger::Manual,
+        psuIpAddress: '192.0.2.44',
+        psuUserAgent: 'SyntheticBrowser/1.0',
+    );
+    runSync($job, $transactionSync, $balanceSync);
+
+    expect($connection->refresh()->rate_limited_until->toDateTimeString())
+        ->toBe($backoff->toDateTimeString())
+        ->and(app(EnableBankingPsuContext::class)->headers())->toBe([]);
+});
+
+test('manual EnableBanking 429 preserves a later background cooldown', function () {
+    $user = User::factory()->onboarded()->create();
+    $backoff = now()->addHour();
+    $connection = BankingConnection::factory()->create([
+        'user_id' => $user->id,
+        'provider' => 'enablebanking',
+        'last_synced_at' => now()->subDay(),
+        'rate_limited_until' => $backoff,
+    ]);
+    Account::factory()->connected()->create([
+        'user_id' => $user->id,
+        'banking_connection_id' => $connection->id,
+        'external_account_id' => 'ext-123',
+    ]);
+
+    $transactionSync = Mockery::mock(TransactionSyncService::class);
+    $transactionSync->shouldReceive('sync')->once()->andThrow(
+        new RequestException(new Illuminate\Http\Client\Response(
+            new Response(429, ['Retry-After' => '60'], '{}')
+        ))
+    );
+    $balanceSync = Mockery::mock(BalanceSyncService::class);
+
+    $job = new SyncBankingConnectionJob(
+        $connection,
+        trigger: BankingSyncTrigger::Manual,
+        psuIpAddress: '192.0.2.44',
+        psuUserAgent: 'SyntheticBrowser/1.0',
+    );
+    runSync($job, $transactionSync, $balanceSync);
+
+    expect($connection->refresh()->rate_limited_until->toDateTimeString())
+        ->toBe($backoff->toDateTimeString());
+});
+
+test('manual jobs without a complete PSU identity still honor the background cooldown', function () {
+    $user = User::factory()->onboarded()->create();
+    $backoff = now()->addHour();
+    $connection = BankingConnection::factory()->create([
+        'user_id' => $user->id,
+        'last_synced_at' => now()->subDay(),
+        'rate_limited_until' => $backoff,
+    ]);
+    Account::factory()->connected()->create([
+        'user_id' => $user->id,
+        'banking_connection_id' => $connection->id,
+        'external_account_id' => 'ext-123',
+    ]);
+
+    $transactionSync = Mockery::mock(TransactionSyncService::class);
+    $transactionSync->shouldNotReceive('sync');
+    $balanceSync = Mockery::mock(BalanceSyncService::class);
+
+    runSync(new SyncBankingConnectionJob($connection, trigger: BankingSyncTrigger::Manual), $transactionSync, $balanceSync);
+
+    expect($connection->refresh()->rate_limited_until->toDateTimeString())
+        ->toBe($backoff->toDateTimeString())
+        ->and(app(EnableBankingPsuContext::class)->headers())->toBe([]);
 });
 
 test('rate limited connection is skipped without calling provider', function () {

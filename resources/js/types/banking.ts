@@ -21,6 +21,8 @@ export interface BankingConnection {
     has_pending_accounts?: boolean;
     next_sync_attempt_at?: string | null;
     can_sync_manually?: boolean;
+    /** Whether the automatic sync is backing off; Sync Now may still work. */
+    is_rate_limited?: boolean;
     created_at: string;
     updated_at: string;
 }
