@@ -171,6 +171,69 @@ it('sets the allocation of a single period through MCP', function () {
         ->and($budget->periods()->whereDate('start_date', '2026-11-01')->value('allocated_amount'))->toBe(50000);
 });
 
+it('keeps a one-off period through a regular allocation change and resets it through MCP', function () {
+    Queue::fake();
+    $this->travelTo(CarbonImmutable::parse('2026-10-15'));
+    $user = User::factory()->create();
+    $space = $user->personalSpace;
+    $category = Category::factory()->create(['user_id' => $user->id, 'space_id' => $space->id]);
+
+    callBudgetWriteTool($user, CreateBudget::class, [
+        'name' => 'Trips',
+        'period_type' => BudgetPeriodType::Monthly->value,
+        'period_start_day' => 1,
+        'category_ids' => [$category->id],
+        'rollover_type' => RolloverType::Reset->value,
+        'allocated_amount' => 50000,
+    ])->assertOk();
+    $budget = Budget::query()->where('name', 'Trips')->firstOrFail();
+    $november = fn () => $budget->periods()->whereDate('start_date', '2026-11-01')->firstOrFail();
+
+    callBudgetWriteTool($user, UpdateBudgetPeriod::class, [
+        'budget_id' => $budget->id,
+        'date' => '2026-11-01',
+        'allocated_amount' => 70000,
+    ])->assertOk()->assertSee('"is_one_off":true');
+
+    callBudgetWriteTool($user, UpdateBudget::class, [
+        'budget_id' => $budget->id,
+        'allocated_amount' => 55000,
+    ])->assertOk()->assertSee('one_off_period_ids')->assertSee($november()->id);
+
+    expect($november()->allocated_amount)->toBe(70000)
+        ->and($november()->regularAllocatedAmount())->toBe(55000);
+
+    callBudgetWriteTool($user, UpdateBudgetPeriod::class, [
+        'budget_id' => $budget->id,
+        'date' => '2026-11-01',
+        'reset' => true,
+    ])->assertOk();
+
+    expect($november()->allocated_amount)->toBe(55000)
+        ->and($november()->hasOneOffAllocation())->toBeFalse();
+});
+
+it('asks for either an amount or a reset', function (array $arguments) {
+    $this->travelTo(CarbonImmutable::parse('2026-10-15'));
+    $user = User::factory()->create();
+    $budget = Budget::factory()->monthly()->create([
+        'user_id' => $user->id,
+        'space_id' => $user->personalSpace->id,
+        'period_start_day' => 1,
+    ]);
+
+    callBudgetWriteTool($user, UpdateBudgetPeriod::class, [
+        'budget_id' => $budget->id,
+        'date' => '2026-10-01',
+        ...$arguments,
+    ])->assertHasErrors();
+
+    expect($budget->periods()->count())->toBe(0);
+})->with([
+    'neither' => [[]],
+    'both' => [['allocated_amount' => 70000, 'reset' => true]],
+]);
+
 it('rejects a one-off allocation the tool cannot apply', function (string $date) {
     $this->travelTo(CarbonImmutable::parse('2026-10-15'));
     $user = User::factory()->create();

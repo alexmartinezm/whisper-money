@@ -82,7 +82,7 @@ class GenerateBudgetPeriods extends Command
                 $successor = $this->budgetPeriodService->ensureSuccessor(
                     $budget,
                     $cursor,
-                    $cursor->allocated_amount,
+                    $cursor->regularAllocatedAmount(),
                 );
                 $generatedCount += $successor->wasRecentlyCreated ? 1 : 0;
                 $cursor = $successor;

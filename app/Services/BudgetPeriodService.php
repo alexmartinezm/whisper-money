@@ -20,10 +20,10 @@ class BudgetPeriodService
         $periodStart = $periodStart->startOfDay();
         $periodEnd = $periodEnd->startOfDay();
 
-        // If no allocated amount provided, use the last period's amount or 0
+        // If no allocated amount provided, use the last period's regular amount or 0
         if ($allocatedAmount === null) {
             $lastPeriod = $budget->periods()->orderBy('end_date', 'desc')->first();
-            $allocatedAmount = $lastPeriod !== null ? $lastPeriod->allocated_amount : 0;
+            $allocatedAmount = $lastPeriod !== null ? $lastPeriod->regularAllocatedAmount() : 0;
         }
 
         // Idempotent on the (budget_id, start_date) unique key: the scheduled
@@ -58,7 +58,7 @@ class BudgetPeriodService
     {
         $referenceDate = $this->onePeriodEarlier($budget, $period);
 
-        return $this->generatePeriod($budget, $allocatedAmount ?? $period->allocated_amount, $referenceDate, $processHistorical);
+        return $this->generatePeriod($budget, $allocatedAmount ?? $period->regularAllocatedAmount(), $referenceDate, $processHistorical);
     }
 
     /**
@@ -111,7 +111,7 @@ class BudgetPeriodService
         // stamps the leftover on the wrong row — which is how a nightly pass
         // over every ended period pushed one budget's chain out to 2143.
         $nextPeriod = $budget->periodFollowing($period)
-            ?? $this->ensureSuccessor($budget, $period, $period->allocated_amount);
+            ?? $this->ensureSuccessor($budget, $period, $period->regularAllocatedAmount());
 
         $nextPeriod->update(['carried_over_amount' => $carriedOverAmount]);
     }

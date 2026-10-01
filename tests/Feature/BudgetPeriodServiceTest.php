@@ -560,3 +560,31 @@ test('generatePreviousPeriod does not overlap a budget anchored past the 28th', 
         ->and($previous->end_date->toDateString())->toBe('2026-03-28')
         ->and($previous->end_date->lt($current->start_date))->toBeTrue();
 });
+
+test('periods generated after a one-off period are seeded from its regular allocation', function (string $generation) {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $budget = Budget::factory()->monthly()->create([
+        'user_id' => $user->id,
+        'period_start_day' => 1,
+        'rollover_type' => RolloverType::Reset,
+    ]);
+    $july = BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => '2026-07-01',
+        'end_date' => '2026-07-31',
+        'allocated_amount' => 70000,
+        'regular_allocated_amount' => 40000,
+    ]);
+
+    $service = app(BudgetPeriodService::class);
+    match ($generation) {
+        'closePeriod' => $service->closePeriod($july),
+        'generatePeriod' => $service->generatePeriod($budget),
+    };
+
+    $august = $budget->periods()->whereDate('start_date', '2026-08-01')->firstOrFail();
+
+    expect($august->allocated_amount)->toBe(40000)
+        ->and($august->hasOneOffAllocation())->toBeFalse()
+        ->and($july->fresh()->allocated_amount)->toBe(70000);
+})->with(['closePeriod', 'generatePeriod']);

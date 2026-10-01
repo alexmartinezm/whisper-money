@@ -45,7 +45,7 @@ use Laravel\Mcp\Server\Attributes\Version;
 use Laravel\Mcp\Server\Tool;
 
 #[Name('Whisper Money')]
-#[Version('1.7.0')]
+#[Version('1.8.0')]
 #[Instructions(<<<'MARKDOWN'
 Access to the authenticated user's Whisper Money finance data, for analysing
 spending, cashflow and net worth — and, with write access, for editing that
@@ -78,9 +78,11 @@ data.
   start date is on or after the application date, plus future periods.
 - For a one-off month (an extraordinary expense), use `update_budget_period`: it sets
   the allocation of the single period that contains `date`, the one in progress or a
-  future one up to 12 months ahead, and leaves every other period as it was. A later
-  allocation change through `update_budget` overwrites those one-off amounts in the
-  periods it reaches.
+  future one up to 12 months ahead, and leaves every other period as it was. Periods
+  report `is_one_off` and the `regular_allocated_amount` they go back to. A later
+  allocation change through `update_budget` keeps one-off amounts and only moves their
+  regular allocation; `update_budget_period` with `reset: true` puts a period back on
+  the regular allocation.
 - Recurring charges (subscriptions, bills, standing payments) are detected server-side
   on a schedule. Read them with `list_recurring_series` instead of grouping
   `search_transactions` results by merchant and cadence yourself. Expected amounts are

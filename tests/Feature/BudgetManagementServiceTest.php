@@ -574,6 +574,67 @@ it('rejects one-off allocations on an archived budget', function () {
     expect($august->fresh()->allocated_amount)->toBe(40000);
 });
 
+it('keeps a one-off amount when the regular allocation changes', function () {
+    $user = User::factory()->create();
+    $budget = managedBudgetWithPeriods($user, $user->personalSpace->id);
+    addManagedPeriod($budget, '2026-08-01', '2026-08-31', 40000);
+    $september = addManagedPeriod($budget, '2026-09-01', '2026-09-30', 40000);
+    $october = addManagedPeriod($budget, '2026-10-01', '2026-10-31', 40000);
+    $service = app(BudgetManagementService::class);
+    $service->updatePeriodAllocation($user, $user->personalSpace, $budget->id, CarbonImmutable::parse('2026-09-01'), 70000, CarbonImmutable::parse('2026-08-15'));
+
+    $result = $service->update($user, $user->personalSpace, $budget->id, ['allocated_amount' => 45000], CarbonImmutable::parse('2026-08-20'));
+
+    expect($result['adjustment']['one_off_period_ids'])->toBe([$september->id])
+        ->and($september->fresh()->allocated_amount)->toBe(70000)
+        ->and($september->fresh()->regular_allocated_amount)->toBe(45000)
+        ->and($october->fresh()->allocated_amount)->toBe(45000)
+        ->and($october->fresh()->hasOneOffAllocation())->toBeFalse();
+});
+
+it('puts a one-off period back on its regular allocation', function () {
+    $user = User::factory()->create();
+    $budget = managedBudgetWithPeriods($user, $user->personalSpace->id);
+    $august = addManagedPeriod($budget, '2026-08-01', '2026-08-31', 40000);
+    $september = addManagedPeriod($budget, '2026-09-01', '2026-09-30', 40000);
+    $service = app(BudgetManagementService::class);
+    $space = $user->personalSpace;
+    $service->updatePeriodAllocation($user, $space, $budget->id, CarbonImmutable::parse('2026-08-20'), 70000, CarbonImmutable::parse('2026-08-15'));
+    $service->updatePeriodAllocation($user, $space, $budget->id, CarbonImmutable::parse('2026-09-01'), 90000, CarbonImmutable::parse('2026-08-15'));
+    $service->update($user, $space, $budget->id, ['allocated_amount' => 45000], CarbonImmutable::parse('2026-08-16'));
+
+    $current = $service->updatePeriodAllocation($user, $space, $budget->id, CarbonImmutable::parse('2026-08-20'), null, CarbonImmutable::parse('2026-08-17'));
+    $future = $service->updatePeriodAllocation($user, $space, $budget->id, CarbonImmutable::parse('2026-09-01'), null, CarbonImmutable::parse('2026-08-17'));
+
+    expect($current['current_period_changed'])->toBeTrue()
+        ->and($august->fresh()->allocated_amount)->toBe(40000)
+        ->and($august->fresh()->hasOneOffAllocation())->toBeFalse()
+        ->and($future['current_period_changed'])->toBeFalse()
+        ->and($september->fresh()->allocated_amount)->toBe(45000)
+        ->and($september->fresh()->hasOneOffAllocation())->toBeFalse();
+});
+
+it('drops the one-off mark once the amount matches the regular allocation', function () {
+    $user = User::factory()->create();
+    $budget = managedBudgetWithPeriods($user, $user->personalSpace->id);
+    addManagedPeriod($budget, '2026-08-01', '2026-08-31', 40000);
+    $september = addManagedPeriod($budget, '2026-09-01', '2026-09-30', 40000);
+    $october = addManagedPeriod($budget, '2026-10-01', '2026-10-31', 40000);
+    $service = app(BudgetManagementService::class);
+    $space = $user->personalSpace;
+
+    $service->updatePeriodAllocation($user, $space, $budget->id, CarbonImmutable::parse('2026-09-01'), 70000, CarbonImmutable::parse('2026-08-15'));
+    $service->updatePeriodAllocation($user, $space, $budget->id, CarbonImmutable::parse('2026-09-01'), 40000, CarbonImmutable::parse('2026-08-15'));
+
+    expect($september->fresh()->hasOneOffAllocation())->toBeFalse();
+
+    $service->updatePeriodAllocation($user, $space, $budget->id, CarbonImmutable::parse('2026-10-01'), 70000, CarbonImmutable::parse('2026-08-15'));
+    $service->update($user, $space, $budget->id, ['allocated_amount' => 70000], CarbonImmutable::parse('2026-08-20'));
+
+    expect($october->fresh()->allocated_amount)->toBe(70000)
+        ->and($october->fresh()->hasOneOffAllocation())->toBeFalse();
+});
+
 it('stamps the reconciled periods with a token the job can recognise', function () {
     Queue::fake();
     CarbonImmutable::setTestNow('2026-08-10');
