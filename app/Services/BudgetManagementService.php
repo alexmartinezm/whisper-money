@@ -24,7 +24,7 @@ class BudgetManagementService
     /**
      * How far ahead of today a one-off allocation may land.
      */
-    public const ONE_OFF_ALLOCATION_HORIZON_MONTHS = 12;
+    private const ONE_OFF_ALLOCATION_HORIZON_MONTHS = 12;
 
     public function __construct(private readonly BudgetPeriodService $periods) {}
 
