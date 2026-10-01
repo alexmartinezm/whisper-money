@@ -11,7 +11,7 @@ use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
 
-#[Description('Update a budget name, allocation, tracked categories and/or tracked labels. Tracking changes preserve closed-period history and recalculate the active period. Cadence and rollover remain immutable. An allocation change applies from today to every later period; to change a single period, use update_budget_period.')]
+#[Description('Update a budget name, allocation, tracked categories and/or tracked labels. Tracking changes preserve closed-period history and recalculate the active period. Cadence and rollover remain immutable. An allocation change applies from today to every later period, except that a period holding a one-off amount keeps it and only its regular allocation moves; to change a single period, use update_budget_period.')]
 class UpdateBudget extends WriteTool
 {
     use InteractsWithBudgets;

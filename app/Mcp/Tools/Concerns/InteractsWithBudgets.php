@@ -118,10 +118,7 @@ trait InteractsWithBudgets
         $available = $period->availableAmount();
 
         return [
-            'id' => $period->id,
-            'start_date' => $period->start_date->toDateString(),
-            'end_date' => $period->end_date->toDateString(),
-            'allocated_amount' => (int) $period->allocated_amount,
+            ...$this->presentPeriodAllocation($period),
             'carried_over_amount' => (int) ($period->carried_over_amount ?? 0),
             'available_amount' => $available,
             'spent_amount' => $spent,
@@ -134,11 +131,25 @@ trait InteractsWithBudgets
     /** @return array<string, mixed> */
     protected function presentNextPeriod(BudgetPeriod $period): array
     {
+        return $this->presentPeriodAllocation($period);
+    }
+
+    /**
+     * A period's dates and allocation. `regular_allocated_amount` is what the
+     * period goes back to when `is_one_off` is true, and equals
+     * `allocated_amount` otherwise.
+     *
+     * @return array<string, mixed>
+     */
+    private function presentPeriodAllocation(BudgetPeriod $period): array
+    {
         return [
             'id' => $period->id,
             'start_date' => $period->start_date->toDateString(),
             'end_date' => $period->end_date->toDateString(),
             'allocated_amount' => (int) $period->allocated_amount,
+            'is_one_off' => $period->hasOneOffAllocation(),
+            'regular_allocated_amount' => $period->regularAllocatedAmount(),
         ];
     }
 }

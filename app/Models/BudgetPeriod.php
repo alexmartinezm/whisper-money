@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 /**
  * @property Carbon $start_date
  * @property Carbon $end_date
+ * @property int|null $regular_allocated_amount
  */
 class BudgetPeriod extends Model
 {
@@ -24,6 +25,7 @@ class BudgetPeriod extends Model
         'start_date',
         'end_date',
         'allocated_amount',
+        'regular_allocated_amount',
         'carried_over_amount',
         'processing_historical',
         'reconciliation_token',
@@ -37,6 +39,7 @@ class BudgetPeriod extends Model
             'start_date' => 'date:Y-m-d',
             'end_date' => 'date:Y-m-d',
             'allocated_amount' => 'integer',
+            'regular_allocated_amount' => 'integer',
             'carried_over_amount' => 'integer',
             'spent_amount' => 'integer',
             'processing_historical' => 'boolean',
@@ -106,6 +109,60 @@ class BudgetPeriod extends Model
         }
 
         return 'on_track';
+    }
+
+    /**
+     * The allocation the period runs on when nothing out of the ordinary
+     * happens in it, in cents. It is `allocated_amount` unless the period holds
+     * a one-off amount, and it is what the periods generated after this one are
+     * seeded from, so a one-off month never carries forward.
+     */
+    public function regularAllocatedAmount(): int
+    {
+        return (int) ($this->regular_allocated_amount ?? $this->allocated_amount);
+    }
+
+    public function hasOneOffAllocation(): bool
+    {
+        return $this->regular_allocated_amount !== null;
+    }
+
+    /**
+     * Give this period its own amount, remembering the regular one it steps
+     * away from.
+     */
+    public function assignOneOffAllocation(int $amount): void
+    {
+        $this->writeAllocation($amount, $this->regularAllocatedAmount());
+    }
+
+    /**
+     * Change the regular allocation. A period holding a one-off amount keeps
+     * it and only remembers the new regular figure.
+     */
+    public function assignRegularAllocation(int $amount): void
+    {
+        $this->writeAllocation($this->hasOneOffAllocation() ? $this->allocated_amount : $amount, $amount);
+    }
+
+    /**
+     * Drop the one-off amount and go back to the regular allocation.
+     */
+    public function restoreRegularAllocation(): void
+    {
+        $this->writeAllocation($this->regularAllocatedAmount(), $this->regularAllocatedAmount());
+    }
+
+    /**
+     * A one-off amount equal to the regular one is no exception at all, so the
+     * mark is only kept while the two differ.
+     */
+    private function writeAllocation(int $allocatedAmount, int $regularAllocatedAmount): void
+    {
+        $this->update([
+            'allocated_amount' => $allocatedAmount,
+            'regular_allocated_amount' => $allocatedAmount === $regularAllocatedAmount ? null : $regularAllocatedAmount,
+        ]);
     }
 
     /** @return HasMany<BudgetTransaction, $this> */

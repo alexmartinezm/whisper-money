@@ -255,7 +255,9 @@ class BudgetManagementService
 
     /**
      * Write an allocation across the current period and every one after it, and
-     * describe what moved. Periods already closed keep the figure they ran on.
+     * describe what moved. Periods already closed keep the figure they ran on,
+     * and a period holding a one-off amount keeps it: only the regular
+     * allocation it goes back to moves.
      *
      * @return array<string, mixed>
      */
@@ -265,7 +267,7 @@ class BudgetManagementService
         $affected = $this->periodsFrom($budget, $date);
 
         foreach ($affected as $period) {
-            $period->update(['allocated_amount' => $amount]);
+            $period->assignRegularAllocation($amount);
         }
 
         $current = $affected->first(fn (BudgetPeriod $period): bool => $period->start_date <= $date && $period->end_date >= $date);
@@ -276,9 +278,10 @@ class BudgetManagementService
         return [
             'application_date' => $date->toDateString(),
             'effective_from' => $affected->first()->start_date->toDateString(),
-            'current_period_changed' => $current !== null,
+            'current_period_changed' => $current !== null && ! $current->hasOneOffAllocation(),
             'affected_period_count' => $affected->count(),
             'affected_period_ids' => $affected->modelKeys(),
+            'one_off_period_ids' => $affected->filter(fn (BudgetPeriod $period): bool => $period->hasOneOffAllocation())->values()->modelKeys(),
             'historical_periods_changed' => 0,
         ];
     }
@@ -359,7 +362,7 @@ class BudgetManagementService
             $directSuccessor = $this->periods->ensureSuccessor(
                 $budget,
                 $currentPeriod,
-                $currentPeriod->allocated_amount,
+                $currentPeriod->regularAllocatedAmount(),
             );
 
             if ($directSuccessor->id !== $planningPeriod->id) {
@@ -374,7 +377,9 @@ class BudgetManagementService
 
     /**
      * Give one period its own allocation, the one in progress or a future one,
-     * and leave every other period on the figure it had: a one-off month.
+     * and leave every other period on the figure it had: a one-off month. A
+     * null amount drops the period's one-off amount and puts it back on the
+     * regular allocation.
      *
      * The chain is walked forward one period at a time up to the target, so a
      * date further out than the periods generated so far leaves no gap behind -
@@ -388,7 +393,7 @@ class BudgetManagementService
         Space $space,
         string $budgetId,
         CarbonImmutable $periodDate,
-        int $allocatedAmount,
+        ?int $allocatedAmount,
         CarbonImmutable $applicationDate,
     ): array {
         return DB::transaction(function () use ($user, $space, $budgetId, $periodDate, $allocatedAmount, $applicationDate): array {
@@ -436,7 +441,7 @@ class BudgetManagementService
     private function chainPeriodCovering(Budget $budget, BudgetPeriod $period, CarbonImmutable $date): BudgetPeriod
     {
         while ($period->end_date->lessThan($date)) {
-            $successor = $this->periods->ensureSuccessor($budget, $period, $period->allocated_amount);
+            $successor = $this->periods->ensureSuccessor($budget, $period, $period->regularAllocatedAmount());
 
             // A stored successor that does not end later would loop forever.
             if (! $successor->end_date->greaterThan($period->end_date)) {
@@ -450,17 +455,21 @@ class BudgetManagementService
     }
 
     /**
-     * Write an allocation to one period without it leaking into the next.
+     * Write an allocation to one period without it leaking into the next, or
+     * put it back on the regular allocation when the amount is null.
      *
-     * The successor is created before the write, seeded with the figure this
-     * period had until now: a successor generated later copies the period
-     * before it, and would carry the one-off amount forward.
+     * The successor is created before the write so the caller can show that it
+     * kept the regular allocation.
      */
-    private function writeSinglePeriodAllocation(Budget $budget, BudgetPeriod $period, int $allocatedAmount, bool $isCurrentPeriod): BudgetPeriod
+    private function writeSinglePeriodAllocation(Budget $budget, BudgetPeriod $period, ?int $allocatedAmount, bool $isCurrentPeriod): BudgetPeriod
     {
-        $followingPeriod = $this->periods->ensureSuccessor($budget, $period, $period->allocated_amount);
+        $followingPeriod = $this->periods->ensureSuccessor($budget, $period, $period->regularAllocatedAmount());
 
-        $period->update(['allocated_amount' => $allocatedAmount]);
+        if ($allocatedAmount === null) {
+            $period->restoreRegularAllocation();
+        } else {
+            $period->assignOneOffAllocation($allocatedAmount);
+        }
 
         if ($isCurrentPeriod) {
             $this->reconcileNotificationFlags($period->fresh());

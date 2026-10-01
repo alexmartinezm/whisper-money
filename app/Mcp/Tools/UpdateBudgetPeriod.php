@@ -11,7 +11,7 @@ use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
 
-#[Description('Set the allocation of a single budget period, the one in progress or a future one up to 12 months ahead, and leave every other period as it is. Use it for a one-off month such as an extraordinary expense; use update_budget to change the allocation of every period from now on. A later allocation change through update_budget overwrites the one-off amounts of future periods.')]
+#[Description('Set the allocation of a single budget period, the one in progress or a future one up to 12 months ahead, and leave every other period as it is. Use it for a one-off month such as an extraordinary expense; use update_budget to change the regular allocation of every period from now on, which keeps one-off amounts. Pass reset: true instead of an amount to put the period back on the regular allocation.')]
 class UpdateBudgetPeriod extends WriteTool
 {
     use InteractsWithBudgets;
@@ -23,7 +23,8 @@ class UpdateBudgetPeriod extends WriteTool
         return [
             'budget_id' => $schema->string()->description('Budget id.')->required(),
             'date' => $schema->string()->description('Any date inside the period to change, as YYYY-MM-DD. For a monthly budget starting on day 1, any day of that month (e.g. 2026-12-01). Closed periods cannot change.')->required(),
-            'allocated_amount' => $schema->integer()->min(0)->description('Allocation for that period only, in minor units.')->required(),
+            'allocated_amount' => $schema->integer()->min(0)->description('One-off allocation for that period only, in minor units. Required unless reset is true.'),
+            'reset' => $schema->boolean()->description('Set true, without allocated_amount, to drop the period\'s one-off amount and put it back on the regular allocation.'),
             'space' => $schema->string()->description('Space id. Defaults to the personal space.'),
         ];
     }
@@ -33,8 +34,14 @@ class UpdateBudgetPeriod extends WriteTool
         $request->validate([
             'budget_id' => ['required', 'string'],
             'date' => ['required', 'date_format:Y-m-d'],
-            'allocated_amount' => ['required', 'integer', 'min:0'],
+            'allocated_amount' => ['nullable', 'integer', 'min:0'],
+            'reset' => ['nullable', 'boolean'],
         ]);
+
+        $reset = $request->boolean('reset');
+        if ($reset === $request->filled('allocated_amount')) {
+            return Response::error('Pass either allocated_amount or reset: true.');
+        }
 
         $space = $this->resolveSpace($request, $user);
         $result = $this->budgets->updatePeriodAllocation(
@@ -42,7 +49,7 @@ class UpdateBudgetPeriod extends WriteTool
             $space,
             $request->string('budget_id')->toString(),
             CarbonImmutable::parse($request->string('date')->toString())->startOfDay(),
-            $request->integer('allocated_amount'),
+            $reset ? null : $request->integer('allocated_amount'),
             CarbonImmutable::today(),
         );
         [$current, $next] = $this->periodsFor($result['budget']);
