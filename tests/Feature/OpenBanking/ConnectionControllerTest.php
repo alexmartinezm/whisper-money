@@ -2,6 +2,7 @@
 
 use App\Contracts\BankingProviderInterface;
 use App\Enums\BankingConnectionStatus;
+use App\Enums\BankingSyncTrigger;
 use App\Jobs\SyncBankingConnectionJob;
 use App\Models\Account;
 use App\Models\AccountBalance;
@@ -232,6 +233,7 @@ test('users cannot manually sync a connection the bank has told us to back off f
     $user = User::factory()->onboarded()->create();
     $connection = BankingConnection::factory()->create([
         'user_id' => $user->id,
+        'provider' => 'binance',
         'status' => BankingConnectionStatus::Active,
         'rate_limited_until' => $backoff,
     ]);
@@ -245,6 +247,81 @@ test('users cannot manually sync a connection the bank has told us to back off f
 
     expect($connection->refresh()->rate_limited_until->toDateTimeString())
         ->toBe($backoff->toDateTimeString());
+});
+
+test('users can manually sync EnableBanking through an active background backoff', function () {
+    Queue::fake();
+
+    $backoff = now()->addHour();
+
+    $user = User::factory()->onboarded()->create();
+    $rateLimitMessage = 'Rate limit exceeded. Please wait a few minutes and try again.';
+    $connection = BankingConnection::factory()->create([
+        'user_id' => $user->id,
+        'provider' => 'enablebanking',
+        'status' => BankingConnectionStatus::Active,
+        'rate_limited_until' => $backoff,
+        'error_message' => $rateLimitMessage,
+    ]);
+
+    $response = $this->actingAs($user)
+        ->withServerVariables(['REMOTE_ADDR' => '192.0.2.44'])
+        ->withHeader('User-Agent', 'SyntheticBrowser/1.0')
+        ->post("/settings/connections/{$connection->id}/sync");
+
+    $response->assertRedirect();
+    $response->assertSessionHas('success');
+
+    Queue::assertPushed(SyncBankingConnectionJob::class, function (SyncBankingConnectionJob $job) use ($connection): bool {
+        return $job->bankingConnection->is($connection)
+            && $job->trigger === BankingSyncTrigger::Manual
+            && $job->psuIpAddress === '192.0.2.44'
+            && $job->psuUserAgent === 'SyntheticBrowser/1.0';
+    });
+
+    $connection->refresh();
+    expect($connection->rate_limited_until->toDateTimeString())
+        ->toBe($backoff->toDateTimeString())
+        ->and($connection->error_message)->toBe($rateLimitMessage);
+});
+
+test('EnableBanking backoff still blocks manual sync without PSU request identity', function () {
+    Queue::fake();
+
+    $backoff = now()->addHour();
+    $user = User::factory()->onboarded()->create();
+    $connection = BankingConnection::factory()->create([
+        'user_id' => $user->id,
+        'provider' => 'enablebanking',
+        'status' => BankingConnectionStatus::Active,
+        'rate_limited_until' => $backoff,
+    ]);
+
+    $response = $this->actingAs($user)->post("/settings/connections/{$connection->id}/sync");
+
+    $response->assertSessionHas('error');
+    Queue::assertNothingPushed();
+    expect($connection->refresh()->rate_limited_until->toDateTimeString())
+        ->toBe($backoff->toDateTimeString());
+});
+
+test('users cannot manually sync another users connection', function () {
+    Queue::fake();
+
+    $user = User::factory()->onboarded()->create();
+    $otherUser = User::factory()->onboarded()->create();
+    $connection = BankingConnection::factory()->create([
+        'user_id' => $otherUser->id,
+        'provider' => 'enablebanking',
+    ]);
+
+    $response = $this->actingAs($user)
+        ->withServerVariables(['REMOTE_ADDR' => '192.0.2.44'])
+        ->withHeader('User-Agent', 'SyntheticBrowser/1.0')
+        ->post("/settings/connections/{$connection->id}/sync");
+
+    $response->assertForbidden();
+    Queue::assertNothingPushed();
 });
 
 test('a lapsed backoff does not block a manual sync', function () {
@@ -287,6 +364,7 @@ test('connections page reports whether each connection can be synced on demand',
     $user = User::factory()->onboarded()->create();
     BankingConnection::factory()->create([
         'user_id' => $user->id,
+        'provider' => 'binance',
         'aspsp_name' => 'Backed off bank',
         'rate_limited_until' => now()->addHour(),
         'created_at' => now(),
@@ -305,6 +383,22 @@ test('connections page reports whether each connection can be synced on demand',
         ->where('connections.0.can_sync_manually', false)
         ->where('connections.1.aspsp_name', 'Healthy bank')
         ->where('connections.1.can_sync_manually', true)
+    );
+});
+
+test('EnableBanking connections remain manually syncable during a background backoff', function () {
+    $user = User::factory()->onboarded()->create();
+    BankingConnection::factory()->create([
+        'user_id' => $user->id,
+        'provider' => 'enablebanking',
+        'status' => BankingConnectionStatus::Active,
+        'rate_limited_until' => now()->addHour(),
+    ]);
+
+    $response = $this->actingAs($user)->get('/settings/connections');
+
+    $response->assertInertia(fn ($page) => $page
+        ->where('connections.0.can_sync_manually', true)
     );
 });
 

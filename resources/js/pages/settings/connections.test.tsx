@@ -228,7 +228,12 @@ describe('ConnectionsPage', () => {
     it('hides the manual sync while the bank has told us to back off', () => {
         render(
             <ConnectionsPage
-                connections={[makeConnection({ can_sync_manually: false })]}
+                connections={[
+                    makeConnection({
+                        provider: 'binance',
+                        can_sync_manually: false,
+                    }),
+                ]}
             />,
         );
 
@@ -238,6 +243,21 @@ describe('ConnectionsPage', () => {
         expect(
             screen.getByRole('menuitem', { name: /disconnect/i }),
         ).toBeInTheDocument();
+    });
+
+    it('shows Sync Now for EnableBanking when the server permits an interactive retry', () => {
+        render(
+            <ConnectionsPage
+                connections={[
+                    makeConnection({
+                        provider: 'enablebanking',
+                        can_sync_manually: true,
+                    }),
+                ]}
+            />,
+        );
+
+        expect(screen.getByRole('menuitem', { name: /sync now/i })).toBeTruthy();
     });
 
     it('says why Sync Now is gone on a connection that has synced before', () => {

@@ -9,6 +9,7 @@ use App\Services\Ai\Contracts\TransactionMatcher;
 use App\Services\Ai\LaravelAiRuleSuggestionGenerator;
 use App\Services\Ai\UncategorizedTransactionMatcher;
 use App\Services\Banking\EnableBankingProvider;
+use App\Services\Banking\EnableBankingPsuContext;
 use App\Services\Discord\DiscordWebhook;
 use App\Support\QueueWorkerLoop;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -32,11 +33,13 @@ class AppServiceProvider extends ServiceProvider
         Cashier::keepPastDueSubscriptionsActive();
 
         $this->app->singleton(RegisterResponseContract::class, RegisterResponse::class);
+        $this->app->scoped(EnableBankingPsuContext::class);
 
         $this->app->bind(BankingProviderInterface::class, function ($app) {
             return new EnableBankingProvider(
                 config('services.enablebanking.app_id'),
                 base_path(config('services.enablebanking.private_key_path')),
+                $app->make(EnableBankingPsuContext::class),
             );
         });
 

@@ -25,6 +25,7 @@ use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Console\Kernel as ConsoleKernel;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
@@ -51,7 +52,8 @@ class ConnectionController extends Controller
             ->get()
             ->each(function (BankingConnection $connection) use ($nextScheduledSync) {
                 $connection->has_pending_accounts = $connection->hasPendingAccounts();
-                $connection->can_sync_manually = ! $connection->isRateLimited();
+                $connection->can_sync_manually = ! $connection->isRateLimited()
+                    || $connection->isEnableBanking();
                 $connection->is_beta = $connection->isBeta();
                 $connection->next_sync_attempt_at = $nextScheduledSync?->max($connection->rate_limited_until);
             });
@@ -85,7 +87,7 @@ class ConnectionController extends Controller
     /**
      * Manually trigger a sync for a connection.
      */
-    public function sync(BankingConnection $connection): RedirectResponse
+    public function sync(Request $request, BankingConnection $connection): RedirectResponse
     {
         if ($connection->user_id !== Auth::id()) {
             abort(403);
@@ -95,33 +97,76 @@ class ConnectionController extends Controller
             return $this->subscribeRedirectResponse();
         }
 
-        if (! $connection->isActive() && $connection->status !== BankingConnectionStatus::Error) {
+        if ($this->isUnavailableForManualSync($connection)) {
             return back()->with('error', 'Connection is not active.');
         }
 
+        $hasInteractivePsuContext = $this->hasInteractivePsuContext($connection, $request);
+
         // A live backoff is the bank having told us to stop. Spending an access
-        // call anyway buys another refusal and burns the scheduled run, and the
-        // card already tells the user when we will try again. Only the healthy
-        // path is refused: a connection in Error is one the scheduler has given
-        // up on, so a manual retry is its only way back.
-        if ($connection->isActive() && $connection->isRateLimited()) {
+        // call anyway buys another refusal and burns the scheduled run, unless
+        // this is a genuine interactive EnableBanking request with the PSU
+        // identity the provider uses to distinguish it from background traffic.
+        // A connection in Error is one the scheduler has given up on, so a manual
+        // retry is its only way back regardless of provider.
+        if ($this->shouldBlockRateLimitedManualSync($connection, $hasInteractivePsuContext)) {
             return back()->with('error', __('Your bank limits how often we can fetch your data. We will retry automatically.'));
         }
 
         $connection->update([
             'status' => BankingConnectionStatus::Active,
-            'error_message' => null,
+            'error_message' => $this->errorMessageToPreserve($connection),
             'consecutive_sync_failures' => 0,
-            // Only a stranded connection reaches this with a backoff still set,
-            // and there the retry is the way back. Leaving it would make the job
-            // return early while this flashed "sync started" and nothing
-            // happened, for as long as the window had left.
-            'rate_limited_until' => null,
+            // An EnableBanking manual run is allowed through an active background
+            // backoff, so leave that window intact until the queued run succeeds or
+            // records a new provider response. Other providers retain the existing
+            // stranded-connection retry behavior.
+            'rate_limited_until' => $this->rateLimitToPreserve($connection),
         ]);
 
-        SyncBankingConnectionJob::dispatch($connection, trigger: BankingSyncTrigger::Manual);
+        SyncBankingConnectionJob::dispatch(
+            $connection,
+            trigger: BankingSyncTrigger::Manual,
+            psuIpAddress: $hasInteractivePsuContext ? $request->ip() : null,
+            psuUserAgent: $hasInteractivePsuContext ? $request->userAgent() : null,
+        );
 
         return back()->with('success', 'Sync started. Transactions will be updated shortly.');
+    }
+
+    private function hasInteractivePsuContext(BankingConnection $connection, Request $request): bool
+    {
+        return $connection->isEnableBanking()
+            && $request->ip() !== null
+            && $request->ip() !== ''
+            && $request->userAgent() !== null
+            && $request->userAgent() !== '';
+    }
+
+    private function isUnavailableForManualSync(BankingConnection $connection): bool
+    {
+        return ! $connection->isActive() && $connection->status !== BankingConnectionStatus::Error;
+    }
+
+    private function shouldBlockRateLimitedManualSync(BankingConnection $connection, bool $hasInteractivePsuContext): bool
+    {
+        return $connection->isActive() && $connection->isRateLimited() && ! $hasInteractivePsuContext;
+    }
+
+    private function rateLimitToPreserve(BankingConnection $connection): ?Carbon
+    {
+        if ($connection->isEnableBanking() && $connection->isActive() && $connection->isRateLimited()) {
+            return $connection->rate_limited_until;
+        }
+
+        return null;
+    }
+
+    private function errorMessageToPreserve(BankingConnection $connection): ?string
+    {
+        return $this->rateLimitToPreserve($connection) !== null
+            ? $connection->error_message
+            : null;
     }
 
     /**

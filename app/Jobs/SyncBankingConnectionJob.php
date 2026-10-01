@@ -13,6 +13,7 @@ use App\Mail\BankingConnectionAuthFailedEmail;
 use App\Mail\BankingConnectionExpiredEmail;
 use App\Models\BankingConnection;
 use App\Models\BankingSyncLog;
+use App\Services\Banking\EnableBankingPsuContext;
 use App\Services\Banking\Sync\BankingConnectionSyncerFactory;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -93,6 +94,8 @@ class SyncBankingConnectionJob implements ShouldBeUnique, ShouldQueue
      */
     private const array LOGGED_QUERY_PARAMS = ['date_from', 'date_to', 'strategy'];
 
+    private const int PSU_CONTEXT_MAX_AGE_SECONDS = 300;
+
     /**
      * Who asked for this sync. A property rather than something handle() works
      * out, because it has to travel in the serialized payload: failed() is
@@ -111,15 +114,43 @@ class SyncBankingConnectionJob implements ShouldBeUnique, ShouldQueue
     public BankingSyncTrigger $trigger = BankingSyncTrigger::Scheduled;
 
     /**
-     * @param  BankingSyncTrigger  $trigger  Third and last: callers pass
-     *                                       $fullSync positionally.
+     * The request identity is carried only by a manual EnableBanking sync.
+     *
+     * These are request metadata, not application log context. They are kept on
+     * the job because the provider request runs after the queue boundary.
+     */
+    public ?string $psuIpAddress = null;
+
+    public ?string $psuUserAgent = null;
+
+    /**
+     * Server time when the manual job carrying PSU identity was dispatched.
+     *
+     * Default null keeps older serialized payloads safe: they must not claim
+     * that a PSU is present without a freshness timestamp.
+     */
+    public ?Carbon $psuContextDispatchedAt = null;
+
+    /**
+     * @param  bool  $fullSync  Force the historical window on this run.
+     * @param  BankingSyncTrigger  $trigger  Why this job was dispatched.
+     * @param  ?string  $psuIpAddress  Interactive EnableBanking request IP.
+     * @param  ?string  $psuUserAgent  Interactive EnableBanking user agent.
      */
     public function __construct(
         public BankingConnection $bankingConnection,
         public bool $fullSync = false,
         BankingSyncTrigger $trigger = BankingSyncTrigger::Scheduled,
+        ?string $psuIpAddress = null,
+        ?string $psuUserAgent = null,
     ) {
         $this->trigger = $trigger;
+
+        if ($trigger === BankingSyncTrigger::Manual) {
+            $this->psuIpAddress = $psuIpAddress;
+            $this->psuUserAgent = $psuUserAgent;
+            $this->psuContextDispatchedAt = now();
+        }
     }
 
     public function uniqueId(): string
@@ -127,48 +158,28 @@ class SyncBankingConnectionJob implements ShouldBeUnique, ShouldQueue
         return $this->bankingConnection->id;
     }
 
-    public function handle(BankingConnectionSyncerFactory $syncerFactory): void
+    public function handle(BankingConnectionSyncerFactory $syncerFactory, ?EnableBankingPsuContext $psuContext = null): void
     {
+        $psuContext ??= app(EnableBankingPsuContext::class);
+        $psuContext->clear();
+
+        try {
+            $this->handleWithPsuContext($syncerFactory, $psuContext);
+        } finally {
+            $psuContext->clear();
+        }
+    }
+
+    private function handleWithPsuContext(
+        BankingConnectionSyncerFactory $syncerFactory,
+        EnableBankingPsuContext $psuContext,
+    ): void {
         $connection = $this->bankingConnection;
         $startTime = microtime(true);
         $syncedAt = now();
+        $syncer = $this->prepareSync($connection, $syncerFactory, $psuContext, $startTime);
 
-        $connection->loadMissing('user');
-        $this->setSentryContext($connection);
-
-        if (! $connection->user) {
-            Log::info('Banking connection belongs to deleted user, skipping sync', ['connection_id' => $connection->id]);
-
-            $this->logSyncAttempt($connection, BankingSyncLogStatus::Skipped, $startTime, metadata: ['reason' => 'deleted_user']);
-
-            return;
-        }
-
-        $syncer = $syncerFactory->make($connection);
-
-        if ($syncer->expires() && $connection->isExpired()) {
-            $this->markExpired($connection, $startTime);
-
-            return;
-        }
-
-        if (! $this->isSyncableStatus($connection)) {
-            $this->logSyncAttempt($connection, BankingSyncLogStatus::Skipped, $startTime, metadata: ['reason' => 'not_syncable', 'status' => $connection->status->value]);
-
-            return;
-        }
-
-        if ($connection->isRateLimited()) {
-            Log::info('Banking connection rate limited, skipping sync', [
-                'connection_id' => $connection->id,
-                'rate_limited_until' => $connection->rate_limited_until?->toIso8601String(),
-            ]);
-
-            $this->logSyncAttempt($connection, BankingSyncLogStatus::Skipped, $startTime, metadata: [
-                'reason' => 'rate_limited',
-                'rate_limited_until' => $connection->rate_limited_until?->toIso8601String(),
-            ]);
-
+        if ($syncer === null) {
             return;
         }
 
@@ -194,6 +205,90 @@ class SyncBankingConnectionJob implements ShouldBeUnique, ShouldQueue
         } catch (\Throwable $e) {
             $this->handleSyncFailure($connection, $syncer, $e, $startTime);
         }
+    }
+
+    private function prepareSync(
+        BankingConnection $connection,
+        BankingConnectionSyncerFactory $syncerFactory,
+        EnableBankingPsuContext $psuContext,
+        float $startTime,
+    ): ?BankingConnectionSyncer {
+        $interactivePsuSync = $this->hasInteractivePsuContext($connection);
+
+        $psuContext->set(
+            $interactivePsuSync ? $this->psuIpAddress : null,
+            $interactivePsuSync ? $this->psuUserAgent : null,
+        );
+
+        $connection->loadMissing('user');
+        $this->setSentryContext($connection);
+
+        if (! $connection->user) {
+            Log::info('Banking connection belongs to deleted user, skipping sync', ['connection_id' => $connection->id]);
+            $this->logSyncAttempt($connection, BankingSyncLogStatus::Skipped, $startTime, metadata: ['reason' => 'deleted_user']);
+
+            return null;
+        }
+
+        $syncer = $syncerFactory->make($connection);
+
+        if ($this->shouldSkipExpired($connection, $syncer)) {
+            $this->markExpired($connection, $startTime);
+
+            return null;
+        }
+
+        if (! $this->isSyncableStatus($connection)) {
+            $this->logSyncAttempt($connection, BankingSyncLogStatus::Skipped, $startTime, metadata: ['reason' => 'not_syncable', 'status' => $connection->status->value]);
+
+            return null;
+        }
+
+        if ($this->shouldSkipRateLimited($connection, $interactivePsuSync)) {
+            $this->logRateLimitedSkip($connection, $startTime);
+
+            return null;
+        }
+
+        return $syncer;
+    }
+
+    private function shouldSkipExpired(BankingConnection $connection, BankingConnectionSyncer $syncer): bool
+    {
+        return $syncer->expires() && $connection->isExpired();
+    }
+
+    private function shouldSkipRateLimited(BankingConnection $connection, bool $interactivePsuSync): bool
+    {
+        return $connection->isRateLimited() && ! $interactivePsuSync;
+    }
+
+    private function logRateLimitedSkip(BankingConnection $connection, float $startTime): void
+    {
+        Log::info('Banking connection rate limited, skipping sync', [
+            'connection_id' => $connection->id,
+            'rate_limited_until' => $connection->rate_limited_until?->toIso8601String(),
+        ]);
+
+        $this->logSyncAttempt($connection, BankingSyncLogStatus::Skipped, $startTime, metadata: [
+            'reason' => 'rate_limited',
+            'rate_limited_until' => $connection->rate_limited_until?->toIso8601String(),
+        ]);
+    }
+
+    private function hasInteractivePsuContext(BankingConnection $connection): bool
+    {
+        return $connection->isEnableBanking()
+            && $this->trigger === BankingSyncTrigger::Manual
+            && $this->attempts() === 1
+            && $this->psuContextDispatchedAt !== null
+            && $this->psuContextDispatchedAt->greaterThanOrEqualTo(
+                now()->subSeconds(self::PSU_CONTEXT_MAX_AGE_SECONDS)
+            )
+            && $this->psuIpAddress !== null
+            && $this->psuIpAddress !== ''
+            && $this->psuUserAgent !== null
+            && $this->psuUserAgent !== '';
     }
 
     /**
@@ -609,7 +704,7 @@ class SyncBankingConnectionJob implements ShouldBeUnique, ShouldQueue
      */
     private function applyRateLimitBackoff(BankingConnection $connection, \Throwable $e, array $context): void
     {
-        $until = $this->resolveRateLimitBackoffUntil($e);
+        $until = $this->resolveRateLimitBackoffUntil($connection, $e);
 
         $connection->update([
             'rate_limited_until' => $until,
@@ -625,24 +720,42 @@ class SyncBankingConnectionJob implements ShouldBeUnique, ShouldQueue
         ]);
     }
 
-    private function resolveRateLimitBackoffUntil(\Throwable $e): Carbon
+    private function resolveRateLimitBackoffUntil(BankingConnection $connection, \Throwable $e): Carbon
     {
         if (! $e instanceof RequestException) {
-            return $this->backoffUntil(null, '');
+            $until = $this->backoffUntil(null, '');
+
+            return $this->resolveRateLimitUntil($connection, $until) ?? $until;
         }
 
         $body = $e->response->json();
-
-        return $this->backoffUntil(
+        $until = $this->backoffUntil(
             $e->response->header('Retry-After'),
             is_array($body) ? (string) ($body['message'] ?? '') : '',
         );
+
+        return $this->resolveRateLimitUntil($connection, $until) ?? $until;
+    }
+
+    private function resolveRateLimitUntil(BankingConnection $connection, ?Carbon $candidate): ?Carbon
+    {
+        if (! $this->hasInteractivePsuContext($connection) || ! $connection->isRateLimited()) {
+            return $candidate;
+        }
+
+        $existing = $connection->rate_limited_until;
+
+        if ($candidate === null || $existing->greaterThan($candidate)) {
+            return Carbon::instance($existing);
+        }
+
+        return $candidate;
     }
 
     /**
      * The backoff a *successful* run still has to carry, because the provider
      * rate limited the balance call after the transactions had already been
-     * persisted. Null on every other run, which is what clears an old backoff.
+     * persisted. An interactive manual run also keeps a later existing cooldown.
      *
      * The exception cannot travel in the metadata - it is persisted as JSON on
      * the sync log - so the syncer reports the two facts the policy keys on.
@@ -654,12 +767,13 @@ class SyncBankingConnectionJob implements ShouldBeUnique, ShouldQueue
         $rateLimit = $metadata['balance_rate_limit'] ?? null;
 
         if (! is_array($rateLimit)) {
-            return null;
+            return $this->resolveRateLimitUntil($connection, null);
         }
 
         $retryAfter = $rateLimit['retry_after'] ?? null;
         $message = (string) ($rateLimit['message'] ?? '');
-        $until = $this->backoffUntil(is_string($retryAfter) ? $retryAfter : null, $message);
+        $candidate = $this->backoffUntil(is_string($retryAfter) ? $retryAfter : null, $message);
+        $until = $this->resolveRateLimitUntil($connection, $candidate) ?? $candidate;
 
         // Same message as the failed-run path, which is what these get searched
         // for. It carries what the failed path reads off the response - which of
