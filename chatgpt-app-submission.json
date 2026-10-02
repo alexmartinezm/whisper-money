@@ -267,16 +267,16 @@
       "expected_output": "Confirmation of the new transaction with its date, amount, account and category, created in the personal space."
     },
     {
-      "description": "Bulk tidy-up of miscategorized data. The app finds the matching transactions and reassigns their category, asking the user to confirm the set before writing.",
+      "description": "Bulk tidy-up of miscategorized data. The app finds the matching transactions and reassigns their category once the user approves the write.",
       "user_prompt": "My Uber charges are filed as Shopping — move them to Transport.",
       "tools_triggered": "search_transactions, list_categories, categorize_transaction",
-      "expected_output": "The matching transactions listed for confirmation, then each one reassigned to the Transport category, including bank-imported ones (categorizing is always allowed)."
+      "expected_output": "After the user approves the write, the matching transactions are reassigned to the Transport category, including bank-imported ones (categorizing is always allowed), and the model reports how many it changed."
     },
     {
       "description": "Budget check and adjustment. The app reads the budgets with the figures of the period in progress, and can raise a limit when the user asks.",
       "user_prompt": "Am I still inside my food budget this month? Raise it to 600 if I am not.",
       "tools_triggered": "list_budgets, update_budget",
-      "expected_output": "The food budget's allocated, spent and remaining amounts for the current period, and, when it is over, the limit raised to 600 for this period and the ones after it."
+      "expected_output": "The food budget's allocated, spent and remaining amounts for the current period (it can already be over), and, when it is over and the user approves the write, the limit raised to 600 for this period and the ones after it."
     }
   ],
   "negative_test_cases": [
@@ -284,7 +284,7 @@
       "description": "Bank-connected data is protected. Editing or deleting a transaction imported from a bank connection must be refused by the server, and the model should explain why instead of retrying.",
       "user_prompt": "Change the amount of that Amazon charge from my bank account to 10 euros.",
       "tools_triggered": "search_transactions, update_transaction",
-      "expected_output": "The server rejects the write because bank-imported transactions are read-only, and the model explains that only manual transactions can be edited, offering to recategorize or label it instead."
+      "expected_output": "The amount is not changed. Either the model sees in the search result that the transaction is bank-imported and declines up front, or the server rejects the write because bank-imported transactions are read-only. The model explains that only manual transactions can have their amount changed, and offers what it can do instead, such as recategorizing it, adding a note or logging a separate adjustment."
     },
     {
       "description": "Wide, irreversible deletion must not be executed on a vague instruction. delete_transaction is destructive and single-target, so the model must stop and confirm rather than looping over the user's history.",
@@ -296,7 +296,7 @@
       "description": "Out of scope: the app is bookkeeping only and exposes no tool that can move money or reach a bank. The model must decline rather than pretending a payment happened.",
       "user_prompt": "Transfer 500 euros from my savings account to my mum's account.",
       "tools_triggered": null,
-      "expected_output": "A refusal explaining that Whisper Money can only record and analyse finance data, not initiate payments or transfers, with an offer to log the transfer as a manual transaction once the user has made it themselves."
+      "expected_output": "A refusal explaining that Whisper Money can only record and analyse finance data, not initiate payments or transfers, with an offer to log the transfer as a manual transaction once the user has made it themselves. The model never asks for a destination account as if it could send the money."
     }
   ]
 }

@@ -51,6 +51,12 @@ Access to the authenticated user's Whisper Money finance data, for analysing
 spending, cashflow and net worth — and, with write access, for editing that
 data.
 
+Whisper Money is bookkeeping only: no tool moves money, pays anyone or reaches a
+bank. When the user asks to transfer, pay or send money, say plainly that this
+app cannot do that — do not ask for a destination account as if it could — and
+offer to record the transfer as a manual transaction once they have made it
+themselves.
+
 - All amounts are integers in minor units (cents). Divide by 100 for a display value.
 - Data is organised into "spaces" (the personal space and any shared spaces).
   Transaction, account, category, label, budget, balance and automation-rule tools accept an
