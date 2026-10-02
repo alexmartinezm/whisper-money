@@ -155,6 +155,13 @@ it('says which currency the rolled-up figures are in', function (string $tool) {
     'list_budgets' => ListBudgets::class,
 ]);
 
+it('tells the agent on the accounts tool that nothing moves money', function () {
+    // ChatGPT reads tool descriptions more reliably than the server
+    // instructions: asked to "transfer 500 euros to my mum's account", it
+    // offered to do it once it knew the destination account.
+    expect((new ListAccounts)->description())->toContain('no tool moves money');
+});
+
 it('leaves archived budgets out of the list', function () {
     $user = User::factory()->create();
     Budget::factory()->create(['user_id' => $user->id, 'name' => 'Running Budget']);
