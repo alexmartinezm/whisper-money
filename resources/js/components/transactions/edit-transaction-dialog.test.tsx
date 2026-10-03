@@ -15,7 +15,7 @@ import {
 import type React from 'react';
 import { useLayoutEffect, useRef } from 'react';
 import { toast } from 'sonner';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     EditTransactionDialog,
     haveSplitLinesChanged,
@@ -2288,6 +2288,316 @@ describe('EditTransactionDialog', () => {
                     expect.objectContaining({ account_id: 'account-card' }),
                     { updateBalance: false },
                 );
+            });
+        });
+    });
+
+    describe('keyboard shortcuts', () => {
+        let platform: ReturnType<typeof vi.spyOn> | null = null;
+
+        function onPlatform(name: string) {
+            platform = vi
+                .spyOn(Navigator.prototype, 'platform', 'get')
+                .mockReturnValue(name);
+        }
+
+        afterEach(() => {
+            platform?.mockRestore();
+            platform = null;
+        });
+
+        function renderEditDialog(
+            transaction: DecryptedTransaction = manualTransaction,
+        ) {
+            return render(
+                <EditTransactionDialog
+                    transaction={transaction}
+                    categories={[]}
+                    accounts={[checkingAccount]}
+                    banks={[]}
+                    labels={[]}
+                    open
+                    onOpenChange={vi.fn()}
+                    onSuccess={vi.fn()}
+                    mode="edit"
+                />,
+            );
+        }
+
+        function pressSave(target: Element) {
+            fireEvent.keyDown(target, { key: 'Enter', ctrlKey: true });
+        }
+
+        it('saves with Ctrl+Enter while typing the description', async () => {
+            vi.mocked(transactionSyncService.create).mockResolvedValue({
+                id: 'tx-new',
+            } as never);
+            renderCreateDialog();
+            fillDescriptionAndAmount();
+
+            pressSave(screen.getByPlaceholderText('Transaction description'));
+
+            await waitFor(() => {
+                expect(transactionSyncService.create).toHaveBeenCalledWith(
+                    expect.objectContaining({
+                        description: 'Dinner',
+                        amount: -2500,
+                    }),
+                    expect.anything(),
+                );
+            });
+        });
+
+        it('saves with ⌘⏎ on a Mac while typing a note', async () => {
+            onPlatform('MacIntel');
+            renderEditDialog({ ...manualTransaction, decryptedNotes: 'Lunch' });
+            const notes = screen.getByPlaceholderText('Add notes...');
+
+            fireEvent.change(notes, { target: { value: 'Lunch with Ana' } });
+            fireEvent.keyDown(notes, { key: 'Enter', metaKey: true });
+
+            await waitFor(() => {
+                expect(transactionSyncService.update).toHaveBeenCalledWith(
+                    'tx-manual',
+                    expect.objectContaining({ notes: 'Lunch with Ana' }),
+                    expect.anything(),
+                );
+            });
+        });
+
+        it('saves an edit with Ctrl+Enter the way Save Changes does', async () => {
+            renderEditDialog();
+            const amountInput = screen.getByLabelText('Amount');
+            fireEvent.change(amountInput, { target: { value: '30' } });
+            fireEvent.blur(amountInput);
+
+            pressSave(amountInput);
+
+            await waitFor(() => {
+                expect(transactionSyncService.update).toHaveBeenCalledWith(
+                    'tx-manual',
+                    expect.objectContaining({ amount: -3000 }),
+                    { updateBalance: true },
+                );
+            });
+            expect(transactionSyncService.update).toHaveBeenCalledOnce();
+        });
+
+        it('does not save again while the first save is in flight', async () => {
+            let finishSaving: (value: unknown) => void = () => {};
+            vi.mocked(transactionSyncService.create).mockReturnValue(
+                new Promise((resolve) => {
+                    finishSaving = resolve;
+                }) as never,
+            );
+            renderCreateDialog();
+            fillDescriptionAndAmount();
+            const description = screen.getByPlaceholderText(
+                'Transaction description',
+            );
+
+            pressSave(description);
+            await waitFor(() => {
+                expect(screen.getByTestId('submit-transaction')).toBeDisabled();
+            });
+            // "Saving..." drops the chip, since the keys do nothing meanwhile.
+            expect(screen.getByTestId('submit-transaction')).toHaveTextContent(
+                /^Saving\.\.\.$/,
+            );
+            pressSave(description);
+
+            expect(transactionSyncService.create).toHaveBeenCalledTimes(1);
+
+            finishSaving({ id: 'tx-new' });
+            await waitFor(() => {
+                expect(
+                    screen.getByTestId('submit-transaction'),
+                ).not.toBeDisabled();
+            });
+        });
+
+        it('shows the save shortcut inside the submit button, the Mac way on a Mac', () => {
+            onPlatform('MacIntel');
+            renderCreateDialog();
+
+            const submit = screen.getByTestId('submit-transaction');
+
+            expect(submit).toHaveTextContent('Create Transaction⌘⏎');
+            expect(submit).toHaveAttribute('aria-keyshortcuts', 'Meta+Enter');
+            // The chip is not read out as part of the button's name.
+            expect(
+                screen.getByRole('button', { name: 'Create Transaction' }),
+            ).toBe(submit);
+        });
+
+        it('shows it with Ctrl on Windows and Linux', () => {
+            onPlatform('Win32');
+            renderEditDialog();
+
+            const submit = screen.getByTestId('submit-transaction');
+
+            expect(submit).toHaveTextContent('Save ChangesCtrl ⏎');
+            expect(submit).toHaveAttribute(
+                'aria-keyshortcuts',
+                'Control+Enter',
+            );
+        });
+
+        it('opens the notes with N, focused and without typing the n', () => {
+            renderEditDialog();
+            const addNote = screen.getByRole('button', { name: /Add note/ });
+
+            expect(addNote).toHaveTextContent('Add noteN');
+            expect(addNote).toHaveAttribute('aria-keyshortcuts', 'N');
+
+            const notPrevented = fireEvent.keyDown(document.body, {
+                key: 'n',
+            });
+
+            expect(notPrevented).toBe(false);
+            expect(screen.getByPlaceholderText('Add notes...')).toHaveFocus();
+            expect(
+                screen.queryByRole('button', { name: /Add note/ }),
+            ).not.toBeInTheDocument();
+        });
+
+        it('focuses notes already open with N, the caret after the text', () => {
+            renderEditDialog({ ...manualTransaction, decryptedNotes: 'Flat' });
+            const notes = screen.getByPlaceholderText(
+                'Add notes...',
+            ) as HTMLTextAreaElement;
+            // Clicked at the start earlier, then left for another field.
+            notes.setSelectionRange(0, 0);
+
+            fireEvent.keyDown(document.body, { key: 'n' });
+
+            expect(notes).toHaveFocus();
+            expect(notes.selectionStart).toBe('Flat'.length);
+        });
+
+        it('leaves an n typed into a field alone', () => {
+            renderEditDialog();
+            const description = screen.getByPlaceholderText(
+                'Transaction description',
+            );
+            description.focus();
+
+            const notPrevented = fireEvent.keyDown(description, { key: 'n' });
+
+            expect(notPrevented).toBe(true);
+            expect(
+                screen.queryByPlaceholderText('Add notes...'),
+            ).not.toBeInTheDocument();
+        });
+
+        it('has no N while the collapsed create form hides the notes', () => {
+            renderCreateDialog();
+
+            expect(fireEvent.keyDown(document.body, { key: 'n' })).toBe(true);
+
+            fireEvent.click(screen.getByTestId('toggle-more-options'));
+            expect(
+                screen.getByRole('button', { name: /Add note/ }),
+            ).toBeInTheDocument();
+            fireEvent.keyDown(document.body, { key: 'n' });
+            expect(screen.getByPlaceholderText('Add notes...')).toHaveFocus();
+        });
+
+        it('focuses the notes when Add note is clicked', () => {
+            renderEditDialog();
+
+            fireEvent.click(screen.getByRole('button', { name: /Add note/ }));
+
+            expect(screen.getByPlaceholderText('Add notes...')).toHaveFocus();
+        });
+
+        describe('with a split in progress', () => {
+            const splitCategories = [
+                { id: 'food', name: 'Food', type: 'expense' },
+                { id: 'home', name: 'Home', type: 'expense' },
+            ] as Category[];
+
+            function startSplitOnFilledForm() {
+                vi.mocked(transactionSyncService.create).mockResolvedValue({
+                    id: 'tx-new',
+                } as never);
+                renderCreateDialog({ categories: splitCategories });
+                fillDescriptionAndAmount();
+                fireEvent.click(screen.getByTestId('toggle-more-options'));
+                fireEvent.click(
+                    screen.getByRole('button', { name: 'Split transaction' }),
+                );
+            }
+
+            it('leaves an n typed into a split line amount alone', () => {
+                startSplitOnFilledForm();
+                const lineAmount = screen.getByLabelText('Amount 1');
+                lineAmount.focus();
+
+                expect(fireEvent.keyDown(lineAmount, { key: 'n' })).toBe(true);
+                expect(
+                    screen.queryByPlaceholderText('Add notes...'),
+                ).not.toBeInTheDocument();
+                expect(lineAmount).toHaveFocus();
+            });
+
+            it('refuses Ctrl+Enter on an incomplete split, as Save would', async () => {
+                startSplitOnFilledForm();
+
+                pressSave(screen.getByLabelText('Amount 2'));
+
+                await waitFor(() => {
+                    expect(toast.error).toHaveBeenCalledWith(
+                        'Complete the split before saving',
+                    );
+                });
+                expect(transactionSyncService.create).not.toHaveBeenCalled();
+            });
+
+            it('saves the split lines with Ctrl+Enter once they add up', async () => {
+                startSplitOnFilledForm();
+                fireEvent.click(
+                    within(screen.getByTestId('split-category-0')).getByText(
+                        'Food',
+                    ),
+                );
+                fireEvent.click(
+                    within(screen.getByTestId('split-category-1')).getByText(
+                        'Home',
+                    ),
+                );
+                for (const [label, value] of [
+                    ['Amount 1', '-15'],
+                    ['Amount 2', '-10'],
+                ]) {
+                    const input = screen.getByLabelText(label);
+                    fireEvent.change(input, { target: { value } });
+                    fireEvent.blur(input);
+                }
+
+                pressSave(screen.getByLabelText('Amount 2'));
+
+                await waitFor(() => {
+                    expect(transactionSyncService.create).toHaveBeenCalledWith(
+                        expect.objectContaining({
+                            amount: -2500,
+                            category_id: null,
+                            splits: [
+                                {
+                                    category_id: 'food',
+                                    amount: -1500,
+                                    position: 0,
+                                },
+                                {
+                                    category_id: 'home',
+                                    amount: -1000,
+                                    position: 1,
+                                },
+                            ],
+                        }),
+                        { updateBalance: true },
+                    );
+                });
             });
         });
     });

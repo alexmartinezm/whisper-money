@@ -2698,5 +2698,6 @@
     "Transaction saved": "Transaction enregistrée",
     "A rule categorized it as :category": "Une règle l'a catégorisée comme :category",
     "You need an account to record transactions": "Vous avez besoin d'un compte pour enregistrer des transactions",
-    "Undo": "Annuler"
+    "Undo": "Annuler",
+    "Save the transaction": "Enregistrer la transaction"
 }
