@@ -7,6 +7,7 @@ use App\Enums\BankingConnectionStatus;
 use App\Enums\BankingProvider;
 use App\Features\CalculateBalancesOnImport;
 use App\Features\CashflowAvailableFree;
+use App\Features\FullImport;
 use App\Features\RecurringTransactions;
 use App\Features\TransactionSplitting;
 use App\Jobs\PurgeResidualEncryptionArtifactsJob;
@@ -291,14 +292,18 @@ class HandleInertiaRequests extends Middleware
                 'transactionSplitting' => true,
                 'recurringTransactions' => false,
                 'cashflowAvailableFree' => false,
+                'fullImport' => false,
+                'fullImportSettings' => false,
             ];
         }
 
+        // One query for every flag, however many of them get read below.
         $features = Feature::for($user)->values([
             CalculateBalancesOnImport::class,
             TransactionSplitting::class,
             RecurringTransactions::class,
             CashflowAvailableFree::class,
+            FullImport::class,
         ]);
 
         return [
@@ -307,6 +312,13 @@ class HandleInertiaRequests extends Middleware
             'transactionSplitting' => $features[TransactionSplitting::class] !== false,
             'recurringTransactions' => $features[RecurringTransactions::class] !== false,
             'cashflowAvailableFree' => $features[CashflowAvailableFree::class] !== false,
+            // Two answers, because Settings keeps the page past the window for
+            // as long as an import can still be undone, while starting one is
+            // only offered inside it. The second costs a query once the window
+            // is closed, and only the Settings menu reads it, so only Settings
+            // pages pay for it.
+            'fullImport' => $user->canUseFullImport(),
+            'fullImportSettings' => request()->is('settings', 'settings/*') && $user->canSeeFullImportSettings(),
         ];
     }
 

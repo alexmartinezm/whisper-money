@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Import;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schedule;
 use Illuminate\Support\Str;
@@ -46,6 +47,9 @@ Schedule::command('banking:health --email')->dailyAt('09:30')->timezone('Europe/
 Schedule::command('stats:daily-report')->dailyAt('09:00')->timezone('Europe/Madrid');
 Schedule::command('stats:ai-cohort-report')->monthlyOn(1, '09:00')->timezone('Europe/Madrid');
 Schedule::command('stats:subscription-funnel')->weekly()->mondays()->at('09:15')->timezone('Europe/Madrid');
+// A full import that never got started keeps the rows the browser staged for
+// it; a day on, nobody is coming back to finish that upload.
+Schedule::command('model:prune', ['--model' => [Import::class]])->dailyAt('04:45')->timezone('Europe/Madrid');
 
 /**
  * Make a failed scheduled command say which one it was and why it failed.

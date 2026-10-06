@@ -105,6 +105,8 @@ test('shared feature flags do not include coinbase flag', function () {
         'transactionSplitting' => true,
         'recurringTransactions' => false,
         'cashflowAvailableFree' => false,
+        'fullImport' => false,
+        'fullImportSettings' => false,
     ]);
 });
 
