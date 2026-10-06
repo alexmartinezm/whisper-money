@@ -34,9 +34,10 @@ const SOURCES: {
 ];
 
 const EXPORT_STEPS = [
-    'Open Banktrack and find the option to export your transactions.',
-    'Download them as an Excel or CSV file.',
-    'Upload it here without changing anything.',
+    'In Banktrack, open the «Transacciones» module.',
+    'Leave the bank and account filter empty and pick the widest period: the download only includes what you see on screen.',
+    'Click «Descargar» and choose CSV or XLSX.',
+    'Upload the file here as it comes: no need to open it, rename columns or delete rows.',
 ];
 
 export interface FileSummary {

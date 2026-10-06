@@ -152,6 +152,38 @@ describe('FullImportWizard', () => {
         api.fetchImport.mockResolvedValue(QUEUED);
     });
 
+    it('walks through the Banktrack export only for the Banktrack source', async () => {
+        api.fetchImportContext.mockResolvedValue(context());
+        render(<FullImportWizard variant="page" onClose={vi.fn()} />);
+
+        await screen.findByText('Where are you coming from?');
+
+        const help = screen
+            .getByText('How to export your data from Banktrack')
+            .closest('details')!;
+
+        expect(
+            within(help)
+                .getAllByRole('listitem')
+                .map((step) => step.textContent),
+        ).toEqual([
+            'In Banktrack, open the «Transacciones» module.',
+            'Leave the bank and account filter empty and pick the widest period: the download only includes what you see on screen.',
+            'Click «Descargar» and choose CSV or XLSX.',
+            'Upload the file here as it comes: no need to open it, rename columns or delete rows.',
+        ]);
+
+        fireEvent.click(
+            screen.getByRole('radio', {
+                name: /Another app or my own spreadsheet/,
+            }),
+        );
+
+        expect(
+            screen.queryByText('How to export your data from Banktrack'),
+        ).not.toBeInTheDocument();
+    });
+
     it('reads a Banktrack export and sends the plan with its rows', async () => {
         await openWithBanktrackFile(context());
         await continueTo('Check the columns');
