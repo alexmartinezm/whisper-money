@@ -172,8 +172,15 @@ export function AccountForm({
     );
     const isRevaluationManuallySet = useRef(false);
 
+    // A credit card under the credit card feature has a limit and what is in
+    // use of it, never a balance.
+    const tracksCreditLimit =
+        selectedType === 'credit_card' &&
+        Boolean(features?.creditCardStatements);
     const showBalanceField =
-        selectedType !== null && BALANCE_ACCOUNT_TYPES.includes(selectedType);
+        selectedType !== null &&
+        BALANCE_ACCOUNT_TYPES.includes(selectedType) &&
+        !tracksCreditLimit;
     // What the account is worth is only half the story on the types that grow:
     // without what went in there is no gain to read anywhere.
     const showInvestedAmountField =
@@ -181,10 +188,7 @@ export function AccountForm({
     const isRealEstate = selectedType === 'real_estate';
     const isLoan = selectedType === 'loan';
     // Asked once, when the card is opened; the card's own page edits it later.
-    const showCreditLimitField =
-        selectedType === 'credit_card' &&
-        Boolean(features?.creditCardStatements) &&
-        !initialValues;
+    const showCreditLimitField = tracksCreditLimit && !initialValues;
     const availableRealEstateAccounts = availableLoanAccounts.filter(
         (account) =>
             account.type === 'real_estate' &&

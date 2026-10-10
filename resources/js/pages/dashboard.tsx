@@ -21,6 +21,7 @@ import { useEncryptionKey } from '@/contexts/encryption-key-context';
 import { PrivacyRevealScope } from '@/contexts/privacy-mode-context';
 import {
     deriveAccountMetrics,
+    withCreditCardUsage,
     type AccountWithMetrics,
     type NetWorthEvolutionData,
 } from '@/hooks/use-dashboard-data';
@@ -28,6 +29,7 @@ import { useLocale } from '@/hooks/use-locale';
 import AppSidebarLayout from '@/layouts/app/app-sidebar-layout';
 import { dashboard } from '@/routes';
 import { BreadcrumbItem, SharedData } from '@/types';
+import { type CreditCardUsage } from '@/types/account';
 import { Category } from '@/types/category';
 import { NetWorthProjection } from '@/types/net-worth';
 import { __ } from '@/utils/i18n';
@@ -61,6 +63,8 @@ interface DashboardProps extends SharedData {
         previous: CashflowSummary;
     };
     openIntegrationRequests?: boolean;
+    /** Only while the credit card feature is on. */
+    creditCardUsage?: Record<string, CreditCardUsage>;
 }
 
 export default function Dashboard() {
@@ -84,8 +88,11 @@ export default function Dashboard() {
     );
 
     const accountMetrics = useMemo(
-        () => deriveAccountMetrics(netWorthEvolution, locale),
-        [netWorthEvolution, locale],
+        () =>
+            deriveAccountMetrics(netWorthEvolution, locale).map((account) =>
+                withCreditCardUsage(account, props.creditCardUsage, locale),
+            ),
+        [netWorthEvolution, props.creditCardUsage, locale],
     );
 
     // Linked loans remain in the manager so their net-worth inclusion can be
@@ -271,6 +278,7 @@ export default function Dashboard() {
         router.reload({
             only: [
                 'netWorthEvolution',
+                'creditCardUsage',
                 'topCategories',
                 'topLabels',
                 'cashflowSummary',

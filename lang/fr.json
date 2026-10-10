@@ -2620,5 +2620,8 @@
     "No limit set": "Aucun plafond",
     "The most your bank lets you spend on this card.": "Le maximum que votre banque vous permet de dépenser avec cette carte.",
     "Optional. The most your bank lets you spend on this card.": "Facultatif. Le maximum que votre banque vous permet de dépenser avec cette carte.",
-    "Edit card details": "Modifier les détails de la carte"
+    "Edit card details": "Modifier les détails de la carte",
+    "In use": "Utilisé",
+    "Credit limit in use": "Plafond de crédit utilisé",
+    "In use of": "Utilisé sur"
 }

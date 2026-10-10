@@ -158,6 +158,48 @@ describe('AccountForm', () => {
             );
         });
 
+        it('does not ask a new credit card for a balance', () => {
+            withCreditCardStatements(true);
+            const onChange = vi.fn();
+
+            render(
+                <AccountForm
+                    forceAccountType="credit_card"
+                    onChange={onChange}
+                />,
+            );
+
+            expect(screen.queryByLabelText('Balance')).not.toBeInTheDocument();
+            expect(onChange).toHaveBeenLastCalledWith(
+                expect.objectContaining({ balance: null }),
+            );
+        });
+
+        // This fork asks a balance only of the types that move as a single
+        // number, never of a credit card, so the feature leaves that alone.
+        it('still asks no balance of a new credit card while the feature is off', () => {
+            withCreditCardStatements(false);
+
+            render(
+                <AccountForm
+                    forceAccountType="credit_card"
+                    onChange={() => {}}
+                />,
+            );
+
+            expect(screen.queryByLabelText('Balance')).not.toBeInTheDocument();
+        });
+
+        it('still asks other account types for a balance', () => {
+            withCreditCardStatements(true);
+
+            render(
+                <AccountForm forceAccountType="savings" onChange={() => {}} />,
+            );
+
+            expect(screen.getByLabelText('Balance')).toBeInTheDocument();
+        });
+
         it('does not ask for a limit while the feature is off', () => {
             withCreditCardStatements(false);
 
