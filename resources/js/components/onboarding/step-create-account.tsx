@@ -112,6 +112,7 @@ export function StepCreateAccount({
         investedAmount: null,
         realEstate: null,
         loan: null,
+        creditLimit: null,
     });
 
     const handleFormChange = useCallback((data: AccountFormData) => {
@@ -207,6 +208,9 @@ export function StepCreateAccount({
                     currency_code: currencyCode,
                     ...(formDataRef.current.balance !== null
                         ? { balance: formDataRef.current.balance }
+                        : {}),
+                    ...(formDataRef.current.creditLimit !== null
+                        ? { credit_limit: formDataRef.current.creditLimit }
                         : {}),
                     ...(formDataRef.current.investedAmount !== null
                         ? {
