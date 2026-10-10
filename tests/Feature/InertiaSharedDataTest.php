@@ -104,6 +104,7 @@ test('shared feature flags do not include coinbase flag', function () {
         'transactionSplitting' => true,
         'recurringTransactions' => false,
         'savingsGoals' => false,
+        'creditCardStatements' => false,
     ]);
 });
 

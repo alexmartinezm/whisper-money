@@ -5,6 +5,7 @@ namespace App\Http\Middleware;
 use App\Enums\BankingConnectionStatus;
 use App\Enums\BankingProvider;
 use App\Features\CalculateBalancesOnImport;
+use App\Features\CreditCardStatements;
 use App\Features\RecurringTransactions;
 use App\Features\SavingsGoals;
 use App\Features\TransactionSplitting;
@@ -261,6 +262,7 @@ class HandleInertiaRequests extends Middleware
                 'transactionSplitting' => true,
                 'recurringTransactions' => false,
                 'savingsGoals' => false,
+                'creditCardStatements' => false,
             ];
         }
 
@@ -269,6 +271,7 @@ class HandleInertiaRequests extends Middleware
             TransactionSplitting::class,
             RecurringTransactions::class,
             SavingsGoals::class,
+            CreditCardStatements::class,
         ]);
 
         return [
@@ -277,6 +280,7 @@ class HandleInertiaRequests extends Middleware
             'transactionSplitting' => $features[TransactionSplitting::class] !== false,
             'recurringTransactions' => $features[RecurringTransactions::class] !== false,
             'savingsGoals' => $features[SavingsGoals::class] !== false,
+            'creditCardStatements' => $features[CreditCardStatements::class] !== false,
         ];
     }
 
