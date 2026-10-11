@@ -46,8 +46,6 @@ export interface Features {
     calculateBalancesOnImport: boolean;
     transactionSplitting: boolean;
     recurringTransactions: boolean;
-    /** Credit cards show their estimated next payment. */
-    creditCardStatements: boolean;
 }
 
 export interface ExpiredBankingConnectionNotification {

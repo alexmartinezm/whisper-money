@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { AccountForm } from './account-form';
 
@@ -123,20 +123,7 @@ describe('AccountForm', () => {
     });
 
     describe('credit limit', () => {
-        const withoutFeatures = pageProps.current;
-        const withCreditCardStatements = (enabled: boolean) => {
-            pageProps.current = {
-                ...withoutFeatures,
-                features: { creditCardStatements: enabled },
-            };
-        };
-
-        afterEach(() => {
-            pageProps.current = withoutFeatures;
-        });
-
         it('asks a new credit card for its limit and hands it over', () => {
-            withCreditCardStatements(true);
             const onChange = vi.fn();
 
             render(
@@ -159,7 +146,6 @@ describe('AccountForm', () => {
         });
 
         it('does not ask a new credit card for a balance', () => {
-            withCreditCardStatements(true);
             const onChange = vi.fn();
 
             render(
@@ -175,24 +161,7 @@ describe('AccountForm', () => {
             );
         });
 
-        // This fork asks a balance only of the types that move as a single
-        // number, never of a credit card, so the feature leaves that alone.
-        it('still asks no balance of a new credit card while the feature is off', () => {
-            withCreditCardStatements(false);
-
-            render(
-                <AccountForm
-                    forceAccountType="credit_card"
-                    onChange={() => {}}
-                />,
-            );
-
-            expect(screen.queryByLabelText('Balance')).not.toBeInTheDocument();
-        });
-
         it('still asks other account types for a balance', () => {
-            withCreditCardStatements(true);
-
             render(
                 <AccountForm forceAccountType="savings" onChange={() => {}} />,
             );
@@ -200,24 +169,7 @@ describe('AccountForm', () => {
             expect(screen.getByLabelText('Balance')).toBeInTheDocument();
         });
 
-        it('does not ask for a limit while the feature is off', () => {
-            withCreditCardStatements(false);
-
-            render(
-                <AccountForm
-                    forceAccountType="credit_card"
-                    onChange={() => {}}
-                />,
-            );
-
-            expect(
-                screen.queryByLabelText('Credit limit'),
-            ).not.toBeInTheDocument();
-        });
-
         it('does not ask other account types for a limit', () => {
-            withCreditCardStatements(true);
-
             render(
                 <AccountForm forceAccountType="checking" onChange={() => {}} />,
             );
@@ -228,8 +180,6 @@ describe('AccountForm', () => {
         });
 
         it('leaves the limit to the card page when editing an account', () => {
-            withCreditCardStatements(true);
-
             render(
                 <AccountForm
                     initialValues={{ ...initialValues, type: 'credit_card' }}

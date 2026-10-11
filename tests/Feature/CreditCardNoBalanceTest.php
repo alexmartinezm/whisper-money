@@ -2,16 +2,15 @@
 
 use App\Enums\AccountType;
 use App\Enums\CategoryType;
-use App\Features\CreditCardStatements;
 use App\Features\TransactionSplitting;
 use App\Models\Account;
+use App\Models\BankingConnection;
 use App\Models\Category;
 use App\Models\CreditCardDetail;
 use App\Models\Transaction;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
-use Laravel\Pennant\Feature;
 
 use function Pest\Laravel\actingAs;
 
@@ -58,9 +57,7 @@ function cardWithPurchase(int $purchase, ?int $limit, array $attributes = []): A
 // Creating a card
 // -------------------------------------------------------------------
 
-it('opens a credit card without a balance while the flag is on', function () {
-    Feature::for($this->user)->activate(CreditCardStatements::class);
-
+it('opens a credit card without a balance', function () {
     actingAs($this->user)
         ->post(route('accounts.store'), [
             'name' => 'Visa',
@@ -77,22 +74,7 @@ it('opens a credit card without a balance while the flag is on', function () {
         ->and($card->creditCardDetail->credit_limit)->toBe(300000);
 });
 
-it('still opens a credit card with its balance while the flag is off', function () {
-    actingAs($this->user)
-        ->post(route('accounts.store'), [
-            'name' => 'Visa',
-            'type' => 'credit_card',
-            'currency_code' => 'EUR',
-            'balance' => -50000,
-        ])
-        ->assertSessionHasNoErrors();
-
-    expect(Account::query()->where('name', 'Visa')->sole()->balances()->sole()->balance)->toBe(-50000);
-});
-
-it('keeps the opening balance of other account types while the flag is on', function () {
-    Feature::for($this->user)->activate(CreditCardStatements::class);
-
+it('keeps the opening balance of other account types', function () {
     actingAs($this->user)
         ->post(route('accounts.store'), [
             'name' => 'Current',
@@ -109,8 +91,7 @@ it('keeps the opening balance of other account types while the flag is on', func
 // Accounts list
 // -------------------------------------------------------------------
 
-it('sends the usage of each credit card to the accounts list while the flag is on', function () {
-    Feature::for($this->user)->activate(CreditCardStatements::class);
+it('sends the usage of each credit card to the accounts list', function () {
     $card = cardWithPurchase(124000, limit: 300000);
     $cardWithoutLimit = cardWithPurchase(5000, limit: null);
     $checking = Account::factory()->create(['user_id' => $this->user->id, 'type' => AccountType::Checking]);
@@ -133,22 +114,24 @@ it('sends the usage of each credit card to the accounts list while the flag is o
         );
 });
 
-it('sends no credit card usage to the accounts list while the flag is off', function () {
-    cardWithPurchase(124000, limit: 300000);
+it('treats a bank-connected credit card like a manual one', function () {
+    $connectedCard = cardWithPurchase(8000, limit: 200000, attributes: [
+        'banking_connection_id' => BankingConnection::factory()->create(['user_id' => $this->user->id])->id,
+        'external_account_id' => 'external-card',
+    ]);
 
     actingAs($this->user)
         ->get(route('accounts.list'))
         ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->loadDeferredProps(fn ($reload) => $reload
-                ->has('accountMetrics')
-                ->missing('creditCardUsage')
+                ->where("creditCardUsage.{$connectedCard->id}.used", 8000)
+                ->where("creditCardUsage.{$connectedCard->id}.available", 192000)
             )
         );
 });
 
 it('works out the usage of every card in one query each', function () {
-    Feature::for($this->user)->activate(CreditCardStatements::class);
     cardWithPurchase(1000, limit: 300000);
 
     $countQueries = function (): int {
@@ -183,8 +166,7 @@ it('works out the usage of every card in one query each', function () {
 // Dashboard
 // -------------------------------------------------------------------
 
-it('sends the usage of each live credit card to the dashboard while the flag is on', function () {
-    Feature::for($this->user)->activate(CreditCardStatements::class);
+it('sends the usage of each live credit card to the dashboard', function () {
     $card = cardWithPurchase(124000, limit: 300000);
     $archived = cardWithPurchase(1000, limit: null, attributes: ['archived_at' => now()]);
 
@@ -198,20 +180,6 @@ it('sends the usage of each live credit card to the dashboard while the flag is 
                 ->where("creditCardUsage.{$card->id}.used", 124000)
                 ->where("creditCardUsage.{$card->id}.limit", 300000)
                 ->missing("creditCardUsage.{$archived->id}")
-            )
-        );
-});
-
-it('sends no credit card usage to the dashboard while the flag is off', function () {
-    cardWithPurchase(124000, limit: 300000);
-
-    actingAs($this->user)
-        ->get(route('dashboard'))
-        ->assertOk()
-        ->assertInertia(fn ($page) => $page
-            ->loadDeferredProps('dashboard', fn ($reload) => $reload
-                ->has('netWorthEvolution')
-                ->missing('creditCardUsage')
             )
         );
 });
@@ -260,8 +228,7 @@ function storeTransactionUpdatingBalance(Account $account, int $amount): Transac
     return Transaction::query()->findOrFail($id);
 }
 
-it('leaves a credit card balance alone when a transaction is created, edited or deleted with the flag on', function () {
-    Feature::for($this->user)->activate(CreditCardStatements::class);
+it('leaves a credit card balance alone when a transaction is created, edited or deleted', function () {
     $card = accountWithBalance(AccountType::CreditCard);
 
     $transaction = storeTransactionUpdatingBalance($card, -2_500);
@@ -277,8 +244,8 @@ it('leaves a credit card balance alone when a transaction is created, edited or 
     expect(balancesOf($card))->toBe(['2026-04-01' => 10_000]);
 });
 
-it('leaves a credit card balance alone when the split editor saves lines with the flag on', function () {
-    Feature::for($this->user)->activate([CreditCardStatements::class, TransactionSplitting::class]);
+it('leaves a credit card balance alone when the split editor saves lines', function () {
+    Feature::for($this->user)->activate(TransactionSplitting::class);
     $card = accountWithBalance(AccountType::CreditCard);
     [$food, $home] = Category::factory()->count(2)->create(['user_id' => $this->user->id, 'type' => CategoryType::Expense]);
 
@@ -316,16 +283,7 @@ it('leaves a credit card balance alone when the split editor saves lines with th
     expect(balancesOf($card))->toBe(['2026-04-01' => 10_000]);
 });
 
-it('still moves a credit card balance with the flag off', function () {
-    $card = accountWithBalance(AccountType::CreditCard);
-
-    storeTransactionUpdatingBalance($card, -2_500);
-
-    expect(balancesOf($card))->toBe(['2026-04-01' => 10_000, '2026-04-10' => 7_500]);
-});
-
-it('still moves the balance of other manual accounts with the flag on', function () {
-    Feature::for($this->user)->activate(CreditCardStatements::class);
+it('still moves the balance of other manual accounts', function () {
     $checking = accountWithBalance(AccountType::Checking);
 
     storeTransactionUpdatingBalance($checking, -2_500);
@@ -333,8 +291,7 @@ it('still moves the balance of other manual accounts with the flag on', function
     expect(balancesOf($checking))->toBe(['2026-04-01' => 10_000, '2026-04-10' => 7_500]);
 });
 
-it('unwinds only the manual side when a transaction moves onto a credit card with the flag on', function () {
-    Feature::for($this->user)->activate(CreditCardStatements::class);
+it('unwinds only the manual side when a transaction moves onto a credit card', function () {
     $checking = accountWithBalance(AccountType::Checking);
     $card = accountWithBalance(AccountType::CreditCard);
 

@@ -2,7 +2,6 @@
 
 use App\Enums\AccountType;
 use App\Enums\CategoryType;
-use App\Features\CreditCardStatements;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\CreditCardDetail;
@@ -13,7 +12,6 @@ use App\Models\User;
 use App\Services\CreditCards\CreditCardStatementService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Http;
-use Laravel\Pennant\Feature;
 
 use function Pest\Laravel\actingAs;
 use function Pest\Laravel\assertDatabaseHas;
@@ -254,33 +252,20 @@ it('leaves the available credit empty while no limit is set', function () {
 // Account page payload
 // -------------------------------------------------------------------
 
-it('sends neither the details nor the estimate while the flag is off', function () {
-    actingAs(test()->user)
-        ->get(route('accounts.show', test()->card))
-        ->assertInertia(fn ($page) => $page
-            ->missing('account.credit_card_detail')
-            ->missing('account.credit_card_statement')
-            ->missing('account.credit_card_usage')
-            ->where('features.creditCardStatements', false));
-});
-
-it('sends the details and the estimate for a credit card when the flag is on', function () {
-    Feature::for(test()->user)->activate(CreditCardStatements::class);
+it('sends the details and the estimate for a credit card', function () {
     $this->travelTo(CarbonImmutable::parse('2026-03-10 12:00', 'UTC'));
     cardTransaction(-1000, '2026-03-01');
 
     actingAs(test()->user)
         ->get(route('accounts.show', test()->card))
         ->assertInertia(fn ($page) => $page
-            ->where('features.creditCardStatements', true)
             ->where('account.credit_card_detail.statement_closing_date', '2026-03-05')
             ->where('account.credit_card_detail.payment_due_date', '2026-03-20')
             ->where('account.credit_card_statement.next_payment.amount', 1000)
             ->where('account.credit_card_statement.next_payment.is_final', true));
 });
 
-it('sends the credit limit and the usage for a credit card when the flag is on', function () {
-    Feature::for(test()->user)->activate(CreditCardStatements::class);
+it('sends the credit limit and the usage for a credit card', function () {
     $this->travelTo(CarbonImmutable::parse('2026-03-10 12:00', 'UTC'));
     test()->detail->update(['credit_limit' => 50000]);
     cardTransaction(-1000, '2026-03-01');
@@ -297,7 +282,6 @@ it('sends the credit limit and the usage for a credit card when the flag is on',
 });
 
 it('treats a card with a limit but no statement dates as having no dates', function () {
-    Feature::for(test()->user)->activate(CreditCardStatements::class);
     $this->travelTo(CarbonImmutable::parse('2026-03-10 12:00', 'UTC'));
     test()->detail->update(['statement_closing_date' => null, 'payment_due_date' => null, 'credit_limit' => 50000]);
 
@@ -313,7 +297,6 @@ it('treats a card with a limit but no statement dates as having no dates', funct
 });
 
 it('sends an empty state when the card has no statement dates yet', function () {
-    Feature::for(test()->user)->activate(CreditCardStatements::class);
     test()->detail->delete();
 
     actingAs(test()->user)
@@ -324,8 +307,7 @@ it('sends an empty state when the card has no statement dates yet', function () 
             ->where('account.credit_card_usage.limit', null));
 });
 
-it('leaves other account types alone when the flag is on', function () {
-    Feature::for(test()->user)->activate(CreditCardStatements::class);
+it('leaves other account types alone', function () {
     $checking = Account::factory()->create(['user_id' => test()->user->id, 'type' => AccountType::Checking]);
 
     actingAs(test()->user)
@@ -334,7 +316,6 @@ it('leaves other account types alone when the flag is on', function () {
 });
 
 it('reads today in the user timezone', function () {
-    Feature::for(test()->user)->activate(CreditCardStatements::class);
     test()->user->update(['timezone' => 'America/Argentina/Buenos_Aires']);
 
     // Already the 21st in UTC, still the 20th (the due date) in Buenos Aires.
@@ -352,7 +333,6 @@ it('reads today in the user timezone', function () {
 // -------------------------------------------------------------------
 
 it('saves the statement dates', function () {
-    Feature::for(test()->user)->activate(CreditCardStatements::class);
     test()->detail->delete();
 
     actingAs(test()->user)
@@ -370,8 +350,6 @@ it('saves the statement dates', function () {
 });
 
 it('replaces the anchor when the dates are edited', function () {
-    Feature::for(test()->user)->activate(CreditCardStatements::class);
-
     actingAs(test()->user)
         ->patch(route('accounts.credit-card-detail.update', test()->card), [
             'statement_closing_date' => '2026-04-07',
@@ -384,8 +362,6 @@ it('replaces the anchor when the dates are edited', function () {
 });
 
 it('clears the statement dates', function () {
-    Feature::for(test()->user)->activate(CreditCardStatements::class);
-
     actingAs(test()->user)
         ->delete(route('accounts.credit-card-detail.destroy', test()->card))
         ->assertRedirect(route('accounts.show', test()->card));
@@ -394,7 +370,6 @@ it('clears the statement dates', function () {
 });
 
 it('keeps the credit limit when the statement dates are cleared', function () {
-    Feature::for(test()->user)->activate(CreditCardStatements::class);
     test()->detail->update(['credit_limit' => 50000]);
 
     actingAs(test()->user)
@@ -408,8 +383,6 @@ it('keeps the credit limit when the statement dates are cleared', function () {
 });
 
 it('sets the credit limit without touching the statement dates', function () {
-    Feature::for(test()->user)->activate(CreditCardStatements::class);
-
     actingAs(test()->user)
         ->patch(route('accounts.credit-card-detail.update', test()->card), ['credit_limit' => 150000])
         ->assertSessionHasNoErrors();
@@ -420,7 +393,6 @@ it('sets the credit limit without touching the statement dates', function () {
 });
 
 it('saves a credit limit without statement dates', function () {
-    Feature::for(test()->user)->activate(CreditCardStatements::class);
     test()->detail->delete();
 
     actingAs(test()->user)
@@ -439,7 +411,6 @@ it('saves a credit limit without statement dates', function () {
 });
 
 it('forgets the card details once neither dates nor limit are left', function () {
-    Feature::for(test()->user)->activate(CreditCardStatements::class);
     test()->detail->update(['credit_limit' => 50000]);
 
     actingAs(test()->user)
@@ -454,8 +425,6 @@ it('forgets the card details once neither dates nor limit are left', function ()
 });
 
 it('rejects a credit limit that is not positive', function (int $creditLimit) {
-    Feature::for(test()->user)->activate(CreditCardStatements::class);
-
     actingAs(test()->user)
         ->patch(route('accounts.credit-card-detail.update', test()->card), ['credit_limit' => $creditLimit])
         ->assertSessionHasErrors('credit_limit');
@@ -466,8 +435,6 @@ it('rejects a credit limit that is not positive', function (int $creditLimit) {
 // -------------------------------------------------------------------
 
 it('saves the credit limit a credit card is created with', function () {
-    Feature::for(test()->user)->activate(CreditCardStatements::class);
-
     actingAs(test()->user)
         ->post(route('accounts.store'), [
             'name' => 'Visa',
@@ -485,8 +452,6 @@ it('saves the credit limit a credit card is created with', function () {
 });
 
 it('creates no card details when a credit card is created without a limit', function () {
-    Feature::for(test()->user)->activate(CreditCardStatements::class);
-
     actingAs(test()->user)
         ->post(route('accounts.store'), [
             'name' => 'Visa',
@@ -499,22 +464,7 @@ it('creates no card details when a credit card is created without a limit', func
     expect(Account::query()->where('name', 'Visa')->sole()->creditCardDetail)->toBeNull();
 });
 
-it('ignores a credit limit while the flag is off', function () {
-    actingAs(test()->user)
-        ->post(route('accounts.store'), [
-            'name' => 'Visa',
-            'type' => 'credit_card',
-            'currency_code' => 'EUR',
-            'credit_limit' => 300000,
-        ])
-        ->assertSessionHasNoErrors();
-
-    expect(Account::query()->where('name', 'Visa')->sole()->creditCardDetail)->toBeNull();
-});
-
 it('rejects statement dates that do not make sense', function (array $payload, string $field) {
-    Feature::for(test()->user)->activate(CreditCardStatements::class);
-
     actingAs(test()->user)
         ->patch(route('accounts.credit-card-detail.update', test()->card), $payload)
         ->assertSessionHasErrors($field);
@@ -528,8 +478,6 @@ it('rejects statement dates that do not make sense', function (array $payload, s
 ]);
 
 it('accepts a due date exactly 45 days after closing', function () {
-    Feature::for(test()->user)->activate(CreditCardStatements::class);
-
     actingAs(test()->user)
         ->patch(route('accounts.credit-card-detail.update', test()->card), [
             'statement_closing_date' => '2026-04-01',
@@ -538,24 +486,8 @@ it('accepts a due date exactly 45 days after closing', function () {
         ->assertSessionHasNoErrors();
 });
 
-it('hides the statement endpoints while the flag is off', function () {
-    actingAs(test()->user)
-        ->patch(route('accounts.credit-card-detail.update', test()->card), [
-            'statement_closing_date' => '2026-04-25',
-            'payment_due_date' => '2026-05-10',
-        ])
-        ->assertNotFound();
-
-    actingAs(test()->user)
-        ->delete(route('accounts.credit-card-detail.destroy', test()->card))
-        ->assertNotFound();
-
-    assertDatabaseHas('credit_card_details', ['account_id' => test()->card->id, 'statement_closing_date' => '2026-03-05']);
-});
-
 it('does not let another user set the statement dates', function () {
     $intruder = User::factory()->onboarded()->create();
-    Feature::for($intruder)->activate(CreditCardStatements::class);
 
     actingAs($intruder)
         ->patch(route('accounts.credit-card-detail.update', test()->card), [
@@ -570,7 +502,6 @@ it('does not let another user set the statement dates', function () {
 });
 
 it('only takes statement dates on a credit card', function () {
-    Feature::for(test()->user)->activate(CreditCardStatements::class);
     $checking = Account::factory()->create(['user_id' => test()->user->id, 'type' => AccountType::Checking]);
 
     actingAs(test()->user)

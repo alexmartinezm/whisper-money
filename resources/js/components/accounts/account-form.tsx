@@ -73,7 +73,7 @@ export interface AccountFormData {
     investedAmount: number | null;
     realEstate: RealEstateFormData | null;
     loan: LoanFormData | null;
-    /** Minor units; only on a new credit card while the feature is on. */
+    /** Minor units; only on a new credit card. */
     creditLimit: number | null;
 }
 
@@ -131,7 +131,7 @@ export function AccountForm({
     onChange,
     errors = {},
 }: AccountFormProps) {
-    const { auth, currencies, features } = usePage<SharedData>().props;
+    const { auth, currencies } = usePage<SharedData>().props;
     const currencyOptions = usePrimaryCurrenciesOnly
         ? currencies.profile
         : currencies.accounts;
@@ -172,15 +172,11 @@ export function AccountForm({
     );
     const isRevaluationManuallySet = useRef(false);
 
-    // A credit card under the credit card feature has a limit and what is in
-    // use of it, never a balance.
-    const tracksCreditLimit =
-        selectedType === 'credit_card' &&
-        Boolean(features?.creditCardStatements);
+    // A credit card has a limit and what is in use of it, never a balance;
+    // the other types are asked one only when they move as a single number.
+    const tracksCreditLimit = selectedType === 'credit_card';
     const showBalanceField =
-        selectedType !== null &&
-        BALANCE_ACCOUNT_TYPES.includes(selectedType) &&
-        !tracksCreditLimit;
+        selectedType !== null && BALANCE_ACCOUNT_TYPES.includes(selectedType);
     // What the account is worth is only half the story on the types that grow:
     // without what went in there is no gain to read anywhere.
     const showInvestedAmountField =

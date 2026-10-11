@@ -47,7 +47,7 @@ export interface AccountWithMetrics extends Account {
     hidden_on_dashboard: boolean;
     include_in_net_worth?: boolean;
     archived_at: string | null;
-    /** Set on a credit card while the credit card feature is on. */
+    /** Set on a credit card once its usage has loaded. */
     creditCardUsage?: CreditCardUsage;
 }
 

@@ -11,7 +11,7 @@ import {
 } from './edit-transaction-dialog';
 
 const inertiaProps = vi.hoisted(() => ({
-    features: { transactionSplitting: true, creditCardStatements: false },
+    features: { transactionSplitting: true },
     auth: { user: { currency_code: 'EUR' } },
     currencies: {
         profile: [{ code: 'EUR', name: 'Euro' }],
@@ -223,7 +223,6 @@ describe('split line dirty checking', () => {
 describe('EditTransactionDialog', () => {
     beforeEach(() => {
         inertiaProps.features.transactionSplitting = true;
-        inertiaProps.features.creditCardStatements = false;
         vi.clearAllMocks();
         globalThis.ResizeObserver = class {
             observe() {}
@@ -1086,8 +1085,7 @@ describe('EditTransactionDialog', () => {
             );
         }
 
-        it('offers no balance update while the feature is on', async () => {
-            inertiaProps.features.creditCardStatements = true;
+        it('offers no balance update', async () => {
             vi.mocked(transactionSyncService.create).mockResolvedValue({
                 id: 'tx-new',
             } as never);
@@ -1109,26 +1107,7 @@ describe('EditTransactionDialog', () => {
             );
         });
 
-        it('still updates the balance while the feature is off', async () => {
-            vi.mocked(transactionSyncService.create).mockResolvedValue({
-                id: 'tx-new',
-            } as never);
-
-            renderCardDialog();
-
-            expect(screen.getByRole('checkbox')).toBeChecked();
-
-            await fillAndSubmitCreate();
-
-            expect(transactionSyncService.create).toHaveBeenCalledWith(
-                expect.anything(),
-                { updateBalance: true },
-            );
-        });
-
-        it('sends no balance update when editing a card transaction with the feature on', async () => {
-            inertiaProps.features.creditCardStatements = true;
-
+        it('sends no balance update when editing a card transaction', async () => {
             renderCardDialog({
                 mode: 'edit',
                 initialAccountId: null,
@@ -1154,8 +1133,7 @@ describe('EditTransactionDialog', () => {
             });
         });
 
-        it('sends no balance update when the split editor saves a card transaction with the feature on', async () => {
-            inertiaProps.features.creditCardStatements = true;
+        it('sends no balance update when the split editor saves a card transaction', async () => {
             const categories = [
                 { id: 'food', name: 'Food', type: 'expense' },
                 { id: 'home', name: 'Home', type: 'expense' },

@@ -190,7 +190,6 @@ const creditCardAccount = {
     type: 'credit_card' as const,
 };
 
-// Only sent by the server while the credit card statements feature is on.
 const creditCardUsage = {
     limit: 100000,
     used: 25000,
@@ -374,7 +373,7 @@ describe('AccountShow', () => {
         ).not.toBeInTheDocument();
     });
 
-    describe('a credit card with the statements feature on', () => {
+    describe('a credit card', () => {
         const card = {
             ...creditCardAccount,
             credit_card_detail: null,
@@ -436,22 +435,5 @@ describe('AccountShow', () => {
 
             expect(router.reload).toHaveBeenCalledWith({ only: ['account'] });
         });
-    });
-
-    it('keeps the balance chart and actions of a credit card with the feature off', () => {
-        renderPage(creditCardAccount);
-
-        expect(
-            screen.queryByTestId('credit-card-usage-chart'),
-        ).not.toBeInTheDocument();
-        expect(
-            screen.getByRole('button', { name: 'Update balance' }),
-        ).toBeInTheDocument();
-        expect(
-            screen.getByRole('button', { name: 'Import balances' }),
-        ).toBeInTheDocument();
-        expect(
-            transactionList.mock.calls.at(-1)![0].onTransactionsChanged,
-        ).toBeUndefined();
     });
 });

@@ -10,6 +10,7 @@ import {
     AccountWithMetrics,
     figuresCurrencyCode,
 } from '@/hooks/use-dashboard-data';
+import { ownsBalanceUpdates } from '@/hooks/use-owns-balance-updates';
 import { cn } from '@/lib/utils';
 import { formatAccountType, supportsInvestedAmount } from '@/types/account';
 import { __ } from '@/utils/i18n';
@@ -466,7 +467,7 @@ export function AccountListCard({
                             )}
                         </div>
 
-                        {!isConnected && !creditCardUsage && (
+                        {ownsBalanceUpdates(account) && (
                             <Button
                                 className="cursor-pointer"
                                 variant="secondary"

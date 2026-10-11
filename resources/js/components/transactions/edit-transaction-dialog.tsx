@@ -31,7 +31,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { useSyncContext } from '@/contexts/sync-context';
 import { useLocale } from '@/hooks/use-locale';
-import { useOwnsBalanceUpdates } from '@/hooks/use-owns-balance-updates';
+import { ownsBalanceUpdates } from '@/hooks/use-owns-balance-updates';
 import { decrypt, importKey } from '@/lib/crypto';
 import { fetchJson } from '@/lib/fetch-json';
 import { getStoredKey } from '@/lib/key-storage';
@@ -204,7 +204,6 @@ export function EditTransactionDialog({
     const userCurrencyCode = auth.user.currency_code;
     const STORAGE_KEY_UPDATE_BALANCE =
         'whisper_money_update_balance_on_transaction';
-    const ownsBalance = useOwnsBalanceUpdates();
 
     const { sync } = useSyncContext();
     const transactionSplittingEnabled =
@@ -473,7 +472,7 @@ export function EditTransactionDialog({
         return [originalAccountId, accountId].some((id) => {
             const account = accounts.find((acc) => acc.id === id);
 
-            return account === undefined || ownsBalance(account);
+            return account === undefined || ownsBalanceUpdates(account);
         });
     }
 
@@ -575,9 +574,9 @@ export function EditTransactionDialog({
                     },
                     {
                         // A connected account's balance is the bank's to
-                        // report and a credit card under the feature has none.
+                        // report and a credit card has none.
                         updateBalance:
-                            ownsBalance(selectedAccount) &&
+                            ownsBalanceUpdates(selectedAccount) &&
                             updateAccountBalance,
                     },
                 );
@@ -818,10 +817,10 @@ export function EditTransactionDialog({
     }
 
     const selectedAccount = accounts.find((acc) => acc.id === accountId);
-    // A connected account's balance is the bank's and a credit card under the
-    // feature has none, so neither offers to update one.
+    // A connected account's balance is the bank's and a credit card has none,
+    // so neither offers to update one.
     const offersBalanceUpdate =
-        !selectedAccount || ownsBalance(selectedAccount);
+        !selectedAccount || ownsBalanceUpdates(selectedAccount);
     const transactionalAccounts = filterTransactionalAccounts(accounts);
     // An archived account stays selectable while editing a transaction that
     // already sits on it, otherwise the field reads as empty and the user cannot

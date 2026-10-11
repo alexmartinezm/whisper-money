@@ -163,14 +163,9 @@ export default function AccountShow({
         setCreateTransactionOpen(true);
     }
 
+    // A credit card has a limit and what is in use of it instead of a
+    // balance: no balance chart and no balance actions.
     const isCreditCard = account.type === 'credit_card';
-    // The server only sends the usage while the credit card statements
-    // feature is on, so its presence is what turns the card from a balance
-    // into a limit: no balance chart and no balance actions.
-    const creditCardUsage = isCreditCard
-        ? account.credit_card_usage
-        : undefined;
-    const showsCreditLimit = creditCardUsage !== undefined;
 
     function handleTransactionCreated() {
         // A credit card's statement estimate is computed on the server from
@@ -343,7 +338,7 @@ export default function AccountShow({
                         <div className="flex flex-wrap gap-2">
                             {addTransactionButton}
                             <ButtonGroup>
-                                {!showsCreditLimit && (
+                                {!isCreditCard && (
                                     <>
                                         <Button
                                             variant="outline"
@@ -364,7 +359,7 @@ export default function AccountShow({
                                     </>
                                 )}
                                 <MoreOptionsMenu>
-                                    {!showsCreditLimit && (
+                                    {!isCreditCard && (
                                         <DropdownMenuItem
                                             onClick={() =>
                                                 setBalancesOpen(true)
@@ -386,11 +381,11 @@ export default function AccountShow({
                     )}
                 </div>
 
-                {creditCardUsage ? (
+                {isCreditCard && account.credit_card_usage ? (
                     <CreditCardUsageChart
                         accountId={account.id}
                         currencyCode={account.currency_code}
-                        usage={creditCardUsage}
+                        usage={account.credit_card_usage}
                         detail={account.credit_card_detail ?? null}
                     />
                 ) : (
@@ -490,7 +485,7 @@ export default function AccountShow({
                                 setChartRefreshKey((key) => key + 1)
                             }
                             onTransactionsChanged={
-                                showsCreditLimit
+                                isCreditCard
                                     ? handleTransactionsChanged
                                     : undefined
                             }
@@ -513,7 +508,7 @@ export default function AccountShow({
                 onOpenChange={setArchiveOpen}
             />
 
-            {!showsCreditLimit && (
+            {!isCreditCard && (
                 <UpdateBalanceDialog
                     account={account}
                     open={updateBalanceOpen}
@@ -536,7 +531,7 @@ export default function AccountShow({
                 initialAccountId={account.id}
             />
 
-            {!showsCreditLimit && (
+            {!isCreditCard && (
                 <>
                     <BalancesModal
                         account={account}
