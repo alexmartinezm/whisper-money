@@ -11,7 +11,7 @@ import {
 } from './edit-transaction-dialog';
 
 const inertiaProps = vi.hoisted(() => ({
-    features: { transactionSplitting: true },
+    features: { transactionSplitting: true, creditCardStatements: false },
     auth: { user: { currency_code: 'EUR' } },
     currencies: {
         profile: [{ code: 'EUR', name: 'Euro' }],
@@ -223,6 +223,7 @@ describe('split line dirty checking', () => {
 describe('EditTransactionDialog', () => {
     beforeEach(() => {
         inertiaProps.features.transactionSplitting = true;
+        inertiaProps.features.creditCardStatements = false;
         vi.clearAllMocks();
         globalThis.ResizeObserver = class {
             observe() {}
@@ -1039,6 +1040,176 @@ describe('EditTransactionDialog', () => {
         decryptedNotes: null,
         label_ids: [],
     };
+
+    describe('on a credit card', () => {
+        const creditCard = {
+            ...checkingAccount,
+            id: 'account-card',
+            name: 'Visa',
+            type: 'credit_card' as const,
+        };
+
+        function renderCardDialog(
+            props: Partial<
+                React.ComponentProps<typeof EditTransactionDialog>
+            > = {},
+        ) {
+            return render(
+                <EditTransactionDialog
+                    transaction={null}
+                    categories={[]}
+                    accounts={[creditCard]}
+                    banks={[]}
+                    labels={[]}
+                    open
+                    onOpenChange={vi.fn()}
+                    onSuccess={vi.fn()}
+                    mode="create"
+                    initialAccountId="account-card"
+                    {...props}
+                />,
+            );
+        }
+
+        async function fillAndSubmitCreate() {
+            fireEvent.change(
+                screen.getByPlaceholderText('Transaction description'),
+                { target: { value: 'Hotel' } },
+            );
+            const amountInput = screen.getByPlaceholderText('25.00');
+            fireEvent.change(amountInput, { target: { value: '40' } });
+            fireEvent.blur(amountInput);
+            fireEvent.click(screen.getByTestId('submit-transaction'));
+
+            await waitFor(() =>
+                expect(transactionSyncService.create).toHaveBeenCalledOnce(),
+            );
+        }
+
+        it('offers no balance update while the feature is on', async () => {
+            inertiaProps.features.creditCardStatements = true;
+            vi.mocked(transactionSyncService.create).mockResolvedValue({
+                id: 'tx-new',
+            } as never);
+
+            renderCardDialog();
+
+            expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+            expect(
+                screen.queryByText(
+                    "This account's balance comes from your bank, so it won't change.",
+                ),
+            ).not.toBeInTheDocument();
+
+            await fillAndSubmitCreate();
+
+            expect(transactionSyncService.create).toHaveBeenCalledWith(
+                expect.anything(),
+                { updateBalance: false },
+            );
+        });
+
+        it('still updates the balance while the feature is off', async () => {
+            vi.mocked(transactionSyncService.create).mockResolvedValue({
+                id: 'tx-new',
+            } as never);
+
+            renderCardDialog();
+
+            expect(screen.getByRole('checkbox')).toBeChecked();
+
+            await fillAndSubmitCreate();
+
+            expect(transactionSyncService.create).toHaveBeenCalledWith(
+                expect.anything(),
+                { updateBalance: true },
+            );
+        });
+
+        it('sends no balance update when editing a card transaction with the feature on', async () => {
+            inertiaProps.features.creditCardStatements = true;
+
+            renderCardDialog({
+                mode: 'edit',
+                initialAccountId: null,
+                transaction: {
+                    ...manualTransaction,
+                    account_id: 'account-card',
+                },
+            });
+
+            const amountInput = screen.getByLabelText('Amount');
+            fireEvent.change(amountInput, { target: { value: '30' } });
+            fireEvent.blur(amountInput);
+            fireEvent.click(
+                screen.getByRole('button', { name: 'Save Changes' }),
+            );
+
+            await waitFor(() => {
+                expect(transactionSyncService.update).toHaveBeenCalledWith(
+                    'tx-manual',
+                    expect.objectContaining({ amount: -3000 }),
+                    { updateBalance: false },
+                );
+            });
+        });
+
+        it('sends no balance update when the split editor saves a card transaction with the feature on', async () => {
+            inertiaProps.features.creditCardStatements = true;
+            const categories = [
+                { id: 'food', name: 'Food', type: 'expense' },
+                { id: 'home', name: 'Home', type: 'expense' },
+            ] as Category[];
+
+            renderCardDialog({
+                mode: 'edit',
+                initialAccountId: null,
+                categories,
+                transaction: {
+                    ...manualTransaction,
+                    account_id: 'account-card',
+                    is_split: true,
+                    split_count: 2,
+                    splits: [
+                        {
+                            id: 'split-1',
+                            transaction_id: manualTransaction.id,
+                            category_id: 'food',
+                            category: categories[0],
+                            amount: -700,
+                            position: 0,
+                        },
+                        {
+                            id: 'split-2',
+                            transaction_id: manualTransaction.id,
+                            category_id: 'home',
+                            category: categories[1],
+                            amount: -500,
+                            position: 1,
+                        },
+                    ],
+                } as DecryptedTransaction,
+            });
+
+            const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+            fireEvent.click(
+                screen.getByRole('button', { name: 'Remove split' }),
+            );
+            fireEvent.click(
+                screen.getByRole('button', { name: 'Save Changes' }),
+            );
+
+            await waitFor(() => {
+                expect(transactionSyncService.update).toHaveBeenCalledWith(
+                    'tx-manual',
+                    expect.objectContaining({ splits: [] }),
+                    { updateBalance: false },
+                );
+            });
+
+            confirm.mockRestore();
+        });
+    });
 
     it('hides the start split control while transaction splitting is disabled', () => {
         inertiaProps.features.transactionSplitting = false;

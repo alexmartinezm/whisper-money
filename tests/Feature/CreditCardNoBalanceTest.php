@@ -3,6 +3,7 @@
 use App\Enums\AccountType;
 use App\Enums\CategoryType;
 use App\Features\CreditCardStatements;
+use App\Features\TransactionSplitting;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\CreditCardDetail;
@@ -213,4 +214,137 @@ it('sends no credit card usage to the dashboard while the flag is off', function
                 ->missing('creditCardUsage')
             )
         );
+});
+
+// -------------------------------------------------------------------
+// Transactions never move a card's balance
+// -------------------------------------------------------------------
+
+/**
+ * A manual account of the test user holding one balance snapshot.
+ */
+function accountWithBalance(AccountType $type, int $balance = 10_000): Account
+{
+    $account = Account::factory()->create([
+        'user_id' => test()->user->id,
+        'type' => $type,
+        'currency_code' => 'EUR',
+    ]);
+    $account->balances()->create(['balance_date' => '2026-04-01', 'balance' => $balance]);
+
+    return $account;
+}
+
+/**
+ * @return array<string, int>
+ */
+function balancesOf(Account $account): array
+{
+    return $account->balances()->orderBy('balance_date')->pluck('balance', 'balance_date')
+        ->mapWithKeys(fn (int $balance, $date): array => [substr((string) $date, 0, 10) => $balance])
+        ->all();
+}
+
+function storeTransactionUpdatingBalance(Account $account, int $amount): Transaction
+{
+    $id = actingAs(test()->user)->postJson(route('transactions.store'), [
+        'account_id' => $account->id,
+        'description' => 'Groceries',
+        'transaction_date' => '2026-04-10',
+        'amount' => $amount,
+        'currency_code' => 'EUR',
+        'source' => 'manually_created',
+        'update_balance' => true,
+    ])->assertCreated()->json('data.id');
+
+    return Transaction::query()->findOrFail($id);
+}
+
+it('leaves a credit card balance alone when a transaction is created, edited or deleted with the flag on', function () {
+    Feature::for($this->user)->activate(CreditCardStatements::class);
+    $card = accountWithBalance(AccountType::CreditCard);
+
+    $transaction = storeTransactionUpdatingBalance($card, -2_500);
+
+    actingAs($this->user)->patchJson(route('transactions.update', $transaction), [
+        'amount' => -4_000,
+        'update_balance' => true,
+    ])->assertOk();
+
+    actingAs($this->user)->deleteJson(route('transactions.destroy', $transaction), ['update_balance' => true])
+        ->assertOk();
+
+    expect(balancesOf($card))->toBe(['2026-04-01' => 10_000]);
+});
+
+it('leaves a credit card balance alone when the split editor saves lines with the flag on', function () {
+    Feature::for($this->user)->activate([CreditCardStatements::class, TransactionSplitting::class]);
+    $card = accountWithBalance(AccountType::CreditCard);
+    [$food, $home] = Category::factory()->count(2)->create(['user_id' => $this->user->id, 'type' => CategoryType::Expense]);
+
+    $id = actingAs($this->user)->postJson(route('transactions.store'), [
+        'account_id' => $card->id,
+        'description' => 'Split purchase',
+        'transaction_date' => '2026-04-10',
+        'amount' => -10_000,
+        'currency_code' => 'EUR',
+        'source' => 'manually_created',
+        'update_balance' => true,
+        'splits' => [
+            ['category_id' => $food->id, 'amount' => -6_000],
+            ['category_id' => $home->id, 'amount' => -4_000],
+        ],
+    ])->assertCreated()->assertJsonPath('data.split_count', 2)->json('data.id');
+
+    // The split editor saving new lines together with a new amount and date.
+    actingAs($this->user)->patchJson(route('transactions.update', $id), [
+        'amount' => -12_000,
+        'transaction_date' => '2026-04-12',
+        'update_balance' => true,
+        'splits' => [
+            ['category_id' => $food->id, 'amount' => -7_000],
+            ['category_id' => $home->id, 'amount' => -5_000],
+        ],
+    ])->assertOk()->assertJsonPath('data.amount', -12_000);
+
+    actingAs($this->user)->patchJson(route('transactions.update', $id), [
+        'category_id' => $food->id,
+        'update_balance' => true,
+        'splits' => [],
+    ])->assertOk()->assertJsonPath('data.is_split', false);
+
+    expect(balancesOf($card))->toBe(['2026-04-01' => 10_000]);
+});
+
+it('still moves a credit card balance with the flag off', function () {
+    $card = accountWithBalance(AccountType::CreditCard);
+
+    storeTransactionUpdatingBalance($card, -2_500);
+
+    expect(balancesOf($card))->toBe(['2026-04-01' => 10_000, '2026-04-10' => 7_500]);
+});
+
+it('still moves the balance of other manual accounts with the flag on', function () {
+    Feature::for($this->user)->activate(CreditCardStatements::class);
+    $checking = accountWithBalance(AccountType::Checking);
+
+    storeTransactionUpdatingBalance($checking, -2_500);
+
+    expect(balancesOf($checking))->toBe(['2026-04-01' => 10_000, '2026-04-10' => 7_500]);
+});
+
+it('unwinds only the manual side when a transaction moves onto a credit card with the flag on', function () {
+    Feature::for($this->user)->activate(CreditCardStatements::class);
+    $checking = accountWithBalance(AccountType::Checking);
+    $card = accountWithBalance(AccountType::CreditCard);
+
+    $transaction = storeTransactionUpdatingBalance($checking, -2_500);
+
+    actingAs($this->user)->patchJson(route('transactions.update', $transaction), [
+        'account_id' => $card->id,
+        'update_balance' => true,
+    ])->assertOk();
+
+    expect(balancesOf($checking))->toBe(['2026-04-01' => 10_000, '2026-04-10' => 10_000]);
+    expect(balancesOf($card))->toBe(['2026-04-01' => 10_000]);
 });

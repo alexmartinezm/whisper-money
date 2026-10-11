@@ -1,4 +1,5 @@
 import { useLocale } from '@/hooks/use-locale';
+import { useBalanceOwningAccountIds } from '@/hooks/use-owns-balance-updates';
 import { reloadPage } from '@/lib/leave-page';
 import { __ } from '@/utils/i18n';
 import { Link } from '@inertiajs/react';
@@ -479,15 +480,7 @@ export function TransactionList({
         setIsSearching(false);
     }, [filters.searchText, transactions]);
 
-    const manualAccountIds = useMemo(
-        () =>
-            new Set(
-                accounts
-                    .filter((account) => account.banking_connection_id === null)
-                    .map((account) => account.id),
-            ),
-        [accounts],
-    );
+    const manualAccountIds = useBalanceOwningAccountIds(accounts);
 
     const categoryFilter = useMemo(
         () => createTransactionCategoryFilter(filters.categoryIds, categories),
@@ -940,7 +933,7 @@ export function TransactionList({
             );
         try {
             await transactionSyncService.deleteMany(selectedIds, {
-                updateBalance: updateBalanceOnDelete,
+                updateBalance: balanceMayHaveUpdated,
             });
             if (balanceMayHaveUpdated) {
                 onBalanceUpdated?.();
