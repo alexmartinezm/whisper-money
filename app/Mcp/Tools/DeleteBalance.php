@@ -82,7 +82,10 @@ class DeleteBalance extends WriteTool
             ]);
         }
 
-        $account = $this->balanceWritableAccount($request, $space);
+        // Not balanceWritableAccount(): a credit card takes no new balance,
+        // but a snapshot it was given before still has to be removable.
+        $account = $this->accountInSpace($request, $space);
+        $this->assertBalanceWritable($account);
         $date = $request->string('balance_date')->toString();
 
         $balance = AccountBalance::query()
