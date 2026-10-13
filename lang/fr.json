@@ -2636,5 +2636,7 @@
     "Add the credit limit of this card to see how much of it you have used and how much is still available.": "Ajoutez le plafond de cette carte pour voir combien vous en avez utilisé et combien il reste disponible.",
     "From :from to :to": "Du :from au :to",
     "Used counts the purchases on this card that are still to be charged: the statement not paid yet and the open cycle. Payments to the card are not subtracted.": "L'utilisé additionne les achats de cette carte qui n'ont pas encore été prélevés : le relevé pas encore payé et le cycle en cours. Les remboursements de la carte ne sont pas déduits.",
-    "Used counts the purchases on this card this month. Payments to the card are not subtracted.": "L'utilisé additionne les achats de cette carte ce mois-ci. Les remboursements de la carte ne sont pas déduits."
+    "Used counts the purchases on this card this month. Payments to the card are not subtracted.": "L'utilisé additionne les achats de cette carte ce mois-ci. Les remboursements de la carte ne sont pas déduits.",
+    "Statement frequency": "Fréquence du relevé",
+    "Every field is optional. Later statements are assumed to repeat on the same weekday every week. If your bank moves them, update them here.": "Tous les champs sont facultatifs. Les relevés suivants sont supposés tomber le même jour de la semaine chaque semaine. Si votre banque les déplace, mettez-les à jour ici."
 }
