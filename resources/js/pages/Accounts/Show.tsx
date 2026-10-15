@@ -66,6 +66,7 @@ import {
     supportsInvestedAmount,
     type AreaUnit,
     type CreditCardDetail,
+    type CreditCardPayment,
     type CreditCardStatement,
     type CreditCardUsage,
     type LoanDetail,
@@ -128,6 +129,9 @@ function MoreOptionsMenu({ children }: { children: ReactNode }) {
     );
 }
 
+/** One empty list for every render, so the chart's memoised work holds. */
+const NO_PAYMENTS: CreditCardPayment[] = [];
+
 export default function AccountShow({
     account,
     categories,
@@ -166,6 +170,17 @@ export default function AccountShow({
     // A credit card has a limit and what is in use of it instead of a
     // balance: no balance chart and no balance actions.
     const isCreditCard = account.type === 'credit_card';
+    const statementPayments = useMemo(
+        () =>
+            isCreditCard
+                ? new Map(
+                      (account.credit_card_statement?.payments ?? []).map(
+                          (payment) => [payment.transaction_id, payment],
+                      ),
+                  )
+                : undefined,
+        [isCreditCard, account.credit_card_statement],
+    );
 
     function handleTransactionCreated() {
         // A credit card's statement estimate is computed on the server from
@@ -387,6 +402,10 @@ export default function AccountShow({
                         currencyCode={account.currency_code}
                         usage={account.credit_card_usage}
                         detail={account.credit_card_detail ?? null}
+                        payments={
+                            account.credit_card_statement?.payments ??
+                            NO_PAYMENTS
+                        }
                     />
                 ) : (
                     <AccountBalanceChart
@@ -481,6 +500,7 @@ export default function AccountShow({
                             showActionsMenu={false}
                             maxHeight={600}
                             hideColumns={['bank', 'account']}
+                            statementPayments={statementPayments}
                             onBalanceUpdated={() =>
                                 setChartRefreshKey((key) => key + 1)
                             }

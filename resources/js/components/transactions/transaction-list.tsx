@@ -76,7 +76,11 @@ import {
 } from '@/lib/transaction-re-evaluation';
 import { getTransactionRowActions } from '@/lib/transaction-row-actions';
 import { transactionSyncService } from '@/services/transaction-sync';
-import { type Account, type Bank } from '@/types/account';
+import {
+    type Account,
+    type Bank,
+    type CreditCardPayment,
+} from '@/types/account';
 import { type AutomationRule } from '@/types/automation-rule';
 import { type Category } from '@/types/category';
 import { type Label } from '@/types/label';
@@ -293,6 +297,8 @@ export interface TransactionListProps {
     onTransactionsChanged?: () => void;
     /** A label every listed transaction already carries; hidden from the rows. */
     hiddenLabelId?: UUID;
+    /** Credit card repayments by transaction id, with the statement each pays. */
+    statementPayments?: Map<string, CreditCardPayment>;
 }
 
 export function TransactionList({
@@ -312,6 +318,7 @@ export function TransactionList({
     onBalanceUpdated,
     onTransactionsChanged,
     hiddenLabelId,
+    statementPayments,
 }: TransactionListProps) {
     const locale = useLocale();
     const [labels, setLabels] = useState<Label[]>(() => initialLabels ?? []);
@@ -739,6 +746,7 @@ export function TransactionList({
             onAutomate: openAutomateDialog,
             isDateHidden: columnVisibility.transaction_date === false,
             hiddenLabelId,
+            statementPayments,
         });
 
         if (hideColumns.length === 0) {
@@ -763,6 +771,7 @@ export function TransactionList({
         hideColumns,
         columnVisibility,
         hiddenLabelId,
+        statementPayments,
     ]);
 
     const table = useReactTable({

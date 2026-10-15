@@ -1,4 +1,5 @@
 import { PrivacyModeProvider } from '@/contexts/privacy-mode-context';
+import type { CreditCardPayment } from '@/types/account';
 import type { DecryptedTransaction } from '@/types/transaction';
 import type { CellContext, ColumnDef } from '@tanstack/react-table';
 import { render, screen } from '@testing-library/react';
@@ -18,7 +19,10 @@ function categoryClassName(columns: ColumnDef<DecryptedTransaction>[]): string {
     return (category?.meta as { cellClassName?: string }).cellClassName ?? '';
 }
 
-function buildColumns(isDateHidden: boolean) {
+function buildColumns(
+    isDateHidden: boolean,
+    statementPayments?: Map<string, CreditCardPayment>,
+) {
     return createTransactionColumns({
         categories: [],
         accounts: [],
@@ -31,6 +35,7 @@ function buildColumns(isDateHidden: boolean) {
         onReEvaluateRules: () => {},
         onAutomate: () => {},
         isDateHidden,
+        statementPayments,
     });
 }
 
@@ -81,5 +86,87 @@ describe('createTransactionColumns amount', () => {
 
         expect(screen.getByText(/\$/)).toBeInTheDocument();
         expect(screen.queryByText(/€/)).not.toBeInTheDocument();
+    });
+});
+
+describe('createTransactionColumns statement payments', () => {
+    const payment: CreditCardPayment = {
+        transaction_id: 'payment-1',
+        date: '2026-09-13',
+        amount: 96335,
+        period_from: '2026-08-07',
+        closing_date: '2026-09-06',
+        due_date: '2026-09-26',
+    };
+
+    function renderDescription(
+        transaction: DecryptedTransaction,
+        statementPayments?: Map<string, CreditCardPayment>,
+    ) {
+        const description = buildColumns(false, statementPayments).find(
+            (column) =>
+                'accessorKey' in column &&
+                column.accessorKey === 'decryptedDescription',
+        );
+
+        render(
+            <PrivacyModeProvider>
+                {(
+                    description?.cell as (
+                        context: CellContext<DecryptedTransaction, unknown>,
+                    ) => React.ReactNode
+                )?.({
+                    row: { original: transaction },
+                    table: { getState: () => ({ columnVisibility: {} }) },
+                } as unknown as CellContext<DecryptedTransaction, unknown>)}
+            </PrivacyModeProvider>,
+        );
+    }
+
+    const row = (id: string) =>
+        ({
+            id,
+            description: 'Merpag Débito -> BBVA Crédito',
+            label_ids: [],
+            notes: null,
+        }) as unknown as DecryptedTransaction;
+
+    it('notes the statement a repayment pays under its description', () => {
+        renderDescription(
+            row('payment-1'),
+            new Map([[payment.transaction_id, payment]]),
+        );
+
+        const note = screen.getByTestId('statement-payment-note');
+        // Its own line under the description, not a pill beside it.
+        expect(
+            screen
+                .getByText('Merpag Débito -> BBVA Crédito')
+                .compareDocumentPosition(note) &
+                Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBeTruthy();
+        expect(note.querySelector('svg')).not.toBeNull();
+        expect(note).toHaveTextContent(
+            /^Statement payment Aug 7(, 2026)? – Sep 6(, 2026)?$/,
+        );
+    });
+
+    it('leaves other rows without the note', () => {
+        renderDescription(
+            row('purchase-1'),
+            new Map([[payment.transaction_id, payment]]),
+        );
+
+        expect(
+            screen.queryByTestId('statement-payment-note'),
+        ).not.toBeInTheDocument();
+    });
+
+    it('shows no note outside a credit card page', () => {
+        renderDescription(row('payment-1'));
+
+        expect(
+            screen.queryByTestId('statement-payment-note'),
+        ).not.toBeInTheDocument();
     });
 });

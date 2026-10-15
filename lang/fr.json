@@ -2638,5 +2638,15 @@
     "Used counts the purchases on this card that are still to be charged: the statement not paid yet and the open cycle. Payments to the card are not subtracted.": "L'utilisé additionne les achats de cette carte qui n'ont pas encore été prélevés : le relevé pas encore payé et le cycle en cours. Les remboursements de la carte ne sont pas déduits.",
     "Used counts the purchases on this card this month. Payments to the card are not subtracted.": "L'utilisé additionne les achats de cette carte ce mois-ci. Les remboursements de la carte ne sont pas déduits.",
     "Statement frequency": "Fréquence du relevé",
-    "Every field is optional. Later statements are assumed to repeat on the same weekday every week. If your bank moves them, update them here.": "Tous les champs sont facultatifs. Les relevés suivants sont supposés tomber le même jour de la semaine chaque semaine. Si votre banque les déplace, mettez-les à jour ici."
+    "Every field is optional. Later statements are assumed to repeat on the same weekday every week. If your bank moves them, update them here.": "Tous les champs sont facultatifs. Les relevés suivants sont supposés tomber le même jour de la semaine chaque semaine. Si votre banque les déplace, mettez-les à jour ici.",
+    "Statement :from – :to": "Relevé :from – :to",
+    "Purchases": "Achats",
+    "Paid": "Payé",
+    "Pending": "Restant",
+    "No purchases recorded for that period": "Aucun achat enregistré pour cette période",
+    "Payment of :amount for the statement :from – :to": "Paiement de :amount pour le relevé :from – :to",
+    "Already paid": "Déjà payé",
+    "Some purchases from that period may not be recorded here.": "Certains achats de cette période ne sont peut-être pas enregistrés ici.",
+    "Dots on the line mark payments to the card and the statement each one pays. They do not lower the credit used.": "Les points sur la courbe indiquent les paiements de la carte et le relevé que chacun règle. Ils ne réduisent pas le crédit utilisé.",
+    "Statement payment :from – :to": "Paiement relevé :from – :to"
 }
