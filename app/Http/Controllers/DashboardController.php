@@ -11,6 +11,8 @@ use App\Services\CreditCards\CreditCardStatementService;
 use App\Services\LabelSpendingService;
 use App\Services\NetWorth\ProjectNetWorth;
 use App\Services\PeriodComparator;
+use App\Services\SavingsGoals\MonthlySavingsGoalStats;
+use App\Services\SavingsGoals\MonthlySavingsGoalTotals;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -25,6 +27,8 @@ class DashboardController extends Controller
         private LabelSpendingService $labelSpendingService,
         private CashflowSummaryService $summaries,
         private CreditCardStatementService $creditCardStatementService,
+        private MonthlySavingsGoalStats $monthlySavingsGoals,
+        private MonthlySavingsGoalTotals $monthlySavingsTotals,
     ) {}
 
     public function __invoke(Request $request): Response
@@ -37,7 +41,32 @@ class DashboardController extends Controller
             'topLabels' => Inertia::defer(fn () => $this->getTopLabels($request), 'dashboard'),
             'cashflowSummary' => Inertia::defer(fn () => $this->getCashflowSummary($request), 'dashboard'),
             'creditCardUsage' => Inertia::defer(fn () => $this->getCreditCardUsage($request), 'dashboard'),
+            'monthlySavingsGoals' => Inertia::defer(fn () => $this->runningMonthlyGoals($request), 'dashboard'),
+            // Archived goals included: the same count the cashflow card and
+            // the monthly summary give for that month.
+            'monthlySavingsLastMonth' => Inertia::defer(fn () => $this->monthlySavingsTotals->verdicts(
+                $this->monthlySavingsGoals->presentForUser($request->user()),
+                today()->subMonthNoOverflow(),
+            ), 'dashboard'),
         ]);
+    }
+
+    /**
+     * The monthly goals still running, for this month's card. An archived goal
+     * has nothing left to save towards. The card only needs this month, so
+     * that is all it gets: no history, no goal fields it does not draw.
+     *
+     * @return list<array{id: string, name: string, monthly: array{current: array<string, mixed>|null}}>
+     */
+    private function runningMonthlyGoals(Request $request): array
+    {
+        return array_map(fn (array $goal): array => [
+            'id' => $goal['id'],
+            'name' => $goal['name'],
+            'monthly' => ['current' => $goal['monthly']['current']],
+        ], $this->monthlySavingsGoals->present(
+            $request->user()->savingsGoals()->monthly()->notArchived()->listed()->get(),
+        ));
     }
 
     private function getNetWorthEvolution(Request $request): array

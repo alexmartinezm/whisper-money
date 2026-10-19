@@ -4,6 +4,7 @@ import {
     store,
 } from '@/actions/App/Http/Controllers/MonthlySummaryController';
 import HeadingSmall from '@/components/heading-small';
+import { SignedAmount } from '@/components/savings-goals/monthly/monthly-goal-figures';
 import { AmountDisplay } from '@/components/ui/amount-display';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -26,6 +27,16 @@ interface CategoryRow {
     change_percent: number;
 }
 
+interface MonthlyGoalRow {
+    name: string;
+    saved: number;
+    target: number;
+    /** Saved minus that month's target: above it when positive. */
+    difference: number;
+    met: boolean;
+    streak: number;
+}
+
 interface Payload {
     currency: string;
     has_history: boolean;
@@ -39,6 +50,14 @@ interface Payload {
     };
     categories: { total: number; top: CategoryRow[] };
     budgets: { total: number; met: number };
+    /** Absent from summaries frozen before monthly goals; null without any. */
+    monthly_goals?: {
+        total: number;
+        met: number;
+        saved: number;
+        target: number;
+        goals: MonthlyGoalRow[];
+    } | null;
     todos: { uncategorised: { count: number; amount: number } };
 }
 
@@ -280,6 +299,13 @@ function MonthReport({
                 </Card>
             )}
 
+            {payload.monthly_goals && (
+                <MonthlyGoalsCard
+                    section={payload.monthly_goals}
+                    currency={currency}
+                />
+            )}
+
             {payload.todos.uncategorised.count > 0 && (
                 <Card>
                     <CardContent className="p-6 text-sm text-muted-foreground">
@@ -301,6 +327,57 @@ function MonthReport({
                 </Card>
             )}
         </div>
+    );
+}
+
+/**
+ * Each monthly goal by how far it landed from that month's own target, the
+ * furthest below first.
+ */
+function MonthlyGoalsCard({
+    section,
+    currency,
+}: {
+    section: NonNullable<Payload['monthly_goals']>;
+    currency: string;
+}) {
+    const goals = [...section.goals].sort(
+        (a, b) => a.difference - b.difference,
+    );
+
+    return (
+        <Card>
+            <CardContent className="flex flex-col gap-3 p-6">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <h3 className="text-sm font-semibold">
+                        {__('Monthly savings goals')}
+                    </h3>
+                    <span className="text-sm text-muted-foreground">
+                        {__(':met of :total goals met', {
+                            met: section.met,
+                            total: section.total,
+                        })}
+                    </span>
+                </div>
+                <div className="flex flex-col gap-2">
+                    {goals.map((goal, index) => (
+                        <div
+                            key={`${goal.name}-${index}`}
+                            className="flex items-center justify-between gap-4 text-sm"
+                        >
+                            <span className="min-w-0 truncate">
+                                {goal.name}
+                            </span>
+                            <SignedAmount
+                                amount={goal.difference}
+                                currencyCode={currency}
+                                className="shrink-0"
+                            />
+                        </div>
+                    ))}
+                </div>
+            </CardContent>
+        </Card>
     );
 }
 

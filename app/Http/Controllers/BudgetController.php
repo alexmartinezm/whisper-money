@@ -19,6 +19,7 @@ use App\Models\User;
 use App\Services\BudgetManagementService;
 use App\Services\BudgetPeriodService;
 use App\Services\SavingsGoals\MonthlySavingsGoalStats;
+use App\Services\SavingsGoals\MonthlySavingsGoalTotals;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\RedirectResponse;
@@ -35,6 +36,7 @@ class BudgetController extends Controller
         protected BudgetPeriodService $budgetPeriodService,
         protected BudgetManagementService $budgetManagementService,
         protected MonthlySavingsGoalStats $monthlySavingsGoals,
+        protected MonthlySavingsGoalTotals $monthlySavingsTotals,
     ) {}
 
     public function index(Request $request): Response
@@ -78,11 +80,15 @@ class BudgetController extends Controller
         [$monthlyGoals, $oneOffGoals] = $user->savingsGoals()->listed()->get()
             ->partition(fn (SavingsGoal $goal): bool => $goal->isMonthly());
 
+        $presentedMonthlyGoals = $this->monthlySavingsGoals->present($monthlyGoals);
+
         return Inertia::render('budgets/index', [
             'budgets' => $budgets,
             'budgetSummary' => $this->buildBudgetSummary($budgets),
             'savingsGoals' => SavingsGoal::withStats($oneOffGoals),
-            'monthlySavingsGoals' => $this->monthlySavingsGoals->present($monthlyGoals),
+            'monthlySavingsGoals' => $presentedMonthlyGoals,
+            // Archived goals included, as on the cashflow card and the summary.
+            'monthlySavingsLastMonth' => $this->monthlySavingsTotals->verdicts($presentedMonthlyGoals, today()->subMonthNoOverflow()),
             // Only when the create dialog asks for them: the savings accounts of
             // the active space, the same set the server validates the auto-tag
             // account against, each with the running goal it already feeds.

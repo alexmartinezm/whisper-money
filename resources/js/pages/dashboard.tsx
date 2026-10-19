@@ -6,6 +6,7 @@ import {
 import { AccountBalanceCard } from '@/components/dashboard/account-balance-card';
 import { AccountsManagerDialog } from '@/components/dashboard/accounts-manager-dialog';
 import { CashflowSummaryCard } from '@/components/dashboard/cashflow-summary-card';
+import { MonthlySavingsDashboardCard } from '@/components/dashboard/monthly-savings-dashboard-card';
 import { NetWorthChart as NetWorthChartComponent } from '@/components/dashboard/net-worth-chart';
 import { NetWorthProjectionCard } from '@/components/dashboard/net-worth-projection';
 import { TopCategoriesCard } from '@/components/dashboard/top-categories-card';
@@ -32,6 +33,7 @@ import { BreadcrumbItem, SharedData } from '@/types';
 import { type CreditCardUsage } from '@/types/account';
 import { Category } from '@/types/category';
 import { NetWorthProjection } from '@/types/net-worth';
+import { DashboardMonthlyGoal, MonthlyVerdicts } from '@/types/savings-goal';
 import { __ } from '@/utils/i18n';
 import { Deferred, Head, router, usePage } from '@inertiajs/react';
 import { Pencil } from 'lucide-react';
@@ -65,6 +67,8 @@ interface DashboardProps extends SharedData {
     openIntegrationRequests?: boolean;
     /** Deferred: what is in use of each credit card, by account id. */
     creditCardUsage?: Record<string, CreditCardUsage>;
+    monthlySavingsGoals?: DashboardMonthlyGoal[];
+    monthlySavingsLastMonth?: MonthlyVerdicts | null;
 }
 
 export default function Dashboard() {
@@ -431,6 +435,18 @@ export default function Dashboard() {
                 </Deferred>
 
                 <div className="flex flex-col gap-6">
+                    {/* Nothing drawn while it loads, for the same reason as
+                        the labels card below: most users have no monthly goal. */}
+                    <Deferred data="monthlySavingsGoals" fallback={<></>}>
+                        <PrivacyRevealScope>
+                            <MonthlySavingsDashboardCard
+                                goals={props.monthlySavingsGoals ?? []}
+                                lastMonth={props.monthlySavingsLastMonth}
+                                currencyCode={props.auth.user.currency_code}
+                            />
+                        </PrivacyRevealScope>
+                    </Deferred>
+
                     <Deferred
                         data="topCategories"
                         fallback={
