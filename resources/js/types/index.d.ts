@@ -46,6 +46,8 @@ export interface Features {
     calculateBalancesOnImport: boolean;
     transactionSplitting: boolean;
     recurringTransactions: boolean;
+    /** May create a monthly savings goal; existing ones show regardless. */
+    monthlySavingsGoals: boolean;
 }
 
 export interface ExpiredBankingConnectionNotification {
