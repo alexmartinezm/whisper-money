@@ -20,6 +20,7 @@ $readOnly = [
     'list_categories',
     'list_labels',
     'list_recurring_series',
+    'list_savings_goals',
     'list_spaces',
 ];
 
