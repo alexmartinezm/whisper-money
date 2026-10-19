@@ -376,18 +376,14 @@ it('never takes a split refund for a payment', function () {
     TransactionSplit::factory()->create(['transaction_id' => $refund->id, 'category_id' => test()->expense->id, 'amount' => 500, 'position' => 1]);
     $payment = cardTransaction(2000, '2026-03-08', ['category_id' => null]);
 
-    $estimate = estimateOn('2026-03-10');
+    $figures = figuresOn('2026-03-10');
+    $estimate = $figures['credit_card_statement'];
 
     expect(collect($estimate['payments'])->pluck('transaction_id')->all())->toBe([$payment->id])
         ->and($estimate['next_payment'])->toMatchArray(['amount' => 5000, 'paid' => 2000])
-        ->and($estimate['current_cycle']['amount'])->toBe(-1500);
-});
-
-it('does not let a payment bring the usage down', function () {
-    cardTransaction(-3000, '2026-02-10');
-    cardTransaction(3000, '2026-02-12', ['category_id' => test()->transfer->id]);
-
-    expect(figuresOn('2026-03-10')['credit_card_usage']['used'])->toBe(3000);
+        ->and($estimate['current_cycle']['amount'])->toBe(-1500)
+        // The refund brings usage down once, as a refund, and the payment once.
+        ->and($figures['credit_card_usage']['used'])->toBe(1500);
 });
 
 // -------------------------------------------------------------------
@@ -414,6 +410,74 @@ it('counts the statement still to be charged and the open cycle as used', functi
         ->and($usage['daily'][0])->toBe(['date' => '2026-02-06', 'used' => 1000])
         ->and($usage['daily'][27])->toBe(['date' => '2026-03-05', 'used' => 3000])
         ->and($usage['daily'][32])->toBe(['date' => '2026-03-10', 'used' => 7000]);
+});
+
+it('subtracts a payment on the statement still to be charged from the day it is booked', function () {
+    test()->detail->update(['credit_limit' => 10000]);
+    cardTransaction(-5000, '2026-02-10');
+    cardTransaction(-1000, '2026-03-07');
+    cardTransaction(3000, '2026-03-08', ['category_id' => test()->transfer->id]);
+
+    $usage = figuresOn('2026-03-10')['credit_card_usage'];
+
+    expect($usage)->toMatchArray(['used' => 3000, 'available' => 7000])
+        ->and($usage['daily'][29])->toBe(['date' => '2026-03-07', 'used' => 6000])
+        ->and($usage['daily'][30])->toBe(['date' => '2026-03-08', 'used' => 3000]);
+});
+
+it('subtracts an uncategorized payment on the statement still to be charged', function () {
+    cardTransaction(-5000, '2026-02-10');
+    cardTransaction(5000, '2026-03-08', ['category_id' => null]);
+
+    expect(figuresOn('2026-03-10')['credit_card_usage']['used'])->toBe(0);
+});
+
+it('does not subtract a payment on the statement before the one still to be charged', function () {
+    cardTransaction(-3000, '2026-02-10');
+    cardTransaction(3000, '2026-02-12', ['category_id' => test()->transfer->id]);
+
+    expect(figuresOn('2026-03-10')['credit_card_usage']['used'])->toBe(3000);
+});
+
+it('does not subtract a payment made after the statement was charged from the open cycle', function () {
+    cardTransaction(-2500, '2026-03-15');
+    cardTransaction(4000, '2026-03-21', ['category_id' => test()->transfer->id]);
+
+    expect(figuresOn('2026-03-25')['credit_card_usage']['used'])->toBe(2500);
+});
+
+it('does not subtract a payment booked after today', function () {
+    cardTransaction(-5000, '2026-02-10');
+    cardTransaction(5000, '2026-03-12', ['category_id' => test()->transfer->id]);
+
+    expect(figuresOn('2026-03-10')['credit_card_usage']['used'])->toBe(5000);
+});
+
+it('floors the usage at zero when a payment overpays, counting the purchases after it', function () {
+    test()->detail->update(['credit_limit' => 10000]);
+    cardTransaction(-1000, '2026-02-10');
+    cardTransaction(4000, '2026-03-08', ['category_id' => test()->transfer->id]);
+    cardTransaction(-500, '2026-03-09');
+
+    $usage = figuresOn('2026-03-10')['credit_card_usage'];
+
+    expect($usage)->toMatchArray(['used' => 500, 'available' => 9500])
+        ->and($usage['daily'][29])->toBe(['date' => '2026-03-07', 'used' => 1000])
+        ->and($usage['daily'][30])->toBe(['date' => '2026-03-08', 'used' => 0])
+        ->and($usage['daily'][31])->toBe(['date' => '2026-03-09', 'used' => 500]);
+});
+
+it('subtracts a payment on a weekly statement still to be charged', function () {
+    test()->detail->update([
+        'statement_frequency' => StatementFrequency::Weekly,
+        'statement_closing_date' => '2026-03-01',
+        'payment_due_date' => '2026-03-04',
+    ]);
+    cardTransaction(-2000, '2026-03-07');
+    cardTransaction(-700, '2026-03-09');
+    cardTransaction(2000, '2026-03-09', ['category_id' => test()->transfer->id]);
+
+    expect(figuresOn('2026-03-10')['credit_card_usage'])->toMatchArray(['used' => 700, 'period_from' => '2026-03-02']);
 });
 
 it('counts only the open cycle once the last statement has been charged', function () {
