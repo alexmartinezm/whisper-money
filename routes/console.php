@@ -9,7 +9,12 @@ use Sentry\State\Scope;
 use function Sentry\configureScope;
 
 Schedule::command('budgets:generate-periods')->daily();
+// Just after midnight, so a month opens and the last one closes as soon as it
+// is over (pages open the month themselves if they get there first). Again at
+// breakfast time in Europe, which is when the month-end reminder goes out: the
+// notifier holds it back until then. Every run is idempotent.
 Schedule::command('savings-goals:generate-periods')->dailyAt('00:05')->withoutOverlapping();
+Schedule::command('savings-goals:generate-periods')->dailyAt('07:00')->withoutOverlapping();
 Schedule::command('recurring:detect')->dailyAt('04:00');
 Schedule::command('recurring:remind')->dailyAt('08:00');
 Schedule::command('recurring:alert-shortfall')->dailyAt('08:15');
