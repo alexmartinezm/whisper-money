@@ -3039,5 +3039,22 @@
     "Already paid": "Ya pagado",
     "Some purchases from that period may not be recorded here.": "Puede que algunas compras de ese periodo no estén registradas aquí.",
     "Dots on the line mark payments to the card and the statement each one pays. Only payments on the statements counted here lower the credit used.": "Los puntos de la línea marcan los pagos a la tarjeta y el extracto que paga cada uno. Solo los pagos de los extractos que se cuentan aquí reducen el crédito dispuesto.",
-    "Statement payment :from – :to": "Pago extracto :from – :to"
+    "Statement payment :from – :to": "Pago extracto :from – :to",
+    "A savings goal can't switch between one-off and monthly.": "Un objetivo de ahorro no puede pasar de puntual a mensual ni al revés.",
+    "Contributions to :goal": "Aportaciones a :goal",
+    "Pick one of your savings accounts.": "Elige una de tus cuentas de ahorro.",
+    "goal name": "nombre del objetivo",
+    "goal type": "tipo de objetivo",
+    "target amount": "importe objetivo",
+    "amount already saved": "importe ya ahorrado",
+    "target date": "fecha objetivo",
+    "monthly target type": "tipo de objetivo mensual",
+    "monthly amount": "importe mensual",
+    "percentage of income": "porcentaje de ingresos",
+    "month-end reminder": "recordatorio de fin de mes",
+    "savings account": "cuenta de ahorro",
+    "This account already feeds “:goal”. Pick another one, or leave contributions to be linked by hand.": "Ya la usa «:goal». Elige otra cuenta o vincula las aportaciones a mano.",
+    "The :attribute must be at least :amount.": "El campo :attribute debe ser al menos :amount.",
+    "The :attribute can't be more than :amount.": "El campo :attribute no puede superar :amount.",
+    "Pick a savings account to tag contributions from, or untick automatic tagging.": "Elige una cuenta de ahorro para el etiquetado automático o desmárcalo."
 }

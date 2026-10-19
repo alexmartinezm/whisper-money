@@ -9,6 +9,7 @@ use Sentry\State\Scope;
 use function Sentry\configureScope;
 
 Schedule::command('budgets:generate-periods')->daily();
+Schedule::command('savings-goals:generate-periods')->dailyAt('00:05')->withoutOverlapping();
 Schedule::command('recurring:detect')->dailyAt('04:00');
 Schedule::command('recurring:remind')->dailyAt('08:00');
 Schedule::command('recurring:alert-shortfall')->dailyAt('08:15');

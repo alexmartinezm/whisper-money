@@ -76,12 +76,18 @@ class CashflowSummaryService
      * transaction counts as its parts here exactly as it does on the cashflow
      * screen.
      *
+     * @param  string|null  $spaceId  that space's transactions, whoever recorded
+     *                                them, instead of the user's
      * @return array<string, array<string, mixed>>
      */
-    public function forMonths(string $userId, string $userCurrency, Carbon $from, Carbon $to): array
+    public function forMonths(string $userId, string $userCurrency, Carbon $from, Carbon $to, ?string $spaceId = null): array
     {
         $transactions = Transaction::query()
-            ->where('transactions.user_id', $userId)
+            ->when(
+                $spaceId === null,
+                fn ($query) => $query->where('transactions.user_id', $userId),
+                fn ($query) => $query->forSpace($spaceId),
+            )
             ->whereBetween('transactions.transaction_date', [
                 $from->copy()->startOfMonth(),
                 $to->copy()->endOfMonth(),
