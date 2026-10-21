@@ -46,6 +46,8 @@ export interface Features {
     calculateBalancesOnImport: boolean;
     transactionSplitting: boolean;
     recurringTransactions: boolean;
+    /** Cashflow shows the Available card and the savings/investments split. */
+    cashflowAvailableFree: boolean;
 }
 
 export interface ExpiredBankingConnectionNotification {
