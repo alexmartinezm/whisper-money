@@ -5,7 +5,6 @@ namespace App\Http\Middleware;
 use App\Enums\BankingConnectionStatus;
 use App\Enums\BankingProvider;
 use App\Features\CalculateBalancesOnImport;
-use App\Features\MonthlySavingsGoals;
 use App\Features\RecurringTransactions;
 use App\Features\TransactionSplitting;
 use App\Jobs\PurgeResidualEncryptionArtifactsJob;
@@ -260,7 +259,6 @@ class HandleInertiaRequests extends Middleware
                 'calculateBalancesOnImport' => false,
                 'transactionSplitting' => true,
                 'recurringTransactions' => false,
-                'monthlySavingsGoals' => false,
             ];
         }
 
@@ -268,7 +266,6 @@ class HandleInertiaRequests extends Middleware
             CalculateBalancesOnImport::class,
             TransactionSplitting::class,
             RecurringTransactions::class,
-            MonthlySavingsGoals::class,
         ]);
 
         return [
@@ -276,8 +273,6 @@ class HandleInertiaRequests extends Middleware
             'calculateBalancesOnImport' => $features[CalculateBalancesOnImport::class] !== false,
             'transactionSplitting' => $features[TransactionSplitting::class] !== false,
             'recurringTransactions' => $features[RecurringTransactions::class] !== false,
-            // Creating a monthly goal only; existing ones show regardless.
-            'monthlySavingsGoals' => $features[MonthlySavingsGoals::class] !== false,
         ];
     }
 

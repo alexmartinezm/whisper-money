@@ -4,7 +4,6 @@ namespace App\Models;
 
 use App\Enums\DripEmailType;
 use App\Enums\PlanFeature;
-use App\Features\MonthlySavingsGoals;
 use App\Notifications\VerifyEmailNotification;
 use App\Services\FormatLocaleOptions;
 use Carbon\Carbon;
@@ -420,15 +419,6 @@ class User extends Authenticatable implements HasLocalePreference, MustVerifyEma
     public function bankingConnections(): HasMany
     {
         return $this->hasMany(BankingConnection::class);
-    }
-
-    /**
-     * Whether the user may create a monthly savings goal. Only creation sits
-     * behind the flag: a monthly goal the user already has keeps working.
-     */
-    public function canCreateMonthlySavingsGoals(): bool
-    {
-        return $this->features()->active(MonthlySavingsGoals::class);
     }
 
     public function hasReceivedEmail(DripEmailType $type): bool
