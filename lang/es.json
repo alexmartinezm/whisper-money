@@ -3503,5 +3503,14 @@
     "For files whose amounts are all positive: ticked rows import as expenses": "Para archivos con todos los importes en positivo: las filas marcadas se importan como gastos",
     ":count rows": ":count filas",
     "Type (Optional)": "Tipo (opcional)",
-    "Select type column (optional)": "Seleccionar columna de tipo (opcional)"
+    "Select type column (optional)": "Seleccionar columna de tipo (opcional)",
+    ":file has different columns from :first, so it can't be imported as part of the same export.": ":file tiene columnas distintas a :first, así que no se puede importar como parte de la misma exportación.",
+    ":count files": ":count ficheros",
+    "Add another file": "Añadir otro fichero",
+    "Remove :file": "Quitar :file",
+    "An export split into several files? Pick them all.": "¿Tu exportación viene en varios ficheros? Elígelos todos.",
+    ":file, row :number": ":file, fila :number",
+    "1 file": "1 fichero",
+    "Already in the list: :files": "Ya están en la lista: :files",
+    "1 row": "1 fila"
 }
