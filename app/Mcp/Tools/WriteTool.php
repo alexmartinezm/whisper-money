@@ -26,9 +26,11 @@ use Laravel\Mcp\Response;
  *
  * Only the irreversible tools (the deletes) carry #[IsDestructive]; creating,
  * updating, categorizing and labelling are reversible and inherit
- * `destructiveHint: false` from McpTool. PHP attributes are not inherited, so
- * the framework only reports one declared directly on the served tool class —
- * it cannot live here.
+ * `destructiveHint: false` from McpTool. update_savings_goal is the one
+ * exception among the updates: OpenAI's review flagged it as an overwrite and
+ * held it back until it was marked destructive. PHP attributes are not
+ * inherited, so the framework only reports one declared directly on the served
+ * tool class — it cannot live here.
  */
 abstract class WriteTool extends McpTool
 {
