@@ -102,6 +102,22 @@ describe('parseImportFile', () => {
         expect(parsed.mapping.transaction_type).toBe('Tipo');
         expect(parsed.mapping.expense_types).toEqual(['Gasto']);
     });
+
+    it('reads accented headers of a UTF-8 CSV without a byte order mark', async () => {
+        const parsed = await parseImportFile(
+            csvFile([
+                'Fecha,Descripción,Cantidad,Tipo de transacción',
+                '2026-06-02,Panadería,10.50,Gasto',
+            ]),
+        );
+
+        expect(parsed.mapping).toMatchObject({
+            description: 'Descripción',
+            transaction_type: 'Tipo de transacción',
+            expense_types: ['Gasto'],
+        });
+        expect(parsed.rows[0]['Descripción']).toBe('Panadería');
+    });
 });
 
 const ACCOUNT_ID = '00000000-0000-0000-0000-000000000001';
