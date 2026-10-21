@@ -5,6 +5,7 @@ namespace App\Http\Requests;
 use App\Enums\TransactionSource;
 use App\Http\Requests\Concerns\ValidatesUserOwnedResources;
 use App\Models\Transaction;
+use App\Rules\StorableDate;
 use Illuminate\Foundation\Http\FormRequest;
 
 class UpdateTransactionRequest extends FormRequest
@@ -43,7 +44,7 @@ class UpdateTransactionRequest extends FormRequest
         // date and the parts follow it.
         $transaction = $this->route('transaction');
         if ($transaction instanceof Transaction) {
-            $rules['transaction_date'] = ['sometimes', 'date'];
+            $rules['transaction_date'] = ['sometimes', 'date', new StorableDate];
 
             if ($transaction->source === TransactionSource::ManuallyCreated) {
                 $rules['account_id'] = ['sometimes', $this->userOwned('accounts')];
