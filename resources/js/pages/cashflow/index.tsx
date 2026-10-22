@@ -1,7 +1,6 @@
 import { index as monthlySummary } from '@/actions/App/Http/Controllers/MonthlySummaryController';
 import { AvailableCard } from '@/components/cashflow/available-card';
 import { BreakdownCard } from '@/components/cashflow/breakdown-card';
-import { IncomeDistributionCard } from '@/components/cashflow/income-distribution-card';
 import { MonthlySavingsCashflowCard } from '@/components/cashflow/monthly-savings-cashflow-card';
 import { NetCashflowCard } from '@/components/cashflow/net-cashflow-card';
 import { PeriodNavigation } from '@/components/cashflow/period-navigation';
@@ -233,14 +232,6 @@ export default function CashflowPage() {
                         />
                     )}
                 </div>
-
-                {showAvailable && (
-                    <IncomeDistributionCard
-                        summary={summary.current}
-                        loading={showPlaceholders}
-                        currency={auth.user.currency_code}
-                    />
-                )}
 
                 {/* Only a month lines up with a monthly goal's target. */}
                 {periodType === 'month' && (
