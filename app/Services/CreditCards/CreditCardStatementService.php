@@ -156,7 +156,8 @@ class CreditCardStatementService
      * The card's rows booked between two dates, read on the date the bank
      * booked them: users move `transaction_date` to tidy their cashflow,
      * while `source_date` keeps the bank's. Each row carries its category
-     * type, so repayments can be told apart without another query.
+     * type and whether it has split lines, so repayments can be told apart
+     * without another query.
      *
      * @return Collection<int, Transaction>
      */

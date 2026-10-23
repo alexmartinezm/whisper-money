@@ -3026,6 +3026,7 @@
     "No spending recorded in this period yet": "Aún no hay gastos registrados en este periodo",
     "Add the credit limit of this card to see how much of it you have used and how much is still available.": "Añade el límite de crédito de esta tarjeta para ver cuánto has dispuesto y cuánto te queda disponible.",
     "From :from to :to": "Del :from al :to",
+    "Used counts the purchases on this card that are still to be charged: the statement not paid yet and the open cycle, less what has been paid on them.": "El dispuesto suma las compras de esta tarjeta que aún no se han cargado: el extracto pendiente de pago y el ciclo abierto, menos lo que ya se ha pagado de ellos.",
     "Used counts the purchases on this card this month. Payments to the card are not subtracted.": "El dispuesto suma las compras de esta tarjeta este mes. Los pagos a la tarjeta no se restan.",
     "Statement frequency": "Frecuencia del extracto",
     "Every field is optional. Later statements are assumed to repeat on the same weekday every week. If your bank moves them, update them here.": "Todos los campos son opcionales. Se asume que los siguientes extractos se repiten el mismo día de la semana cada semana. Si tu banco los cambia, actualízalos aquí.",
@@ -3037,7 +3038,6 @@
     "Payment of :amount for the statement :from – :to": "Pago de :amount del extracto :from – :to",
     "Already paid": "Ya pagado",
     "Some purchases from that period may not be recorded here.": "Puede que algunas compras de ese periodo no estén registradas aquí.",
-    "Statement payment :from – :to": "Pago extracto :from – :to",
-    "Used counts the purchases on this card that are still to be charged: the statement not paid yet and the open cycle, less what has been paid on them.": "El dispuesto suma las compras de esta tarjeta que aún no se han cargado: el extracto pendiente de pago y el ciclo abierto, menos lo que ya se ha pagado de ellos.",
-    "Dots on the line mark payments to the card and the statement each one pays. Only payments on the statements counted here lower the credit used.": "Los puntos de la línea marcan los pagos a la tarjeta y el extracto que paga cada uno. Solo los pagos de los extractos que se cuentan aquí reducen el crédito dispuesto."
+    "Dots on the line mark payments to the card and the statement each one pays. Only payments on the statements counted here lower the credit used.": "Los puntos de la línea marcan los pagos a la tarjeta y el extracto que paga cada uno. Solo los pagos de los extractos que se cuentan aquí reducen el crédito dispuesto.",
+    "Statement payment :from – :to": "Pago extracto :from – :to"
 }
