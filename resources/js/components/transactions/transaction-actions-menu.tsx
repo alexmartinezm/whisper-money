@@ -23,24 +23,30 @@ import {
 } from '@/types/transaction';
 import { __ } from '@/utils/i18n';
 import { Link } from '@inertiajs/react';
-import { BarChart3, ChevronDown, Plus, Tags, WandSparkles } from 'lucide-react';
+import { BarChart3, ChevronDown, Tags, WandSparkles } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
+import { AddTransactionButton } from './add-transaction-button';
 import { TransactionAnalysisDrawer } from './transaction-analysis-drawer';
 
 interface TransactionActionsMenuProps {
-    onAddTransaction: () => void;
     transactions: DecryptedTransaction[];
+    /** Whether the user owns an account a manual transaction can be filed in. */
+    hasTransactionalAccounts: boolean;
+    /** How the list learns about a transaction added from the bar. */
+    onTransactionSaved?: () => void;
     onReEvaluateComplete?: () => void;
     filters: TransactionFilters;
 }
 
 /**
- * The bar above the transactions table. Importing lives in the app header,
- * so it is not repeated here.
+ * The bar above the transactions table. Adding a transaction sits here, right
+ * above the list it lands in; importing lives in the app header, so it is not
+ * repeated here.
  */
 export function TransactionActionsMenu({
-    onAddTransaction,
     transactions,
+    hasTransactionalAccounts,
+    onTransactionSaved,
     onReEvaluateComplete,
     filters,
 }: TransactionActionsMenuProps) {
@@ -59,10 +65,6 @@ export function TransactionActionsMenu({
             return;
         }
         setAnalysisDrawerOpen(true);
-    };
-
-    const handleAddTransaction = () => {
-        onAddTransaction();
     };
 
     const handleReEvaluateAll = async () => {
@@ -131,25 +133,10 @@ export function TransactionActionsMenu({
                     </Tooltip>
                 </TooltipProvider>
 
-                <TooltipProvider>
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <Button
-                                variant="outline"
-                                onClick={handleAddTransaction}
-                                aria-label={__('Add transaction')}
-                            >
-                                <Plus className="h-5 w-5" />
-                                <span className="hidden sm:inline">
-                                    {__('Transaction')}
-                                </span>
-                            </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                            {__('Create a new transaction')}
-                        </TooltipContent>
-                    </Tooltip>
-                </TooltipProvider>
+                <AddTransactionButton
+                    hasTransactionalAccounts={hasTransactionalAccounts}
+                    onSaved={onTransactionSaved}
+                />
 
                 {!isMobile && (
                     <TooltipProvider>

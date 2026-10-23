@@ -36,6 +36,22 @@ vi.mock('@inertiajs/react', () => ({
     ),
 }));
 
+vi.mock('./add-transaction-button', () => ({
+    AddTransactionButton: ({
+        hasTransactionalAccounts,
+        onSaved,
+    }: {
+        hasTransactionalAccounts: boolean;
+        onSaved?: () => void;
+    }) => (
+        <button
+            aria-label="Add transaction"
+            aria-disabled={!hasTransactionalAccounts}
+            onClick={onSaved}
+        />
+    ),
+}));
+
 vi.mock('./transaction-analysis-drawer', () => ({
     TransactionAnalysisDrawer: ({ open }: { open: boolean }) =>
         open ? <div data-testid="analysis-drawer" /> : null,
@@ -58,11 +74,14 @@ function renderMenu(
     filters: TransactionFilters,
     transactions: DecryptedTransaction[] = [],
     onReEvaluateComplete?: () => void,
+    hasTransactionalAccounts = true,
+    onTransactionSaved?: () => void,
 ) {
     return render(
         <TransactionActionsMenu
-            onAddTransaction={vi.fn()}
             transactions={transactions}
+            hasTransactionalAccounts={hasTransactionalAccounts}
+            onTransactionSaved={onTransactionSaved}
             filters={filters}
             onReEvaluateComplete={onReEvaluateComplete}
         />,
@@ -144,6 +163,25 @@ describe('TransactionActionsMenu action bar layout', () => {
         expect(
             within(menu).queryByText('Import Transactions'),
         ).not.toBeInTheDocument();
+    });
+
+    it('keeps adding off while the user owns no account to file one in', () => {
+        renderMenu(emptyFilters, [], undefined, false);
+
+        expect(
+            screen.getByRole('button', { name: 'Add transaction' }),
+        ).toHaveAttribute('aria-disabled', 'true');
+    });
+
+    it('hands the list refresh to the add button', () => {
+        const onTransactionSaved = vi.fn();
+        renderMenu(emptyFilters, [], undefined, true, onTransactionSaved);
+
+        fireEvent.click(
+            screen.getByRole('button', { name: 'Add transaction' }),
+        );
+
+        expect(onTransactionSaved).toHaveBeenCalledTimes(1);
     });
 
     it('keeps add transaction in the bar and moves categorize to the dropdown on mobile', async () => {

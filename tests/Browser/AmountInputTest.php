@@ -9,7 +9,12 @@ use function Pest\Laravel\actingAs;
 it('formats amount on blur', function () {
     $user = User::factory()->onboarded()->create();
     $category = Category::factory()->create(['user_id' => $user->id]);
-    $account = Account::factory()->create(['user_id' => $user->id]);
+    // Pinned: the factory picks a random type, and the add button is
+    // off for a user whose only account cannot hold a transaction.
+    $account = Account::factory()->create([
+        'user_id' => $user->id,
+        'type' => 'checking',
+    ]);
 
     actingAs($user);
 
@@ -27,7 +32,12 @@ it('formats amount on blur', function () {
 it('accepts comma as decimal separator', function () {
     $user = User::factory()->onboarded()->create();
     $category = Category::factory()->create(['user_id' => $user->id]);
-    $account = Account::factory()->create(['user_id' => $user->id]);
+    // Pinned: the factory picks a random type, and the add button is
+    // off for a user whose only account cannot hold a transaction.
+    $account = Account::factory()->create([
+        'user_id' => $user->id,
+        'type' => 'checking',
+    ]);
 
     actingAs($user);
 

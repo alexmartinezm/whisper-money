@@ -78,6 +78,7 @@ import {
 import { getTransactionRowActions } from '@/lib/transaction-row-actions';
 import { transactionSyncService } from '@/services/transaction-sync';
 import {
+    filterTransactionalAccounts,
     type Account,
     type Bank,
     type CreditCardPayment,
@@ -371,7 +372,6 @@ export function TransactionList({
     });
     const [editTransaction, setEditTransaction] =
         useState<DecryptedTransaction | null>(null);
-    const [createDialogOpen, setCreateDialogOpen] = useState(false);
     const [duplicateTransaction, setDuplicateTransaction] =
         useState<DecryptedTransaction | null>(null);
     // A ref, not state: the dialog reports the save and closes in the same
@@ -1014,10 +1014,11 @@ export function TransactionList({
                         <div className="flex justify-end gap-2">
                             {showActionsMenu && (
                                 <TransactionActionsMenu
-                                    onAddTransaction={() =>
-                                        setCreateDialogOpen(true)
-                                    }
                                     transactions={transactions}
+                                    hasTransactionalAccounts={
+                                        filterTransactionalAccounts(accounts)
+                                            .length > 0
+                                    }
                                     onReEvaluateComplete={() => {
                                         setRowSelection({});
                                         setTimeout(() => {
@@ -1116,9 +1117,8 @@ export function TransactionList({
                 banks={banks}
                 labels={labels}
                 automationRules={automationRules}
-                open={createDialogOpen || !!duplicateTransaction}
+                open={!!duplicateTransaction}
                 onOpenChange={(open) => {
-                    setCreateDialogOpen(open);
                     if (open) {
                         return;
                     }
@@ -1131,9 +1131,7 @@ export function TransactionList({
                     }
                 }}
                 onSuccess={() => {
-                    if (duplicateTransaction) {
-                        savedDuplicate.current = true;
-                    }
+                    savedDuplicate.current = true;
                 }}
                 onLabelCreated={handleLabelCreated}
                 mode="create"
