@@ -3,11 +3,8 @@
 declare(strict_types=1);
 
 use App\Enums\AccountType;
-use App\Features\SavingsGoals;
 use App\Models\Label;
 use App\Models\SavingsGoal;
-use App\Models\User;
-use Laravel\Pennant\Feature;
 use Tests\Support\PlanningFixtures;
 
 use function Pest\Laravel\actingAs;
@@ -22,17 +19,6 @@ use function Pest\Laravel\actingAs;
  * /savings-goals/{id} reach those endpoints, and that the progress the user
  * reads afterwards is the one the server computed.
  */
-/**
- * A planning user with this fork's savings-goals rollout flag on.
- */
-function goalUser(): User
-{
-    $user = PlanningFixtures::user();
-    Feature::for($user)->activate(SavingsGoals::class);
-
-    return $user;
-}
-
 beforeEach(function () {
     // Goals are not what the subscription gate is about; gating has its own
     // coverage.
@@ -40,7 +26,7 @@ beforeEach(function () {
 });
 
 it('creates a savings goal from the planning page and opens it', function () {
-    $user = goalUser();
+    $user = PlanningFixtures::user();
     $targetDate = now()->addYear()->format('Y-m-d');
 
     actingAs($user);
@@ -82,7 +68,7 @@ it('creates a savings goal from the planning page and opens it', function () {
 // year cap added there is what turns it away, and it does so here in the
 // browser: the form never submits and no goal is created.
 it('refuses a savings goal whose target year was mistyped', function () {
-    $user = goalUser();
+    $user = PlanningFixtures::user();
 
     actingAs($user);
 
@@ -108,7 +94,7 @@ it('refuses a savings goal whose target year was mistyped', function () {
 });
 
 it('links transactions to a goal and moves its progress', function () {
-    $user = goalUser();
+    $user = PlanningFixtures::user();
     $checking = PlanningFixtures::account($user, 'Everyday Checking');
     $savings = PlanningFixtures::account($user, 'Rainy Day Savings', AccountType::Savings);
 
@@ -149,7 +135,7 @@ it('links transactions to a goal and moves its progress', function () {
 });
 
 it('edits the target and archives the goal, which moves it to the archived section', function () {
-    $user = goalUser();
+    $user = PlanningFixtures::user();
     $checking = PlanningFixtures::account($user, 'Everyday Checking');
 
     [$goal, $label] = PlanningFixtures::savingsGoal($user, 'New kitchen', 100000);
@@ -204,7 +190,7 @@ it('edits the target and archives the goal, which moves it to the archived secti
 });
 
 it('deletes an archived goal from its page', function () {
-    $user = goalUser();
+    $user = PlanningFixtures::user();
 
     [$goal] = PlanningFixtures::savingsGoal($user, 'Old laptop fund', 80000);
     $goal->update(['archived_at' => now(), 'archived_saved_amount' => 12000]);

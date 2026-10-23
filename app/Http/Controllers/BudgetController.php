@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Enums\BudgetPeriodType;
-use App\Features\SavingsGoals;
 use App\Http\Requests\ReorderPlanningItemsRequest;
 use App\Http\Requests\StoreBudgetRequest;
 use App\Http\Requests\UpdateBudgetPeriodRequest;
@@ -24,7 +23,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
-use Laravel\Pennant\Feature;
 
 class BudgetController extends Controller
 {
@@ -72,13 +70,10 @@ class BudgetController extends Controller
             ]);
         });
 
-        $savingsGoalsEnabled = Feature::active(SavingsGoals::class);
-
         return Inertia::render('budgets/index', [
             'budgets' => $budgets,
             'budgetSummary' => $this->buildBudgetSummary($budgets),
-            'savingsGoals' => $savingsGoalsEnabled ? SavingsGoal::withStatsForUser($user) : [],
-            'savingsGoalsEnabled' => $savingsGoalsEnabled,
+            'savingsGoals' => SavingsGoal::withStatsForUser($user),
             'currencyCode' => $user->currency_code ?? 'USD',
         ]);
     }

@@ -16,7 +16,6 @@ import {
     CollapsibleContent,
     CollapsibleTrigger,
 } from '@/components/ui/collapsible';
-import { CreateButton } from '@/components/ui/create-button';
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -59,7 +58,6 @@ interface Props {
     budgets: Budget[];
     budgetSummary: BudgetSummary;
     savingsGoals?: SavingsGoal[];
-    savingsGoalsEnabled?: boolean;
     currencyCode: string;
 }
 
@@ -67,7 +65,6 @@ export default function BudgetsIndex({
     budgets,
     budgetSummary,
     savingsGoals = [],
-    savingsGoalsEnabled = false,
     currencyCode,
 }: Props) {
     const [createType, setCreateType] = useState<'budget' | 'goal' | null>(
@@ -80,11 +77,8 @@ export default function BudgetsIndex({
     const [order, setOrder] = useState<string[] | null>(null);
     const { url } = usePage();
     const locale = useLocale();
-    // Without savings goals there is no toggle to undo a ?show= filter coming
-    // from a stale bookmark, so clamp it to 'all' instead of serving a list
-    // the user has no way to unfilter.
     const [filter, setFilter] = useState<BudgetTypeFilter>(() =>
-        savingsGoalsEnabled ? budgetTypeFilterFromUrl(url) : 'all',
+        budgetTypeFilterFromUrl(url),
     );
 
     const changeFilter = (value: string) => {
@@ -107,13 +101,11 @@ export default function BudgetsIndex({
     // own collapsed section, ordered by the same rule so the two lists cannot
     // disagree about how they sort. They are not reorderable.
     const { liveItems, items, archivedItems } = useMemo(() => {
-        const goals = savingsGoalsEnabled ? savingsGoals : [];
         const merge = (archived: boolean) =>
             mergePlanningItems(
                 budgets.filter((budget) => !!budget.archived_at === archived),
-                goals.filter((goal) => !!goal.archived_at === archived),
+                savingsGoals.filter((goal) => !!goal.archived_at === archived),
                 locale,
-                savingsGoalsEnabled ? 'name' : 'allocation',
             );
 
         const live = merge(false);
@@ -127,7 +119,7 @@ export default function BudgetsIndex({
             items: ordered.filter(matchesFilter),
             archivedItems: merge(true).filter(matchesFilter),
         };
-    }, [budgets, savingsGoals, savingsGoalsEnabled, filter, locale, order]);
+    }, [budgets, savingsGoals, filter, locale, order]);
 
     const handleReorder = useCallback(
         (orderedVisibleIds: string[]) => {
@@ -178,82 +170,65 @@ export default function BudgetsIndex({
                             'Track your spending and save toward your goals',
                         )}
                     />
-                    {savingsGoalsEnabled ? (
-                        <CreateMenu
-                            onCreate={setCreateType}
-                            trigger={
-                                <Button>
-                                    <Plus />
-                                    {__('Create')}
-                                    <ChevronDown className="ml-1 h-4 w-4" />
-                                </Button>
-                            }
-                        />
-                    ) : (
-                        <CreateBudgetDialog
-                            currencyCode={currencyCode}
-                            trigger={
-                                <CreateButton>
-                                    {__('Create Budget')}
-                                </CreateButton>
-                            }
-                        />
-                    )}
+                    <CreateMenu
+                        onCreate={setCreateType}
+                        trigger={
+                            <Button>
+                                <Plus />
+                                {__('Create')}
+                                <ChevronDown className="ml-1 h-4 w-4" />
+                            </Button>
+                        }
+                    />
                 </div>
 
-                {/* The row exists for either control, so it still lays the
-                    reorder button out on the right with savings goals off and
-                    no filter to sit beside it. It wraps rather than shrinks:
-                    the filter is already as narrow as its labels allow, so on
-                    a phone the button drops to its own line instead of sitting
-                    on top of it. */}
-                {(savingsGoalsEnabled || items.length > 1) && (
-                    <div className="flex flex-wrap items-center gap-2">
-                        {savingsGoalsEnabled && (
-                            <ToggleGroup
-                                type="single"
-                                variant="outline"
-                                size="sm"
-                                value={filter}
-                                onValueChange={changeFilter}
-                                aria-label={__('Filter by type')}
-                            >
-                                <ToggleGroupItem
-                                    value="all"
-                                    className="cursor-pointer px-3 aria-checked:bg-primary/10"
-                                >
-                                    {__('All')}
-                                </ToggleGroupItem>
-                                <ToggleGroupItem
-                                    value="budgets"
-                                    className="cursor-pointer px-3 aria-checked:bg-primary/10"
-                                >
-                                    {__('Budgets')}
-                                </ToggleGroupItem>
-                                <ToggleGroupItem
-                                    value="goals"
-                                    className="cursor-pointer px-3 aria-checked:bg-primary/10"
-                                >
-                                    {__('Savings Goals')}
-                                </ToggleGroupItem>
-                            </ToggleGroup>
-                        )}
-                        {items.length > 1 && (
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                className="ml-auto"
-                                onClick={() => setReorderOpen(true)}
-                                aria-label={__('Edit order')}
-                            >
-                                <Pencil className="size-4" />
-                                <span className="hidden md:inline">
-                                    {__('Edit order')}
-                                </span>
-                            </Button>
-                        )}
-                    </div>
-                )}
+                {/* The row wraps rather than shrinks: the filter is already as
+                    narrow as its labels allow, so on a phone the reorder
+                    button drops to its own line instead of sitting on top of
+                    it. */}
+                <div className="flex flex-wrap items-center gap-2">
+                    <ToggleGroup
+                        type="single"
+                        variant="outline"
+                        size="sm"
+                        value={filter}
+                        onValueChange={changeFilter}
+                        aria-label={__('Filter by type')}
+                    >
+                        <ToggleGroupItem
+                            value="all"
+                            className="cursor-pointer px-3 aria-checked:bg-primary/10"
+                        >
+                            {__('All')}
+                        </ToggleGroupItem>
+                        <ToggleGroupItem
+                            value="budgets"
+                            className="cursor-pointer px-3 aria-checked:bg-primary/10"
+                        >
+                            {__('Budgets')}
+                        </ToggleGroupItem>
+                        <ToggleGroupItem
+                            value="goals"
+                            className="cursor-pointer px-3 aria-checked:bg-primary/10"
+                        >
+                            {__('Savings Goals')}
+                        </ToggleGroupItem>
+                    </ToggleGroup>
+                    {items.length > 1 && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            className="ml-auto"
+                            onClick={() => setReorderOpen(true)}
+                            aria-label={__('Edit order')}
+                        >
+                            <Pencil className="size-4" />
+                            <span className="hidden md:inline">
+                                {__('Edit order')}
+                            </span>
+                        </Button>
+                    )}
+                </div>
 
                 {hasActiveBudgets && filter !== 'goals' && (
                     <BudgetOverviewCard
@@ -266,7 +241,6 @@ export default function BudgetsIndex({
                     <PlanningCards items={items} currencyCode={currencyCode} />
                     <CreateCard
                         currencyCode={currencyCode}
-                        savingsGoalsEnabled={savingsGoalsEnabled}
                         filter={filter}
                         isListEmpty={items.length === 0}
                         onCreate={setCreateType}
@@ -306,20 +280,16 @@ export default function BudgetsIndex({
                 onReorder={handleReorder}
             />
 
-            {savingsGoalsEnabled && (
-                <>
-                    <CreateBudgetDialog
-                        currencyCode={currencyCode}
-                        open={createType === 'budget'}
-                        onOpenChange={(open) => !open && setCreateType(null)}
-                    />
-                    <CreateSavingsGoalDialog
-                        currencyCode={currencyCode}
-                        open={createType === 'goal'}
-                        onOpenChange={(open) => !open && setCreateType(null)}
-                    />
-                </>
-            )}
+            <CreateBudgetDialog
+                currencyCode={currencyCode}
+                open={createType === 'budget'}
+                onOpenChange={(open) => !open && setCreateType(null)}
+            />
+            <CreateSavingsGoalDialog
+                currencyCode={currencyCode}
+                open={createType === 'goal'}
+                onOpenChange={(open) => !open && setCreateType(null)}
+            />
         </AppSidebarLayout>
     );
 }
@@ -354,28 +324,25 @@ function PlanningCards({
 
 interface CreateCardProps {
     currencyCode: string;
-    savingsGoalsEnabled: boolean;
     filter: BudgetTypeFilter;
     isListEmpty: boolean;
     onCreate: (type: 'budget' | 'goal') => void;
 }
 
 /**
- * The card that trails the list. Without savings goals it is the budget
- * dialog's own placeholder, exactly as before. With them it offers both types
- * — unless the list is filtered, in which case it creates the type the user is
- * already looking at instead of asking again.
+ * The card that trails the list. It offers both types — unless the list is
+ * filtered, in which case it creates the type the user is already looking at
+ * instead of asking again.
  */
 function CreateCard({
     currencyCode,
-    savingsGoalsEnabled,
     filter,
     isListEmpty,
     onCreate,
 }: CreateCardProps) {
     const className = isListEmpty ? 'min-h-[260px]' : '';
 
-    if (!savingsGoalsEnabled || filter === 'budgets') {
+    if (filter === 'budgets') {
         return (
             <CreateBudgetDialog
                 currencyCode={currencyCode}
