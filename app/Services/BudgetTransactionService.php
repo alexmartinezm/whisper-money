@@ -9,8 +9,10 @@ use App\Models\Budget;
 use App\Models\BudgetPeriod;
 use App\Models\BudgetTransaction;
 use App\Models\Transaction;
+use App\Services\Budgets\BudgetAssignmentLookups;
 use App\Services\Transactions\EffectiveTransactionPostings;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 
 class BudgetTransactionService
@@ -27,6 +29,33 @@ class BudgetTransactionService
      */
     public function assignTransaction(Transaction $transaction, bool $notify = true): void
     {
+        $this->assignWithLookups($transaction, $notify, new BudgetAssignmentLookups($this->tree));
+    }
+
+    /**
+     * {@see self::assignTransaction()} for a batch, reading each user's
+     * category tree, the periods covering each date and the budgets that can
+     * displace a catch-all once for the whole batch instead of once per
+     * transaction. Each transaction is still re-read under its own row lock.
+     *
+     * The lookups only live for this call, so the next batch sees any category
+     * re-parented or budget changed in the meantime.
+     *
+     * @param  iterable<int, Transaction>  $transactions
+     * @param  bool  $notify  set to false for bulk backfills, where the emails
+     *                        would describe budget states the user never crossed
+     */
+    public function assignTransactions(iterable $transactions, bool $notify = true): void
+    {
+        $lookups = new BudgetAssignmentLookups($this->tree);
+
+        foreach ($transactions as $transaction) {
+            $this->assignWithLookups($transaction, $notify, $lookups);
+        }
+    }
+
+    private function assignWithLookups(Transaction $transaction, bool $notify, BudgetAssignmentLookups $lookups): void
+    {
         if (! $transaction->user_id) {
             return;
         }
@@ -34,7 +63,7 @@ class BudgetTransactionService
         $matchingPeriodIds = [];
         $createdPeriodIds = [];
 
-        DB::transaction(function () use ($transaction, &$matchingPeriodIds, &$createdPeriodIds): void {
+        DB::transaction(function () use ($transaction, $lookups, &$matchingPeriodIds, &$createdPeriodIds): void {
             // Reset per attempt: a deadlock retry re-runs the closure.
             $matchingPeriodIds = [];
             $createdPeriodIds = [];
@@ -45,22 +74,9 @@ class BudgetTransactionService
                 ->with(['labels', 'category', 'splits.category'])
                 ->firstOrFail();
             $this->reuseLoadedAccount($locked, $transaction);
-            $periods = BudgetPeriod::query()
-                // An archived budget stops taking in new data from the day it
-                // was archived; what it already counted stays as it was.
-                // Spelled out rather than via Budget::scopeNotArchived: inside
-                // a whereHas closure the builder is not typed to the model.
-                ->whereHas('budget', fn ($query) => $query
-                    ->whereNull('archived_at')
-                    ->where('user_id', $locked->user_id)
-                    ->where('space_id', $locked->space_id))
-                ->where('start_date', '<=', $locked->transaction_date)
-                ->where('end_date', '>=', $locked->transaction_date)
-                ->with(['budget.categories:id', 'budget.labels:id'])
-                ->get();
 
-            foreach ($periods as $period) {
-                $amount = $this->amountForBudget($locked, $period->budget);
+            foreach ($lookups->periodsCovering($locked) as $period) {
+                $amount = $this->amountForBudget($locked, $period->budget, $lookups);
                 if ($amount === 0) {
                     continue;
                 }
@@ -140,45 +156,86 @@ class BudgetTransactionService
             return 0;
         }
 
+        $lookups = new BudgetAssignmentLookups($this->tree);
         $count = 0;
         Transaction::query()
             ->where('user_id', $budget->user_id)
             ->where('space_id', $budget->space_id)
             ->whereBetween('transaction_date', [$period->start_date, $period->end_date])
             ->with(['account' => fn ($query) => $query->withTrashed(), 'labels', 'category', 'splits.category'])
-            ->chunk(500, function ($transactions) use ($period, $budget, &$count): void {
-                foreach ($transactions as $transaction) {
-                    $amount = $this->amountForBudget($transaction, $budget);
-                    if ($amount === 0) {
-                        BudgetTransaction::query()->where([
-                            'transaction_id' => $transaction->id,
-                            'budget_period_id' => $period->id,
-                        ])->delete();
-
-                        continue;
-                    }
-
-                    $assignment = BudgetTransaction::updateOrCreate(
-                        ['transaction_id' => $transaction->id, 'budget_period_id' => $period->id],
-                        ['amount' => $amount],
-                    );
-                    if ($assignment->wasRecentlyCreated) {
-                        $count++;
-                    }
-                }
+            ->chunk(500, function (Collection $transactions) use ($period, $budget, $lookups, &$count): void {
+                $count += $this->recordSnapshots($transactions, $period, $budget, $lookups);
             });
 
         return $count;
     }
 
-    private function amountForBudget(Transaction $transaction, Budget $budget): int
+    /**
+     * Write one period's snapshots for a chunk of transactions in one lookup,
+     * one upsert and one delete, rather than all three per transaction.
+     *
+     * Behaves as updateOrCreate() would row by row: a missing snapshot is
+     * inserted, one whose amount changed is refreshed, and one already holding
+     * the right amount is left untouched, updated_at included. A transaction
+     * the budget no longer counts loses its snapshot. Eloquent's upsert() fills
+     * in the ids and timestamps the model would have set.
+     *
+     * @param  Collection<int, Transaction>  $transactions
+     * @return int the number of snapshots newly created
+     */
+    private function recordSnapshots(Collection $transactions, BudgetPeriod $period, Budget $budget, BudgetAssignmentLookups $lookups): int
+    {
+        $existingAmounts = BudgetTransaction::query()
+            ->where('budget_period_id', $period->id)
+            ->whereIn('transaction_id', $transactions->modelKeys())
+            ->pluck('amount', 'transaction_id');
+
+        $rows = [];
+        $uncountedIds = [];
+        $created = 0;
+
+        foreach ($transactions as $transaction) {
+            $amount = $this->amountForBudget($transaction, $budget, $lookups);
+
+            if ($amount === 0) {
+                $uncountedIds[] = $transaction->id;
+
+                continue;
+            }
+
+            if (! $existingAmounts->has($transaction->id)) {
+                $created++;
+            } elseif ($existingAmounts->get($transaction->id) === $amount) {
+                continue;
+            }
+
+            $rows[] = [
+                'transaction_id' => $transaction->id,
+                'budget_period_id' => $period->id,
+                'amount' => $amount,
+            ];
+        }
+
+        if ($uncountedIds !== []) {
+            BudgetTransaction::query()
+                ->where('budget_period_id', $period->id)
+                ->whereIn('transaction_id', $uncountedIds)
+                ->delete();
+        }
+
+        BudgetTransaction::upsert($rows, ['transaction_id', 'budget_period_id'], ['amount']);
+
+        return $created;
+    }
+
+    private function amountForBudget(Transaction $transaction, Budget $budget, BudgetAssignmentLookups $lookups): int
     {
         $labelMatch = $budget->labels->pluck('id')->intersect($transaction->labels->pluck('id'))->isNotEmpty();
         if ($labelMatch) {
             return -$this->ownedAmount($transaction, $transaction->amount);
         }
 
-        $budgetCategoryIds = $this->tree->expand(
+        $budgetCategoryIds = $lookups->expand(
             $budget->user_id,
             $budget->categories->pluck('id')->all(),
             $budget->space_id,
@@ -191,35 +248,19 @@ class BudgetTransactionService
                 ->sum(fn ($posting): int => $this->ownedAmount($transaction, $posting->amount));
         }
 
-        // Only a budget that can actually take this transaction displaces the
-        // catch-all: one whose period covers the transaction's date. A budget
-        // created later, or one whose periods stop short, would otherwise drop
-        // the expense out of every budget there is.
-        $claimants = Budget::query()
-            ->notArchived()
-            ->where('user_id', $budget->user_id)
-            ->where('space_id', $budget->space_id)
-            ->where('is_catch_all', false)
-            // Compared as plain dates: a Carbon binding serializes with a time
-            // ("Y-m-d H:i:s"), which sorts after a stored date-only end_date on
-            // any driver that compares them as strings, so the period's own last
-            // day would never match.
-            ->whereHas('periods', fn ($query) => $query
-                ->where('start_date', '<=', $transaction->transaction_date->toDateString())
-                ->where('end_date', '>=', $transaction->transaction_date->toDateString()));
+        $claimants = $lookups->catchAllClaimants($budget, $transaction);
+        $transactionLabelIds = $transaction->labels->pluck('id');
 
-        $claimedByLabel = (clone $claimants)
-            ->whereHas('labels', fn ($query) => $query->whereIn('labels.id', $transaction->labels->pluck('id')))
-            ->exists();
+        $claimedByLabel = $claimants->contains(
+            fn (Budget $other): bool => $other->labels->pluck('id')->intersect($transactionLabelIds)->isNotEmpty(),
+        );
         if ($claimedByLabel) {
             return 0;
         }
 
-        $claimed = $this->tree->expand(
+        $claimed = $lookups->expand(
             $budget->user_id,
             $claimants
-                ->with('categories:id')
-                ->get()
                 ->flatMap(fn (Budget $other): mixed => $other->categories->pluck('id'))
                 ->unique()
                 ->all(),

@@ -47,10 +47,11 @@ class ReassignTransactionsToBudgets implements ShouldQueue
             // trashed account would be loaded as null, which the service does
             // not reuse, so the lookup per row would come back.
             ->with(['labels', 'account' => fn ($query) => $query->withTrashed()])
+            // Assigned as a batch, so the category tree, the periods covering
+            // each date and the catch-all's claimants are read once per chunk
+            // rather than once for every transaction.
             ->chunkById(200, function (Collection $transactions) use ($service): void {
-                foreach ($transactions as $transaction) {
-                    $service->assignTransaction($transaction, notify: $this->notify);
-                }
+                $service->assignTransactions($transactions, notify: $this->notify);
             });
     }
 }
