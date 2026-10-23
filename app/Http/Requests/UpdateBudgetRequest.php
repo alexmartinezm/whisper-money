@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Enums\BudgetExpenseType;
 use App\Enums\BudgetPeriodType;
 use App\Enums\RolloverType;
 use App\Http\Requests\Concerns\ValidatesUserOwnedResources;
@@ -24,6 +25,7 @@ class UpdateBudgetRequest extends FormRequest
             'period_type' => ['sometimes', Rule::enum(BudgetPeriodType::class)],
             'period_start_day' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:31'],
             'rollover_type' => ['sometimes', Rule::enum(RolloverType::class)],
+            'expense_type' => ['sometimes', Rule::enum(BudgetExpenseType::class)],
             'allocated_amount' => ['sometimes', 'integer', 'min:0'],
             'category_ids' => ['sometimes', 'array'],
             'category_ids.*' => [$this->userOwned('categories')],
@@ -35,7 +37,7 @@ class UpdateBudgetRequest extends FormRequest
     public function withValidator($validator): void
     {
         $validator->after(function ($validator): void {
-            if (! $this->hasAny(['name', 'allocated_amount', 'category_ids', 'label_ids'])) {
+            if (! $this->hasAny(['name', 'allocated_amount', 'category_ids', 'label_ids', 'expense_type'])) {
                 $validator->errors()->add('budget', 'Provide a mutable budget field.');
             }
 

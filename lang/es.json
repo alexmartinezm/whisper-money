@@ -3152,5 +3152,10 @@
     "Contributed split: :saved% saved, :invested% invested": "Reparto del aportado: :saved% ahorrado, :invested% invertido",
     "Free (cashflow)": "Libre",
     "reserved in budgets": "reservados en presupuestos",
-    "Nothing reserved in budgets": "Nada reservado en presupuestos"
+    "Nothing reserved in budgets": "Nada reservado en presupuestos",
+    "Expense Type": "Tipo de gasto",
+    "Fixed expense": "Gasto fijo",
+    "Variable expense": "Gasto variable",
+    "Same amount every period, like rent or subscriptions": "La misma cantidad cada período, como el alquiler o las suscripciones",
+    "Spending you can adjust, like groceries or restaurants": "Gastos que puedes ajustar, como el supermercado o los restaurantes"
 }

@@ -2656,5 +2656,10 @@
     "Free (cashflow)": "Libre",
     "reserved in budgets": "réservés dans les budgets",
     "Nothing reserved in budgets": "Rien de réservé dans les budgets",
-    "Budget": "Budget"
+    "Budget": "Budget",
+    "Expense Type": "Type de dépense",
+    "Fixed expense": "Dépense fixe",
+    "Variable expense": "Dépense variable",
+    "Same amount every period, like rent or subscriptions": "Le même montant à chaque période, comme le loyer ou les abonnements",
+    "Spending you can adjust, like groceries or restaurants": "Des dépenses que vous pouvez ajuster, comme les courses ou les restaurants"
 }

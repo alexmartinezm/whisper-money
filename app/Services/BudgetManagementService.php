@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\BudgetExpenseType;
 use App\Jobs\AssignHistoricalTransactionsToBudget;
 use App\Models\Budget;
 use App\Models\BudgetPeriod;
@@ -15,6 +16,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -60,18 +62,19 @@ class BudgetManagementService
             }
 
             $setting = $user->setting;
-            $budget = new Budget([
+            $budget = new Budget($this->keepCatchAllVariable([
                 'user_id' => $user->id,
                 'space_id' => $space->id,
                 'name' => $attributes['name'],
                 'period_type' => $attributes['period_type'],
                 'period_start_day' => $attributes['period_start_day'] ?? null,
                 'rollover_type' => $attributes['rollover_type'],
+                'expense_type' => $attributes['expense_type'] ?? BudgetExpenseType::Variable,
                 'is_catch_all' => $isCatchAll,
                 'notify_on_new_transaction' => $setting->budget_notify_on_new_transaction ?? false,
                 'notify_on_close_to_limit' => $setting->budget_notify_on_close_to_limit ?? true,
                 'notify_on_over_limit' => $setting->budget_notify_on_over_limit ?? true,
-            ]);
+            ], $isCatchAll));
             $budget->save();
             $budget->categories()->sync($categories->modelKeys());
             $budget->labels()->sync($labels->modelKeys());
@@ -111,9 +114,7 @@ class BudgetManagementService
 
             $reconciliationPeriods = $this->applyTrackingChange($user, $space, $budget, $changes, $applicationDate);
 
-            if (array_key_exists('name', $changes)) {
-                $budget->name = $changes['name'];
-            }
+            $budget->fill($this->keepCatchAllVariable(Arr::only($changes, ['name', 'expense_type']), $budget->is_catch_all));
 
             $adjustment = array_key_exists('allocated_amount', $changes)
                 ? $this->applyAllocation($budget, (int) $changes['allocated_amount'], $applicationDate)
@@ -139,6 +140,23 @@ class BudgetManagementService
         unset($result['reconciliation_periods']);
 
         return $result;
+    }
+
+    /**
+     * A catch-all budget takes whatever no other budget covers, so it has no
+     * kind of spending of its own and keeps the default expense type whatever
+     * the caller sends.
+     *
+     * @param  array<string, mixed>  $attributes
+     * @return array<string, mixed>
+     */
+    private function keepCatchAllVariable(array $attributes, bool $isCatchAll): array
+    {
+        if ($isCatchAll && array_key_exists('expense_type', $attributes)) {
+            $attributes['expense_type'] = BudgetExpenseType::Variable;
+        }
+
+        return $attributes;
     }
 
     /**
