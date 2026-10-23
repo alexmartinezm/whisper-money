@@ -2982,5 +2982,9 @@
     "Re-evaluation complete!": "¡Reevaluación completada!",
     ":count transaction(s) updated.": ":count movimiento(s) actualizado(s).",
     "Re-evaluation queued": "Reevaluación en cola",
-    "Your transactions will be updated in the background shortly. Reload the page later to see the changes.": "Tus movimientos se actualizarán en segundo plano en breve. Recarga la página más tarde para ver los cambios."
+    "Your transactions will be updated in the background shortly. Reload the page later to see the changes.": "Tus movimientos se actualizarán en segundo plano en breve. Recarga la página más tarde para ver los cambios.",
+    "Amount type": "Tipo de importe",
+    "Minimum amount": "Importe mínimo",
+    "Maximum amount": "Importe máximo",
+    "This range covers both expenses and income. Picking a side turns its bounds into sizes.": "Este rango incluye gastos e ingresos. Al elegir uno, sus límites pasan a ser importes."
 }

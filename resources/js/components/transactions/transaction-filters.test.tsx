@@ -136,3 +136,13 @@ describe('TransactionFilters categories dropdown', () => {
         await expectFoodListedWithSubcategories();
     });
 });
+
+describe('TransactionFilters amount', () => {
+    it('counts the amount as one filter even when a single bound sets both ends', () => {
+        renderFilters({ ...emptyFilters, amountMin: -30, amountMax: 0 });
+
+        expect(
+            screen.getByRole('button', { name: /Filters/ }),
+        ).toHaveTextContent(/^Filters1$/);
+    });
+});

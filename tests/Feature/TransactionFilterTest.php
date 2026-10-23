@@ -677,3 +677,25 @@ test('does not expose the sort alias attribute when sorting by a nullable column
         ->missing('transactions.data.0.creditor_name_sort')
     );
 });
+
+test('a positive amount range only matches income, so small expenses need the negative range', function () {
+    foreach ([-1500, -2500, -9000, 2000] as $amount) {
+        Transaction::factory()->create([
+            'user_id' => $this->user->id,
+            'account_id' => $this->account->id,
+            'currency_code' => 'USD',
+            'amount' => $amount,
+        ]);
+    }
+
+    actingAs($this->user)->get(route('transactions.index', ['amount_min' => 0, 'amount_max' => 30]))
+        ->assertInertia(fn ($page) => $page
+            ->has('transactions.data', 1)
+            ->where('transactions.data.0.amount', 2000));
+
+    actingAs($this->user)->get(route('transactions.index', ['amount_min' => -30, 'amount_max' => 0]))
+        ->assertInertia(fn ($page) => $page
+            ->has('transactions.data', 2)
+            ->where('appliedFilters.amount_min', -30)
+            ->where('appliedFilters.amount_max', 0));
+});
