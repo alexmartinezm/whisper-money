@@ -268,3 +268,23 @@ test('a year range reserves only the periods in progress, not future ones', func
     expect($summary['reserved'])->toBe(30000 + 7500)
         ->and($summary['budgets'])->toHaveCount(2);
 });
+
+test('a period with a one-off allocation reserves the one-off amount, not the regular one', function () {
+    $budget = Budget::factory()->monthly()->create(['user_id' => $this->user->id, 'name' => 'Holidays']);
+
+    $period = budgetPeriodWithSpend($budget, '2026-10-01', '2026-10-31', 40000, 15000);
+    $period->assignOneOffAllocation(60000);
+
+    expect($period->fresh()->regularAllocatedAmount())->toBe(40000);
+
+    $summary = cashflowSummary();
+
+    expect($summary['reserved'])->toBe(60000 - 15000)
+        ->and($summary['budgets'])->toHaveCount(1)
+        ->and($summary['budgets'][0])->toMatchArray([
+            'budget_period_id' => $period->id,
+            'allocated' => 60000,
+            'spent' => 15000,
+            'margin' => 45000,
+        ]);
+});
