@@ -59,7 +59,7 @@ import { formatDate, todayDateString } from '@/utils/date';
 import { __ } from '@/utils/i18n';
 import { router, usePage } from '@inertiajs/react';
 import axios from 'axios';
-import { getYear, parseISO } from 'date-fns';
+import { getYear, isValid, parseISO } from 'date-fns';
 import {
     FileText,
     HelpCircle,
@@ -164,6 +164,24 @@ function useConvertedAmount(
     return converted;
 }
 
+/**
+ * A source date as the "original date" hint shows it: the year is dropped when
+ * it is the current one. A value parseISO cannot read is shown as it came.
+ */
+function formatSourceDate(date: string, locale: string): string {
+    const parsed = parseISO(date);
+
+    if (!isValid(parsed)) {
+        return date;
+    }
+
+    return formatDate(
+        parsed,
+        getYear(parsed) === getYear(new Date()) ? 'MMMM d' : 'MMMM d, yyyy',
+        locale,
+    );
+}
+
 export function EditTransactionDialog({
     transaction,
     categories,
@@ -246,13 +264,7 @@ export function EditTransactionDialog({
             : null;
     const movedFromSourceDate =
         sourceDate && sourceDate !== transactionDate
-            ? formatDate(
-                  parseISO(sourceDate),
-                  getYear(parseISO(sourceDate)) === getYear(new Date())
-                      ? 'MMMM d'
-                      : 'MMMM d, yyyy',
-                  locale,
-              )
+            ? formatSourceDate(sourceDate, locale)
             : null;
 
     useEffect(() => {
@@ -1064,9 +1076,13 @@ export function EditTransactionDialog({
                                         <FormLabel htmlFor="date">
                                             {__('Date')}
                                         </FormLabel>
+                                        {/* Without a max, Chromium lets the year take
+                                            six digits, and the server reads
+                                            "20266-10-01" as 2006-10-01. */}
                                         <Input
                                             id="date"
                                             type="date"
+                                            max="9999-12-31"
                                             value={transactionDate}
                                             onChange={(e) =>
                                                 setTransactionDate(
@@ -1194,9 +1210,13 @@ export function EditTransactionDialog({
                                         <FormLabel htmlFor="date">
                                             {__('Date')}
                                         </FormLabel>
+                                        {/* Without a max, Chromium lets the year take
+                                            six digits, and the server reads
+                                            "20266-10-01" as 2006-10-01. */}
                                         <Input
                                             id="date"
                                             type="date"
+                                            max="9999-12-31"
                                             value={transactionDate}
                                             onChange={(e) =>
                                                 setTransactionDate(

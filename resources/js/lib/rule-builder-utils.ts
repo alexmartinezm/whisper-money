@@ -53,7 +53,7 @@ export const FIELD_CONFIG: Record<
     amount: {
         label: 'Amount',
         type: 'number',
-        operators: ['equals', 'greater_than', 'less_than'],
+        operators: ['equals', 'not_equals', 'greater_than', 'less_than'],
     },
     bank_name: {
         label: 'Bank Name',
@@ -90,6 +90,14 @@ export const OPERATOR_LABELS: Record<Operator, string> = {
 
 type JsonLogicRule = Record<string, unknown>;
 
+/**
+ * The value an equality condition compares against. A numeric field compares as
+ * a number, so `amount != 14` is stored as 14 and not as the string "14".
+ */
+function equalityValue(field: string, value: string): string | number {
+    return FIELD_CONFIG[field]?.type === 'number' ? parseFloat(value) : value;
+}
+
 function buildConditionJsonLogic(condition: Condition): JsonLogicRule {
     const { field, operator, value } = condition;
 
@@ -99,12 +107,9 @@ function buildConditionJsonLogic(condition: Condition): JsonLogicRule {
         case 'not_contains':
             return { '!': { in: [value, { var: field }] } };
         case 'not_equals':
-            return { '!=': [{ var: field }, value] };
+            return { '!=': [{ var: field }, equalityValue(field, value)] };
         case 'equals':
-            if (FIELD_CONFIG[field]?.type === 'number') {
-                return { '==': [{ var: field }, parseFloat(value)] };
-            }
-            return { '==': [{ var: field }, value] };
+            return { '==': [{ var: field }, equalityValue(field, value)] };
         case 'greater_than':
             return { '>': [{ var: field }, parseFloat(value)] };
         case 'less_than':
@@ -116,6 +121,30 @@ function buildConditionJsonLogic(condition: Condition): JsonLogicRule {
         default:
             throw new Error(`Unknown operator: ${operator}`);
     }
+}
+
+/**
+ * Whether a condition has a value to compare against. A blank one is left out
+ * of the rule instead of being saved as a comparison with null: a blank amount
+ * would become `amount != null`, which matches every transaction.
+ */
+function isCompleteCondition(condition: Condition): boolean {
+    if (!condition.field || !condition.operator) {
+        return false;
+    }
+
+    if (
+        condition.operator === 'is_empty' ||
+        condition.operator === 'is_not_empty'
+    ) {
+        return true;
+    }
+
+    if (FIELD_CONFIG[condition.field]?.type === 'number') {
+        return !Number.isNaN(parseFloat(condition.value));
+    }
+
+    return condition.value.trim() !== '';
 }
 
 function buildGroupJsonLogic(group: ConditionGroup): JsonLogicRule {
@@ -132,9 +161,12 @@ function buildGroupJsonLogic(group: ConditionGroup): JsonLogicRule {
 }
 
 export function buildJsonLogic(structure: RuleStructure): JsonLogicRule {
-    const validGroups = structure.groups.filter(
-        (group) => group.conditions.length > 0,
-    );
+    const validGroups = structure.groups
+        .map((group) => ({
+            ...group,
+            conditions: group.conditions.filter(isCompleteCondition),
+        }))
+        .filter((group) => group.conditions.length > 0);
 
     if (validGroups.length === 0) {
         return {};
@@ -161,9 +193,9 @@ function jsonLogicVariable(value: unknown): string | null {
 }
 
 /**
- * What a condition becomes once it is wrapped in a JsonLogic `!`. Only the two
- * positive text operators have a negative twin in the builder, so anything else
- * under a `!` stays unparseable and is dropped like any other unknown node.
+ * What a condition becomes once it is wrapped in a JsonLogic `!`. Only `contains`
+ * and `equals` have a negative twin in the builder, so anything else under a `!`
+ * stays unparseable and is dropped like any other unknown node.
  *
  * The two entries are not symmetric: the builder writes `not_contains` as a `!`
  * and reads it back here, while it writes `not_equals` as a plain `!=`. The
@@ -425,6 +457,78 @@ export function createEmptyGroup(): ConditionGroup {
     };
 }
 
+export type MoveDirection = 'up' | 'down';
+
+/**
+ * Swaps the item with `id` with its neighbour above or below, or returns the list
+ * as is when it is already at that edge. Order never changes what a rule matches
+ * (AND and OR do not care), it only keeps the builder tidy, and it survives a save
+ * because `buildJsonLogic` and `parseJsonLogic` both keep array order.
+ */
+function moveById<T extends { id: string }>(
+    items: T[],
+    id: string,
+    direction: MoveDirection,
+): T[] {
+    const from = items.findIndex((item) => item.id === id);
+    const to = direction === 'up' ? from - 1 : from + 1;
+
+    if (from === -1 || to < 0 || to >= items.length) {
+        return items;
+    }
+
+    const moved = [...items];
+    [moved[from], moved[to]] = [moved[to], moved[from]];
+
+    return moved;
+}
+
+export function moveGroup(
+    structure: RuleStructure,
+    groupId: string,
+    direction: MoveDirection,
+): RuleStructure {
+    return {
+        ...structure,
+        groups: moveById(structure.groups, groupId, direction),
+    };
+}
+
+export function moveCondition(
+    group: ConditionGroup,
+    conditionId: string,
+    direction: MoveDirection,
+): ConditionGroup {
+    return {
+        ...group,
+        conditions: moveById(group.conditions, conditionId, direction),
+    };
+}
+
+export function reorderConditions(
+    group: ConditionGroup,
+    orderedIds: string[],
+): ConditionGroup {
+    const conditionsById = new Map(
+        group.conditions.map((condition) => [condition.id, condition]),
+    );
+
+    const ordered = orderedIds
+        .map((id) => conditionsById.get(id))
+        .filter((condition): condition is Condition => !!condition);
+
+    // A condition the order does not mention is kept at the end, never dropped.
+    return {
+        ...group,
+        conditions: [
+            ...ordered,
+            ...group.conditions.filter(
+                (condition) => !orderedIds.includes(condition.id),
+            ),
+        ],
+    };
+}
+
 function cloneCondition(condition: Condition): Condition {
     return {
         ...condition,
@@ -485,13 +589,6 @@ export function addDescriptionMatchToRuleStructure(
 
 export function isValidRuleStructure(structure: RuleStructure): boolean {
     return structure.groups.some((group) =>
-        group.conditions.some(
-            (condition) =>
-                condition.field &&
-                condition.operator &&
-                (condition.operator === 'is_empty' ||
-                    condition.operator === 'is_not_empty' ||
-                    condition.value.trim() !== ''),
-        ),
+        group.conditions.some(isCompleteCondition),
     );
 }

@@ -51,6 +51,7 @@ class TransactionSyncService
         $continuationKey = null;
         $dailyBalances = [];
         $bankName = $account->bank?->name;
+        $country = $account->bankingConnection?->aspsp_country;
 
         // Preload the account's existing dedup keys once. Without this every
         // incoming transaction ran its own exists() probe (the N+1 in
@@ -89,7 +90,7 @@ class TransactionSyncService
                     $pages++;
 
                     foreach ($result['transactions'] as $transaction) {
-                        if ($this->importTransaction($account, $transaction, $bankName, $knownFingerprints, $knownExternalIds, $skippedUnsettled)) {
+                        if ($this->importTransaction($account, $transaction, $bankName, $country, $knownFingerprints, $knownExternalIds, $skippedUnsettled)) {
                             $created++;
                         }
 
@@ -313,9 +314,9 @@ class TransactionSyncService
      * TransactionSettlement::waitsForSettlement(). `$skippedUnsettled` counts
      * what was held back, for the sync log.
      */
-    private function importTransaction(Account $account, array $data, ?string $bankName, array &$knownFingerprints, array &$knownExternalIds, int &$skippedUnsettled): bool
+    private function importTransaction(Account $account, array $data, ?string $bankName, ?string $country, array &$knownFingerprints, array &$knownExternalIds, int &$skippedUnsettled): bool
     {
-        $identifiedByUpstreamId = TransactionFingerprint::identifiesTransaction($data, $bankName);
+        $identifiedByUpstreamId = TransactionFingerprint::identifiesTransaction($data, $bankName, $country);
 
         if (TransactionSettlement::waitsForSettlement($data, $bankName, $identifiedByUpstreamId)) {
             $skippedUnsettled++;
@@ -324,7 +325,7 @@ class TransactionSyncService
         }
 
         $externalId = $data['transaction_id'] ?? $data['entry_reference'] ?? null;
-        $fingerprint = TransactionFingerprint::for($data, $bankName);
+        $fingerprint = TransactionFingerprint::for($data, $bankName, $country);
 
         // Mirror of the previous exists() probe against the preloaded sets:
         // match on the fingerprint, or — for legacy rows keyed solely on the

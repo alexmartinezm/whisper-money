@@ -1,3 +1,4 @@
+import { PrivacyRevealButton } from '@/components/privacy-reveal-button';
 import { AmountDisplay } from '@/components/ui/amount-display';
 import {
     Card,
@@ -11,6 +12,7 @@ import {
     ChartTooltip,
     type ChartConfig,
 } from '@/components/ui/chart';
+import { usePrivacyMode } from '@/contexts/privacy-mode-context';
 import { useLocale } from '@/hooks/use-locale';
 import { cn } from '@/lib/utils';
 import { type NetWorthProjection } from '@/types/net-worth';
@@ -89,20 +91,30 @@ export function NetWorthProjectionCard({ projection }: Props) {
         (point) => point.actual !== null && point.committed !== null,
     );
 
+    const { isPrivacyModeEnabled } = usePrivacyMode();
+    // Masked the way AmountDisplay masks: the figures this card formats itself
+    // (change, axis, tooltip, drivers) must hide along with the headline ones.
+    const masked = (formatted: string) =>
+        isPrivacyModeEnabled ? formatted.replace(/\d/g, '*') : formatted;
+
     const money = (cents: number, round = true) =>
-        new Intl.NumberFormat(locale, {
-            style: 'currency',
-            currency: projection.currency_code,
-            ...(round ? { maximumFractionDigits: 0 } : {}),
-        }).format(cents / 100);
+        masked(
+            new Intl.NumberFormat(locale, {
+                style: 'currency',
+                currency: projection.currency_code,
+                ...(round ? { maximumFractionDigits: 0 } : {}),
+            }).format(cents / 100),
+        );
 
     const compact = (cents: number) =>
-        new Intl.NumberFormat(locale, {
-            style: 'currency',
-            currency: projection.currency_code,
-            notation: 'compact',
-            maximumFractionDigits: 0,
-        }).format(cents / 100);
+        masked(
+            new Intl.NumberFormat(locale, {
+                style: 'currency',
+                currency: projection.currency_code,
+                notation: 'compact',
+                maximumFractionDigits: 0,
+            }).format(cents / 100),
+        );
 
     // The axis spans two calendar years, so every tick carries one. Marking
     // only January does not survive tick thinning: the axis is free to drop it.
@@ -168,9 +180,12 @@ export function NetWorthProjectionCard({ projection }: Props) {
     return (
         <Card>
             <CardHeader className="gap-1">
-                <CardTitle className="text-base">
-                    {__('Where this is heading')}
-                </CardTitle>
+                <div className="flex items-start justify-between gap-2">
+                    <CardTitle className="text-base">
+                        {__('Where this is heading')}
+                    </CardTitle>
+                    <PrivacyRevealButton className="-my-2" />
+                </div>
                 <CardDescription>
                     {__(
                         'Your net worth in :months months if nothing changes.',

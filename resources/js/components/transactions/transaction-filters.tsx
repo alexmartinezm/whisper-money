@@ -8,6 +8,7 @@ import { AccountName } from '@/components/accounts/account-name';
 import { BankLogo } from '@/components/bank-logo';
 import { LabelIcon } from '@/components/shared/label-icon';
 import { SavedFilters } from '@/components/transactions/saved-filters';
+import { AmountFilterFields } from '@/components/transactions/transaction-filters-amount';
 import { AiSparkleIcon } from '@/components/ui/ai-sparkle-icon';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -30,6 +31,7 @@ import {
     buildCategoryTree,
     categorySelectionState,
     flattenCategoryTree,
+    searchCategoryTree,
     toggleCategorySelection,
 } from '@/lib/category-tree';
 import { UNCATEGORIZED_CATEGORY_ID } from '@/lib/transaction-category-filter';
@@ -150,30 +152,10 @@ export function TransactionFilters({
         [filters.categoryIds],
     );
 
-    // Tree-aware search: keep each match together with its ancestors so a
-    // matching child still shows its parent chain for context.
-    const visibleCategoryTree = useMemo(() => {
-        const query = categorySearch.trim().toLowerCase();
-        if (!query) {
-            return categoryTree;
-        }
-
-        const parentOf = new Map(categories.map((c) => [c.id, c.parent_id]));
-        const include = new Set<string>();
-        for (const category of categories) {
-            if (!category.name.toLowerCase().includes(query)) {
-                continue;
-            }
-            let id: string | null | undefined = category.id;
-            let guard = 0;
-            while (id != null && guard++ < 10) {
-                include.add(id);
-                id = parentOf.get(id);
-            }
-        }
-
-        return categoryTree.filter((node) => include.has(node.id));
-    }, [categoryTree, categories, categorySearch]);
+    const visibleCategoryTree = useMemo(
+        () => searchCategoryTree(categoryTree, categorySearch),
+        [categoryTree, categorySearch],
+    );
 
     const showUncategorizedRow =
         categorySearch.trim() === '' ||
@@ -230,8 +212,8 @@ export function TransactionFilters({
     const activeFilterCount =
         (filters.dateFrom ? 1 : 0) +
         (filters.dateTo ? 1 : 0) +
-        (filters.amountMin !== null ? 1 : 0) +
-        (filters.amountMax !== null ? 1 : 0) +
+        // One amount filter, though a single typed bound can set both ends.
+        (filters.amountMin !== null || filters.amountMax !== null ? 1 : 0) +
         filters.categoryIds.length +
         filters.labelIds.length +
         (filters.creditorName ? 1 : 0) +
@@ -261,6 +243,7 @@ export function TransactionFilters({
                         <PopoverContent
                             className="max-h-[600px] w-96 overflow-y-auto"
                             align="start"
+                            data-test="transaction-filters-panel"
                         >
                             <div className="space-y-4">
                                 <div className="flex items-center justify-between">
@@ -287,6 +270,7 @@ export function TransactionFilters({
                                     <div className="grid grid-cols-2 gap-2 pt-2">
                                         <Input
                                             type="date"
+                                            data-testid="filter-date-from"
                                             value={
                                                 filters.dateFrom
                                                     ? formatLocalDate(
@@ -309,6 +293,7 @@ export function TransactionFilters({
 
                                         <Input
                                             type="date"
+                                            data-testid="filter-date-to"
                                             value={
                                                 filters.dateTo
                                                     ? formatLocalDate(
@@ -333,41 +318,16 @@ export function TransactionFilters({
 
                                 <div className="space-y-2">
                                     <FormLabel>{__('Amount')}</FormLabel>
-                                    <div className="grid grid-cols-2 gap-2 pt-2">
-                                        <Input
-                                            type="number"
-                                            step="0.01"
-                                            value={filters.amountMin ?? ''}
-                                            onChange={(e) =>
-                                                onFiltersChange({
-                                                    ...filters,
-                                                    amountMin: e.target.value
-                                                        ? parseFloat(
-                                                              e.target.value,
-                                                          )
-                                                        : null,
-                                                })
-                                            }
-                                            placeholder={__('Min')}
-                                        />
-
-                                        <Input
-                                            type="number"
-                                            step="0.01"
-                                            value={filters.amountMax ?? ''}
-                                            onChange={(e) =>
-                                                onFiltersChange({
-                                                    ...filters,
-                                                    amountMax: e.target.value
-                                                        ? parseFloat(
-                                                              e.target.value,
-                                                          )
-                                                        : null,
-                                                })
-                                            }
-                                            placeholder={__('Max')}
-                                        />
-                                    </div>
+                                    <AmountFilterFields
+                                        amountMin={filters.amountMin}
+                                        amountMax={filters.amountMax}
+                                        onChange={(range) =>
+                                            onFiltersChange({
+                                                ...filters,
+                                                ...range,
+                                            })
+                                        }
+                                    />
                                 </div>
 
                                 <div className="space-y-2">
@@ -393,6 +353,7 @@ export function TransactionFilters({
                                                     variant="outline"
                                                     role="combobox"
                                                     className="w-full justify-between"
+                                                    data-testid="filter-categories"
                                                 >
                                                     {filters.categoryIds
                                                         .length > 0 ? (
@@ -478,7 +439,7 @@ export function TransactionFilters({
                                                                             category.id
                                                                         }
                                                                         value={
-                                                                            category.name
+                                                                            category.id
                                                                         }
                                                                         onSelect={() =>
                                                                             handleCategoryToggle(
@@ -544,6 +505,7 @@ export function TransactionFilters({
                                                     variant="outline"
                                                     role="combobox"
                                                     className="w-full justify-between"
+                                                    data-testid="filter-labels"
                                                 >
                                                     {filters.labelIds.length >
                                                     0 ? (
@@ -654,6 +616,7 @@ export function TransactionFilters({
                                                         variant="outline"
                                                         role="combobox"
                                                         className="w-full justify-between"
+                                                        data-testid="filter-accounts"
                                                     >
                                                         {filters.accountIds
                                                             .length > 0 ? (

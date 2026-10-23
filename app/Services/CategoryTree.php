@@ -47,10 +47,15 @@ class CategoryTree
      * drop subcategories from the dashboard and the cashflow report without a
      * single test noticing.
      *
+     * Expanding many sets of one user's ids, pass that user's
+     * {@see self::parentMap()} (read with the same `$spaceId`) so the tree is
+     * read once instead of once per level for every call.
+     *
      * @param  array<int, string>  $ids
+     * @param  array<string, ?string>|null  $parentMap
      * @return array<int, string>
      */
-    public function expand(string $userId, array $ids, ?string $spaceId = null): array
+    public function expand(string $userId, array $ids, ?string $spaceId = null, ?array $parentMap = null): array
     {
         $ids = array_values(array_unique(array_filter($ids)));
 
@@ -62,12 +67,14 @@ class CategoryTree
         $frontier = $ids;
 
         for ($level = 1; $level < Category::MAX_DEPTH; $level++) {
-            $childIds = Category::query()
-                ->where('user_id', $userId)
-                ->when($spaceId !== null, fn ($query) => $query->where('space_id', $spaceId))
-                ->whereIn('parent_id', $frontier)
-                ->pluck('id')
-                ->all();
+            $childIds = $parentMap === null
+                ? Category::query()
+                    ->where('user_id', $userId)
+                    ->when($spaceId !== null, fn ($query) => $query->where('space_id', $spaceId))
+                    ->whereIn('parent_id', $frontier)
+                    ->pluck('id')
+                    ->all()
+                : array_keys(array_intersect($parentMap, $frontier));
 
             $childIds = array_values(array_diff($childIds, $collected));
 
@@ -80,6 +87,25 @@ class CategoryTree
         }
 
         return $collected;
+    }
+
+    /**
+     * Every live category of a user keyed by id, pointing at its parent id,
+     * narrowed to one space when `$spaceId` is given, the same way
+     * {@see self::expand()} narrows its queries.
+     *
+     * Soft-deleted categories are left out, so a walk over the map stops at a
+     * trashed category just as a query walk would.
+     *
+     * @return array<string, ?string>
+     */
+    public function parentMap(string $userId, ?string $spaceId = null): array
+    {
+        return Category::query()
+            ->where('user_id', $userId)
+            ->when($spaceId !== null, fn ($query) => $query->where('space_id', $spaceId))
+            ->pluck('parent_id', 'id')
+            ->all();
     }
 
     /**

@@ -11,6 +11,7 @@ import {
     useScrollTranslate,
 } from '@/hooks/use-scroll-progress';
 import { leavePage } from '@/lib/leave-page';
+import { isInstalledPwa } from '@/lib/pwa';
 import { readStoredValue, writeStoredValue } from '@/lib/safe-storage';
 import { cn } from '@/lib/utils';
 import { dashboard, roadmap } from '@/routes';
@@ -2271,20 +2272,7 @@ export default function Welcome({
         }
     }, [locale]);
 
-    const [isPwa] = useState(() => {
-        if (typeof window === 'undefined') {
-            return false;
-        }
-
-        return (
-            // Android applies fullscreen, iOS falls back to standalone.
-            window.matchMedia(
-                '(display-mode: fullscreen), (display-mode: standalone)',
-            ).matches ||
-            ('standalone' in navigator &&
-                (navigator as Navigator & { standalone: boolean }).standalone)
-        );
-    });
+    const [isPwa] = useState(() => isInstalledPwa());
 
     useEffect(() => {
         if (isPwa) {

@@ -57,6 +57,7 @@ class ListBudgets extends McpTool
         return $this->json([
             'space_id' => $space->id,
             'as_of' => $asOf->toDateString(),
+            'currency' => $this->reportingCurrency($user),
             'budgets' => $budgets->map(function (Budget $budget) use ($periods, $asOf): array {
                 $budgetPeriods = $periods->get($budget->id, collect());
                 $current = $budgetPeriods->first(fn (BudgetPeriod $period): bool => $period->start_date <= $asOf && $period->end_date >= $asOf);

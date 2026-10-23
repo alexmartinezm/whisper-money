@@ -814,6 +814,40 @@ describe('EditTransactionDialog', () => {
         ).not.toBeInTheDocument();
     });
 
+    // Sentry PHP-LARAVEL-5G: Chromium lets the year segment take six digits, and
+    // formatting the "20266-10-01" that leaves behind threw during render.
+    // The fixtures are read lazily: manualTransaction is declared further down.
+    it.each([
+        { label: 'manual', transaction: () => manualTransaction },
+        { label: 'imported', transaction: () => importedTransaction },
+    ])(
+        'keeps rendering a $label transaction when the date field holds a year past four digits',
+        ({ transaction }) => {
+            render(
+                <EditTransactionDialog
+                    transaction={transaction()}
+                    categories={[]}
+                    accounts={[checkingAccount]}
+                    banks={[]}
+                    labels={[]}
+                    open
+                    onOpenChange={vi.fn()}
+                    onSuccess={vi.fn()}
+                    mode="edit"
+                />,
+            );
+
+            const dateInput = document.querySelector(
+                'input[type="date"]',
+            ) as HTMLInputElement;
+            fireEvent.change(dateInput, { target: { value: '20266-10-01' } });
+
+            expect(dateInput).toHaveValue('20266-10-01');
+            expect(dateInput).toHaveAttribute('max', '9999-12-31');
+            expect(screen.getByText('Edit Transaction')).toBeInTheDocument();
+        },
+    );
+
     // Upstream locks the date on a part of a split, because there each part is
     // a transaction of its own. Here a split lives in transaction_splits and the
     // parent keeps a single date the parts follow, so there is no part-row whose

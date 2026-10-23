@@ -236,3 +236,33 @@ test('the tree service expands a parent id to include all descendants', function
     expect($expanded)->toContain($root->id, $child->id, $grandchild->id)
         ->not->toContain($unrelated->id);
 });
+
+test('the tree service expands over a preloaded parent map exactly as over queries', function () {
+    $user = User::factory()->create();
+    $root = Category::factory()->create(['user_id' => $user->id, 'type' => CategoryType::Expense]);
+    $child = Category::factory()->childOf($root)->create();
+    $grandchild = Category::factory()->childOf($child)->create();
+    Category::factory()->create(['user_id' => $user->id]);
+    $otherUser = User::factory()->create();
+    $tree = new CategoryTree;
+
+    expect($tree->expand($user->id, [$root->id], parentMap: $tree->parentMap($user->id)))
+        ->toEqualCanonicalizing([$root->id, $child->id, $grandchild->id])
+        ->toEqualCanonicalizing($tree->expand($user->id, [$root->id]))
+        // Another user's map holds none of these categories, so nothing below the root is reached.
+        ->and($tree->expand($otherUser->id, [$root->id], parentMap: $tree->parentMap($otherUser->id)))->toBe([$root->id]);
+});
+
+test('the tree service parent map leaves trashed categories out, so an expansion stops at one', function () {
+    $user = User::factory()->create();
+    $root = Category::factory()->create(['user_id' => $user->id, 'type' => CategoryType::Expense]);
+    $child = Category::factory()->childOf($root)->create();
+    Category::factory()->childOf($child)->create();
+    $tree = new CategoryTree;
+
+    $child->delete();
+
+    expect($tree->parentMap($user->id))->not->toHaveKey($child->id)
+        ->and($tree->expand($user->id, [$root->id], parentMap: $tree->parentMap($user->id)))->toBe([$root->id])
+        ->and($tree->expand($user->id, [$root->id]))->toBe([$root->id]);
+});

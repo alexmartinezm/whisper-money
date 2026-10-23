@@ -37,8 +37,8 @@ abstract class McpTool extends Tool
      * The ChatGPT app directory requires all three MCP hints to be declared
      * explicitly, with a justification per tool. Default them here — read tools
      * flip `readOnlyHint` with #[IsReadOnly] and the delete tools flip
-     * `destructiveHint` with #[IsDestructive]. `openWorldHint` is always false:
-     * every tool reads or writes the user's own account, never the open web.
+     * `destructiveHint` with #[IsDestructive]. `openWorldHint` is false here,
+     * for the read tools; WriteTool turns it on for every write tool.
      *
      * @return array<string, mixed>
      */
@@ -93,6 +93,16 @@ abstract class McpTool extends Tool
     /**
      * Encode structured data as a JSON text response the agent can parse.
      */
+    /**
+     * The currency every rolled-up figure is reported in. Analytics responses
+     * carry it so the agent never has to guess: the amounts alone do not say
+     * whether they are euros or dollars.
+     */
+    protected function reportingCurrency(User $user): string
+    {
+        return $user->currency_code ?? 'USD';
+    }
+
     protected function json(mixed $data): Response
     {
         return Response::text((string) json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));

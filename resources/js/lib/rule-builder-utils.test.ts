@@ -3,9 +3,15 @@ import {
     addDescriptionMatchToRuleStructure,
     buildJsonLogic,
     type Condition,
+    type ConditionGroup,
     createDescriptionCondition,
+    FIELD_CONFIG,
+    isValidRuleStructure,
+    moveCondition,
+    moveGroup,
     type Operator,
     parseJsonLogic,
+    reorderConditions,
     type RuleStructure,
 } from './rule-builder-utils';
 
@@ -164,28 +170,28 @@ describe('addDescriptionMatchToRuleStructure', () => {
     });
 });
 
+function singleCondition(
+    field: string,
+    operator: Operator,
+    value: string,
+): RuleStructure {
+    return {
+        groupOperator: 'and',
+        groups: [
+            {
+                id: 'group-1',
+                operator: 'and',
+                conditions: [{ id: 'condition-1', field, operator, value }],
+            },
+        ],
+    };
+}
+
+function firstCondition(structure: RuleStructure): Condition {
+    return structure.groups[0].conditions[0];
+}
+
 describe('negative text operators', () => {
-    function singleCondition(
-        field: string,
-        operator: Operator,
-        value: string,
-    ): RuleStructure {
-        return {
-            groupOperator: 'and',
-            groups: [
-                {
-                    id: 'group-1',
-                    operator: 'and',
-                    conditions: [{ id: 'condition-1', field, operator, value }],
-                },
-            ],
-        };
-    }
-
-    function firstCondition(structure: RuleStructure): Condition {
-        return structure.groups[0].conditions[0];
-    }
-
     it.each([
         [
             'not_contains' as Operator,
@@ -296,5 +302,231 @@ describe('negative text operators', () => {
             operator: 'is_not_empty',
             value: '',
         });
+    });
+});
+
+describe('amount equality operators', () => {
+    it('offers does not equal right after equals', () => {
+        expect(FIELD_CONFIG.amount.operators).toEqual([
+            'equals',
+            'not_equals',
+            'greater_than',
+            'less_than',
+        ]);
+    });
+
+    // Stored as a number, like `equals`, so the rule compares amounts and not
+    // the amount against the string "-14".
+    it.each([
+        ['equals' as Operator, { '==': [{ var: 'amount' }, -14] }],
+        ['not_equals' as Operator, { '!=': [{ var: 'amount' }, -14] }],
+    ])('builds an amount %s with a numeric value', (operator, expected) => {
+        expect(
+            buildJsonLogic(singleCondition('amount', operator, '-14')),
+        ).toEqual(expected);
+    });
+
+    it.each(['-14', '-21.99', '14'])(
+        'round-trips an amount not_equals of %s through build and parse',
+        (value) => {
+            const built = buildJsonLogic(
+                singleCondition('amount', 'not_equals', value),
+            );
+
+            expect(firstCondition(parseJsonLogic(built))).toMatchObject({
+                field: 'amount',
+                operator: 'not_equals',
+                value,
+            });
+        },
+    );
+
+    // The rule from the request: every GitHub charge except the subscription.
+    it('round-trips a description match with an amount exception', () => {
+        const structure: RuleStructure = {
+            groupOperator: 'and',
+            groups: [
+                {
+                    id: 'group-1',
+                    operator: 'and',
+                    conditions: [
+                        {
+                            id: 'condition-1',
+                            field: 'description',
+                            operator: 'contains',
+                            value: 'github',
+                        },
+                        {
+                            id: 'condition-2',
+                            field: 'amount',
+                            operator: 'not_equals',
+                            value: '-14',
+                        },
+                    ],
+                },
+            ],
+        };
+
+        const jsonLogic = buildJsonLogic(structure);
+
+        expect(jsonLogic).toEqual({
+            and: [
+                { in: ['github', { var: 'description' }] },
+                { '!=': [{ var: 'amount' }, -14] },
+            ],
+        });
+        expect(parseJsonLogic(jsonLogic).groups[0].conditions).toMatchObject([
+            { field: 'description', operator: 'contains', value: 'github' },
+            { field: 'amount', operator: 'not_equals', value: '-14' },
+        ]);
+    });
+
+    // A cleared amount would otherwise be saved as `amount != null`, which is
+    // also how `is_not_empty` is written, and match every transaction.
+    it.each<Operator>(['equals', 'not_equals', 'greater_than', 'less_than'])(
+        'leaves a blank amount %s out of the rule',
+        (operator) => {
+            const structure: RuleStructure = {
+                groupOperator: 'and',
+                groups: [
+                    {
+                        id: 'group-1',
+                        operator: 'and',
+                        conditions: [
+                            {
+                                id: 'condition-1',
+                                field: 'description',
+                                operator: 'contains',
+                                value: 'github',
+                            },
+                            {
+                                id: 'condition-2',
+                                field: 'amount',
+                                operator,
+                                value: '',
+                            },
+                        ],
+                    },
+                ],
+            };
+
+            expect(buildJsonLogic(structure)).toEqual({
+                in: ['github', { var: 'description' }],
+            });
+        },
+    );
+
+    it('does not count a blank amount as a valid condition', () => {
+        expect(
+            isValidRuleStructure(singleCondition('amount', 'not_equals', '')),
+        ).toBe(false);
+    });
+
+    // An agent over MCP may negate an equality instead of writing `!=`.
+    it('parses a negated amount equality as does not equal', () => {
+        const parsed = parseJsonLogic({
+            '!': { '==': [{ var: 'amount' }, -14] },
+        });
+
+        expect(firstCondition(parsed)).toMatchObject({
+            field: 'amount',
+            operator: 'not_equals',
+            value: '-14',
+        });
+    });
+});
+
+function descriptionGroup(id: string, values: string[]): ConditionGroup {
+    return {
+        id,
+        operator: 'or',
+        conditions: values.map((value) => ({
+            ...createDescriptionCondition(value),
+            id: value,
+        })),
+    };
+}
+
+function valuesOf(group: ConditionGroup): string[] {
+    return group.conditions.map((condition) => condition.value);
+}
+
+describe('reordering', () => {
+    const structure: RuleStructure = {
+        groupOperator: 'and',
+        groups: [
+            descriptionGroup('first', ['a']),
+            descriptionGroup('second', ['b']),
+            descriptionGroup('third', ['c']),
+        ],
+    };
+
+    it.each([
+        ['second', 'up', ['second', 'first', 'third']],
+        ['second', 'down', ['first', 'third', 'second']],
+        ['first', 'up', ['first', 'second', 'third']],
+        ['third', 'down', ['first', 'second', 'third']],
+    ] as const)('moves group %s %s', (groupId, direction, expected) => {
+        expect(
+            moveGroup(structure, groupId, direction).groups.map(
+                (group) => group.id,
+            ),
+        ).toEqual(expected);
+    });
+
+    it('moves a condition one step within its group', () => {
+        const group = descriptionGroup('group', ['Mercadona', 'Lidl', 'Dia']);
+
+        expect(valuesOf(moveCondition(group, 'Lidl', 'up'))).toEqual([
+            'Lidl',
+            'Mercadona',
+            'Dia',
+        ]);
+        expect(valuesOf(moveCondition(group, 'Dia', 'down'))).toEqual(
+            valuesOf(group),
+        );
+    });
+
+    it('puts conditions in the order a drag left them', () => {
+        const group = descriptionGroup('group', ['Mercadona', 'Lidl', 'Dia']);
+
+        expect(
+            valuesOf(reorderConditions(group, ['Dia', 'Mercadona', 'Lidl'])),
+        ).toEqual(['Dia', 'Mercadona', 'Lidl']);
+    });
+
+    it('keeps a condition the new order leaves out', () => {
+        const group = descriptionGroup('group', ['Mercadona', 'Lidl', 'Dia']);
+
+        expect(
+            valuesOf(reorderConditions(group, ['Dia', 'Mercadona'])),
+        ).toEqual(['Dia', 'Mercadona', 'Lidl']);
+    });
+
+    // Order is only presentational, so it has to survive a save on its own: the
+    // builder collapses a one-condition group to a bare condition and a one-group
+    // rule to that group, and reading those shapes back must keep the order.
+    it.each([
+        [
+            'several groups',
+            [
+                descriptionGroup('amount', ['Revolut', 'Nómina']),
+                descriptionGroup('shops', ['Lidl', 'Mercadona', 'Dia']),
+            ],
+        ],
+        ['a single group', [descriptionGroup('shops', ['Dia', 'Lidl'])]],
+        [
+            'a one-condition group among others',
+            [
+                descriptionGroup('account', ['Revolut']),
+                descriptionGroup('shops', ['Dia', 'Lidl']),
+            ],
+        ],
+    ])('keeps the order of %s through a save', (_, groups) => {
+        const parsed = parseJsonLogic(
+            buildJsonLogic({ groupOperator: 'and', groups }),
+        );
+
+        expect(parsed.groups.map(valuesOf)).toEqual(groups.map(valuesOf));
     });
 });

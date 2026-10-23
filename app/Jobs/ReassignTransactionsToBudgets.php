@@ -40,11 +40,18 @@ class ReassignTransactionsToBudgets implements ShouldQueue
     {
         Transaction::query()
             ->whereIn('id', $this->transactionIds)
-            ->with('labels')
+            // Both relations {@see BudgetTransactionService::assignTransaction()}
+            // reaches for, so a 200-row chunk does not turn into 200 account
+            // lookups: the service reuses the account loaded here. Trashed
+            // accounts are included to match the load there — without them a
+            // trashed account would be loaded as null, which the service does
+            // not reuse, so the lookup per row would come back.
+            ->with(['labels', 'account' => fn ($query) => $query->withTrashed()])
+            // Assigned as a batch, so the category tree, the periods covering
+            // each date and the catch-all's claimants are read once per chunk
+            // rather than once for every transaction.
             ->chunkById(200, function (Collection $transactions) use ($service): void {
-                foreach ($transactions as $transaction) {
-                    $service->assignTransaction($transaction, notify: $this->notify);
-                }
+                $service->assignTransactions($transactions, notify: $this->notify);
             });
     }
 }
