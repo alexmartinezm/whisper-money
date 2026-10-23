@@ -34,12 +34,13 @@ class BudgetTransactionService
 
     /**
      * {@see self::assignTransaction()} for a batch, reading each user's
-     * category tree, the periods covering each date and the budgets that can
-     * displace a catch-all once for the whole batch instead of once per
-     * transaction. Each transaction is still re-read under its own row lock.
+     * category tree once for the whole batch instead of once per transaction.
+     * Each transaction is still re-read under its own row lock, and the periods
+     * covering its date and the budgets that can displace a catch-all are read
+     * inside that lock (see {@see BudgetAssignmentLookups}).
      *
      * The lookups only live for this call, so the next batch sees any category
-     * re-parented or budget changed in the meantime.
+     * re-parented in the meantime.
      *
      * @param  iterable<int, Transaction>  $transactions
      * @param  bool  $notify  set to false for bulk backfills, where the emails
