@@ -3,11 +3,14 @@
 namespace App\Services;
 
 use App\Enums\BudgetExpenseType;
+use App\Enums\CashflowBlock;
+use App\Enums\CategoryType;
 use App\Models\Budget;
 use App\Models\BudgetPeriod;
 use App\Models\Transaction;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Which budget expense type a cashflow posting belongs to, read the way the
@@ -54,6 +57,53 @@ class CashflowBlockQuery
     }
 
     /**
+     * Narrow $query to the transactions the cashflow summary counts for
+     * $block over $period: rows counting towards totals, on the expense side
+     * for the expense blocks, and set aside into the block's category type
+     * for the saved and invested blocks.
+     *
+     * The expense blocks follow the budgets with a period in the range:
+     * `fixed` is what a fixed budget tracks, `variable` what a variable one
+     * tracks and no fixed one does (fixed wins an overlap), and `general`
+     * whatever no budget tracks. Catch-all budgets are left out: they track
+     * whatever nothing else does, which would leave no general expenses at all.
+     *
+     * The condition runs as an id subquery, so it composes with any other
+     * filter, pagination or bulk update without joining into $query.
+     *
+     * @param  Builder<Transaction>  $query
+     * @return Builder<Transaction>
+     */
+    public function apply(Builder $query, CashflowBlock $block, string $userId, PeriodComparator $period): Builder
+    {
+        $rows = Transaction::query()
+            ->where('transactions.user_id', $userId)
+            ->whereBetween('transactions.transaction_date', [$period->from, $period->to])
+            ->countingTowardsTotals()
+            ->select('transactions.id');
+
+        $tracked = fn (BudgetExpenseType $type): array => $this->trackedIds($userId, $period)[$type->value];
+
+        match ($block) {
+            CashflowBlock::Saved => $rows->setAsideInto(CategoryType::Savings),
+            CashflowBlock::Invested => $rows->setAsideInto(CategoryType::Investment),
+            CashflowBlock::Fixed => $this->whereTrackedBy($rows->expenseSide(), $tracked(BudgetExpenseType::Fixed)),
+            CashflowBlock::Variable => $this->whereNotTrackedBy(
+                $this->whereTrackedBy($rows->expenseSide(), $tracked(BudgetExpenseType::Variable)),
+                $tracked(BudgetExpenseType::Fixed),
+            ),
+            CashflowBlock::General => $this->whereNotTrackedBy(
+                $this->whereNotTrackedBy($rows->expenseSide(), $tracked(BudgetExpenseType::Fixed)),
+                $tracked(BudgetExpenseType::Variable),
+            ),
+        };
+
+        // Wrapped in a derived table, which MySQL materializes, so a bulk
+        // update can filter on the same table it writes to.
+        return $query->whereIn('transactions.id', DB::query()->fromSub($rows, 'cashflow_block_rows')->select('id'));
+    }
+
+    /**
      * Narrow $rows to the transactions $tracked reaches: booked to a tracked
      * category, carrying a tracked label, or split with a line in a tracked
      * category. The SQL twin of {@see self::isTrackedBy()}.
@@ -97,6 +147,24 @@ class CashflowBlockQuery
             ->pipe(fn (Collection $budgets): array => collect(BudgetExpenseType::cases())
                 ->mapWithKeys(fn (BudgetExpenseType $type): array => [$type->value => $this->trackedBy($userId, $budgets->get($type->value, collect()))])
                 ->all());
+    }
+
+    /**
+     * Spelled out rather than as the negation of whereTrackedBy(): an
+     * uncategorized row's `category_id IN (...)` is NULL, and negating NULL
+     * would drop it instead of keeping it.
+     *
+     * @param  Builder<Transaction>  $rows
+     * @param  TrackedIds  $tracked
+     * @return Builder<Transaction>
+     */
+    private function whereNotTrackedBy(Builder $rows, array $tracked): Builder
+    {
+        return $rows
+            ->where(fn (Builder $query) => $query
+                ->whereNull('transactions.category_id')
+                ->orWhereNotIn('transactions.category_id', $tracked['categories']))
+            ->whereDoesntHave('labels', fn (Builder $labelQuery) => $labelQuery->whereIn('labels.id', $tracked['labels']));
     }
 
     /**
