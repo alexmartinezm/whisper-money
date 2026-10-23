@@ -1,4 +1,7 @@
-import { applySuggestion } from '@/lib/ai-import-mapping';
+import {
+    applySuggestion,
+    counterpartiesInDescription,
+} from '@/lib/ai-import-mapping';
 import {
     autoDetectColumns,
     detectDateFormat,
@@ -226,7 +229,9 @@ export interface TransactionMappingDraft {
 /**
  * Lay the AI's suggestion over the mapping, leaving the fields in `keep` as
  * the user picked them. A new date column reads its own format, and a new
- * type column brings its own expense values to tick.
+ * type column brings its own expense values to tick. A suggested creditor or
+ * debtor that lands on the description the mapping ends up with (one picked
+ * by hand, say) keeps the column it had.
  */
 export function applyTransactionSuggestion(
     draft: TransactionMappingDraft,
@@ -243,6 +248,16 @@ export function applyTransactionSuggestion(
         rows,
         locale,
     );
+
+    for (const field of counterpartiesInDescription(
+        mapping,
+        mapping.description,
+    )) {
+        if (!keep.has(field)) {
+            mapping[field] = draft.mapping[field];
+        }
+    }
+
     const expenseTypes =
         mapping.transaction_type !== draft.mapping.transaction_type
             ? detectExpenseTypes(rows, mapping.transaction_type)
