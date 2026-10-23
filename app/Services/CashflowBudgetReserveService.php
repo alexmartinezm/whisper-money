@@ -2,8 +2,8 @@
 
 namespace App\Services;
 
-use App\Enums\BudgetExpenseType;
 use App\Enums\BudgetPeriodType;
+use App\Enums\CashflowBlock;
 use App\Models\BudgetPeriod;
 use App\Models\Transaction;
 use App\Services\Concerns\ConvertsTransactionCurrency;
@@ -152,7 +152,10 @@ class CashflowBudgetReserveService
      * `expense`: both figures are exact parts of it.
      *
      * Only transactions some budget reaches are loaded; every posting the
-     * classifier counts belongs to one of them ({@see CashflowBlockQuery}).
+     * classifier counts belongs to one of them. The classifier is
+     * {@see CashflowBlockQuery::blockOf()}, whose SQL twin filters the
+     * transactions list by block, so a block's list holds every posting its
+     * figure counts.
      *
      * @return array{fixed: int, variable: int}
      */
@@ -181,12 +184,11 @@ class CashflowBudgetReserveService
         $this->preloadExchangeRates($transactions, $userCurrency);
 
         $postings = $this->effectiveTransactions($transactions, $userCurrency)
-            ->filter(fn (Transaction $posting): bool => $posting->isExpenseSide())
-            ->groupBy(fn (Transaction $posting): string => $this->blocks->expenseTypeOf($posting, $tracked)?->value ?? 'general');
+            ->groupBy(fn (Transaction $posting): string => $this->blocks->blockOf($posting, $tracked)->value ?? '');
 
         return [
-            'fixed' => -$this->sumConvertedAmounts($postings->get(BudgetExpenseType::Fixed->value, collect()), $userCurrency),
-            'variable' => -$this->sumConvertedAmounts($postings->get(BudgetExpenseType::Variable->value, collect()), $userCurrency),
+            'fixed' => -$this->sumConvertedAmounts($postings->get(CashflowBlock::Fixed->value, collect()), $userCurrency),
+            'variable' => -$this->sumConvertedAmounts($postings->get(CashflowBlock::Variable->value, collect()), $userCurrency),
         ];
     }
 }

@@ -13,18 +13,28 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Which budget expense type a cashflow posting belongs to, read the way the
- * fork's budgets read a transaction ({@see BudgetTransactionService}): a label
- * a budget tracks on the transaction claims all of it, otherwise each posting
- * goes by its own category. A posting is an element of
- * `effectiveTransactions()`: an unsplit transaction, or one split line carrying
- * its parent's labels.
+ * Which block of a cashflow period each posting belongs to, and which
+ * transactions the list shows for a block. A posting is an element of
+ * `effectiveTransactions()`: an unsplit transaction, or one split line
+ * carrying its parent's labels.
  *
- * The per-posting classifier and its SQL twin sit side by side and share the
- * tracked ids. The SQL side works at transaction level and matches a
- * transaction when it, or any of its split lines, is tracked, so every posting
- * the classifier counts belongs to a transaction the query returns; a split
- * transaction can match while only some of its lines count.
+ * - `saved` / `invested`: a posting in a Savings / Investment category that is
+ *   not a set-aside account leg, exactly what the summary adds up as savings
+ *   and investments.
+ * - `fixed`, `variable`, `general`: an expense-side posting, by the expense
+ *   type of the budgets tracking it, read the way the fork's budgets read a
+ *   transaction ({@see BudgetTransactionService}): a label a budget tracks on
+ *   the transaction claims all of it, otherwise each posting goes by its own
+ *   category. Fixed wins an overlap with variable; what no budget tracks is
+ *   general.
+ *
+ * The per-posting classifier ({@see self::blockOf()}) adds up the figures, and
+ * its SQL twin ({@see self::apply()}) filters the list; both share the tracked
+ * ids. The SQL side works at transaction level: a transaction is listed under
+ * a block when it, or any of its split lines, falls in it. So every posting
+ * the figure counts belongs to a listed transaction, and a split transaction
+ * is listed under each block one of its lines falls in, while only those lines
+ * count towards each figure.
  *
  * @phpstan-type TrackedIds array{categories: array<int, string>, labels: array<int, string>}
  */
@@ -40,33 +50,37 @@ class CashflowBlockQuery
     public function __construct(private CategoryTree $tree) {}
 
     /**
-     * The expense type of the budgets tracking $posting, or null when none
-     * does. Fixed wins an overlap, so a posting is only ever counted once.
+     * The block $posting falls in, or null when it is in none (income, a
+     * transfer, a set-aside account leg). Needs the posting's `category`,
+     * `account` and `labels` loaded; a split line shares its parent's labels.
      *
      * @param  array<string, TrackedIds>  $trackedByType  as {@see self::trackedIds()} returns it
      */
-    public function expenseTypeOf(Transaction $posting, array $trackedByType): ?BudgetExpenseType
+    public function blockOf(Transaction $posting, array $trackedByType): ?CashflowBlock
     {
-        foreach ([BudgetExpenseType::Fixed, BudgetExpenseType::Variable] as $type) {
-            if ($this->isTrackedBy($posting, $trackedByType[$type->value])) {
-                return $type;
-            }
+        if ($posting->isExpenseSide()) {
+            return match ($this->expenseTypeOf($posting, $trackedByType)) {
+                BudgetExpenseType::Fixed => CashflowBlock::Fixed,
+                BudgetExpenseType::Variable => CashflowBlock::Variable,
+                null => CashflowBlock::General,
+            };
         }
 
-        return null;
+        if ($posting->isSetAsideAccountLeg()) {
+            return null;
+        }
+
+        return match ($posting->categoryType()) {
+            CategoryType::Savings => CashflowBlock::Saved,
+            CategoryType::Investment => CashflowBlock::Invested,
+            default => null,
+        };
     }
 
     /**
-     * Narrow $query to the transactions the cashflow summary counts for
-     * $block over $period: rows counting towards totals, on the expense side
-     * for the expense blocks, and set aside into the block's category type
-     * for the saved and invested blocks.
-     *
-     * The expense blocks follow the budgets with a period in the range:
-     * `fixed` is what a fixed budget tracks, `variable` what a variable one
-     * tracks and no fixed one does (fixed wins an overlap), and `general`
-     * whatever no budget tracks. Catch-all budgets are left out: they track
-     * whatever nothing else does, which would leave no general expenses at all.
+     * Narrow $query to the transactions with a posting in $block over $period,
+     * among the rows counting towards totals: the SQL twin of
+     * {@see self::blockOf()}.
      *
      * The condition runs as an id subquery, so it composes with any other
      * filter, pagination or bulk update without joining into $query.
@@ -82,20 +96,16 @@ class CashflowBlockQuery
             ->countingTowardsTotals()
             ->select('transactions.id');
 
-        $tracked = fn (BudgetExpenseType $type): array => $this->trackedIds($userId, $period)[$type->value];
+        $tracked = $this->trackedIds($userId, $period);
+        $fixed = $tracked[BudgetExpenseType::Fixed->value];
+        $variable = $tracked[BudgetExpenseType::Variable->value];
 
         match ($block) {
             CashflowBlock::Saved => $rows->setAsideInto(CategoryType::Savings),
             CashflowBlock::Invested => $rows->setAsideInto(CategoryType::Investment),
-            CashflowBlock::Fixed => $this->whereTrackedBy($rows->expenseSide(), $tracked(BudgetExpenseType::Fixed)),
-            CashflowBlock::Variable => $this->whereNotTrackedBy(
-                $this->whereTrackedBy($rows->expenseSide(), $tracked(BudgetExpenseType::Variable)),
-                $tracked(BudgetExpenseType::Fixed),
-            ),
-            CashflowBlock::General => $this->whereNotTrackedBy(
-                $this->whereNotTrackedBy($rows->expenseSide(), $tracked(BudgetExpenseType::Fixed)),
-                $tracked(BudgetExpenseType::Variable),
-            ),
+            CashflowBlock::Fixed => $this->whereHasExpensePosting($rows, $fixed, []),
+            CashflowBlock::Variable => $this->whereHasExpensePosting($rows, $variable, [$fixed]),
+            CashflowBlock::General => $this->whereHasExpensePosting($rows, null, [$fixed, $variable]),
         };
 
         // Wrapped in a derived table, which MySQL materializes, so a bulk
@@ -106,7 +116,8 @@ class CashflowBlockQuery
     /**
      * Narrow $rows to the transactions $tracked reaches: booked to a tracked
      * category, carrying a tracked label, or split with a line in a tracked
-     * category. The SQL twin of {@see self::isTrackedBy()}.
+     * category. Every transaction with a posting {@see self::isTrackedBy()}
+     * accepts is among them, so it is a cheap superset to load and classify.
      *
      * @param  Builder<Transaction>  $rows
      * @param  TrackedIds  $tracked
@@ -150,21 +161,66 @@ class CashflowBlockQuery
     }
 
     /**
-     * Spelled out rather than as the negation of whereTrackedBy(): an
-     * uncategorized row's `category_id IN (...)` is NULL, and negating NULL
-     * would drop it instead of keeping it.
+     * The expense type of the budgets tracking $posting, or null when none
+     * does. Fixed wins an overlap, so a posting is only ever counted once.
+     *
+     * @param  array<string, TrackedIds>  $trackedByType
+     */
+    private function expenseTypeOf(Transaction $posting, array $trackedByType): ?BudgetExpenseType
+    {
+        foreach ([BudgetExpenseType::Fixed, BudgetExpenseType::Variable] as $type) {
+            if ($this->isTrackedBy($posting, $trackedByType[$type->value])) {
+                return $type;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Rows with an expense-side posting that $trackedBy tracks (any
+     * expense-side posting when null) and none of $outrankedBy does: the SQL
+     * twin of {@see self::blockOf()} for the expense blocks, posting by
+     * posting. A label sits on the row and reaches every posting, so it is
+     * checked on the row; a category is checked on each posting, the row's own
+     * or a split line's. A split row with lines in several blocks matches
+     * each of them.
      *
      * @param  Builder<Transaction>  $rows
-     * @param  TrackedIds  $tracked
+     * @param  TrackedIds|null  $trackedBy
+     * @param  list<TrackedIds>  $outrankedBy  what the types that win an overlap track
      * @return Builder<Transaction>
      */
-    private function whereNotTrackedBy(Builder $rows, array $tracked): Builder
+    private function whereHasExpensePosting(Builder $rows, ?array $trackedBy, array $outrankedBy): Builder
     {
-        return $rows
-            ->where(fn (Builder $query) => $query
-                ->whereNull('transactions.category_id')
-                ->orWhereNotIn('transactions.category_id', $tracked['categories']))
-            ->whereDoesntHave('labels', fn (Builder $labelQuery) => $labelQuery->whereIn('labels.id', $tracked['labels']));
+        foreach ($outrankedBy as $tracked) {
+            $rows->whereDoesntHave('labels', fn (Builder $labelQuery) => $labelQuery->whereIn('labels.id', $tracked['labels']));
+        }
+
+        // Spelled out rather than as a negated whereIn(): an uncategorized
+        // row's `category_id IN (...)` is NULL, and negating NULL would drop it
+        // instead of keeping it.
+        $outranked = function (Builder $posting, string $categoryColumn) use ($outrankedBy): void {
+            foreach ($outrankedBy as $tracked) {
+                $posting->where(fn (Builder $category) => $category
+                    ->whereNull($categoryColumn)
+                    ->orWhereNotIn($categoryColumn, $tracked['categories']));
+            }
+        };
+
+        if ($trackedBy === null) {
+            return $rows->expenseSide($outranked);
+        }
+
+        return $rows->where(fn (Builder $reached) => $reached
+            ->where(fn (Builder $byLabel) => $byLabel
+                ->whereHas('labels', fn (Builder $labelQuery) => $labelQuery->whereIn('labels.id', $trackedBy['labels']))
+                ->expenseSide($outranked))
+            ->orWhere(fn (Builder $byCategory) => $byCategory
+                ->expenseSide(function (Builder $posting, string $categoryColumn) use ($outranked, $trackedBy): void {
+                    $outranked($posting, $categoryColumn);
+                    $posting->whereIn($categoryColumn, $trackedBy['categories']);
+                })));
     }
 
     /**
