@@ -11,6 +11,7 @@ export interface TransactionRowAction {
 interface TransactionRowActionsOptions {
     transaction: DecryptedTransaction;
     onEdit: (transaction: DecryptedTransaction) => void;
+    onDuplicate: (transaction: DecryptedTransaction) => void;
     onReEvaluateRules: (transaction: DecryptedTransaction) => void;
     onAutomate: (transaction: DecryptedTransaction) => void;
     onDelete: (transaction: DecryptedTransaction) => void;
@@ -26,6 +27,7 @@ interface TransactionRowActionsOptions {
 export function getTransactionRowActions({
     transaction,
     onEdit,
+    onDuplicate,
     onReEvaluateRules,
     onAutomate,
     onDelete,
@@ -35,6 +37,11 @@ export function getTransactionRowActions({
             id: 'edit',
             label: __('Edit'),
             onSelect: () => onEdit(transaction),
+        },
+        {
+            id: 'duplicate',
+            label: __('Duplicate'),
+            onSelect: () => onDuplicate(transaction),
         },
         {
             id: 're-evaluate-rules',

@@ -106,7 +106,8 @@ export function haveSplitLinesChanged(
 export type TransactionCreateOrigin =
     | 'quick_add'
     | 'full_dialog'
-    | 'account_page';
+    | 'account_page'
+    | 'duplicate';
 
 interface EditTransactionDialogProps {
     transaction: DecryptedTransaction | null;
@@ -127,6 +128,12 @@ interface EditTransactionDialogProps {
     onDelete?: (transaction: DecryptedTransaction) => void;
     mode: 'create' | 'edit';
     initialAccountId?: string | null;
+    /**
+     * Create mode only: open the form filled in from this transaction, dated
+     * today, for the recurring ones entered by hand. Its split lines come
+     * along, so the copy is split the same way.
+     */
+    duplicateFrom?: DecryptedTransaction | null;
     /** Which surface opened the dialog, for `transaction_created`. */
     origin?: TransactionCreateOrigin;
     /**
@@ -232,6 +239,7 @@ export function EditTransactionDialog({
     onDelete,
     mode,
     initialAccountId = null,
+    duplicateFrom = null,
     origin = 'full_dialog',
     onRequestEdit,
 }: EditTransactionDialogProps) {
@@ -260,6 +268,10 @@ export function EditTransactionDialog({
     // entry of a batch was wrong for the rest of it too.
     const defaultAccountId = useRef('');
     const defaultDate = useRef('');
+    const defaultCategoryId = useRef('null');
+    // Only the first save is the copy: what "Save and add another" brings next
+    // is a transaction of its own, so rules and analytics treat it as one.
+    const isDuplicate = useRef(false);
     const amountInputRef = useRef<HTMLInputElement>(null);
     const [focusAmountAfterSave, setFocusAmountAfterSave] = useState(false);
     const [accountId, setAccountId] = useState<string>('');
@@ -316,14 +328,23 @@ export function EditTransactionDialog({
             : null;
 
     useEffect(() => {
+        function fillFrom(source: DecryptedTransaction) {
+            setDescription(source.decryptedDescription);
+            setUnsignedAmount(Math.abs(source.amount));
+            setTransactionType(source.amount > 0 ? 'income' : 'expense');
+            setCurrencyCode(source.currency_code);
+            setCategoryId(source.category_id || 'null');
+            setSelectedLabelIds(
+                source.label_ids || source.labels?.map((l) => l.id) || [],
+            );
+            setNotes(source.decryptedNotes || '');
+            setShowNotes(!!source.decryptedNotes);
+        }
+
         if (mode === 'edit' && transaction) {
             setTransactionDate(transaction.transaction_date);
-            setDescription(transaction.decryptedDescription);
-            setUnsignedAmount(Math.abs(transaction.amount));
-            setTransactionType(transaction.amount > 0 ? 'income' : 'expense');
             setAccountId(transaction.account_id);
-            setCurrencyCode(transaction.currency_code);
-            setCategoryId(transaction.category_id || 'null');
+            fillFrom(transaction);
             setSplits(
                 transaction.splits?.length
                     ? transaction.splits.map((split, position) => ({
@@ -334,13 +355,6 @@ export function EditTransactionDialog({
                     : null,
             );
             setRemoveSplits(false);
-            setSelectedLabelIds(
-                transaction.label_ids ||
-                    transaction.labels?.map((l) => l.id) ||
-                    [],
-            );
-            setNotes(transaction.decryptedNotes || '');
-            setShowNotes(!!transaction.decryptedNotes);
         } else if (mode === 'create' && open) {
             const today = todayDateString();
             setTransactionDate(today);
@@ -352,11 +366,15 @@ export function EditTransactionDialog({
             setShowDateField(false);
             defaultDate.current = today;
             const availableAccounts = filterTransactionalAccounts(accounts);
-            // The chip always opens filled in: the account being read wins,
-            // then the one the last manual transaction went to, then simply
-            // the first. Pre-filling is fine because the chip shows what it
-            // picked — it is hiding it that would not be.
+            // The chip always opens filled in: the duplicated transaction's
+            // account wins, then the account being read, then the one the last
+            // manual transaction went to, then simply the first. Pre-filling is
+            // fine because the chip shows what it picked — it is hiding it
+            // that would not be.
             const initialAccount =
+                availableAccounts.find(
+                    (account) => account.id === duplicateFrom?.account_id,
+                ) ??
                 availableAccounts.find(
                     (account) => account.id === initialAccountId,
                 ) ??
@@ -374,8 +392,40 @@ export function EditTransactionDialog({
             setRemoveSplits(false);
             setSelectedLabelIds([]);
             setNotes('');
+            if (duplicateFrom) {
+                fillFrom(duplicateFrom);
+                // The copy is split the way the original is, line for line.
+                // Saving lines needs the feature on, so with it off the copy
+                // goes out whole; the original's category is empty then, as
+                // a split's always is.
+                const lines =
+                    transactionSplittingEnabled && duplicateFrom.splits?.length
+                        ? [...duplicateFrom.splits]
+                              .sort((a, b) => a.position - b.position)
+                              .map((split, position) => ({
+                                  category_id: split.category_id,
+                                  amount: split.amount,
+                                  position,
+                              }))
+                        : null;
+                setSplits(lines);
+                // Lines are only edited in the expanded form, and it cannot
+                // collapse over them.
+                setExpanded(lines !== null);
+            }
+            isDuplicate.current = !!duplicateFrom;
+            defaultCategoryId.current = duplicateFrom?.category_id || 'null';
         }
-    }, [mode, transaction, open, accounts, initialAccountId, userCurrencyCode]);
+    }, [
+        mode,
+        transaction,
+        open,
+        accounts,
+        initialAccountId,
+        userCurrencyCode,
+        duplicateFrom,
+        transactionSplittingEnabled,
+    ]);
 
     useEffect(() => {
         if (!open || !canEditAllFields) return;
@@ -443,7 +493,13 @@ export function EditTransactionDialog({
     }, [focusAmountAfterSave, isSubmitting]);
 
     async function checkAndApplyAutomationRules() {
-        if (mode !== 'create' || automationRules.length === 0) {
+        // A duplicate already carries the category, labels and notes the user
+        // settled on for the original, so a rule has nothing left to decide.
+        if (
+            mode !== 'create' ||
+            isDuplicate.current ||
+            automationRules.length === 0
+        ) {
             return {
                 categoryId: null,
                 labelIds: [] as string[],
@@ -745,19 +801,23 @@ export function EditTransactionDialog({
 
                 captureEvent('transaction_created', {
                     source: 'manually_created',
-                    origin,
+                    origin: isDuplicate.current ? 'duplicate' : origin,
                     expanded,
                     saved_and_added_another: addAnother,
                     account_chip_changed:
                         accountId !== defaultAccountId.current,
                     date_chip_changed: transactionDate !== defaultDate.current,
-                    // The chip always opens on Uncategorized, so anything else
-                    // is the user's own pick.
-                    category_chip_changed: categoryId !== 'null',
+                    // The chip opens on Uncategorized, or on the duplicated
+                    // transaction's category, so anything else is the user's
+                    // own pick.
+                    category_chip_changed:
+                        categoryId !== defaultCategoryId.current,
                     rule_applied_category: ruleAppliedCategory,
                 });
 
                 onSuccess(newTransaction);
+
+                isDuplicate.current = false;
 
                 if (addAnother) {
                     setUnsignedAmount(0);

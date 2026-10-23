@@ -4,6 +4,7 @@ import { transactionSyncService } from '@/services/transaction-sync';
 import type { AutomationRule } from '@/types/automation-rule';
 import type { Category } from '@/types/category';
 import type { DecryptedTransaction } from '@/types/transaction';
+import { todayDateString } from '@/utils/date';
 import {
     fireEvent,
     render,
@@ -1973,6 +1974,279 @@ describe('EditTransactionDialog', () => {
                 expect(
                     screen.getByRole('button', { name: 'Split transaction' }),
                 ).toBeInTheDocument();
+            });
+        });
+    });
+
+    describe('duplicating', () => {
+        const savingsAccount = {
+            ...checkingAccount,
+            id: 'account-2',
+            name: 'Savings',
+        };
+
+        const splitCategories = [
+            { id: 'food', name: 'Food', type: 'expense' },
+            { id: 'home', name: 'Home', type: 'expense' },
+        ] as Category[];
+
+        const monthlyRent: DecryptedTransaction = {
+            ...manualTransaction,
+            id: 'tx-rent',
+            account_id: 'account-2',
+            description: 'Rent',
+            transaction_date: '2026-01-01',
+            amount: -85000,
+            currency_code: 'USD',
+            category_id: 'category-1',
+            label_ids: ['label-1'],
+            source: 'enablebanking',
+            decryptedDescription: 'Rent',
+            decryptedNotes: 'Flat on Main St',
+        };
+
+        // A split parent carries no category of its own; its lines do. They
+        // come out of order here to show the copy follows their positions.
+        const splitShopping: DecryptedTransaction = {
+            ...monthlyRent,
+            id: 'tx-shopping',
+            description: 'Hypermarket',
+            decryptedDescription: 'Hypermarket',
+            amount: -2500,
+            currency_code: 'EUR',
+            category_id: null,
+            is_split: true,
+            split_count: 2,
+            splits: [
+                {
+                    id: 'split-2',
+                    transaction_id: 'tx-shopping',
+                    category_id: 'home',
+                    category: null,
+                    amount: -1000,
+                    position: 1,
+                },
+                {
+                    id: 'split-1',
+                    transaction_id: 'tx-shopping',
+                    category_id: 'food',
+                    category: null,
+                    amount: -1500,
+                    position: 0,
+                },
+            ],
+        };
+
+        beforeEach(() => {
+            vi.mocked(transactionSyncService.create).mockResolvedValue({
+                id: 'tx-new',
+            } as never);
+        });
+
+        it('fills a duplicate in from the original, dated today', async () => {
+            renderCreateDialog({
+                accounts: [checkingAccount, savingsAccount],
+                categories: [groceries],
+                automationRules: [{ id: 'rule-1' } as AutomationRule],
+                duplicateFrom: monthlyRent,
+            });
+
+            expect(screen.getByTestId('account-value')).toHaveAttribute(
+                'data-value',
+                'account-2',
+            );
+
+            fireEvent.click(screen.getByTestId('submit-transaction'));
+
+            await waitFor(() => {
+                expect(transactionSyncService.create).toHaveBeenCalledWith(
+                    expect.objectContaining({
+                        account_id: 'account-2',
+                        description: 'Rent',
+                        amount: -85000,
+                        currency_code: 'USD',
+                        category_id: 'category-1',
+                        label_ids: ['label-1'],
+                        notes: 'Flat on Main St',
+                        transaction_date: todayDateString(),
+                        source: 'manually_created',
+                        splits: undefined,
+                    }),
+                    { updateBalance: true },
+                );
+            });
+            // The copy keeps what the user settled on; no rule gets a say.
+            expect(evaluateRulesForNewTransaction).not.toHaveBeenCalled();
+            expect(captureEvent).toHaveBeenCalledWith(
+                'transaction_created',
+                expect.objectContaining({
+                    origin: 'duplicate',
+                    category_chip_changed: false,
+                }),
+            );
+        });
+
+        it('falls back to the usual account when the original one is gone', () => {
+            renderCreateDialog({ duplicateFrom: monthlyRent });
+
+            expect(screen.getByTestId('account-value')).toHaveAttribute(
+                'data-value',
+                'account-1',
+            );
+        });
+
+        it('treats what comes after a duplicate as a transaction of its own', async () => {
+            renderCreateDialog({
+                accounts: [checkingAccount, savingsAccount],
+                automationRules: [{ id: 'rule-1' } as AutomationRule],
+                duplicateFrom: monthlyRent,
+            });
+
+            fireEvent.click(screen.getByTestId('submit-and-add-another'));
+            await waitFor(() => {
+                expect(captureEvent).toHaveBeenCalledTimes(1);
+            });
+            await fillAndSubmit('submit-transaction');
+            await waitFor(() => {
+                expect(captureEvent).toHaveBeenCalledTimes(2);
+            });
+
+            expect(evaluateRulesForNewTransaction).toHaveBeenCalledTimes(1);
+            expect(
+                vi.mocked(captureEvent).mock.calls.map(([, props]) => props),
+            ).toEqual([
+                expect.objectContaining({ origin: 'duplicate' }),
+                expect.objectContaining({ origin: 'full_dialog' }),
+            ]);
+        });
+
+        it('copies the split lines, in order, and opens on them', async () => {
+            renderCreateDialog({
+                accounts: [checkingAccount, savingsAccount],
+                categories: splitCategories,
+                duplicateFrom: splitShopping,
+            });
+
+            // The form cannot collapse over lines in progress.
+            expect(screen.getByTestId('split-category-0')).toBeInTheDocument();
+            expect(
+                screen.queryByTestId('toggle-more-options'),
+            ).not.toBeInTheDocument();
+            expect(
+                screen.queryByTestId('category-chip'),
+            ).not.toBeInTheDocument();
+
+            fireEvent.click(screen.getByTestId('submit-transaction'));
+
+            await waitFor(() => {
+                expect(transactionSyncService.create).toHaveBeenCalledOnce();
+            });
+            const payload = vi.mocked(transactionSyncService.create).mock
+                .calls[0][0];
+            expect(payload).toMatchObject({
+                account_id: 'account-2',
+                description: 'Hypermarket',
+                amount: -2500,
+                category_id: null,
+                label_ids: ['label-1'],
+                notes: 'Flat on Main St',
+                transaction_date: todayDateString(),
+            });
+            expect(payload.splits).toEqual([
+                { category_id: 'food', amount: -1500, position: 0 },
+                { category_id: 'home', amount: -1000, position: 1 },
+            ]);
+            expect(
+                payload.splits?.reduce((sum, line) => sum + line.amount, 0),
+            ).toBe(payload.amount);
+            expect(captureEvent).toHaveBeenCalledWith(
+                'transaction_created',
+                expect.objectContaining({
+                    origin: 'duplicate',
+                    expanded: true,
+                }),
+            );
+        });
+
+        it('drops the copied lines when adding another after it', async () => {
+            renderCreateDialog({
+                accounts: [checkingAccount, savingsAccount],
+                categories: splitCategories,
+                duplicateFrom: splitShopping,
+            });
+
+            fireEvent.click(screen.getByTestId('submit-and-add-another'));
+
+            await waitFor(() => {
+                expect(transactionSyncService.create).toHaveBeenCalledOnce();
+            });
+            expect(
+                vi.mocked(transactionSyncService.create).mock.calls[0][0]
+                    .splits,
+            ).toHaveLength(2);
+            await waitFor(() => {
+                expect(
+                    screen.getByRole('button', { name: 'Split transaction' }),
+                ).toBeInTheDocument();
+            });
+
+            await fillAndSubmit('submit-transaction');
+            await waitFor(() => {
+                expect(transactionSyncService.create).toHaveBeenCalledTimes(2);
+            });
+            expect(
+                vi.mocked(transactionSyncService.create).mock.calls[1][0]
+                    .splits,
+            ).toBeUndefined();
+        });
+
+        it('copies no lines while splitting is switched off', async () => {
+            inertiaProps.features.transactionSplitting = false;
+
+            renderCreateDialog({
+                accounts: [checkingAccount, savingsAccount],
+                categories: splitCategories,
+                duplicateFrom: splitShopping,
+            });
+
+            expect(
+                screen.getByTestId('toggle-more-options'),
+            ).toBeInTheDocument();
+            fireEvent.click(screen.getByTestId('submit-transaction'));
+
+            await waitFor(() => {
+                expect(transactionSyncService.create).toHaveBeenCalledOnce();
+            });
+            const payload = vi.mocked(transactionSyncService.create).mock
+                .calls[0][0];
+            expect(payload.splits).toBeUndefined();
+            expect(payload.category_id).toBeNull();
+        });
+
+        it('sends no balance update when the original sits on a credit card', async () => {
+            const creditCard = {
+                ...checkingAccount,
+                id: 'account-card',
+                name: 'Visa',
+                type: 'credit_card' as const,
+            };
+
+            renderCreateDialog({
+                accounts: [checkingAccount, creditCard],
+                categories: splitCategories,
+                duplicateFrom: {
+                    ...splitShopping,
+                    account_id: 'account-card',
+                },
+            });
+
+            fireEvent.click(screen.getByTestId('submit-transaction'));
+
+            await waitFor(() => {
+                expect(transactionSyncService.create).toHaveBeenCalledWith(
+                    expect.objectContaining({ account_id: 'account-card' }),
+                    { updateBalance: false },
+                );
             });
         });
     });

@@ -11,6 +11,7 @@ const transaction = {
 
 const handlers = {
     onEdit: vi.fn(),
+    onDuplicate: vi.fn(),
     onReEvaluateRules: vi.fn(),
     onAutomate: vi.fn(),
     onDelete: vi.fn(),
@@ -25,6 +26,7 @@ describe('getTransactionRowActions', () => {
 
         expect(ids).toEqual([
             'edit',
+            'duplicate',
             're-evaluate-rules',
             'automate',
             'delete',
@@ -40,6 +42,17 @@ describe('getTransactionRowActions', () => {
         automate?.onSelect();
 
         expect(handlers.onAutomate).toHaveBeenCalledWith(transaction);
+    });
+
+    it('hands the row to the duplicate handler', () => {
+        getTransactionRowActions({
+            transaction,
+            ...handlers,
+        })
+            .find((action) => action.id === 'duplicate')
+            ?.onSelect();
+
+        expect(handlers.onDuplicate).toHaveBeenCalledWith(transaction);
     });
 
     it('keeps delete as the only destructive action', () => {
