@@ -22,6 +22,7 @@ vi.mock('recharts', async (importOriginal) => {
 
 const privacyMode = {
     isPrivacyModeEnabled: false,
+    isGlobalPrivacyModeEnabled: false,
     togglePrivacyMode: vi.fn(),
     setPrivacyMode: vi.fn(),
 };

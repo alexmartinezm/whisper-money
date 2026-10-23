@@ -1,3 +1,4 @@
+import { PrivacyRevealButton } from '@/components/privacy-reveal-button';
 import { AmountDisplay } from '@/components/ui/amount-display';
 import {
     Card,
@@ -168,9 +169,12 @@ export function NetWorthProjectionCard({ projection }: Props) {
     return (
         <Card>
             <CardHeader className="gap-1">
-                <CardTitle className="text-base">
-                    {__('Where this is heading')}
-                </CardTitle>
+                <div className="flex items-start justify-between gap-2">
+                    <CardTitle className="text-base">
+                        {__('Where this is heading')}
+                    </CardTitle>
+                    <PrivacyRevealButton className="-my-2" />
+                </div>
                 <CardDescription>
                     {__(
                         'Your net worth in :months months if nothing changes.',

@@ -9,6 +9,7 @@ import {
     MoMChart,
     MoMPercentChart,
 } from '@/components/charts';
+import { PrivacyRevealButton } from '@/components/privacy-reveal-button';
 import { AmountDisplay } from '@/components/ui/amount-display';
 import {
     Card,
@@ -599,6 +600,7 @@ export function NetWorthChart({
                     </div>
 
                     <div className="flex items-center gap-2">
+                        <PrivacyRevealButton withSeparator />
                         {isMobile ? (
                             <ChartSettingsPopover
                                 granularity={granularity}
