@@ -14,10 +14,10 @@ use App\Models\Budget;
 use App\Models\BudgetPeriod;
 use App\Models\Category;
 use App\Models\Label;
-use App\Models\MonthlySummary;
 use App\Models\SavingsGoal;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\MonthlySummary\Summaries;
 use Laravel\Pennant\Feature;
 
 use function Pest\Laravel\actingAs;
@@ -128,13 +128,21 @@ function seedSmokeReader(): User
         'target_amount' => 500000,
     ]);
 
-    // The month that closed, already frozen, so the review screen has figures
-    // to read back rather than a button to press.
-    MonthlySummary::factory()->create([
-        'user_id' => $user->id,
-        'space_id' => $user->activeSpace()->id,
-        'period' => now()->subMonthNoOverflow()->format('Y-m'),
-    ]);
+    // The month that closed, frozen through the real service so the review
+    // screen reads back a full report rather than a button to press. The
+    // factory's payload only carries a currency, which the report cannot draw.
+    foreach ([['Smoke last month shop', -3150, $groceries->id], ['Smoke last month pay', 300000, $salary->id]] as [$description, $amount, $categoryId]) {
+        Transaction::factory()->plaintext()->create([
+            'user_id' => $user->id,
+            'account_id' => $account->id,
+            'category_id' => $categoryId,
+            'description' => $description,
+            'amount' => $amount,
+            'currency_code' => 'USD',
+            'transaction_date' => closedMonth()->addDays(5),
+        ])->forceFill(['created_at' => closedMonth()->addDays(5)])->save();
+    }
+    app(Summaries::class)->freeze($user, closedMonth());
 
     BankingConnection::factory()->create([
         'user_id' => $user->id,
