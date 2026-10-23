@@ -10,7 +10,9 @@ use App\Models\Label;
 use App\Models\Space;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\Budgets\BudgetAssignmentLookups;
 use App\Services\BudgetTransactionService;
+use App\Services\CategoryTree;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -1061,4 +1063,23 @@ test('assignHistoricalTransactionsToPeriod refreshes stale snapshots and only co
         ->and($newSnapshot->amount)->toBe(3000)
         ->and(Str::isUuid($newSnapshot->id))->toBeTrue()
         ->and($newSnapshot->created_at->equalTo(now()))->toBeTrue();
+});
+
+test('a batch reads budget periods fresh for each transaction, not once per batch', function () {
+    $category = Category::factory()->create(['user_id' => $this->user->id]);
+    $transaction = Transaction::factory()->forUser($this->user)->create([
+        'user_id' => $this->user->id,
+        'category_id' => $category->id,
+        'transaction_date' => now()->subDays(2),
+    ]);
+    $lookups = new BudgetAssignmentLookups(app(CategoryTree::class));
+
+    expect($lookups->periodsCovering($transaction))->toBeEmpty();
+
+    // A budget created by another job while the batch runs: assignment deletes
+    // the snapshots of every period it leaves out, so a stale read here would
+    // delete the new period's snapshots.
+    $period = periodTracking($category);
+
+    expect($lookups->periodsCovering($transaction)->modelKeys())->toBe([$period->id]);
 });

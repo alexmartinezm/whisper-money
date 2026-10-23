@@ -9,24 +9,20 @@ use App\Services\CategoryTree;
 use Illuminate\Database\Eloquent\Collection;
 
 /**
- * What assigning transactions to budgets reads over and over, read once per
- * batch instead of once per transaction: each user's category tree, the
- * budget periods covering a date, and the budgets that keep a transaction out
- * of the catch-all on that date.
+ * What assigning transactions to budgets reads over and over. Each user's
+ * category tree is read once per batch instead of once per transaction; the
+ * budget periods and catch-all claimants are read per transaction, inside its
+ * row lock, because the assignment deletes the snapshots of every period they
+ * leave out: a period or tracking change made by another job while the batch
+ * runs must not be read stale and have its fresh snapshots deleted.
  *
  * One instance lives for one batch only, so the next batch sees any category
- * re-parented or budget changed in the meantime.
+ * re-parented in the meantime.
  */
 class BudgetAssignmentLookups
 {
     /** @var array<string, array<string, ?string>> */
     private array $parentMaps = [];
-
-    /** @var array<string, Collection<int, BudgetPeriod>> */
-    private array $periods = [];
-
-    /** @var array<string, Collection<int, Budget>> */
-    private array $claimants = [];
 
     public function __construct(private readonly CategoryTree $tree) {}
 
@@ -55,9 +51,7 @@ class BudgetAssignmentLookups
      */
     public function periodsCovering(Transaction $transaction): Collection
     {
-        $key = implode('|', [$transaction->user_id, $transaction->space_id, $transaction->transaction_date->toDateString()]);
-
-        return $this->periods[$key] ??= BudgetPeriod::query()
+        return BudgetPeriod::query()
             // An archived budget stops taking in new data from the day it
             // was archived; what it already counted stays as it was.
             // Spelled out rather than via Budget::scopeNotArchived: inside
@@ -87,9 +81,8 @@ class BudgetAssignmentLookups
     public function catchAllClaimants(Budget $catchAll, Transaction $transaction): Collection
     {
         $date = $transaction->transaction_date->toDateString();
-        $key = implode('|', [$catchAll->user_id, $catchAll->space_id, $date]);
 
-        return $this->claimants[$key] ??= Budget::query()
+        return Budget::query()
             ->notArchived()
             ->where('user_id', $catchAll->user_id)
             ->where('space_id', $catchAll->space_id)
