@@ -189,8 +189,11 @@ class CreditCardStatementService
      * Whether a row repays the card instead of ending up on a statement: rows
      * in a transfer category, and uncategorized inflows, which on a card are
      * almost always the repayment itself. A split row has no category of its
-     * own (its lines carry them, and never a transfer one), so an inflow with
-     * lines is a refund and still counts, at its whole amount.
+     * own: its lines carry them, and never a transfer one, because
+     * ReplaceTransactionSplits requires every line to share one expense or
+     * income type and Category::booted() refuses a type change on a category
+     * (or any descendant) that split lines use. So an uncategorized inflow
+     * with lines is a refund and still counts, at its whole amount.
      */
     private static function isRepayment(Transaction $transaction): bool
     {

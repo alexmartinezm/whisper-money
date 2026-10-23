@@ -180,9 +180,8 @@ class UpdateTransaction extends WriteTool
     /**
      * Move the manual balance off the pre-edit account/date/amount and onto the
      * new ones. Either side no-ops on an account that does not own its
-     * balance (a connected one, or a credit card under the credit card
-     * feature), so moving a transaction onto one still unwinds the account it
-     * came from.
+     * balance (a connected one, or a credit card), so moving a transaction
+     * onto one still unwinds the account it came from.
      */
     private function syncManualBalance(Request $request, Transaction $transaction, Transaction $originalSnapshot): bool
     {
