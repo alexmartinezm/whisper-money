@@ -73,6 +73,8 @@ export interface AccountFormData {
     investedAmount: number | null;
     realEstate: RealEstateFormData | null;
     loan: LoanFormData | null;
+    /** Minor units; only on a new credit card. */
+    creditLimit: number | null;
 }
 
 interface AccountFormProps {
@@ -161,6 +163,7 @@ export function AccountForm({
     );
     const [balance, setBalance] = useState<number | null>(null);
     const [investedAmount, setInvestedAmount] = useState<number | null>(null);
+    const [creditLimit, setCreditLimit] = useState<number | null>(null);
     const [realEstateData, setRealEstateData] = useState<RealEstateFormData>(
         initialValues?.realEstate ?? initialRealEstateData,
     );
@@ -169,6 +172,9 @@ export function AccountForm({
     );
     const isRevaluationManuallySet = useRef(false);
 
+    // A credit card has a limit and what is in use of it, never a balance;
+    // the other types are asked one only when they move as a single number.
+    const tracksCreditLimit = selectedType === 'credit_card';
     const showBalanceField =
         selectedType !== null && BALANCE_ACCOUNT_TYPES.includes(selectedType);
     // What the account is worth is only half the story on the types that grow:
@@ -177,6 +183,8 @@ export function AccountForm({
         selectedType !== null && supportsInvestedAmount({ type: selectedType });
     const isRealEstate = selectedType === 'real_estate';
     const isLoan = selectedType === 'loan';
+    // Asked once, when the card is opened; the card's own page edits it later.
+    const showCreditLimitField = tracksCreditLimit && !initialValues;
     const availableRealEstateAccounts = availableLoanAccounts.filter(
         (account) =>
             account.type === 'real_estate' &&
@@ -240,6 +248,7 @@ export function AccountForm({
             investedAmount: showInvestedAmountField ? investedAmount : null,
             realEstate: isRealEstate ? realEstateData : null,
             loan: isLoan ? loanData : null,
+            creditLimit: showCreditLimitField ? creditLimit : null,
         });
     }, [
         displayName,
@@ -256,6 +265,8 @@ export function AccountForm({
         isLoan,
         realEstateData,
         loanData,
+        showCreditLimitField,
+        creditLimit,
         onChange,
     ]);
 
@@ -456,6 +467,30 @@ export function AccountForm({
                             'Optional. Set the current balance for this account.',
                         )}
                     </p>
+                </div>
+            )}
+
+            {showCreditLimitField && selectedCurrency && (
+                <div className="space-y-2">
+                    <Label htmlFor="credit_limit">{__('Credit limit')}</Label>
+                    <div className="mt-1">
+                        <AmountInput
+                            id="credit_limit"
+                            value={creditLimit ?? 0}
+                            onChange={(valueInCents) =>
+                                setCreditLimit(
+                                    valueInCents > 0 ? valueInCents : null,
+                                )
+                            }
+                            currencyCode={selectedCurrency}
+                        />
+                    </div>
+                    <p className="pl-1 text-xs text-muted-foreground">
+                        {__(
+                            'Optional. The most your bank lets you spend on this card.',
+                        )}
+                    </p>
+                    <InputError message={errors.credit_limit} />
                 </div>
             )}
 

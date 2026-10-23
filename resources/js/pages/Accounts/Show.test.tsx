@@ -54,6 +54,19 @@ vi.mock('@/components/accounts/account-balance-chart', () => ({
     },
 }));
 
+const creditCardUsageChart = vi.fn();
+
+vi.mock('@/components/accounts/credit-card-usage-chart', () => ({
+    CreditCardUsageChart: (props: Record<string, unknown>) => {
+        creditCardUsageChart(props);
+        return <div data-testid="credit-card-usage-chart" />;
+    },
+}));
+
+vi.mock('@/components/accounts/credit-card-statement-card', () => ({
+    CreditCardStatementCard: () => null,
+}));
+
 vi.mock('@/components/accounts/archive-account-dialog', () => ({
     ArchiveAccountDialog: () => null,
 }));
@@ -102,8 +115,13 @@ vi.mock('@/components/transactions/edit-transaction-dialog', () => ({
     },
 }));
 
+const transactionList = vi.fn();
+
 vi.mock('@/components/transactions/transaction-list', () => ({
-    TransactionList: () => null,
+    TransactionList: (props: Record<string, unknown>) => {
+        transactionList(props);
+        return null;
+    },
     TransactionListSkeleton: () => null,
 }));
 
@@ -166,7 +184,24 @@ const investmentChartData = (
     longTrend: null,
 });
 
-const renderPage = (account = baseAccount) =>
+const creditCardAccount = {
+    ...baseAccount,
+    name: 'Visa',
+    type: 'credit_card' as const,
+};
+
+const creditCardUsage = {
+    limit: 100000,
+    used: 25000,
+    available: 75000,
+    period_from: '2026-10-01',
+    period_to: '2026-10-31',
+    daily: [{ date: '2026-10-01', used: 25000 }],
+};
+
+const renderPage = (
+    account: Parameters<typeof AccountShow>[0]['account'] = baseAccount,
+) =>
     render(
         <PrivacyModeProvider>
             <AccountShow
@@ -336,5 +371,69 @@ describe('AccountShow', () => {
         expect(
             screen.queryByRole('button', { name: 'Add transaction' }),
         ).not.toBeInTheDocument();
+    });
+
+    describe('a credit card', () => {
+        const card = {
+            ...creditCardAccount,
+            credit_card_detail: null,
+            credit_card_usage: creditCardUsage,
+        };
+
+        it('shows the credit limit view instead of the balance chart', () => {
+            renderPage(card);
+
+            expect(
+                screen.getByTestId('credit-card-usage-chart'),
+            ).toBeInTheDocument();
+            expect(creditCardUsageChart).toHaveBeenLastCalledWith(
+                expect.objectContaining({
+                    accountId: 'account-1',
+                    usage: creditCardUsage,
+                }),
+            );
+        });
+
+        it('offers no balance actions, only the account ones', async () => {
+            renderPage(card);
+
+            expect(
+                screen.queryByRole('button', { name: 'Update balance' }),
+            ).not.toBeInTheDocument();
+            expect(
+                screen.queryByRole('button', { name: 'Import balances' }),
+            ).not.toBeInTheDocument();
+
+            const menu = await openMoreOptionsMenu();
+            expect(within(menu).queryByText('See balances')).toBeNull();
+            expect(within(menu).getByText('Edit account')).toBeInTheDocument();
+            expect(
+                within(menu).getByText('Archive account'),
+            ).toBeInTheDocument();
+        });
+
+        it('refreshes the usage after a transaction is created', () => {
+            renderPage(card);
+
+            const { onSuccess } = editTransactionDialog.mock.calls.at(
+                -1,
+            )![0] as { onSuccess: () => void };
+            act(() => onSuccess());
+
+            expect(router.reload).toHaveBeenCalledWith({
+                only: ['transactions', 'account'],
+            });
+        });
+
+        it('refreshes the usage after a listed transaction changes', () => {
+            renderPage(card);
+
+            const { onTransactionsChanged } = transactionList.mock.calls.at(
+                -1,
+            )![0] as { onTransactionsChanged: () => void };
+            act(() => onTransactionsChanged());
+
+            expect(router.reload).toHaveBeenCalledWith({ only: ['account'] });
+        });
     });
 });

@@ -64,4 +64,19 @@ class AccountFactory extends Factory
             'type' => AccountType::Loan,
         ]);
     }
+
+    public function creditCard(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'type' => AccountType::CreditCard,
+        ]);
+    }
+
+    /** Any type of account that has a balance, which a credit card does not. */
+    public function withBalance(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'type' => fake()->randomElement(array_filter(AccountType::cases(), fn (AccountType $type): bool => $type->hasBalance())),
+        ]);
+    }
 }

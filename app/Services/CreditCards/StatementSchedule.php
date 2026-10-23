@@ -1,0 +1,127 @@
+<?php
+
+namespace App\Services\CreditCards;
+
+use App\Enums\StatementFrequency;
+use App\Models\CreditCardDetail;
+use Carbon\CarbonImmutable;
+
+/**
+ * The statement cycles of a credit card, monthly or weekly, projected from
+ * one anchor closing date and its due date.
+ *
+ * Every cycle is projected from the anchor itself, never from the cycle before
+ * it: chaining month by month would let a closing on the 31st fall to the 28th
+ * in February and stay there for good.
+ */
+final readonly class StatementSchedule
+{
+    public function __construct(
+        private CarbonImmutable $closingAnchor,
+        private CarbonImmutable $dueAnchor,
+        private StatementFrequency $frequency = StatementFrequency::Monthly,
+    ) {}
+
+    /**
+     * The schedule a card's statement dates project, or null while it has
+     * none (a card can carry just a credit limit).
+     */
+    public static function fromDetail(?CreditCardDetail $detail): ?self
+    {
+        $closingDate = $detail?->statement_closing_date;
+        $dueDate = $detail?->payment_due_date;
+
+        if ($closingDate === null || $dueDate === null) {
+            return null;
+        }
+
+        return new self($closingDate, $dueDate, $detail->statement_frequency);
+    }
+
+    /**
+     * The cycle $offset cycles away from the anchor one (negative goes back).
+     */
+    public function cycle(int $offset): StatementCycle
+    {
+        return new StatementCycle(
+            periodFrom: $this->closingDate($offset - 1)->addDay(),
+            closingDate: $this->closingDate($offset),
+            dueDate: $this->frequency->addCycles($this->dueAnchor, $offset),
+        );
+    }
+
+    /**
+     * The cycle still collecting purchases on $day: the first one whose
+     * closing date is not before it.
+     */
+    public function openCycleOn(CarbonImmutable $day): StatementCycle
+    {
+        return $this->cycle($this->openOffsetOn($day));
+    }
+
+    /**
+     * The last cycle whose closing date is before $day.
+     */
+    public function closedCycleBefore(CarbonImmutable $day): StatementCycle
+    {
+        return $this->cycle($this->openOffsetOn($day) - 1);
+    }
+
+    /**
+     * The statement a payment made on $day pays: the last one closed before
+     * it, unless the cycle closing on $day is also charged that day, as
+     * banks that charge a statement the day it closes do.
+     */
+    public function statementPaidOn(CarbonImmutable $day): StatementCycle
+    {
+        $openCycle = $this->openCycleOn($day);
+
+        return $openCycle->dueDate->lessThanOrEqualTo($day) ? $openCycle : $this->closedCycleBefore($day);
+    }
+
+    /**
+     * The statement charged next as of $today, and whether it is final.
+     *
+     * A closed statement whose due date has not passed yet (the due date
+     * itself still counts) is what gets charged, and its amount no longer
+     * moves. With a due date more than a cycle after its closing, two closed
+     * statements can be pending at once, and the older one is charged first.
+     * Once every closed statement is past due, the next charge is the open
+     * cycle, whose amount is still a running total. A statement charged the
+     * day it closes is that open cycle on its closing day too: purchases made
+     * that day still land on it.
+     *
+     * @return array{cycle: StatementCycle, is_final: bool}
+     */
+    public function nextPaymentOn(CarbonImmutable $today): array
+    {
+        $openOffset = $this->openOffsetOn($today);
+        $offset = $openOffset;
+
+        while ($today->lessThanOrEqualTo($this->cycle($offset - 1)->dueDate)) {
+            $offset--;
+        }
+
+        return ['cycle' => $this->cycle($offset), 'is_final' => $offset < $openOffset];
+    }
+
+    private function closingDate(int $offset): CarbonImmutable
+    {
+        return $this->frequency->addCycles($this->closingAnchor, $offset);
+    }
+
+    private function openOffsetOn(CarbonImmutable $day): int
+    {
+        $offset = $this->frequency->approximateCyclesBetween($this->closingAnchor, $day);
+
+        while ($this->closingDate($offset)->lessThan($day)) {
+            $offset++;
+        }
+
+        while ($this->closingDate($offset - 1)->greaterThanOrEqualTo($day)) {
+            $offset--;
+        }
+
+        return $offset;
+    }
+}

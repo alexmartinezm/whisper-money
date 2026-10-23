@@ -409,6 +409,8 @@ class TransactionController extends Controller
                 $this->saveWithLabels($transaction, $data, $hasLabelUpdate);
             }
 
+            // Connected accounts and credit cards own no balance rows, so
+            // the adjuster skips them.
             if ($request->boolean('update_balance') && $this->balanceFieldsChanged($originalSnapshot, $transaction)) {
                 $balanceAdjuster->reverseDeletedTransaction($originalSnapshot);
                 $balanceAdjuster->applyCreatedTransaction($transaction->load('account'));

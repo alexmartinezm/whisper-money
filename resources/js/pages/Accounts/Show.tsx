@@ -12,6 +12,8 @@ import {
 } from '@/components/accounts/account-balance-chart';
 import { ArchiveAccountDialog } from '@/components/accounts/archive-account-dialog';
 import { BalancesModal } from '@/components/accounts/balances-modal';
+import { CreditCardStatementCard } from '@/components/accounts/credit-card-statement-card';
+import { CreditCardUsageChart } from '@/components/accounts/credit-card-usage-chart';
 import { EditAccountDialog } from '@/components/accounts/edit-account-dialog';
 import { EditLoanDetailDialog } from '@/components/accounts/edit-loan-detail-dialog';
 import { ImportBalancesDrawer } from '@/components/accounts/import-balances-drawer';
@@ -63,6 +65,10 @@ import {
     PROPERTY_TYPES,
     supportsInvestedAmount,
     type AreaUnit,
+    type CreditCardDetail,
+    type CreditCardPayment,
+    type CreditCardStatement,
+    type CreditCardUsage,
     type LoanDetail,
     type PropertyType,
     type RealEstateDetail,
@@ -89,6 +95,9 @@ interface AccountWithDetails extends Account {
     available_loan_accounts?: Account[];
     loan_detail?: LoanDetail;
     linked_loan_account?: Account;
+    credit_card_detail?: CreditCardDetail | null;
+    credit_card_statement?: CreditCardStatement | null;
+    credit_card_usage?: CreditCardUsage;
 }
 
 interface Props {
@@ -119,6 +128,9 @@ function MoreOptionsMenu({ children }: { children: ReactNode }) {
         </DropdownMenu>
     );
 }
+
+/** One empty list for every render, so the chart's memoised work holds. */
+const NO_PAYMENTS: CreditCardPayment[] = [];
 
 export default function AccountShow({
     account,
@@ -155,9 +167,33 @@ export default function AccountShow({
         setCreateTransactionOpen(true);
     }
 
+    // A credit card has a limit and what is in use of it instead of a
+    // balance: no balance chart and no balance actions.
+    const isCreditCard = account.type === 'credit_card';
+    const statementPayments = useMemo(
+        () =>
+            isCreditCard
+                ? new Map(
+                      (account.credit_card_statement?.payments ?? []).map(
+                          (payment) => [payment.transaction_id, payment],
+                      ),
+                  )
+                : undefined,
+        [isCreditCard, account.credit_card_statement],
+    );
+
     function handleTransactionCreated() {
-        router.reload({ only: ['transactions'] });
+        // A credit card's statement estimate is computed on the server from
+        // the ledger, so it is refreshed along with it.
+        router.reload({
+            only: isCreditCard ? ['transactions', 'account'] : ['transactions'],
+        });
         handleBalanceUpdated();
+    }
+
+    /** Edits and deletes from the list move the card's usage figures too. */
+    function handleTransactionsChanged() {
+        router.reload({ only: ['account'] });
     }
 
     const isArchived = !!account.archived_at;
@@ -317,24 +353,36 @@ export default function AccountShow({
                         <div className="flex flex-wrap gap-2">
                             {addTransactionButton}
                             <ButtonGroup>
-                                <Button
-                                    variant="outline"
-                                    onClick={() => setUpdateBalanceOpen(true)}
-                                >
-                                    {updateBalanceLabel}
-                                </Button>
-                                <Button
-                                    variant="outline"
-                                    onClick={() => setImportBalancesOpen(true)}
-                                >
-                                    {importBalancesLabel}
-                                </Button>
+                                {!isCreditCard && (
+                                    <>
+                                        <Button
+                                            variant="outline"
+                                            onClick={() =>
+                                                setUpdateBalanceOpen(true)
+                                            }
+                                        >
+                                            {updateBalanceLabel}
+                                        </Button>
+                                        <Button
+                                            variant="outline"
+                                            onClick={() =>
+                                                setImportBalancesOpen(true)
+                                            }
+                                        >
+                                            {importBalancesLabel}
+                                        </Button>
+                                    </>
+                                )}
                                 <MoreOptionsMenu>
-                                    <DropdownMenuItem
-                                        onClick={() => setBalancesOpen(true)}
-                                    >
-                                        {seeBalancesLabel}
-                                    </DropdownMenuItem>
+                                    {!isCreditCard && (
+                                        <DropdownMenuItem
+                                            onClick={() =>
+                                                setBalancesOpen(true)
+                                            }
+                                        >
+                                            {seeBalancesLabel}
+                                        </DropdownMenuItem>
+                                    )}
                                     <DropdownMenuItem
                                         onClick={() => setEditOpen(true)}
                                     >
@@ -348,12 +396,25 @@ export default function AccountShow({
                     )}
                 </div>
 
-                <AccountBalanceChart
-                    account={account}
-                    refreshKey={chartRefreshKey}
-                    onBalanceClick={() => setUpdateBalanceOpen(true)}
-                    onDataLoaded={handleChartDataLoaded}
-                />
+                {isCreditCard && account.credit_card_usage ? (
+                    <CreditCardUsageChart
+                        accountId={account.id}
+                        currencyCode={account.currency_code}
+                        usage={account.credit_card_usage}
+                        detail={account.credit_card_detail ?? null}
+                        payments={
+                            account.credit_card_statement?.payments ??
+                            NO_PAYMENTS
+                        }
+                    />
+                ) : (
+                    <AccountBalanceChart
+                        account={account}
+                        refreshKey={chartRefreshKey}
+                        onBalanceClick={() => setUpdateBalanceOpen(true)}
+                        onDataLoaded={handleChartDataLoaded}
+                    />
+                )}
 
                 {isRealEstate &&
                     realEstateDetail &&
@@ -412,6 +473,15 @@ export default function AccountShow({
                     />
                 )}
 
+                {isCreditCard && (
+                    <CreditCardStatementCard
+                        accountId={account.id}
+                        currencyCode={account.currency_code}
+                        detail={account.credit_card_detail ?? null}
+                        statement={account.credit_card_statement ?? null}
+                    />
+                )}
+
                 {isTransactionalAccount(account) && (
                     <Deferred
                         data="transactions"
@@ -430,8 +500,14 @@ export default function AccountShow({
                             showActionsMenu={false}
                             maxHeight={600}
                             hideColumns={['bank', 'account']}
+                            statementPayments={statementPayments}
                             onBalanceUpdated={() =>
                                 setChartRefreshKey((key) => key + 1)
+                            }
+                            onTransactionsChanged={
+                                isCreditCard
+                                    ? handleTransactionsChanged
+                                    : undefined
                             }
                         />
                     </Deferred>
@@ -452,12 +528,14 @@ export default function AccountShow({
                 onOpenChange={setArchiveOpen}
             />
 
-            <UpdateBalanceDialog
-                account={account}
-                open={updateBalanceOpen}
-                onOpenChange={setUpdateBalanceOpen}
-                onSuccess={handleBalanceUpdated}
-            />
+            {!isCreditCard && (
+                <UpdateBalanceDialog
+                    account={account}
+                    open={updateBalanceOpen}
+                    onOpenChange={setUpdateBalanceOpen}
+                    onSuccess={handleBalanceUpdated}
+                />
+            )}
 
             <EditTransactionDialog
                 transaction={null}
@@ -473,21 +551,25 @@ export default function AccountShow({
                 initialAccountId={account.id}
             />
 
-            <BalancesModal
-                account={account}
-                open={balancesOpen}
-                onOpenChange={setBalancesOpen}
-                onBalanceChange={handleBalanceUpdated}
-            />
+            {!isCreditCard && (
+                <>
+                    <BalancesModal
+                        account={account}
+                        open={balancesOpen}
+                        onOpenChange={setBalancesOpen}
+                        onBalanceChange={handleBalanceUpdated}
+                    />
 
-            <ImportBalancesDrawer
-                open={importBalancesOpen}
-                onOpenChange={setImportBalancesOpen}
-                accounts={accounts}
-                account={account}
-                accountId={account.id}
-                onSuccess={handleBalanceUpdated}
-            />
+                    <ImportBalancesDrawer
+                        open={importBalancesOpen}
+                        onOpenChange={setImportBalancesOpen}
+                        accounts={accounts}
+                        account={account}
+                        accountId={account.id}
+                        onSuccess={handleBalanceUpdated}
+                    />
+                </>
+            )}
 
             {hasLinkedLoan && (
                 <>

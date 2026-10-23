@@ -69,6 +69,7 @@ export function EditAccountDialog({
         investedAmount: null,
         realEstate: null,
         loan: null,
+        creditLimit: null,
     });
 
     useEffect(() => {

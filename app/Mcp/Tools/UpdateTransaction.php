@@ -51,7 +51,7 @@ class UpdateTransaction extends WriteTool
             'creditor_name' => $schema->string()->nullable()->description('New creditor (payee) name, or null to clear it.'),
             'debtor_name' => $schema->string()->nullable()->description('New debtor (payer) name, or null to clear it.'),
             'notes' => $schema->string()->nullable()->description('New free-text notes, or null to clear them. Editable on any transaction, bank/imported ones included.'),
-            'update_balance' => $schema->boolean()->description('When true and the amount/date/account changed, move the account balance snapshots accordingly. Ignored on connected accounts, whose balances come from the bank. Default false.'),
+            'update_balance' => $schema->boolean()->description('When true and the amount/date/account changed, move the account balance snapshots accordingly. Ignored on connected accounts, whose balances come from the bank, and on credit cards that track a limit instead of a balance. Default false.'),
             'space' => $schema->string()->description('Space id. Defaults to the personal space.'),
         ];
     }
@@ -179,8 +179,9 @@ class UpdateTransaction extends WriteTool
 
     /**
      * Move the manual balance off the pre-edit account/date/amount and onto the
-     * new ones. Either side no-ops on a connected account, so moving a
-     * transaction onto one still unwinds the manual account it came from.
+     * new ones. Either side no-ops on an account that does not own its
+     * balance (a connected one, or a credit card), so moving a transaction
+     * onto one still unwinds the account it came from.
      */
     private function syncManualBalance(Request $request, Transaction $transaction, Transaction $originalSnapshot): bool
     {

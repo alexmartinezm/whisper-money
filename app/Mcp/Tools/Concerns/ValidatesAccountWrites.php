@@ -4,8 +4,10 @@ namespace App\Mcp\Tools\Concerns;
 
 use App\Enums\AccountType;
 use App\Enums\PropertyType;
+use App\Enums\StatementFrequency;
 use App\Http\Requests\Concerns\ValidatesAccountDetailRules;
 use App\Http\Requests\Concerns\ValidatesUserOwnedResources;
+use App\Models\CreditCardDetail;
 use App\Models\User;
 use App\Services\CurrencyOptions;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
@@ -43,7 +45,7 @@ trait ValidatesAccountWrites
      *
      * @return array<string, array<mixed>>
      */
-    protected function detailRules(?AccountType $type, bool $creating): array
+    protected function detailRules(?AccountType $type, bool $creating, ?CreditCardDetail $storedCreditCard = null): array
     {
         return match ($type) {
             // An update changes only the fields it is passed, so the property
@@ -55,6 +57,7 @@ trait ValidatesAccountWrites
                 // after that the link lives on the property's own detail.
                 ...$creating ? $this->linkedRealEstateAccountRules() : [],
             ],
+            AccountType::CreditCard => $this->creditCardDetailRules($storedCreditCard),
             default => [],
         };
     }
@@ -90,7 +93,7 @@ trait ValidatesAccountWrites
     }
 
     /**
-     * The real estate and loan detail fields, offered by both tools so an
+     * The real estate, loan and credit card detail fields, offered by both tools so an
      * account of either type can be described in one call.
      *
      * @return array<string, mixed>
@@ -111,6 +114,10 @@ trait ValidatesAccountWrites
             'loan_term_months' => $schema->integer()->description('loan only: term in months, 1 to 600.'),
             'original_amount' => $schema->integer()->description('loan only: amount originally borrowed, in minor units.'),
             'loan_start_date' => $schema->string()->description('loan only: when the loan started, YYYY-MM-DD. Defaults to today.'),
+            'statement_closing_date' => $schema->string()->description('credit_card only: a statement closing date, YYYY-MM-DD. Later cycles repeat from it at statement_frequency. Send with payment_due_date; both null clears them.'),
+            'payment_due_date' => $schema->string()->description('credit_card only: when that statement is charged, YYYY-MM-DD. On or after the closing date, at most '.StatementFrequency::Monthly->maxDaysToPay().' days later on a monthly card and '.StatementFrequency::Weekly->maxDaysToPay().' on a weekly one.'),
+            'statement_frequency' => $schema->string()->enum(array_column(StatementFrequency::cases(), 'value'))->description('credit_card only: how often a statement closes, monthly (the default) or weekly. Left out, the stored one stays. Kept only on a card with statement dates or a credit limit.'),
+            'credit_limit' => $schema->integer()->description('credit_card only: the card\'s credit limit, in minor units. null clears it.'),
         ];
     }
 

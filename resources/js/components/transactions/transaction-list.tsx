@@ -1,4 +1,5 @@
 import { useLocale } from '@/hooks/use-locale';
+import { useBalanceOwningAccountIds } from '@/hooks/use-owns-balance-updates';
 import { reloadPage } from '@/lib/leave-page';
 import { __ } from '@/utils/i18n';
 import { Link } from '@inertiajs/react';
@@ -75,7 +76,11 @@ import {
 } from '@/lib/transaction-re-evaluation';
 import { getTransactionRowActions } from '@/lib/transaction-row-actions';
 import { transactionSyncService } from '@/services/transaction-sync';
-import { type Account, type Bank } from '@/types/account';
+import {
+    type Account,
+    type Bank,
+    type CreditCardPayment,
+} from '@/types/account';
 import { type AutomationRule } from '@/types/automation-rule';
 import { type Category } from '@/types/category';
 import { type Label } from '@/types/label';
@@ -285,8 +290,15 @@ export interface TransactionListProps {
     maxHeight?: number;
     hideColumns?: string[];
     onBalanceUpdated?: () => void;
+    /**
+     * Called after a transaction in the list is edited or deleted, for pages
+     * whose figures are computed from the ledger on the server.
+     */
+    onTransactionsChanged?: () => void;
     /** A label every listed transaction already carries; hidden from the rows. */
     hiddenLabelId?: UUID;
+    /** Credit card repayments by transaction id, with the statement each pays. */
+    statementPayments?: Map<string, CreditCardPayment>;
 }
 
 export function TransactionList({
@@ -304,7 +316,9 @@ export function TransactionList({
     maxHeight,
     hideColumns = [],
     onBalanceUpdated,
+    onTransactionsChanged,
     hiddenLabelId,
+    statementPayments,
 }: TransactionListProps) {
     const locale = useLocale();
     const [labels, setLabels] = useState<Label[]>(() => initialLabels ?? []);
@@ -394,8 +408,9 @@ export function TransactionList({
                     };
                 }),
             );
+            onTransactionsChanged?.();
         },
-        [setTransactions],
+        [setTransactions, onTransactionsChanged],
     );
 
     useEffect(() => {
@@ -472,15 +487,7 @@ export function TransactionList({
         setIsSearching(false);
     }, [filters.searchText, transactions]);
 
-    const manualAccountIds = useMemo(
-        () =>
-            new Set(
-                accounts
-                    .filter((account) => account.banking_connection_id === null)
-                    .map((account) => account.id),
-            ),
-        [accounts],
-    );
+    const manualAccountIds = useBalanceOwningAccountIds(accounts);
 
     const categoryFilter = useMemo(
         () => createTransactionCategoryFilter(filters.categoryIds, categories),
@@ -739,6 +746,7 @@ export function TransactionList({
             onAutomate: openAutomateDialog,
             isDateHidden: columnVisibility.transaction_date === false,
             hiddenLabelId,
+            statementPayments,
         });
 
         if (hideColumns.length === 0) {
@@ -763,6 +771,7 @@ export function TransactionList({
         hideColumns,
         columnVisibility,
         hiddenLabelId,
+        statementPayments,
     ]);
 
     const table = useReactTable({
@@ -819,6 +828,7 @@ export function TransactionList({
             if (balanceWasUpdated) {
                 onBalanceUpdated?.();
             }
+            onTransactionsChanged?.();
             setTransactions((previous) =>
                 previous.filter(
                     (transaction) => transaction.id !== deleteTransaction.id,
@@ -864,6 +874,7 @@ export function TransactionList({
                           count: result.updated_count,
                       }),
             );
+            onTransactionsChanged?.();
 
             setRowSelection({});
         } catch (error) {
@@ -931,11 +942,12 @@ export function TransactionList({
             );
         try {
             await transactionSyncService.deleteMany(selectedIds, {
-                updateBalance: updateBalanceOnDelete,
+                updateBalance: balanceMayHaveUpdated,
             });
             if (balanceMayHaveUpdated) {
                 onBalanceUpdated?.();
             }
+            onTransactionsChanged?.();
             setTransactions((previous) =>
                 previous.filter(
                     (transaction) => !selectedIds.includes(transaction.id),

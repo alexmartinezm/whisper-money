@@ -139,6 +139,18 @@ first.
 `ownership_percentage` below 100 means the user only owns that share of the
 account, and the app counts only that slice of it in their figures — changing it
 also reweighs the budgets that already counted the account.
+When a credit card row carries `credit_card_statement`, it is an estimate of the
+next charge (`is_final` false means the cycle is still open), computed from the
+statement dates in `credit_card_detail`; it is not a transaction. Those dates are
+one cycle, and later cycles repeat monthly or weekly from them, as
+`statement_frequency` says.
+`credit_card_usage` is how much of the card is in use: `used` adds up what is
+still to be charged between `period_from` and today (the pending statement plus
+the open cycle, or the calendar month when the card has no statement dates),
+less the payments made on those statements (none is subtracted without
+statement dates), never below 0. `available` is `limit` minus it, negative when
+over the limit, null while `credit_limit` is not set. A credit card has no balance:
+`create_account` refuses one for it and `create_balance` rejects the card.
 MARKDOWN)]
 class WhisperMoneyServer extends Server
 {

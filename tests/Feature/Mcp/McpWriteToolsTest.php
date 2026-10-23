@@ -2,6 +2,7 @@
 
 use App\Enums\AccountType;
 use App\Enums\CategorySource;
+use App\Enums\StatementFrequency;
 use App\Jobs\GenerateHistoricalLoanBalancesJob;
 use App\Jobs\GenerateHistoricalRealEstateBalancesJob;
 use App\Mcp\Servers\WhisperMoneyServer;
@@ -30,6 +31,7 @@ use App\Models\AutomationRule;
 use App\Models\Bank;
 use App\Models\Budget;
 use App\Models\Category;
+use App\Models\CreditCardDetail;
 use App\Models\Label;
 use App\Models\Space;
 use App\Models\Transaction;
@@ -108,7 +110,7 @@ it('edits a manual transaction', function () {
 
 it('moves a transaction onto a connected account, unwinding only the manual side', function () {
     $user = User::factory()->create();
-    $manualAccount = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
+    $manualAccount = Account::factory()->create(['type' => AccountType::Checking, 'user_id' => $user->id, 'currency_code' => 'EUR']);
     $connectedAccount = Account::factory()->connected()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
 
     $manualAccount->balances()->create(['balance_date' => '2026-01-15', 'balance' => 9_000]);
@@ -263,7 +265,7 @@ it('leaves the iv of a field it did not touch alone', function () {
 
 it('leaves the balance alone when only the notes change', function () {
     $user = User::factory()->create();
-    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
+    $account = Account::factory()->create(['type' => AccountType::Checking, 'user_id' => $user->id, 'currency_code' => 'EUR']);
     $account->balances()->create(['balance_date' => '2026-01-15', 'balance' => 9_000]);
     $transaction = Transaction::factory()->create([
         'user_id' => $user->id,
@@ -280,6 +282,35 @@ it('leaves the balance alone when only the notes change', function () {
     ])->assertOk()->assertSee('"balance_updated":false');
 
     expect($account->balances()->where('balance_date', '2026-01-15')->value('balance'))->toBe(9_000);
+});
+
+it('never moves a credit card balance', function () {
+    $user = User::factory()->create();
+    $card = Account::factory()->creditCard()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
+    $card->balances()->create(['balance_date' => '2026-01-15', 'balance' => 9_000]);
+
+    callWriteTool($user, CreateTransaction::class, [
+        'account_id' => $card->id,
+        'description' => 'Dinner',
+        'amount' => -1_000,
+        'transaction_date' => '2026-01-15',
+        'update_balance' => true,
+    ])->assertOk()->assertSee('"balance_updated":false');
+
+    $transaction = Transaction::query()->where('account_id', $card->id)->sole();
+
+    callWriteTool($user, UpdateTransaction::class, [
+        'transaction_id' => $transaction->id,
+        'amount' => -2_000,
+        'update_balance' => true,
+    ])->assertOk()->assertSee('"balance_updated":false');
+
+    callWriteTool($user, DeleteTransaction::class, [
+        'transaction_id' => $transaction->id,
+        'update_balance' => true,
+    ])->assertOk()->assertSee('"balance_updated":false');
+
+    expect($card->balances()->pluck('balance')->all())->toBe([9_000]);
 });
 
 it('deletes a manual transaction', function () {
@@ -352,7 +383,7 @@ it('adds a label to an imported transaction', function () {
 
 it('records a balance on a manual account', function () {
     $user = User::factory()->create();
-    $account = Account::factory()->create(['user_id' => $user->id]);
+    $account = Account::factory()->withBalance()->create(['user_id' => $user->id]);
 
     callWriteTool($user, CreateBalance::class, [
         'account_id' => $account->id,
@@ -371,6 +402,18 @@ it('refuses to record a balance on a connected account', function () {
         'account_id' => $account->id,
         'balance' => 250000,
     ])->assertHasErrors(['connected']);
+
+    expect($account->balances()->count())->toBe(0);
+});
+
+it('refuses to record a balance on a credit card', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->creditCard()->create(['user_id' => $user->id]);
+
+    callWriteTool($user, CreateBalance::class, [
+        'account_id' => $account->id,
+        'balance' => 250000,
+    ])->assertHasErrors([AccountType::NO_BALANCE_MESSAGE]);
 
     expect($account->balances()->count())->toBe(0);
 });
@@ -1133,3 +1176,177 @@ it('rejects update_account for a read-only token', function () {
 
     expect($account->fresh()->name)->toBe('Untouched');
 });
+
+it('creates a credit card with its statement dates', function () {
+    $user = User::factory()->create();
+
+    callWriteTool($user, CreateAccount::class, [
+        'name' => 'Visa',
+        'type' => 'credit_card',
+        'currency_code' => 'EUR',
+        'statement_closing_date' => '2026-03-05',
+        'payment_due_date' => '2026-03-20',
+    ])->assertOk()->assertSee('credit_card_statement')->assertSee('2026-03-20');
+
+    $detail = $user->accounts()->sole()->creditCardDetail;
+
+    expect($detail->statement_closing_date->toDateString())->toBe('2026-03-05')
+        ->and($detail->payment_due_date->toDateString())->toBe('2026-03-20');
+});
+
+it('sets and clears the statement dates of a credit card through update_account', function () {
+    $user = User::factory()->create();
+    $card = Account::factory()->creditCard()->create(['user_id' => $user->id]);
+
+    callWriteTool($user, UpdateAccount::class, [
+        'account_id' => $card->id,
+        'statement_closing_date' => '2026-04-25',
+        'payment_due_date' => '2026-05-10',
+    ])->assertOk()->assertSee('2026-05-10');
+
+    expect($card->creditCardDetail()->sole()->statement_closing_date->toDateString())->toBe('2026-04-25');
+
+    callWriteTool($user, UpdateAccount::class, [
+        'account_id' => $card->id,
+        'statement_closing_date' => null,
+        'payment_due_date' => null,
+    ])->assertOk();
+
+    expect($card->creditCardDetail()->exists())->toBeFalse();
+});
+
+it('creates a weekly credit card and switches it back to monthly through update_account', function () {
+    $user = User::factory()->create();
+
+    callWriteTool($user, CreateAccount::class, [
+        'name' => 'Visa',
+        'type' => 'credit_card',
+        'currency_code' => 'EUR',
+        'statement_closing_date' => '2026-10-01',
+        'payment_due_date' => '2026-10-05',
+        'statement_frequency' => 'weekly',
+    ])->assertOk()->assertSee('"statement_frequency":"weekly"', false);
+
+    $card = $user->accounts()->sole();
+
+    expect($card->creditCardDetail->statement_frequency)->toBe(StatementFrequency::Weekly);
+
+    callWriteTool($user, UpdateAccount::class, [
+        'account_id' => $card->id,
+        'statement_frequency' => 'monthly',
+    ])->assertOk()->assertSee('"statement_frequency":"monthly"', false);
+
+    expect($card->creditCardDetail()->sole()->statement_frequency)->toBe(StatementFrequency::Monthly);
+});
+
+it('rejects a weekly credit card charged more than a week after closing', function () {
+    $user = User::factory()->create();
+
+    callWriteTool($user, CreateAccount::class, [
+        'name' => 'Visa',
+        'type' => 'credit_card',
+        'currency_code' => 'EUR',
+        'statement_closing_date' => '2026-10-01',
+        'payment_due_date' => '2026-10-09',
+        'statement_frequency' => 'weekly',
+    ])->assertHasErrors(['7 days']);
+
+    expect($user->accounts()->exists())->toBeFalse();
+});
+
+it('accepts a credit card charged the same day its statement closes', function (string $frequency) {
+    $user = User::factory()->create();
+
+    callWriteTool($user, CreateAccount::class, [
+        'name' => 'Visa',
+        'type' => 'credit_card',
+        'currency_code' => 'EUR',
+        'statement_closing_date' => '2026-10-15',
+        'payment_due_date' => '2026-10-15',
+        'statement_frequency' => $frequency,
+    ])->assertOk();
+
+    expect($user->accounts()->sole()->creditCardDetail->payment_due_date->toDateString())->toBe('2026-10-15');
+})->with(['monthly', 'weekly']);
+
+it('creates a credit card with its credit limit', function () {
+    $user = User::factory()->create();
+
+    callWriteTool($user, CreateAccount::class, [
+        'name' => 'Visa',
+        'type' => 'credit_card',
+        'currency_code' => 'EUR',
+        'credit_limit' => 300000,
+    ])->assertOk()->assertSee('"credit_limit":300000', false)->assertSee('"available":300000', false);
+
+    expect($user->accounts()->sole()->creditCardDetail)
+        ->credit_limit->toBe(300000)
+        ->statement_closing_date->toBeNull();
+});
+
+it('refuses a balance on a credit card that takes a credit limit', function () {
+    $user = User::factory()->create();
+
+    callWriteTool($user, CreateAccount::class, [
+        'name' => 'Visa',
+        'type' => 'credit_card',
+        'currency_code' => 'EUR',
+        'balance' => -50000,
+    ])->assertHasErrors(['A credit card has no balance']);
+
+    expect($user->accounts()->exists())->toBeFalse();
+});
+
+it('sets and clears the credit limit through update_account, keeping the dates', function () {
+    $user = User::factory()->create();
+    $card = Account::factory()->creditCard()->create(['user_id' => $user->id]);
+    CreditCardDetail::factory()->create(['account_id' => $card->id, 'statement_closing_date' => '2026-04-25', 'payment_due_date' => '2026-05-10']);
+
+    callWriteTool($user, UpdateAccount::class, [
+        'account_id' => $card->id,
+        'credit_limit' => 150000,
+    ])->assertOk()->assertSee('"credit_limit":150000', false);
+
+    callWriteTool($user, UpdateAccount::class, [
+        'account_id' => $card->id,
+        'statement_closing_date' => null,
+        'payment_due_date' => null,
+    ])->assertOk();
+
+    expect($card->creditCardDetail()->sole())
+        ->credit_limit->toBe(150000)
+        ->statement_closing_date->toBeNull();
+
+    callWriteTool($user, UpdateAccount::class, [
+        'account_id' => $card->id,
+        'credit_limit' => null,
+    ])->assertOk();
+
+    expect($card->creditCardDetail()->exists())->toBeFalse();
+});
+
+it('leaves the statement dates alone when update_account is not passed them', function () {
+    $user = User::factory()->create();
+    $card = Account::factory()->creditCard()->create(['user_id' => $user->id]);
+    CreditCardDetail::factory()->create(['account_id' => $card->id]);
+
+    callWriteTool($user, UpdateAccount::class, [
+        'account_id' => $card->id,
+        'name' => 'Renamed card',
+    ])->assertOk();
+
+    expect($card->creditCardDetail()->exists())->toBeTrue();
+});
+
+it('rejects statement dates that do not make sense through update_account', function (array $dates) {
+    $user = User::factory()->create();
+    $card = Account::factory()->creditCard()->create(['user_id' => $user->id]);
+
+    callWriteTool($user, UpdateAccount::class, ['account_id' => $card->id, ...$dates])->assertHasErrors();
+
+    expect($card->creditCardDetail()->exists())->toBeFalse();
+})->with([
+    'due before closing' => [['statement_closing_date' => '2026-04-25', 'payment_due_date' => '2026-04-20']],
+    'due too long after closing' => [['statement_closing_date' => '2026-04-01', 'payment_due_date' => '2026-05-17']],
+    'only one of the two' => [['statement_closing_date' => '2026-04-25']],
+]);

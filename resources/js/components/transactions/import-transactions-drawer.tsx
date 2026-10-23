@@ -12,6 +12,7 @@ import {
     DrawerTitle,
 } from '@/components/ui/drawer';
 import { Progress } from '@/components/ui/progress';
+import { accountHasBalance } from '@/hooks/use-owns-balance-updates';
 import { importKey } from '@/lib/crypto';
 import { getCsrfToken } from '@/lib/csrf';
 import {
@@ -91,6 +92,11 @@ export function ImportTransactionsDrawer({
     const [selectedAccount, setSelectedAccount] = useState<Account | null>(
         null,
     );
+    // A credit card has no balance, so the import neither asks for one nor
+    // carries one over from the file.
+    const tracksBalance = selectedAccount
+        ? accountHasBalance(selectedAccount)
+        : true;
     const [state, setState] = useState<ImportState>({
         step: ImportStep.SelectAccount,
         selectedAccountId: null,
@@ -346,6 +352,7 @@ export function ImportTransactionsDrawer({
     // on that date. If found, no need to ask the user.
     useEffect(() => {
         if (
+            !tracksBalance ||
             !state.calculateBalances ||
             !state.referenceBalanceDate ||
             !state.selectedAccountId ||
@@ -401,6 +408,7 @@ export function ImportTransactionsDrawer({
             cancelled = true;
         };
     }, [
+        tracksBalance,
         state.calculateBalances,
         state.referenceBalanceDate,
         state.selectedAccountId,
@@ -413,12 +421,6 @@ export function ImportTransactionsDrawer({
 
     const handlePreviewTransactions = async () => {
         try {
-            const parsedTransactions = convertRowsToTransactions(
-                state.parsedData,
-                state.columnMapping,
-                state.dateFormat,
-            );
-
             const account = accounts.find(
                 (a) => a.id === state.selectedAccountId,
             );
@@ -427,6 +429,20 @@ export function ImportTransactionsDrawer({
                 setError('Selected account not found');
                 return;
             }
+
+            // A credit card has no balance at all, so none of its rows carries
+            // one, even when a saved mapping still names a balance column.
+            const carriesBalance = accountHasBalance(account);
+
+            const parsedTransactions = convertRowsToTransactions(
+                state.parsedData,
+                state.columnMapping,
+                state.dateFormat,
+            ).map((transaction) =>
+                carriesBalance
+                    ? transaction
+                    : { ...transaction, balance: null },
+            );
 
             const duplicateFlags = await transactionSyncService.checkDuplicates(
                 account.id,
@@ -445,6 +461,7 @@ export function ImportTransactionsDrawer({
             // mapped, derive balances from the reference balance for every
             // distinct transaction date.
             const shouldCalculate =
+                carriesBalance &&
                 state.calculateBalances &&
                 !state.columnMapping.balance &&
                 state.referenceBalanceDate !== null &&
@@ -653,7 +670,10 @@ export function ImportTransactionsDrawer({
             setImportProgress(processedCount);
         }
 
-        const balancesToImport = collectBalancesToImport(newTransactions);
+        // The server refuses a credit card balance; none is sent for one.
+        const balancesToImport = accountHasBalance(selectedAccount)
+            ? collectBalancesToImport(newTransactions)
+            : new Map<string, number>();
 
         if (balancesToImport.size > 0) {
             try {
@@ -840,12 +860,19 @@ export function ImportTransactionsDrawer({
                 return (
                     <ImportStepMapping
                         columnOptions={state.columnOptions}
-                        columnMapping={state.columnMapping}
+                        columnMapping={
+                            tracksBalance
+                                ? state.columnMapping
+                                : { ...state.columnMapping, balance: null }
+                        }
                         dateFormat={state.dateFormat}
                         dateFormatDetected={state.dateFormatDetected}
                         parsedData={state.parsedData}
                         currencyCode={selectedAccount?.currency_code || 'USD'}
-                        calculateBalances={state.calculateBalances}
+                        tracksBalance={tracksBalance}
+                        calculateBalances={
+                            tracksBalance && state.calculateBalances
+                        }
                         referenceBalance={state.referenceBalance}
                         referenceBalancePrefilled={
                             state.referenceBalancePrefilled

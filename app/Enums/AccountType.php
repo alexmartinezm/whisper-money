@@ -13,6 +13,9 @@ enum AccountType: string
     case Savings = 'savings';
     case Others = 'others';
 
+    /** Why a balance written for an account without one is refused. */
+    public const string NO_BALANCE_MESSAGE = 'A credit card has no balance: it has a credit limit instead.';
+
     /**
      * Whether this account type supports tracking invested amount and gains/losses.
      */
@@ -53,6 +56,16 @@ enum AccountType: string
      * (neither added nor subtracted) while still being tracked on their own.
      */
     public function countsInNetWorth(): bool
+    {
+        return $this !== self::CreditCard;
+    }
+
+    /**
+     * Whether an account of this type has a balance. A credit card has a
+     * limit and what is in use of it instead, so no balance is asked for,
+     * stored by a transaction or shown for one.
+     */
+    public function hasBalance(): bool
     {
         return $this !== self::CreditCard;
     }

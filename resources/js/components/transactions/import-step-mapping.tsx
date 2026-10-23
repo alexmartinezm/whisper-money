@@ -33,6 +33,8 @@ interface ImportStepMappingProps {
     dateFormatDetected: boolean;
     parsedData: ParsedRow[];
     currencyCode: string;
+    /** False for a credit card: it has no balance to map or work out. */
+    tracksBalance: boolean;
     calculateBalances: boolean;
     referenceBalance: number | null;
     referenceBalancePrefilled: boolean;
@@ -56,6 +58,7 @@ export function ImportStepMapping({
     dateFormatDetected,
     parsedData,
     currencyCode,
+    tracksBalance,
     calculateBalances,
     referenceBalance,
     referenceBalancePrefilled,
@@ -344,103 +347,108 @@ export function ImportStepMapping({
                     </Select>
                 </div>
 
-                <div className="flex flex-col gap-2">
-                    <Label htmlFor="balance-column">
-                        {__('Balance (Optional)')}
-                    </Label>
-                    <Select
-                        value={columnMapping.balance || '__none__'}
-                        onValueChange={(value) =>
-                            onMappingChange(
-                                'balance',
-                                value === '__none__' ? '' : value,
-                            )
-                        }
-                    >
-                        <SelectTrigger id="balance-column">
-                            <SelectValue
-                                placeholder={__(
-                                    'Select balance column (optional)',
-                                )}
-                            />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="__none__">
-                                {__('None')}
-                            </SelectItem>
-                            {columnOptions.map((option, index) => (
-                                <SelectItem
-                                    key={`balance-${option.value}-${index}`}
-                                    value={option.value}
-                                >
-                                    {option.label}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-
-                    {calculateBalancesAvailable && (
-                        <div className="flex flex-col gap-3 pt-2">
-                            <div className="flex items-start gap-2">
-                                <Checkbox
-                                    id="calculate-balances"
-                                    checked={
-                                        balanceColumnSet
-                                            ? false
-                                            : calculateBalances
-                                    }
-                                    disabled={checkboxDisabled}
-                                    onCheckedChange={(checked) =>
-                                        onCalculateBalancesChange(
-                                            checked === true,
-                                        )
-                                    }
-                                    className="mt-0.5"
+                {tracksBalance && (
+                    <div className="flex flex-col gap-2">
+                        <Label htmlFor="balance-column">
+                            {__('Balance (Optional)')}
+                        </Label>
+                        <Select
+                            value={columnMapping.balance || '__none__'}
+                            onValueChange={(value) =>
+                                onMappingChange(
+                                    'balance',
+                                    value === '__none__' ? '' : value,
+                                )
+                            }
+                        >
+                            <SelectTrigger id="balance-column">
+                                <SelectValue
+                                    placeholder={__(
+                                        'Select balance column (optional)',
+                                    )}
                                 />
-                                <div className="flex flex-col gap-1">
-                                    <Label
-                                        htmlFor="calculate-balances"
-                                        className={`cursor-pointer font-normal ${checkboxDisabled ? 'opacity-50' : ''}`}
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="__none__">
+                                    {__('None')}
+                                </SelectItem>
+                                {columnOptions.map((option, index) => (
+                                    <SelectItem
+                                        key={`balance-${option.value}-${index}`}
+                                        value={option.value}
                                     >
-                                        {__(
-                                            'Calculate balances from transactions',
-                                        )}
-                                    </Label>
-                                    <p className="text-xs text-muted-foreground">
-                                        {__(
-                                            'Use the balance on the latest transaction date as a reference to compute balances for older dates.',
-                                        )}
-                                    </p>
-                                </div>
-                            </div>
+                                        {option.label}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
 
-                            {effectiveCalculate && latestDate && (
-                                <div className="flex flex-col gap-2 rounded-md border bg-muted/30 p-3">
-                                    <Label htmlFor="reference-balance">
-                                        {__('Balance on')}{' '}
-                                        {formatRelativeDate(latestDate, locale)}{' '}
-                                        <span className="text-destructive">
-                                            *
-                                        </span>
-                                    </Label>
-                                    <AmountInput
-                                        id="reference-balance"
-                                        value={referenceBalance ?? 0}
-                                        onChange={onReferenceBalanceChange}
-                                        currencyCode={currencyCode}
+                        {calculateBalancesAvailable && (
+                            <div className="flex flex-col gap-3 pt-2">
+                                <div className="flex items-start gap-2">
+                                    <Checkbox
+                                        id="calculate-balances"
+                                        checked={
+                                            balanceColumnSet
+                                                ? false
+                                                : calculateBalances
+                                        }
+                                        disabled={checkboxDisabled}
+                                        onCheckedChange={(checked) =>
+                                            onCalculateBalancesChange(
+                                                checked === true,
+                                            )
+                                        }
+                                        className="mt-0.5"
                                     />
-                                    {referenceBalancePrefilled && (
+                                    <div className="flex flex-col gap-1">
+                                        <Label
+                                            htmlFor="calculate-balances"
+                                            className={`cursor-pointer font-normal ${checkboxDisabled ? 'opacity-50' : ''}`}
+                                        >
+                                            {__(
+                                                'Calculate balances from transactions',
+                                            )}
+                                        </Label>
                                         <p className="text-xs text-muted-foreground">
                                             {__(
-                                                'Pre-filled from an existing balance for this date.',
+                                                'Use the balance on the latest transaction date as a reference to compute balances for older dates.',
                                             )}
                                         </p>
-                                    )}
+                                    </div>
                                 </div>
-                            )}
-                        </div>
-                    )}
-                </div>
+
+                                {effectiveCalculate && latestDate && (
+                                    <div className="flex flex-col gap-2 rounded-md border bg-muted/30 p-3">
+                                        <Label htmlFor="reference-balance">
+                                            {__('Balance on')}{' '}
+                                            {formatRelativeDate(
+                                                latestDate,
+                                                locale,
+                                            )}{' '}
+                                            <span className="text-destructive">
+                                                *
+                                            </span>
+                                        </Label>
+                                        <AmountInput
+                                            id="reference-balance"
+                                            value={referenceBalance ?? 0}
+                                            onChange={onReferenceBalanceChange}
+                                            currencyCode={currencyCode}
+                                        />
+                                        {referenceBalancePrefilled && (
+                                            <p className="text-xs text-muted-foreground">
+                                                {__(
+                                                    'Pre-filled from an existing balance for this date.',
+                                                )}
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 <div className="grid gap-4 md:grid-cols-2">
                     <div className="flex flex-col gap-2">

@@ -62,6 +62,12 @@ class StoreAccountRequest extends FormRequest
             $rules = array_merge($rules, $this->loanDetailRules(), $this->linkedRealEstateAccountRules());
         }
 
+        // A card has a limit instead of a balance, so a balance sent along is
+        // left out of the validated data.
+        if (AccountType::tryFrom((string) $this->input('type'))?->hasBalance() === false) {
+            $rules = array_merge($rules, ['balance' => ['exclude']], $this->creditLimitRules());
+        }
+
         return $rules;
     }
 }

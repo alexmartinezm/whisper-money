@@ -109,6 +109,93 @@ export interface LoanDetail {
     remaining_months: number | null;
 }
 
+/** How often a credit card statement closes, mirroring App\Enums\StatementFrequency. */
+export type StatementFrequency = 'monthly' | 'weekly';
+
+/**
+ * What the user set on a credit card. The statement dates are the anchor its
+ * cycles repeat from, every month or every week; they travel together, both
+ * set or both null.
+ */
+export interface CreditCardDetail {
+    statement_closing_date: string | null;
+    payment_due_date: string | null;
+    statement_frequency: StatementFrequency;
+    /** In the card currency's minor units. */
+    credit_limit: number | null;
+}
+
+/** One statement cycle and what it adds up to, as an amount to pay. */
+export interface CreditCardStatementCycle {
+    period_from: string;
+    closing_date: string;
+    due_date: string;
+    amount: number;
+}
+
+/**
+ * A repayment booked on the card, with the statement it pays: the last one
+ * closed before it was made. `amount` is positive, in minor units.
+ */
+export interface CreditCardPayment {
+    transaction_id: string;
+    date: string;
+    amount: number;
+    period_from: string;
+    closing_date: string;
+    due_date: string;
+}
+
+/**
+ * The statement before the one charged next, against what was paid on it.
+ * `pending` never goes below zero. `has_recorded_purchases` is false when the
+ * statement ends before the card's first recorded purchase, so the app has no
+ * data to check the payments against.
+ */
+export interface CreditCardPreviousStatement {
+    period_from: string;
+    closing_date: string;
+    due_date: string;
+    purchases: number;
+    paid: number;
+    pending: number;
+    has_recorded_purchases: boolean;
+}
+
+/** The server's estimate of what a credit card charges next. */
+export interface CreditCardStatement {
+    /**
+     * `is_final` once the statement has closed and its amount no longer moves;
+     * `paid` adds up the repayments already made on it.
+     */
+    next_payment: CreditCardStatementCycle & {
+        is_final: boolean;
+        paid: number;
+    };
+    current_cycle: CreditCardStatementCycle;
+    /** Repayments booked in the usage window, oldest first. */
+    payments: CreditCardPayment[];
+    previous_statement: CreditCardPreviousStatement;
+}
+
+/**
+ * How much of a credit card is in use, computed by the server from the card's
+ * own ledger. `used` covers what is still to be charged (the pending
+ * statement plus the open cycle, or the calendar month on a card without
+ * statement dates) up to today. Amounts are in minor units.
+ */
+export interface CreditCardUsage {
+    limit: number | null;
+    used: number;
+    /** `limit - used`: negative over the limit, null without a limit. */
+    available: number | null;
+    /** The window `used` covers, `Y-m-d`; it runs past today to its end. */
+    period_from: string;
+    period_to: string;
+    /** Cumulative `used` per day from `period_from` through today. */
+    daily: { date: string; used: number }[];
+}
+
 export function formatPropertyType(type: PropertyType): string {
     const typeMap: Record<PropertyType, string> = {
         residential: __('Residential'),

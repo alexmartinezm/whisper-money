@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\AccountType;
 use App\Enums\CategorySource;
 use App\Enums\CategoryType;
 use App\Models\Account;
@@ -414,7 +415,7 @@ test('users cannot delete other users transactions', function () {
 
 test('deleting a manual account expense increases the current balance when requested', function () {
     $user = User::factory()->onboarded()->create();
-    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
+    $account = Account::factory()->create(['type' => AccountType::Checking, 'user_id' => $user->id, 'currency_code' => 'EUR']);
 
     $account->balances()->create([
         'balance_date' => now()->toDateString(),
@@ -441,7 +442,7 @@ test('deleting a manual account expense increases the current balance when reque
 
 test('deleting a manual account income decreases the current balance when requested', function () {
     $user = User::factory()->onboarded()->create();
-    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
+    $account = Account::factory()->create(['type' => AccountType::Checking, 'user_id' => $user->id, 'currency_code' => 'EUR']);
 
     $account->balances()->create([
         'balance_date' => now()->toDateString(),
@@ -468,7 +469,7 @@ test('deleting a manual account income decreases the current balance when reques
 
 test('deleting a past-dated transaction reverses it on that date and every later balance', function () {
     $user = User::factory()->onboarded()->create();
-    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
+    $account = Account::factory()->create(['type' => AccountType::Checking, 'user_id' => $user->id, 'currency_code' => 'EUR']);
 
     $account->balances()->create(['balance_date' => '2025-11-10', 'balance' => 5000]);
     $account->balances()->create(['balance_date' => '2025-11-11', 'balance' => 5000]);
@@ -499,7 +500,7 @@ test('deleting a past-dated transaction reverses it on that date and every later
 
 test('deleting a transaction does not change the balance when not requested', function () {
     $user = User::factory()->onboarded()->create();
-    $account = Account::factory()->create(['user_id' => $user->id]);
+    $account = Account::factory()->create(['type' => AccountType::Checking, 'user_id' => $user->id]);
 
     $account->balances()->create([
         'balance_date' => now()->toDateString(),
@@ -551,7 +552,7 @@ test('deleting a connected account transaction never changes the balance', funct
 
 test('creating a transaction updates the balance on its date when one exists', function () {
     $user = User::factory()->onboarded()->create();
-    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'USD']);
+    $account = Account::factory()->create(['type' => AccountType::Checking, 'user_id' => $user->id, 'currency_code' => 'USD']);
 
     $account->balances()->create([
         'balance_date' => '2025-11-11',
@@ -578,7 +579,7 @@ test('creating a transaction updates the balance on its date when one exists', f
 
 test('creating a transaction creates a balance on its date from the closest earlier balance', function () {
     $user = User::factory()->onboarded()->create();
-    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'USD']);
+    $account = Account::factory()->create(['type' => AccountType::Checking, 'user_id' => $user->id, 'currency_code' => 'USD']);
 
     $account->balances()->create([
         'balance_date' => '2025-11-01',
@@ -604,7 +605,7 @@ test('creating a transaction creates a balance on its date from the closest earl
 
 test('creating a past-dated transaction updates that date and every later balance', function () {
     $user = User::factory()->onboarded()->create();
-    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'USD']);
+    $account = Account::factory()->create(['type' => AccountType::Checking, 'user_id' => $user->id, 'currency_code' => 'USD']);
 
     $account->balances()->create(['balance_date' => '2025-11-10', 'balance' => 1000]);
     $account->balances()->create(['balance_date' => '2025-11-11', 'balance' => 1000]);
@@ -633,7 +634,7 @@ test('creating a past-dated transaction updates that date and every later balanc
 
 test('creating the first transaction on an account creates a balance equal to its amount', function () {
     $user = User::factory()->onboarded()->create();
-    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'USD']);
+    $account = Account::factory()->create(['type' => AccountType::Checking, 'user_id' => $user->id, 'currency_code' => 'USD']);
 
     actingAs($user)->postJson(route('transactions.store'), [
         'account_id' => $account->id,
@@ -654,7 +655,7 @@ test('creating the first transaction on an account creates a balance equal to it
 
 test('creating a transaction does not change the balance when not requested', function () {
     $user = User::factory()->onboarded()->create();
-    $account = Account::factory()->create(['user_id' => $user->id]);
+    $account = Account::factory()->create(['type' => AccountType::Checking, 'user_id' => $user->id]);
 
     actingAs($user)->postJson(route('transactions.store'), [
         'account_id' => $account->id,
@@ -697,7 +698,7 @@ test('creating a connected account transaction never changes the balance', funct
 
 test('editing a manual transaction amount moves the balance by the delta when requested', function () {
     $user = User::factory()->onboarded()->create();
-    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
+    $account = Account::factory()->create(['type' => AccountType::Checking, 'user_id' => $user->id, 'currency_code' => 'EUR']);
 
     // Balance already reflects the transaction's original 2500 amount (100000 base + 2500).
     $account->balances()->create([
@@ -728,7 +729,7 @@ test('editing a manual transaction amount moves the balance by the delta when re
 
 test('editing a manual transaction amount does not change the balance when not requested', function () {
     $user = User::factory()->onboarded()->create();
-    $account = Account::factory()->create(['user_id' => $user->id]);
+    $account = Account::factory()->create(['type' => AccountType::Checking, 'user_id' => $user->id]);
 
     $account->balances()->create([
         'balance_date' => '2025-11-11',
@@ -756,8 +757,8 @@ test('editing a manual transaction amount does not change the balance when not r
 
 test('moving a manual transaction between accounts reverses the old balance and credits the new one', function () {
     $user = User::factory()->onboarded()->create();
-    $fromAccount = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
-    $toAccount = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
+    $fromAccount = Account::factory()->create(['type' => AccountType::Checking, 'user_id' => $user->id, 'currency_code' => 'EUR']);
+    $toAccount = Account::factory()->create(['type' => AccountType::Checking, 'user_id' => $user->id, 'currency_code' => 'EUR']);
 
     // Origin balance embeds the transaction's 2500; destination starts flat.
     $fromAccount->balances()->create(['balance_date' => '2025-11-11', 'balance' => 102500]);
@@ -811,7 +812,7 @@ test('storing a transaction in a currency other than the account one keeps it as
 
 test('creating a foreign-currency transaction shifts the balance by its converted amount', function () {
     $user = User::factory()->onboarded()->create();
-    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
+    $account = Account::factory()->create(['type' => AccountType::Checking, 'user_id' => $user->id, 'currency_code' => 'EUR']);
 
     ExchangeRate::factory()->create([
         'base_currency' => 'eur',
@@ -841,7 +842,7 @@ test('creating a foreign-currency transaction shifts the balance by its converte
 
 test('deleting a foreign-currency transaction gives back exactly what it took', function () {
     $user = User::factory()->onboarded()->create();
-    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
+    $account = Account::factory()->create(['type' => AccountType::Checking, 'user_id' => $user->id, 'currency_code' => 'EUR']);
 
     ExchangeRate::factory()->create([
         'base_currency' => 'eur',
@@ -873,7 +874,7 @@ test('deleting a foreign-currency transaction gives back exactly what it took', 
 
 test('a transaction in a currency with no rate leaves the balance untouched', function () {
     $user = User::factory()->onboarded()->create();
-    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
+    $account = Account::factory()->create(['type' => AccountType::Checking, 'user_id' => $user->id, 'currency_code' => 'EUR']);
 
     ExchangeRate::factory()->create([
         'base_currency' => 'eur',
@@ -906,7 +907,7 @@ test('a transaction in a currency with no rate leaves the balance untouched', fu
 
 test('editing only the currency of a manual transaction re-converts the balance', function () {
     $user = User::factory()->onboarded()->create();
-    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
+    $account = Account::factory()->create(['type' => AccountType::Checking, 'user_id' => $user->id, 'currency_code' => 'EUR']);
 
     ExchangeRate::factory()->create([
         'base_currency' => 'eur',

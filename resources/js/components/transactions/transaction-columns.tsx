@@ -8,6 +8,7 @@ import { AccountName } from '@/components/accounts/account-name';
 import { BankLogo } from '@/components/bank-logo';
 import { LabelBadges } from '@/components/shared/label-combobox';
 import { CategoryCell } from '@/components/transactions/category-cell';
+import { StatementPaymentNote } from '@/components/transactions/statement-payment-note';
 import {
     ENCRYPTED_PLACEHOLDER,
     TransactionDescription,
@@ -23,7 +24,11 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { getTransactionRowActions } from '@/lib/transaction-row-actions';
-import { type Account, type Bank } from '@/types/account';
+import {
+    type Account,
+    type Bank,
+    type CreditCardPayment,
+} from '@/types/account';
 import { type Category } from '@/types/category';
 import { type Label } from '@/types/label';
 import { type DecryptedTransaction } from '@/types/transaction';
@@ -50,6 +55,11 @@ interface CreateColumnsOptions {
     categoryFilterIds?: ReadonlySet<string>;
     /** A label every row already carries, so showing it would say nothing. */
     hiddenLabelId?: string;
+    /**
+     * Credit card repayments by transaction id, with the statement each one
+     * pays. Only the credit card account page passes it.
+     */
+    statementPayments?: Map<string, CreditCardPayment>;
 }
 
 export function createTransactionColumns({
@@ -68,6 +78,7 @@ export function createTransactionColumns({
     categorizingIds,
     categoryFilterIds,
     hiddenLabelId,
+    statementPayments,
 }: CreateColumnsOptions): ColumnDef<DecryptedTransaction>[] {
     return [
         {
@@ -226,6 +237,7 @@ export function createTransactionColumns({
 
                 const hasLabels = transactionLabels.length > 0;
                 const hasNotes = !!transaction.notes;
+                const statementPayment = statementPayments?.get(transaction.id);
 
                 return (
                     <div className="flex flex-col gap-0.5">
@@ -243,6 +255,9 @@ export function createTransactionColumns({
                                 />
                             )}
                         </div>
+                        {statementPayment && (
+                            <StatementPaymentNote payment={statementPayment} />
+                        )}
                         {showNotes && hasNotes && (
                             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
                                 <div className="truncate text-muted-foreground/80">

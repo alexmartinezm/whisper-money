@@ -8,6 +8,7 @@ use App\Jobs\GenerateHistoricalRealEstateBalancesJob;
 use App\Models\Account;
 use App\Models\User;
 use Carbon\Carbon;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -27,7 +28,8 @@ class AccountWriteService
 
     /**
      * Create an account with its balance, its type detail and the balance
-     * history implied by them.
+     * history implied by them. A credit card takes no balance at all: its
+     * limit and usage replace it.
      *
      * `$spaceId` is for callers that know which space to write to (the MCP
      * tools resolve one per call); left null, the account falls back to the
@@ -49,12 +51,14 @@ class AccountWriteService
      */
     private function createAccount(User $user, array $data, ?string $spaceId): Account
     {
-        $balance = $data['balance'] ?? null;
-
         $account = $user->accounts()->create([
             ...$this->accountAttributes($data),
             ...$spaceId !== null ? ['space_id' => $spaceId] : [],
         ]);
+
+        $balance = $account->type->hasBalance()
+            ? $data['balance'] ?? null
+            : null;
 
         $investedAmount = $account->type->supportsInvestedAmount()
             ? $data['invested_amount'] ?? null
@@ -78,6 +82,10 @@ class AccountWriteService
         if ($account->type === AccountType::Loan) {
             $this->createLoanDetail($account, $data, $balance);
             $this->linkToRealEstateAccount($user, $account, $data['linked_real_estate_account_id'] ?? null);
+        }
+
+        if ($account->type === AccountType::CreditCard) {
+            $this->syncCreditCardDetail($account, $data);
         }
 
         $this->accountUserCurrencyService->syncFromFirstAccount($account);
@@ -113,7 +121,48 @@ class AccountWriteService
             return $this->syncLoanDetail($account, $data);
         }
 
+        if ($account->type === AccountType::CreditCard) {
+            $this->syncCreditCardDetail($account, $data);
+        }
+
         return [];
+    }
+
+    /**
+     * Set what the payload carries of a credit card's limit, statement dates
+     * and statement frequency, leaving the rest alone. The dates become the
+     * anchor every later cycle is projected from; null clears a field, except
+     * the frequency, which null leaves alone. Clearing the dates keeps the
+     * limit, and the row goes only once neither is left.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function syncCreditCardDetail(Account $account, array $data): void
+    {
+        $attributes = Arr::only($data, ['statement_closing_date', 'payment_due_date', 'credit_limit']);
+
+        if (($data['statement_frequency'] ?? null) !== null) {
+            $attributes['statement_frequency'] = $data['statement_frequency'];
+        }
+
+        if ($attributes === []) {
+            return;
+        }
+
+        $detail = $account->creditCardDetail()->firstOrNew()->fill($attributes);
+
+        if ($detail->isBlank()) {
+            if ($detail->exists) {
+                $detail->delete();
+            }
+
+            $account->setRelation('creditCardDetail', null);
+
+            return;
+        }
+
+        $detail->save();
+        $account->setRelation('creditCardDetail', $detail);
     }
 
     /**

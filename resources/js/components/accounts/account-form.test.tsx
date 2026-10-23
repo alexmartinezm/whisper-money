@@ -122,6 +122,77 @@ describe('AccountForm', () => {
         expect(screen.getByLabelText('Owed Amount')).toBeInTheDocument();
     });
 
+    describe('credit limit', () => {
+        it('asks a new credit card for its limit and hands it over', () => {
+            const onChange = vi.fn();
+
+            render(
+                <AccountForm
+                    forceAccountType="credit_card"
+                    onChange={onChange}
+                />,
+            );
+
+            const limit = screen.getByLabelText('Credit limit');
+            fireEvent.change(limit, { target: { value: '3000' } });
+            fireEvent.blur(limit);
+
+            expect(onChange).toHaveBeenLastCalledWith(
+                expect.objectContaining({
+                    type: 'credit_card',
+                    creditLimit: 300000,
+                }),
+            );
+        });
+
+        it('does not ask a new credit card for a balance', () => {
+            const onChange = vi.fn();
+
+            render(
+                <AccountForm
+                    forceAccountType="credit_card"
+                    onChange={onChange}
+                />,
+            );
+
+            expect(screen.queryByLabelText('Balance')).not.toBeInTheDocument();
+            expect(onChange).toHaveBeenLastCalledWith(
+                expect.objectContaining({ balance: null }),
+            );
+        });
+
+        it('still asks other account types for a balance', () => {
+            render(
+                <AccountForm forceAccountType="savings" onChange={() => {}} />,
+            );
+
+            expect(screen.getByLabelText('Balance')).toBeInTheDocument();
+        });
+
+        it('does not ask other account types for a limit', () => {
+            render(
+                <AccountForm forceAccountType="checking" onChange={() => {}} />,
+            );
+
+            expect(
+                screen.queryByLabelText('Credit limit'),
+            ).not.toBeInTheDocument();
+        });
+
+        it('leaves the limit to the card page when editing an account', () => {
+            render(
+                <AccountForm
+                    initialValues={{ ...initialValues, type: 'credit_card' }}
+                    onChange={() => {}}
+                />,
+            );
+
+            expect(
+                screen.queryByLabelText('Credit limit'),
+            ).not.toBeInTheDocument();
+        });
+    });
+
     // The reader's own currency was already on their profile; the select opened
     // empty anyway, on every account they added.
     it('opens on the currency the reader already keeps their money in', () => {

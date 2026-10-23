@@ -1,0 +1,145 @@
+<?php
+
+use App\Enums\StatementFrequency;
+use App\Services\CreditCards\StatementSchedule;
+use Carbon\CarbonImmutable;
+
+function schedule(string $closing, string $due, StatementFrequency $frequency = StatementFrequency::Monthly): StatementSchedule
+{
+    return new StatementSchedule(CarbonImmutable::parse($closing), CarbonImmutable::parse($due), $frequency);
+}
+
+it('picks the statement charged next', function (string $closing, string $due, string $today, string $expectedFrom, string $expectedClosing, string $expectedDue, bool $isFinal) {
+    $next = schedule($closing, $due)->nextPaymentOn(CarbonImmutable::parse($today));
+
+    expect($next['cycle']->toArray())->toBe([
+        'period_from' => $expectedFrom,
+        'closing_date' => $expectedClosing,
+        'due_date' => $expectedDue,
+    ])->and($next['is_final'])->toBe($isFinal);
+})->with([
+    'closing and due in the same month, before closing' => ['2026-03-05', '2026-03-20', '2026-03-03', '2026-02-06', '2026-03-05', '2026-03-20', false],
+    'closing and due in the same month, between them' => ['2026-03-05', '2026-03-20', '2026-03-10', '2026-02-06', '2026-03-05', '2026-03-20', true],
+    'closing at month end, due early next month' => ['2026-01-31', '2026-02-05', '2026-02-03', '2026-01-01', '2026-01-31', '2026-02-05', true],
+    'today is the closing day: the cycle is still open' => ['2026-03-05', '2026-03-20', '2026-03-05', '2026-02-06', '2026-03-05', '2026-03-20', false],
+    'today is the due day: still the closed statement' => ['2026-03-05', '2026-03-20', '2026-03-20', '2026-02-06', '2026-03-05', '2026-03-20', true],
+    'the day after the due date moves on to the open cycle' => ['2026-03-05', '2026-03-20', '2026-03-21', '2026-03-06', '2026-04-05', '2026-04-20', false],
+    'anchor far in the past' => ['2020-01-15', '2020-02-05', '2026-07-01', '2026-05-16', '2026-06-15', '2026-07-05', true],
+    'due more than a cycle after closing: the older statement is still pending' => ['2026-09-01', '2026-10-11', '2026-10-02', '2026-08-02', '2026-09-01', '2026-10-11', true],
+    'due more than a cycle after closing: the newer one once the older is paid' => ['2026-09-01', '2026-10-11', '2026-10-12', '2026-09-02', '2026-10-01', '2026-11-11', true],
+    'anchor far in the future' => ['2030-01-15', '2030-02-05', '2026-07-01', '2026-05-16', '2026-06-15', '2026-07-05', true],
+]);
+
+it('reports the cycle still collecting purchases', function (string $closing, string $due, string $today, string $expectedFrom, string $expectedClosing, string $expectedDue) {
+    expect(schedule($closing, $due)->openCycleOn(CarbonImmutable::parse($today))->toArray())->toBe([
+        'period_from' => $expectedFrom,
+        'closing_date' => $expectedClosing,
+        'due_date' => $expectedDue,
+    ]);
+})->with([
+    'before closing' => ['2026-03-05', '2026-03-20', '2026-03-03', '2026-02-06', '2026-03-05', '2026-03-20'],
+    'on the closing day' => ['2026-03-05', '2026-03-20', '2026-03-05', '2026-02-06', '2026-03-05', '2026-03-20'],
+    'the day after closing' => ['2026-03-05', '2026-03-20', '2026-03-06', '2026-03-06', '2026-04-05', '2026-04-20'],
+    'anchor far in the past' => ['2020-01-15', '2020-02-05', '2026-07-01', '2026-06-16', '2026-07-15', '2026-08-05'],
+]);
+
+it('keeps a closing on the 31st on the last day of short months without drifting', function (int $offset, string $expectedClosing) {
+    expect(schedule('2027-01-31', '2027-02-10')->cycle($offset)->closingDate->toDateString())->toBe($expectedClosing);
+})->with([
+    'February' => [1, '2027-02-28'],
+    'March after February' => [2, '2027-03-31'],
+    'April' => [3, '2027-04-30'],
+    'May after April' => [4, '2027-05-31'],
+    'leap February' => [13, '2028-02-29'],
+    'March after the leap February' => [14, '2028-03-31'],
+    'backwards into a short month' => [-2, '2026-11-30'],
+]);
+
+it('starts each period the day after the previous closing', function () {
+    $march = schedule('2027-01-31', '2027-02-10')->cycle(2);
+
+    expect($march->periodFrom->toDateString())->toBe('2027-03-01')
+        ->and($march->closingDate->toDateString())->toBe('2027-03-31')
+        ->and($march->dueDate->toDateString())->toBe('2027-04-10');
+});
+
+it('counts both ends of the period as part of the cycle', function () {
+    $cycle = schedule('2026-03-05', '2026-03-20')->cycle(0);
+
+    expect($cycle->contains(CarbonImmutable::parse('2026-02-06')))->toBeTrue()
+        ->and($cycle->contains(CarbonImmutable::parse('2026-03-05')))->toBeTrue()
+        ->and($cycle->contains(CarbonImmutable::parse('2026-02-05')))->toBeFalse()
+        ->and($cycle->contains(CarbonImmutable::parse('2026-03-06')))->toBeFalse();
+});
+
+// 2026-10-01 is a Thursday: the statement closes every Thursday and is charged
+// the Monday after.
+
+it('reports the weekly cycle still collecting purchases', function (string $closing, string $due, string $today, string $expectedFrom, string $expectedClosing, string $expectedDue) {
+    expect(schedule($closing, $due, StatementFrequency::Weekly)->openCycleOn(CarbonImmutable::parse($today))->toArray())->toBe([
+        'period_from' => $expectedFrom,
+        'closing_date' => $expectedClosing,
+        'due_date' => $expectedDue,
+    ]);
+})->with([
+    'before closing' => ['2026-10-01', '2026-10-05', '2026-09-29', '2026-09-25', '2026-10-01', '2026-10-05'],
+    'on the closing day' => ['2026-10-01', '2026-10-05', '2026-10-01', '2026-09-25', '2026-10-01', '2026-10-05'],
+    'the day after closing' => ['2026-10-01', '2026-10-05', '2026-10-02', '2026-10-02', '2026-10-08', '2026-10-12'],
+    'anchor far in the past' => ['2020-01-02', '2020-01-06', '2026-10-13', '2026-10-09', '2026-10-15', '2026-10-19'],
+    'anchor far in the future' => ['2030-01-03', '2030-01-07', '2026-10-13', '2026-10-09', '2026-10-15', '2026-10-19'],
+]);
+
+it('picks the weekly statement charged next', function (string $due, string $today, string $expectedClosing, string $expectedDue, bool $isFinal) {
+    $next = schedule('2026-10-01', $due, StatementFrequency::Weekly)->nextPaymentOn(CarbonImmutable::parse($today));
+
+    expect($next['cycle']->closingDate->toDateString())->toBe($expectedClosing)
+        ->and($next['cycle']->dueDate->toDateString())->toBe($expectedDue)
+        ->and($next['is_final'])->toBe($isFinal);
+})->with([
+    'closed and not charged yet' => ['2026-10-05', '2026-10-03', '2026-10-01', '2026-10-05', true],
+    'on the due day: still the closed statement' => ['2026-10-05', '2026-10-05', '2026-10-01', '2026-10-05', true],
+    'past due: the open cycle, still provisional' => ['2026-10-05', '2026-10-06', '2026-10-08', '2026-10-12', false],
+    'charged on the next closing day: the closed one first' => ['2026-10-08', '2026-10-08', '2026-10-01', '2026-10-08', true],
+    'charged on the next closing day, the day after' => ['2026-10-08', '2026-10-09', '2026-10-08', '2026-10-15', true],
+]);
+
+it('moves weekly cycles a week at a time from the anchor', function (int $offset, string $expectedFrom, string $expectedClosing, string $expectedDue) {
+    expect(schedule('2026-10-01', '2026-10-05', StatementFrequency::Weekly)->cycle($offset)->toArray())->toBe([
+        'period_from' => $expectedFrom,
+        'closing_date' => $expectedClosing,
+        'due_date' => $expectedDue,
+    ]);
+})->with([
+    'the anchor' => [0, '2026-09-25', '2026-10-01', '2026-10-05'],
+    'across a month end' => [5, '2026-10-30', '2026-11-05', '2026-11-09'],
+    'backwards' => [-1, '2026-09-18', '2026-09-24', '2026-09-28'],
+]);
+
+// 2026-10-15 is a Thursday: the statement closes every Thursday and is charged
+// that same day.
+
+it('picks the statement charged the day it closes', function (string $frequency, string $today, string $expectedClosing, bool $isFinal) {
+    $next = schedule('2026-10-15', '2026-10-15', StatementFrequency::from($frequency))->nextPaymentOn(CarbonImmutable::parse($today));
+
+    expect($next['cycle']->closingDate->toDateString())->toBe($expectedClosing)
+        ->and($next['cycle']->dueDate->toDateString())->toBe($expectedClosing)
+        ->and($next['is_final'])->toBe($isFinal);
+})->with([
+    'weekly, before closing' => ['weekly', '2026-10-13', '2026-10-15', false],
+    'weekly, on the closing day: charged that day, purchases still landing' => ['weekly', '2026-10-15', '2026-10-15', false],
+    'weekly, the day after: the open cycle' => ['weekly', '2026-10-16', '2026-10-22', false],
+    'monthly, on the closing day' => ['monthly', '2026-10-15', '2026-10-15', false],
+    'monthly, the day after: the open cycle' => ['monthly', '2026-10-16', '2026-11-15', false],
+]);
+
+it('reports the statement a payment made on a day pays', function (string $closing, string $due, StatementFrequency $frequency, string $day, string $expectedClosing) {
+    expect(schedule($closing, $due, $frequency)->statementPaidOn(CarbonImmutable::parse($day))->closingDate->toDateString())->toBe($expectedClosing);
+})->with([
+    'charged the day it closes, paid on that day' => ['2026-10-15', '2026-10-15', StatementFrequency::Weekly, '2026-10-15', '2026-10-15'],
+    'charged the day it closes, paid the day before' => ['2026-10-15', '2026-10-15', StatementFrequency::Weekly, '2026-10-14', '2026-10-08'],
+    'charged the day it closes, paid the day after' => ['2026-10-15', '2026-10-15', StatementFrequency::Weekly, '2026-10-16', '2026-10-15'],
+    'monthly, charged the day it closes, paid on that day' => ['2026-10-15', '2026-10-15', StatementFrequency::Monthly, '2026-10-15', '2026-10-15'],
+    'charged later, paid on the closing day: the one before' => ['2026-10-01', '2026-10-05', StatementFrequency::Weekly, '2026-10-01', '2026-09-24'],
+    'charged later, paid between closing and due' => ['2026-10-01', '2026-10-05', StatementFrequency::Weekly, '2026-10-03', '2026-10-01'],
+    'monthly, paid on the closing day: the one before' => ['2026-03-05', '2026-03-20', StatementFrequency::Monthly, '2026-03-05', '2026-02-05'],
+]);

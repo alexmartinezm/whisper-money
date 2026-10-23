@@ -24,8 +24,8 @@ class ManualBalanceAdjuster
      * Reverse a deleted transaction's effect on its manual account's balances.
      *
      * Subtracts the transaction amount from its own day and every later
-     * snapshot, mirroring the forward shift applied on creation. Connected
-     * accounts are skipped because their balances come from bank sync.
+     * snapshot, mirroring the forward shift applied on creation. Accounts
+     * that do not own their balance are skipped (see ownsBalance()).
      *
      * @return bool whether any balance was actually shifted
      */
@@ -33,7 +33,7 @@ class ManualBalanceAdjuster
     {
         $account = $transaction->account;
 
-        if ($account === null || $account->isConnected()) {
+        if ($account === null || ! $this->ownsBalance($account)) {
             return false;
         }
 
@@ -57,8 +57,8 @@ class ManualBalanceAdjuster
      *
      * Seeds a snapshot on the transaction's own date (from the carried-forward
      * balance when none exists yet), then shifts that day and every later
-     * snapshot by the transaction amount. Connected accounts are skipped
-     * because their balances come from bank sync.
+     * snapshot by the transaction amount. Accounts that do not own their
+     * balance are skipped (see ownsBalance()).
      *
      * @return bool whether any balance was actually shifted
      */
@@ -66,7 +66,7 @@ class ManualBalanceAdjuster
     {
         $account = $transaction->account;
 
-        if ($account === null || $account->isConnected()) {
+        if ($account === null || ! $this->ownsBalance($account)) {
             return false;
         }
 
@@ -86,6 +86,19 @@ class ManualBalanceAdjuster
         $this->shiftBalancesFrom($account, $transactionDate, $amount);
 
         return true;
+    }
+
+    /**
+     * Whether a transaction may move this account's balance snapshots.
+     *
+     * A connected account's balance comes from bank sync, and a credit card
+     * has a limit and what is in use of it, never a balance, so neither gets
+     * snapshots written by a transaction.
+     * Existing snapshots are left as they are.
+     */
+    private function ownsBalance(Account $account): bool
+    {
+        return ! $account->isConnected() && $account->type->hasBalance();
     }
 
     /**

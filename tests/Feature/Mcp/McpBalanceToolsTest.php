@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\AccountType;
 use App\Mcp\Servers\WhisperMoneyServer;
 use App\Mcp\Tools\CreateBalance;
 use App\Mcp\Tools\DeleteBalance;
@@ -121,7 +122,7 @@ it('deletes a snapshot identified by its id', function () {
 
 it('deletes a snapshot identified by its account and date', function () {
     $user = User::factory()->create();
-    $account = Account::factory()->create(['user_id' => $user->id]);
+    $account = Account::factory()->withBalance()->create(['user_id' => $user->id]);
 
     callBalanceTool($user, CreateBalance::class, [
         'account_id' => $account->id,
@@ -135,6 +136,27 @@ it('deletes a snapshot identified by its account and date', function () {
     ])->assertOk();
 
     expect(AccountBalance::query()->where('account_id', $account->id)->count())->toBe(0);
+});
+
+it('still deletes a snapshot a credit card was given before, while refusing it a new one', function () {
+    $user = User::factory()->create();
+    $card = Account::factory()->creditCard()->create(['user_id' => $user->id]);
+    $byId = AccountBalance::factory()->create(['account_id' => $card->id, 'balance_date' => '2026-05-31']);
+    AccountBalance::factory()->create(['account_id' => $card->id, 'balance_date' => '2026-06-30']);
+
+    callBalanceTool($user, CreateBalance::class, [
+        'account_id' => $card->id,
+        'balance' => 125000,
+        'balance_date' => '2026-07-31',
+    ])->assertHasErrors([AccountType::NO_BALANCE_MESSAGE]);
+
+    callBalanceTool($user, DeleteBalance::class, ['balance_id' => $byId->id])->assertOk();
+    callBalanceTool($user, DeleteBalance::class, [
+        'account_id' => $card->id,
+        'balance_date' => '2026-06-30',
+    ])->assertOk();
+
+    expect($card->balances()->count())->toBe(0);
 });
 
 it('refuses to guess which snapshot to delete', function () {

@@ -31,6 +31,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { useSyncContext } from '@/contexts/sync-context';
 import { useLocale } from '@/hooks/use-locale';
+import { ownsBalanceUpdates } from '@/hooks/use-owns-balance-updates';
 import { decrypt, importKey } from '@/lib/crypto';
 import { fetchJson } from '@/lib/fetch-json';
 import { getStoredKey } from '@/lib/key-storage';
@@ -462,6 +463,19 @@ export function EditTransactionDialog({
         }
     }
 
+    /**
+     * Whether the account the transaction leaves or the one it lands on has a
+     * balance this edit may move. An account missing from the list is left
+     * for the server to decide.
+     */
+    function editTouchesOwnedBalance(originalAccountId: string): boolean {
+        return [originalAccountId, accountId].some((id) => {
+            const account = accounts.find((acc) => acc.id === id);
+
+            return account === undefined || ownsBalanceUpdates(account);
+        });
+    }
+
     function handleUpdateBalanceChange(checked: boolean) {
         setUpdateAccountBalance(checked);
         writeStoredValue(STORAGE_KEY_UPDATE_BALANCE, String(checked));
@@ -559,9 +573,11 @@ export function EditTransactionDialog({
                         splits: splits ?? undefined,
                     },
                     {
-                        updateBalance: selectedAccount.banking_connection_id
-                            ? false
-                            : updateAccountBalance,
+                        // A connected account's balance is the bank's to
+                        // report and a credit card has none.
+                        updateBalance:
+                            ownsBalanceUpdates(selectedAccount) &&
+                            updateAccountBalance,
                     },
                 );
 
@@ -683,13 +699,15 @@ export function EditTransactionDialog({
                     transaction.id,
                     updateData,
                     {
-                        // Gate on the transaction being manual, not on the target
-                        // account: the backend adjuster skips connected accounts
-                        // per-account, so this still reverses the old manual
-                        // account when the edit moves it onto a connected one.
-                        updateBalance: canEditAllFields
-                            ? updateAccountBalance
-                            : false,
+                        // Gate on the transaction being manual and on either
+                        // side owning its balance, not on the target alone: the
+                        // backend adjuster skips the other side per-account, so
+                        // this still reverses the old manual account when the
+                        // edit moves it onto a connected one or a credit card.
+                        updateBalance:
+                            canEditAllFields &&
+                            updateAccountBalance &&
+                            editTouchesOwnedBalance(transaction.account_id),
                     },
                 );
 
@@ -799,6 +817,10 @@ export function EditTransactionDialog({
     }
 
     const selectedAccount = accounts.find((acc) => acc.id === accountId);
+    // A connected account's balance is the bank's and a credit card has none,
+    // so neither offers to update one.
+    const offersBalanceUpdate =
+        !selectedAccount || ownsBalanceUpdates(selectedAccount);
     const transactionalAccounts = filterTransactionalAccounts(accounts);
     // An archived account stays selectable while editing a transaction that
     // already sits on it, otherwise the field reads as empty and the user cannot
@@ -1030,25 +1052,33 @@ export function EditTransactionDialog({
                                             )}
                                         </p>
                                     ) : (
-                                        <div className="flex items-center gap-2">
-                                            <Checkbox
-                                                id="update-balance"
-                                                checked={updateAccountBalance}
-                                                onCheckedChange={(checked) =>
-                                                    handleUpdateBalanceChange(
-                                                        checked === true,
-                                                    )
-                                                }
-                                                disabled={isSubmitting}
-                                            />
+                                        offersBalanceUpdate && (
+                                            <div className="flex items-center gap-2">
+                                                <Checkbox
+                                                    id="update-balance"
+                                                    checked={
+                                                        updateAccountBalance
+                                                    }
+                                                    onCheckedChange={(
+                                                        checked,
+                                                    ) =>
+                                                        handleUpdateBalanceChange(
+                                                            checked === true,
+                                                        )
+                                                    }
+                                                    disabled={isSubmitting}
+                                                />
 
-                                            <FormLabel
-                                                htmlFor="update-balance"
-                                                className="cursor-pointer font-normal"
-                                            >
-                                                {__('Update account balance')}
-                                            </FormLabel>
-                                        </div>
+                                                <FormLabel
+                                                    htmlFor="update-balance"
+                                                    className="cursor-pointer font-normal"
+                                                >
+                                                    {__(
+                                                        'Update account balance',
+                                                    )}
+                                                </FormLabel>
+                                            </div>
+                                        )
                                     )}
                                 </div>
 
