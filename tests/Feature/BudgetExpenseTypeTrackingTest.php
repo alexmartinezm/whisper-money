@@ -90,3 +90,16 @@ test('the budget page sends the expense type the edit dialog starts from', funct
         ->get("/budgets/{$this->budget->id}")
         ->assertInertia(fn ($page) => $page->where('budget.expense_type', 'fixed'));
 });
+
+test('editing a catch-all budget is accepted and leaves its expense type variable', function () {
+    $catchAll = Budget::factory()->for($this->user)->catchAll()->create();
+
+    $this->actingAs($this->user)
+        ->patch("/budgets/{$catchAll->id}", ['name' => 'Everything else', 'expense_type' => 'fixed'])
+        ->assertSessionHasNoErrors()
+        ->assertRedirect();
+
+    expect($catchAll->fresh())
+        ->name->toBe('Everything else')
+        ->expense_type->toBe(BudgetExpenseType::Variable);
+});
