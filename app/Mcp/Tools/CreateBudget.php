@@ -33,7 +33,7 @@ class CreateBudget extends WriteTool
             'rollover_type' => $schema->string()->enum(array_column(RolloverType::cases(), 'value'))->description('Carry remaining amount or reset.')->required(),
             'allocated_amount' => $schema->integer()->min(0)->description('Allocation in minor units.')->required(),
             'is_catch_all' => $schema->boolean()->description('Track all otherwise unclaimed expenses.'),
-            'expense_type' => $schema->string()->enum(array_column(BudgetExpenseType::cases(), 'value'))->description(self::EXPENSE_TYPE_DESCRIPTION.' Defaults to variable.'),
+            'expense_type' => $this->expenseTypeSchema($schema, 'Defaults to variable.'),
             'space' => $schema->string()->description('Space id. Defaults to the personal space.'),
         ];
     }

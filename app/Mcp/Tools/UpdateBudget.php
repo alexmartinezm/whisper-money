@@ -28,7 +28,7 @@ class UpdateBudget extends WriteTool
             'allocated_amount' => $schema->integer()->min(0)->description('New allocation in minor units.'),
             'category_ids' => $schema->array()->items($schema->string())->description('Replacement set of tracked category ids.'),
             'label_ids' => $schema->array()->items($schema->string())->description('Replacement set of tracked label ids.'),
-            'expense_type' => $schema->string()->enum(array_column(BudgetExpenseType::cases(), 'value'))->description(self::EXPENSE_TYPE_DESCRIPTION),
+            'expense_type' => $this->expenseTypeSchema($schema),
             'space' => $schema->string()->description('Space id. Defaults to the personal space.'),
         ];
     }
