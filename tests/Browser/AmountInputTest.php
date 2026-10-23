@@ -66,6 +66,9 @@ it('can create a transaction with amount input', function () {
         ->wait(0.5)
         ->fill('#amount', '123.45')
         ->wait(0.5)
+        // The account, category and label fields open behind the reveal.
+        ->click('[data-testid="toggle-more-options"]')
+        ->wait(0.5)
         ->click('[data-testid="account-select"]')
         ->wait(2)
         ->waitForText('Test Checking', 5)
@@ -112,6 +115,9 @@ it('formats amount when pressing enter', function () {
         ->fill('#description', 'Test Transaction Enter')
         ->fill('#amount', '99.99')
         ->wait(0.5)
+        // The account, category and label fields open behind the reveal.
+        ->click('[data-testid="toggle-more-options"]')
+        ->wait(0.5)
         ->click('[data-testid="account-select"]')
         ->wait(2)
         ->waitForText('Test Checking', 5)
@@ -156,6 +162,9 @@ it('accepts negative amounts', function () {
         ->wait(1)
         ->fill('#description', 'Test Negative Amount')
         ->fill('#amount', '-50.00')
+        // The account, category and label fields open behind the reveal.
+        ->click('[data-testid="toggle-more-options"]')
+        ->wait(0.5)
         ->click('[data-testid="account-select"]')
         ->wait(2)
         ->waitForText('Test Checking', 5)

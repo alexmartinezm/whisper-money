@@ -3184,5 +3184,11 @@
     "General expense": "Gasto general",
     "Block: :name": "Bloque: :name",
     "Remove the :name filter": "Quitar el filtro :name",
-    "Quick periods": "Periodos rápidos"
+    "Quick periods": "Periodos rápidos",
+    "Updates the balance": "Actualiza el saldo",
+    "Leaves the balance alone": "Sin tocar el saldo",
+    "Fewer options": "Menos opciones",
+    "Save and add another": "Guardar y añadir otra",
+    "Transaction saved": "Transacción guardada",
+    "A rule categorized it as :category": "Una regla la ha categorizado como :category"
 }

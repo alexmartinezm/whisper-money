@@ -61,6 +61,9 @@ it('shows newly created labels in the transaction label dropdown without refresh
     $page->assertSee('Transactions')
         ->click('Transaction')
         ->waitForText('Create Transaction', 5)
+        // The account, category and label fields open behind the reveal.
+        ->click('[data-testid="toggle-more-options"]')
+        ->wait(0.5)
         ->click('[data-testid="label-combobox-trigger"]')
         ->fill('input[placeholder="Search or create labels..."]', 'Padel')
         ->waitForText('Create "Padel"', 5)
@@ -103,6 +106,9 @@ it('can create a transaction', function () {
         ->assertSee('Create Transaction')
         ->fill('description', 'Test Transaction')
         ->wait(1)
+        // The account, category and label fields open behind the reveal.
+        ->click('[data-testid="toggle-more-options"]')
+        ->wait(0.5)
         ->click('[data-testid="account-select"]')
         ->wait(2)
         ->waitForText('My Checking', 5)

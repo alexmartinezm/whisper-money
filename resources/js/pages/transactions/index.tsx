@@ -1361,10 +1361,6 @@ export default function Transactions({
                         actions={
                             <div className="flex w-full items-center justify-between gap-2">
                                 <TransactionActionsMenu
-                                    categories={categories}
-                                    accounts={accounts}
-                                    banks={banks}
-                                    automationRules={automationRules}
                                     onAddTransaction={() =>
                                         setCreateDialogOpen(true)
                                     }
@@ -1373,9 +1369,6 @@ export default function Transactions({
                                         setRowSelection({});
                                         refreshTransactions();
                                     }}
-                                    onImportComplete={() =>
-                                        refreshTransactions()
-                                    }
                                     filters={filters}
                                 />
 

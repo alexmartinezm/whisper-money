@@ -2689,5 +2689,12 @@
     "General expense": "Dépense générale",
     "Block: :name": "Bloc : :name",
     "Remove the :name filter": "Retirer le filtre :name",
-    "Quick periods": "Périodes rapides"
+    "Quick periods": "Périodes rapides",
+    "Updates the balance": "Met à jour le solde",
+    "Leaves the balance alone": "Sans toucher au solde",
+    "Fewer options": "Moins d'options",
+    "Save and add another": "Enregistrer et en ajouter une autre",
+    "Transaction saved": "Transaction enregistrée",
+    "A rule categorized it as :category": "Une règle l'a catégorisée comme :category",
+    "Undo": "Annuler"
 }

@@ -1,4 +1,3 @@
-import { index as importDataRoute } from '@/actions/App/Http/Controllers/Api/ImportDataController';
 import { Button } from '@/components/ui/button';
 import {
     Tooltip,
@@ -6,43 +5,20 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { type Account, type Bank } from '@/types/account';
-import { type AutomationRule } from '@/types/automation-rule';
-import { type Category } from '@/types/category';
+import { useTransactionDialogData } from '@/hooks/use-transaction-dialog-data';
+import { refreshPageAfterWrite } from '@/lib/refresh-page';
 import { __ } from '@/utils/i18n';
 import { Upload } from 'lucide-react';
 import { useState } from 'react';
-import { toast } from 'sonner';
 import { ImportTransactionsDrawer } from './import-transactions-drawer';
-
-interface ImportData {
-    accounts: Account[];
-    categories: Category[];
-    banks: Bank[];
-    automationRules: AutomationRule[];
-}
 
 export function ImportTransactionsButton() {
     const [drawerOpen, setDrawerOpen] = useState(false);
-    const [importData, setImportData] = useState<ImportData | null>(null);
-    const [loading, setLoading] = useState(false);
+    const { data: importData, loading, load } = useTransactionDialogData();
 
     const handleOpenDrawer = async () => {
-        // Fetch data on-demand when drawer opens
-        setLoading(true);
-        try {
-            const response = await fetch(importDataRoute.url());
-            if (!response.ok) {
-                throw new Error('Failed to load import data');
-            }
-            const data = await response.json();
-            setImportData(data);
+        if (await load()) {
             setDrawerOpen(true);
-        } catch (error) {
-            toast.error(__('Failed to load import data'));
-            console.error(error);
-        } finally {
-            setLoading(false);
         }
     };
 
@@ -74,6 +50,9 @@ export function ImportTransactionsButton() {
                 <ImportTransactionsDrawer
                     open={drawerOpen}
                     onOpenChange={setDrawerOpen}
+                    // The page underneath was rendered before the import, so
+                    // it only learns about the new rows by re-rendering.
+                    onImportComplete={refreshPageAfterWrite}
                     accounts={importData.accounts}
                     categories={importData.categories}
                     banks={importData.banks}
