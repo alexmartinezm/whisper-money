@@ -35,8 +35,9 @@ vi.mock('@/components/charts', () => ({
     SankeyChart: () => null,
 }));
 
+// The card fetches its own figures; the page only decides where it goes.
 vi.mock('@/components/cashflow/monthly-savings-cashflow-card', () => ({
-    MonthlySavingsCashflowCard: () => null,
+    MonthlySavingsCashflowCard: () => <div>Monthly savings card</div>,
 }));
 
 vi.mock('@/components/cashflow/breakdown-card', () => ({
@@ -101,4 +102,16 @@ describe('CashflowPage', () => {
         );
         expect(screen.queryByText('Income distribution')).toBeNull();
     });
+
+    it.each([false, true])(
+        'keeps the month in review link and the monthly savings card with the flag %s',
+        (cashflowAvailableFree) => {
+            pageProps.current = { features: { cashflowAvailableFree } };
+
+            render(<CashflowPage />);
+
+            expect(screen.getByText('Month in review')).toBeTruthy();
+            expect(screen.getByText('Monthly savings card')).toBeTruthy();
+        },
+    );
 });
