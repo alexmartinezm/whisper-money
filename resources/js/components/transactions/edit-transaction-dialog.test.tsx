@@ -1018,6 +1018,48 @@ describe('EditTransactionDialog', () => {
         ).toBeInTheDocument();
     });
 
+    it('updates the balance of a manual account it creates a transaction on', async () => {
+        vi.mocked(transactionSyncService.create).mockResolvedValue({
+            id: 'tx-new',
+        } as never);
+
+        render(
+            <EditTransactionDialog
+                transaction={null}
+                categories={[]}
+                accounts={[checkingAccount]}
+                banks={[]}
+                labels={[]}
+                open
+                onOpenChange={vi.fn()}
+                onSuccess={vi.fn()}
+                mode="create"
+                initialAccountId="account-1"
+            />,
+        );
+
+        expect(screen.getByRole('checkbox')).toBeChecked();
+
+        fireEvent.change(
+            screen.getByPlaceholderText('Transaction description'),
+            { target: { value: 'Hotel' } },
+        );
+        const amountInput = screen.getByPlaceholderText('25.00');
+        fireEvent.change(amountInput, { target: { value: '40' } });
+        fireEvent.blur(amountInput);
+        fireEvent.click(screen.getByTestId('submit-transaction'));
+
+        await waitFor(() => {
+            expect(transactionSyncService.create).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    account_id: 'account-1',
+                    amount: -4000,
+                }),
+                { updateBalance: true },
+            );
+        });
+    });
+
     const manualTransaction = {
         id: 'tx-manual',
         user_id: 'user-1',
@@ -1186,6 +1228,66 @@ describe('EditTransactionDialog', () => {
             });
 
             confirm.mockRestore();
+        });
+
+        function moveOntoCardAndSave() {
+            const cardOption = screen
+                .getByTestId('account-value')
+                .querySelector('[data-select-value="account-card"]');
+            expect(cardOption).not.toBeNull();
+            fireEvent.click(cardOption!);
+            fireEvent.click(
+                screen.getByRole('button', { name: 'Save Changes' }),
+            );
+        }
+
+        it('still updates the balance when an edit moves a manual account transaction onto a card', async () => {
+            // The card side moves nothing, but the manual account the
+            // transaction leaves is still reversed by the server.
+            renderCardDialog({
+                mode: 'edit',
+                initialAccountId: null,
+                accounts: [checkingAccount, creditCard],
+                transaction: manualTransaction,
+            });
+
+            moveOntoCardAndSave();
+
+            await waitFor(() => {
+                expect(transactionSyncService.update).toHaveBeenCalledWith(
+                    'tx-manual',
+                    expect.objectContaining({ account_id: 'account-card' }),
+                    { updateBalance: true },
+                );
+            });
+        });
+
+        it('sends no balance update when an edit moves a connected account transaction onto a card', async () => {
+            const connectedAccount = {
+                ...checkingAccount,
+                id: 'account-connected',
+                banking_connection_id: 'connection-1',
+            };
+
+            renderCardDialog({
+                mode: 'edit',
+                initialAccountId: null,
+                accounts: [connectedAccount, creditCard],
+                transaction: {
+                    ...manualTransaction,
+                    account_id: 'account-connected',
+                },
+            });
+
+            moveOntoCardAndSave();
+
+            await waitFor(() => {
+                expect(transactionSyncService.update).toHaveBeenCalledWith(
+                    'tx-manual',
+                    expect.objectContaining({ account_id: 'account-card' }),
+                    { updateBalance: false },
+                );
+            });
         });
     });
 
