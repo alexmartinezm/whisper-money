@@ -2582,5 +2582,11 @@
     "Move cancelled. Condition back at position :position of :total": "Déplacement annulé. La condition revient en position :position sur :total",
     "To pick up a condition, press Space or Enter. Use the up and down arrow keys to move it, Space or Enter to drop it, and Escape to cancel.": "Pour saisir une condition, appuyez sur Espace ou Entrée. Déplacez-la avec les flèches haut et bas, déposez-la avec Espace ou Entrée, et annulez avec Échap.",
     "Show amounts in this block": "Afficher les montants de ce bloc",
-    "Hide amounts in this block": "Masquer les montants de ce bloc"
+    "Hide amounts in this block": "Masquer les montants de ce bloc",
+    "Re-evaluating transactions...": "Réévaluation des transactions...",
+    "Re-evaluating :processed of :total transactions...": "Réévaluation de :processed sur :total transactions...",
+    "Re-evaluation complete!": "Réévaluation terminée !",
+    ":count transaction(s) updated.": ":count transaction(s) mise(s) à jour.",
+    "Re-evaluation queued": "Réévaluation en file d'attente",
+    "Your transactions will be updated in the background shortly. Reload the page later to see the changes.": "Vos transactions seront mises à jour en arrière-plan sous peu. Rechargez la page plus tard pour voir les modifications."
 }

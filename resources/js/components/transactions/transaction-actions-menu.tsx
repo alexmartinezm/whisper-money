@@ -14,8 +14,8 @@ import {
     TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { useReEvaluateAllTransactions } from '@/hooks/use-re-evaluate-all-transactions';
 import { hasActiveFilters } from '@/lib/transaction-filter-serialization';
+import { reEvaluateTransactionRules } from '@/lib/transaction-re-evaluation';
 
 import { type Account, type Bank } from '@/types/account';
 import { type AutomationRule } from '@/types/automation-rule';
@@ -66,7 +66,6 @@ export function TransactionActionsMenu({
     const [analysisDrawerOpen, setAnalysisDrawerOpen] = useState(false);
     const [analysisHintOpen, setAnalysisHintOpen] = useState(false);
     const [isReEvaluating, setIsReEvaluating] = useState(false);
-    const { reEvaluateAll } = useReEvaluateAllTransactions();
 
     const canAnalyze = hasActiveFilters(filters);
 
@@ -91,8 +90,9 @@ export function TransactionActionsMenu({
     const handleReEvaluateAll = async () => {
         setIsReEvaluating(true);
         try {
-            await reEvaluateAll();
-            onReEvaluateComplete?.();
+            if ((await reEvaluateTransactionRules()) === 'done') {
+                onReEvaluateComplete?.();
+            }
         } finally {
             setIsReEvaluating(false);
         }

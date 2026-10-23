@@ -2976,5 +2976,11 @@
     "Move cancelled. Condition back at position :position of :total": "Movimiento cancelado. La condición vuelve a la posición :position de :total",
     "To pick up a condition, press Space or Enter. Use the up and down arrow keys to move it, Space or Enter to drop it, and Escape to cancel.": "Para coger una condición, pulsa Espacio o Intro. Muévela con las flechas arriba y abajo, suéltala con Espacio o Intro y cancela con Escape.",
     "Show amounts in this block": "Mostrar importes de este bloque",
-    "Hide amounts in this block": "Ocultar importes de este bloque"
+    "Hide amounts in this block": "Ocultar importes de este bloque",
+    "Re-evaluating transactions...": "Reevaluando movimientos...",
+    "Re-evaluating :processed of :total transactions...": "Reevaluando :processed de :total movimientos...",
+    "Re-evaluation complete!": "¡Reevaluación completada!",
+    ":count transaction(s) updated.": ":count movimiento(s) actualizado(s).",
+    "Re-evaluation queued": "Reevaluación en cola",
+    "Your transactions will be updated in the background shortly. Reload the page later to see the changes.": "Tus movimientos se actualizarán en segundo plano en breve. Recarga la página más tarde para ver los cambios."
 }
