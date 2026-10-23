@@ -112,6 +112,22 @@ describe.each([
             />,
         );
 
+        expect(screen.getByText('-€500.00')).toBeInTheDocument();
+        // The balance endpoints refuse a card, so its amount is no
+        // update-balance button while the usage loads.
+        expect(
+            screen.queryByRole('button', { name: '-€500.00' }),
+        ).not.toBeInTheDocument();
+    });
+
+    it('offers to update the balance of a manual account from its amount', () => {
+        render(
+            <Card
+                account={account({ type: 'checking' })}
+                displayCurrencyCode="EUR"
+            />,
+        );
+
         expect(
             screen.getByRole('button', { name: '-€500.00' }),
         ).toBeInTheDocument();

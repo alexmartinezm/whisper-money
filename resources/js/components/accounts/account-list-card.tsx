@@ -139,7 +139,10 @@ export function AccountListCard({
         ? equityData.prevEquity
         : account.previousBalance;
     const isPositive = displayDiff >= 0;
-    const isConnected = !!account.banking_connection_id;
+    // A connected account's balance is the bank's to report and a credit
+    // card has none, so neither offers its amount as an update-balance
+    // button, even while a card's usage has not loaded yet.
+    const ownsBalance = ownsBalanceUpdates(account);
     const creditCardUsage = account.creditCardUsage;
 
     // Choose sparkline data: dual-line history for merged, account history for normal
@@ -216,7 +219,7 @@ export function AccountListCard({
                             />
                         ) : (
                             <div className="flex shrink-0 flex-col items-start sm:items-end">
-                                {isConnected ? (
+                                {!ownsBalance ? (
                                     <div className="-ml-2 px-2 py-1 sm:-mr-2 sm:ml-0">
                                         <AmountDisplay
                                             amountInCents={displayBalance}

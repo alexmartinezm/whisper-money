@@ -11,6 +11,7 @@ import {
     AccountWithMetrics,
     figuresCurrencyCode,
 } from '@/hooks/use-dashboard-data';
+import { ownsBalanceUpdates } from '@/hooks/use-owns-balance-updates';
 import { supportsInvestedAmount } from '@/types/account';
 import { __ } from '@/utils/i18n';
 import { Link } from '@inertiajs/react';
@@ -153,7 +154,10 @@ export function AccountBalanceCard({
         ? equityData.prevEquity
         : account.previousBalance;
     const isPositive = displayDiff >= 0;
-    const isConnected = !!account.banking_connection_id;
+    // A connected account's balance is the bank's to report and a credit
+    // card has none, so neither offers its amount as an update-balance
+    // button, even while a card's usage has not loaded yet.
+    const ownsBalance = ownsBalanceUpdates(account);
     const creditCardUsage = account.creditCardUsage;
 
     const sparklineData = equityData ? equityData.dualHistory : account.history;
@@ -216,7 +220,7 @@ export function AccountBalanceCard({
                         />
                     ) : (
                         <div className="flex flex-col gap-1">
-                            {isConnected ? (
+                            {!ownsBalance ? (
                                 <div className="-ml-2 px-2 py-1">
                                     <AmountDisplay
                                         amountInCents={displayBalance}
