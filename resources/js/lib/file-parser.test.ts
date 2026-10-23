@@ -539,13 +539,11 @@ describe('parseDate with a time part', () => {
                     transaction_date: 'date',
                     description: 'description',
                     amount: 'amount',
-                    currency: null,
                     balance: null,
                     creditor_name: null,
                     debtor_name: null,
                 },
                 DateFormat.YearMonthDay,
-                'EUR',
             );
 
             expect(transactions[0].transaction_date).toBe('2026-05-04');
