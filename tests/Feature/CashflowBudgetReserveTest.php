@@ -10,6 +10,7 @@ use App\Models\Category;
 use App\Models\ExchangeRate;
 use App\Models\Label;
 use App\Models\Transaction;
+use App\Models\TransactionSplit;
 use App\Models\User;
 use Illuminate\Support\Facades\Http;
 
@@ -392,3 +393,98 @@ test('a range reads as a year once it is longer than a quarter', function (strin
     '92 days with a time on the end date' => ['2026-08-01', '2026-10-31 23:59:59', false],
     '93 days' => ['2026-07-31', '2026-10-31', true],
 ]);
+
+/**
+ * A split transaction on the test account, with no category of its own, as
+ * ReplaceTransactionSplits leaves the parent: one line per [category, amount].
+ *
+ * @param  list<array{0: Category, 1: int}>  $lines
+ */
+function splitTransactionOn(object $test, array $lines, ?Label $label = null): Transaction
+{
+    $transaction = expenseOn($test, null, array_sum(array_column($lines, 1)), $label);
+
+    foreach (array_values($lines) as $position => [$category, $amount]) {
+        TransactionSplit::factory()->create([
+            'transaction_id' => $transaction->id,
+            'category_id' => $category->id,
+            'amount' => $amount,
+            'position' => $position,
+        ]);
+    }
+
+    return $transaction;
+}
+
+test('a split line in a fixed budget category is fixed and its untracked line general', function () {
+    $rent = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Expense]);
+    $shopping = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Expense]);
+
+    budgetFor(Budget::factory()->monthly()->fixed()->forCategories($rent)->create(['user_id' => $this->user->id]));
+
+    splitTransactionOn($this, [[$rent, -60000], [$shopping, -4000]]);
+
+    $summary = cashflowSummary();
+
+    expect($summary['fixed_expense'])->toBe(60000)
+        ->and($summary['variable_expense'])->toBe(0)
+        ->and($summary['general_expense'])->toBe(4000)
+        ->and($summary['fixed_expense'] + $summary['variable_expense'] + $summary['general_expense'])->toBe($summary['expense'])
+        ->and($summary['expense'])->toBe(64000);
+});
+
+test('a split transaction carrying a variable budget label counts every expense line as variable, to the cent', function () {
+    // A half-owned account: each line is weighed on its own, as the expense
+    // total weighs it, so the parent's single rounding would leave a cent out.
+    $this->account->update(['ownership_percentage' => 50]);
+    $food = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Expense]);
+    $shopping = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Expense]);
+    $holidays = Label::factory()->create(['user_id' => $this->user->id]);
+
+    budgetFor(Budget::factory()->monthly()->forLabels($holidays)->create(['user_id' => $this->user->id]));
+
+    splitTransactionOn($this, [[$food, -1001], [$shopping, -1001], [$food, -999]], $holidays);
+
+    $summary = cashflowSummary();
+
+    expect($summary['expense'])->toBe(501 + 501 + 500)
+        ->and($summary['variable_expense'])->toBe($summary['expense'])
+        ->and($summary['fixed_expense'])->toBe(0)
+        ->and($summary['general_expense'])->toBe(0);
+});
+
+test('a split line in an income category is not an expense, even under a tracked label', function () {
+    $rent = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Expense]);
+    $salary = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Income]);
+    $flat = Label::factory()->create(['user_id' => $this->user->id]);
+
+    budgetFor(Budget::factory()->monthly()->fixed()->forLabels($flat)->create(['user_id' => $this->user->id]));
+
+    splitTransactionOn($this, [[$rent, -50000], [$salary, 20000]], $flat);
+
+    $summary = cashflowSummary();
+
+    expect($summary['expense'])->toBe(50000)
+        ->and($summary['income'])->toBe(20000)
+        ->and($summary['fixed_expense'])->toBe(50000)
+        ->and($summary['variable_expense'])->toBe(0)
+        ->and($summary['general_expense'])->toBe(0);
+});
+
+test('a split line reached by a fixed and a variable budget counts once, as fixed', function () {
+    $rent = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Expense]);
+    $shopping = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Expense]);
+    $move = Label::factory()->create(['user_id' => $this->user->id]);
+
+    budgetFor(Budget::factory()->monthly()->fixed()->forCategories($rent)->create(['user_id' => $this->user->id]));
+    budgetFor(Budget::factory()->monthly()->forLabels($move)->create(['user_id' => $this->user->id]));
+
+    splitTransactionOn($this, [[$rent, -70000], [$shopping, -8000]], $move);
+
+    $summary = cashflowSummary();
+
+    expect($summary['fixed_expense'])->toBe(70000)
+        ->and($summary['variable_expense'])->toBe(8000)
+        ->and($summary['general_expense'])->toBe(0)
+        ->and($summary['expense'])->toBe(78000);
+});
