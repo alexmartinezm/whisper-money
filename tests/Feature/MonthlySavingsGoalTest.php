@@ -15,6 +15,7 @@ use App\Models\Space;
 use App\Models\Transaction;
 use App\Models\TransactionSplit;
 use App\Models\User;
+use App\Services\AutomationRuleService;
 use App\Services\SavingsGoals\MonthlySavingsGoalStats;
 use App\Services\SavingsGoals\SavingsGoalPeriodService;
 use App\Services\SavingsGoals\SavingsGoalService;
@@ -450,14 +451,21 @@ test('the auto-tag rule also matches the bank, so a same-named account elsewhere
     $savings->update(['bank_id' => $bank->id]);
     $namesake = monthlyGoalAccount($user, AccountType::Checking, 'Savings');
 
-    $salary = Transaction::factory()->create(['user_id' => $user->id, 'account_id' => $namesake->id, 'amount' => 200000, 'transaction_date' => '2026-10-01']);
-
     $goal = createMonthlyGoal($user, ['auto_tag_account_id' => $savings->id]);
+
+    // Through the rules, as a synced transaction goes: the backfill only reads
+    // the goal's own account, so it cannot tell whether the bank is matched.
+    // Plaintext, because the rules skip a transaction they cannot read.
+    $rules = app(AutomationRuleService::class);
+    $salary = Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'account_id' => $namesake->id, 'amount' => 200000, 'transaction_date' => today()]);
+    $transfer = Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'account_id' => $savings->id, 'amount' => 10000, 'transaction_date' => today()]);
+    $rules->applyRules($salary);
+    $rules->applyRules($transfer);
 
     $rule = AutomationRule::query()->where('user_id', $user->id)->firstOrFail();
     expect(json_encode($rule->rules_json))->toContain('"bank_name"')
         ->and($salary->labels()->count())->toBe(0)
-        ->and($goal->label_id)->not->toBeNull();
+        ->and($transfer->labels()->pluck('labels.id')->all())->toBe([$goal->label_id]);
 });
 
 test('archiving a monthly goal closes its open months and retires its auto-tag rule', function () {
