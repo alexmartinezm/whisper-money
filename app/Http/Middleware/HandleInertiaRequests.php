@@ -13,6 +13,7 @@ use App\Features\TransactionSplitting;
 use App\Jobs\PurgeResidualEncryptionArtifactsJob;
 use App\Models\BankingConnection;
 use App\Models\User;
+use App\Services\Ai\AiImportMappingGate;
 use App\Services\CurrencyOptions;
 use App\Services\FormatLocaleOptions;
 use App\Services\Subscriptions\PriceExperiment;
@@ -28,6 +29,7 @@ class HandleInertiaRequests extends Middleware
     public function __construct(
         private CurrencyOptions $currencyOptions,
         private FormatLocaleOptions $formatLocales,
+        private AiImportMappingGate $aiImportMappingGate,
     ) {}
 
     /**
@@ -104,6 +106,7 @@ class HandleInertiaRequests extends Middleware
             'demoCredentials' => $this->demoCredentials($request, $user),
             'subscriptionsEnabled' => config('subscriptions.enabled', false),
             'aiCategorizationUpsellRate' => (int) config('ai_categorization.upsell_sample_rate'),
+            'aiImportMappingEnabled' => $user !== null && $this->aiImportMappingGate->allows($user),
             'pricing' => [
                 'plans' => PriceExperiment::plansFor($user, $request->cookie(PriceExperiment::COOKIE)),
                 'defaultPlan' => config('subscriptions.default_plan', 'monthly'),

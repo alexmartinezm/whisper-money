@@ -29,7 +29,7 @@ import {
 } from '@/types/import';
 import { formatRelativeDate } from '@/utils/date';
 import { __ } from '@/utils/i18n';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, type ReactNode } from 'react';
 
 const NONE = '__none__';
 
@@ -66,6 +66,8 @@ interface ImportStepMappingProps {
     onLatestDateChange: (date: string | null) => void;
     onNext: () => void;
     onBack: () => void;
+    /** The AI badge or button, shown above the fields. */
+    aiDetection?: ReactNode;
 }
 
 /**
@@ -235,6 +237,7 @@ export function ImportStepMapping({
     onLatestDateChange,
     onNext,
     onBack,
+    aiDetection,
 }: ImportStepMappingProps) {
     const descriptionColumns = Array.isArray(columnMapping.description)
         ? columnMapping.description
@@ -366,6 +369,8 @@ export function ImportStepMapping({
 
     return (
         <div className="flex flex-col gap-6">
+            {aiDetection}
+
             <div className="flex flex-col gap-4">
                 <div className="flex flex-col gap-2">
                     <Label htmlFor="date-column">

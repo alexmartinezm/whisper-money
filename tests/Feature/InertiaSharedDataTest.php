@@ -260,3 +260,18 @@ test('the translation dictionary is omitted once the client already has it', fun
 
     expect($response->json('props'))->not->toHaveKey('translations');
 });
+
+test('shares whether AI import mapping is enabled for the user', function (bool $enabled) {
+    config()->set('ai_import_mapping.enabled', $enabled);
+    config()->set('services.typesafe.enabled', true);
+
+    $response = actingAs(User::factory()->onboarded()->create())->withoutVite()->get(route('dashboard'));
+
+    $response->assertInertia(fn (Assert $page) => $page->where('aiImportMappingEnabled', $enabled));
+})->with([true, false]);
+
+test('guests never get AI import mapping', function () {
+    $response = $this->withoutVite()->get(route('home'));
+
+    $response->assertInertia(fn (Assert $page) => $page->where('aiImportMappingEnabled', false));
+});

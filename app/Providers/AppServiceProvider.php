@@ -13,6 +13,7 @@ use App\Services\Banking\EnableBankingPsuContext;
 use App\Services\Discord\DiscordWebhook;
 use App\Support\QueueWorkerLoop;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
 use Illuminate\Queue\Events\JobProcessed;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Queue\Events\Looping;
@@ -92,6 +93,14 @@ class AppServiceProvider extends ServiceProvider
         // is cleared by the next turn's `Looping` instead.
         Event::listen(JobProcessed::class, function (): void {
             $this->app->make(QueueWorkerLoop::class)->leaveJob();
+        });
+
+        // AI column-mapping suggestions are asked once per imported file, so 20
+        // a minute per user is plenty. A named limiter keeps its own bucket: a
+        // plain `throttle:20,1` would share (and double-count) the key of the
+        // `throttle:300,1` around every API route.
+        RateLimiter::for('import-column-suggestions', function (Request $request): Limit {
+            return Limit::perMinute(20)->by((string) $request->user()?->getAuthIdentifier());
         });
 
         // Render the OAuth consent screen (Claude Desktop / ChatGPT connecting

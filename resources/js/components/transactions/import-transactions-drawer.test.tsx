@@ -377,6 +377,17 @@ describe('ImportTransactionsDrawer', () => {
         fireEvent.click(screen.getByText('leave mapping'));
         await screen.findByText('Import 3 Transactions');
 
+        // The layout is remembered only once the import brought rows in.
+        expect(saveImportConfig).not.toHaveBeenCalled();
+
+        create.mockImplementation(
+            async (transaction: { description: string }) => ({
+                id: transaction.description,
+            }),
+        );
+        fireEvent.click(screen.getByText('Import 3 Transactions'));
+
+        await waitFor(() => expect(saveImportConfig).toHaveBeenCalled());
         expect(saveImportConfig).toHaveBeenCalledWith(
             'account-1',
             expect.objectContaining({

@@ -1184,4 +1184,12 @@ describe('type column detection', () => {
         ]);
         expect(detectExpenseTypes(rows, null)).toEqual([]);
     });
+
+    it('ticks the Dutch and German values for money going out', () => {
+        const rows = ['Af', 'Bij', 'Soll', 'Haben'].map((type) => ({
+            Type: type,
+        }));
+
+        expect(detectExpenseTypes(rows, 'Type')).toEqual(['Af', 'Soll']);
+    });
 });

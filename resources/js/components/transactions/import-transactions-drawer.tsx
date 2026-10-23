@@ -3,6 +3,7 @@ import {
     store as storeBalance,
 } from '@/actions/App/Http/Controllers/AccountBalanceController';
 import { categorize } from '@/actions/App/Http/Controllers/TransactionController';
+import { AiColumnDetection } from '@/components/ai-column-detection';
 import AlertError from '@/components/alert-error';
 import {
     Drawer,
@@ -12,7 +13,13 @@ import {
     DrawerTitle,
 } from '@/components/ui/drawer';
 import { Progress } from '@/components/ui/progress';
+import { useAiColumnSuggestion } from '@/hooks/use-ai-column-suggestion';
 import { accountHasBalance } from '@/hooks/use-owns-balance-updates';
+import {
+    suggestedTransactionMapping,
+    TRANSACTION_FIELDS,
+} from '@/lib/ai-import-mapping';
+import { describeColumns } from '@/lib/column-shape';
 import { importKey } from '@/lib/crypto';
 import { getCsrfToken } from '@/lib/csrf';
 import {
@@ -25,6 +32,7 @@ import { getStoredKey } from '@/lib/key-storage';
 import { evaluateRulesForNewTransaction } from '@/lib/rule-engine';
 import {
     applyStoredImportConfig,
+    applyTransactionSuggestion,
     parseImportFile,
 } from '@/lib/transaction-import';
 import { transactionSyncService } from '@/services/transaction-sync';
@@ -37,6 +45,7 @@ import {
     ImportStep,
     type ColumnMapping,
     type ImportState,
+    type ParsedRow,
 } from '@/types/import';
 import { type UUID } from '@/types/uuid';
 import { __ } from '@/utils/i18n';
@@ -101,6 +110,8 @@ export function ImportTransactionsDrawer({
     const [selectedAccount, setSelectedAccount] = useState<Account | null>(
         null,
     );
+    const ai = useAiColumnSuggestion();
+    const { begin: resetAi } = ai;
     // A credit card has no balance, so the import neither asks for one nor
     // carries one over from the file.
     const tracksBalance = selectedAccount
@@ -172,8 +183,9 @@ export function ImportTransactionsDrawer({
             setError(null);
             setWasSingleAccountAutoSelected(false);
             setSelectedAccount(null);
+            resetAi();
         }
-    }, [open]);
+    }, [open, resetAi]);
 
     const handleAccountSelect = (accountId: UUID) => {
         setState((prev) => ({ ...prev, selectedAccountId: accountId }));
@@ -184,7 +196,64 @@ export function ImportTransactionsDrawer({
         handleAccountSelect(accountId);
     };
 
+    /**
+     * Ask the AI which column is which for the file on screen. Its answer
+     * lands after the mapping is shown, so it is dropped if another file was
+     * picked meanwhile, and leaves alone the fields picked by hand — unless
+     * the user pressed the button, which asks for every field.
+     */
+    const requestSuggestion = (
+        file: File,
+        headers: string[],
+        rows: ParsedRow[],
+        everything: boolean,
+        token?: number,
+    ) => {
+        const columns = describeColumns(headers, rows);
+
+        void ai.request<ColumnMapping>({
+            kind: 'transaction',
+            columns,
+            accountId: state.selectedAccountId,
+            everything,
+            token,
+            // This drawer never reads a currency column (see
+            // withoutCurrencyColumn), so the suggestion leaves it out too.
+            toMapping: (suggestions) => ({
+                ...suggestedTransactionMapping(suggestions, columns),
+                currency: null,
+            }),
+            apply: (suggested, keep) =>
+                setState((prev) => {
+                    if (prev.file !== file) {
+                        return prev;
+                    }
+
+                    const next = applyTransactionSuggestion(
+                        {
+                            mapping: prev.columnMapping,
+                            dateFormat: prev.dateFormat,
+                            dateFormatDetected: prev.dateFormatDetected,
+                        },
+                        prev.parsedData,
+                        suggested,
+                        keep,
+                        locale,
+                    );
+
+                    return {
+                        ...prev,
+                        columnMapping: next.mapping,
+                        dateFormat: next.dateFormat,
+                        dateFormatDetected: next.dateFormatDetected,
+                    };
+                }),
+        });
+    };
+
     const handleFileSelect = async (file: File) => {
+        const token = ai.begin();
+
         if (!file) {
             setState((prev) => ({
                 ...prev,
@@ -222,29 +291,39 @@ export function ImportTransactionsDrawer({
             }));
 
             const accountId = state.selectedAccountId;
-            if (accountId) {
-                const stored = await applyStoredImportConfig(parsed, accountId);
+            const stored = accountId
+                ? await applyStoredImportConfig(parsed, accountId)
+                : null;
 
-                if (stored) {
-                    // Only apply if this file is still the selected one, so a
-                    // slow load can't clobber a file picked afterwards. Keep
-                    // the saved format as the default, but still show the
-                    // selector when the dates are ambiguous so a
-                    // previously-saved wrong format can be corrected.
-                    setState((prev) =>
-                        prev.file === file
-                            ? {
-                                  ...prev,
-                                  columnMapping: withoutCurrencyColumn(
-                                      stored.mapping,
-                                  ),
-                                  dateFormat: stored.dateFormat,
-                                  dateFormatDetected: stored.dateFormatDetected,
-                              }
-                            : prev,
-                    );
-                }
+            ai.afterStoredLayout(token, stored, TRANSACTION_FIELDS, () =>
+                requestSuggestion(
+                    file,
+                    parsed.headers,
+                    parsed.rows,
+                    false,
+                    token,
+                ),
+            );
+
+            if (!stored) {
+                return;
             }
+
+            // Only apply if this file is still the selected one, so a slow
+            // load can't clobber a file picked afterwards. Keep the saved
+            // format as the default, but still show the selector when the
+            // dates are ambiguous so a previously-saved wrong format can be
+            // corrected.
+            setState((prev) =>
+                prev.file === file
+                    ? {
+                          ...prev,
+                          columnMapping: withoutCurrencyColumn(stored.mapping),
+                          dateFormat: stored.dateFormat,
+                          dateFormatDetected: stored.dateFormatDetected,
+                      }
+                    : prev,
+            );
         } catch (err) {
             setError(
                 err instanceof Error ? err.message : 'Failed to parse file',
@@ -256,6 +335,7 @@ export function ImportTransactionsDrawer({
         field: keyof ColumnMapping,
         value: string | string[],
     ) => {
+        ai.touch(field);
         setState((prev) => {
             const next = {
                 ...prev,
@@ -444,13 +524,6 @@ export function ImportTransactionsDrawer({
                             transaction.balance ??
                             null,
                     }));
-            }
-
-            if (state.selectedAccountId) {
-                void saveImportConfig(state.selectedAccountId, {
-                    columnMapping: state.columnMapping,
-                    dateFormat: state.dateFormat,
-                });
             }
 
             setState((prev) => ({
@@ -678,6 +751,21 @@ export function ImportTransactionsDrawer({
         setIsImporting(false);
 
         const successCount = createdTransactions.length;
+
+        // Only a mapping that actually brought rows in is worth remembering:
+        // an abandoned or failed import would leave a bad layout behind.
+        if (successCount > 0) {
+            void saveImportConfig(selectedAccount.id, {
+                columnMapping: state.columnMapping,
+                dateFormat: state.dateFormat,
+                aiSuggested: ai.importedWith(
+                    state.columnMapping,
+                    'account_drawer',
+                    'transaction',
+                ),
+            });
+        }
+
         const errorCount = errors.length;
 
         console.log('Import complete:', { successCount, errorCount, total });
@@ -849,6 +937,20 @@ export function ImportTransactionsDrawer({
                         onLatestDateChange={handleLatestDateChange}
                         onNext={handlePreviewTransactions}
                         onBack={() => moveToStep(ImportStep.UploadFile)}
+                        aiDetection={
+                            <AiColumnDetection
+                                status={ai.status(state.columnMapping)}
+                                onDetect={() =>
+                                    state.file &&
+                                    requestSuggestion(
+                                        state.file,
+                                        state.columnHeaders,
+                                        state.parsedData,
+                                        true,
+                                    )
+                                }
+                            />
+                        }
                     />
                 );
 

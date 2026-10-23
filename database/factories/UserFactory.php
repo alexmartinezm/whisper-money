@@ -83,4 +83,18 @@ class UserFactory extends Factory
             'onboarded_at' => null,
         ]);
     }
+
+    /**
+     * Give the user an active paid plan. The `stripe_id` is deliberately not
+     * one of the seeded prefixes (`sub_demo_` and friends).
+     */
+    public function subscribed(string $status = 'active'): static
+    {
+        return $this->afterCreating(fn (User $user) => $user->subscriptions()->create([
+            'type' => 'default',
+            'stripe_id' => 'sub_factory_'.fake()->unique()->numerify('##########'),
+            'stripe_status' => $status,
+            'stripe_price' => 'price_factory',
+        ]));
+    }
 }

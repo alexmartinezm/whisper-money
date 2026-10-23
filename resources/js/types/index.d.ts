@@ -92,6 +92,8 @@ export interface SharedData {
     /** API-key providers on our curated beta list (`banking.beta_banks`). */
     betaProviders: string[];
     aiCategorizationUpsellRate: number;
+    /** Whether the import wizards may ask the AI which column holds each field. */
+    aiImportMappingEnabled: boolean;
     subscriptionPaymentIssue: SubscriptionPaymentIssueNotification | null;
     pricing: PricingConfig;
     sidebarOpen: boolean;
