@@ -76,12 +76,12 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
 import { TableCell, TableRow } from '@/components/ui/table';
 import AppSidebarLayout from '@/layouts/app/app-sidebar-layout';
-import { getDescendantIds } from '@/lib/category-tree';
 import {
     cashflowBlockFromParam,
     cashflowBlockParam,
     withoutDatelessCashflowBlock,
 } from '@/lib/cashflow-block';
+import { getDescendantIds } from '@/lib/category-tree';
 import {
     isCursorPaginatedResponse,
     type CursorPaginatedResponse,
