@@ -29,8 +29,7 @@ $readOnly = [
  * labelling can all be undone by another call, and marking them destructive
  * makes a client ask for confirmation on every edit. split_transaction is the
  * exception among the writes: it replaces the whole posting set at once, so the
- * postings it overwrites are gone. update_savings_goal is marked destructive
- * because OpenAI's review held it back as an overwrite until it was.
+ * postings it overwrites are gone.
  */
 $destructive = [
     'delete_transaction',
@@ -40,7 +39,6 @@ $destructive = [
     'delete_balance',
     'delete_budget',
     'split_transaction',
-    'update_savings_goal',
 ];
 
 it('declares all three MCP hints on every tool', function () use ($readOnly, $destructive) {
