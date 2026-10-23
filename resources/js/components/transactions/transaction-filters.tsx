@@ -488,9 +488,6 @@ export function TransactionFilters({
                                                                                     category={
                                                                                         category
                                                                                     }
-                                                                                    size={
-                                                                                        4
-                                                                                    }
                                                                                 />
                                                                             </div>
                                                                             <span className="truncate">

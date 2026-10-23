@@ -80,6 +80,7 @@ export function deserializeFilters(
         creditorName: data.creditor_name ?? '',
         debtorName: data.debtor_name ?? '',
         searchText: data.search ?? '',
+        aiCategorizedOnly: false,
         cashflowBlock: cashflowBlockFromParam(data.cashflow_block),
     };
 }
