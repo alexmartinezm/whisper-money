@@ -44,8 +44,22 @@ vi.mock('@/components/cashflow/breakdown-card', () => ({
     BreakdownCard: () => null,
 }));
 
+// Stands in for the period type switcher the page passes its setter to.
 vi.mock('@/components/cashflow/period-navigation', () => ({
-    PeriodNavigation: () => null,
+    PeriodNavigation: ({
+        onPeriodTypeChange,
+    }: {
+        onPeriodTypeChange: (periodType: 'quarter' | 'year') => void;
+    }) => (
+        <>
+            <button onClick={() => onPeriodTypeChange('quarter')}>
+                Quarter view
+            </button>
+            <button onClick={() => onPeriodTypeChange('year')}>
+                Year view
+            </button>
+        </>
+    ),
     formatPeriodLabel: () => 'October 2026',
 }));
 
@@ -121,6 +135,20 @@ describe('CashflowPage', () => {
 
             expect(screen.getByText('Month in review')).toBeTruthy();
             expect(screen.getByText('Monthly savings card')).toBeTruthy();
+        },
+    );
+
+    it.each(['Quarter view', 'Year view'])(
+        'leaves the monthly savings card out after switching to the %s',
+        (view) => {
+            render(<CashflowPage />);
+
+            expect(screen.getByText('Monthly savings card')).toBeTruthy();
+
+            fireEvent.click(screen.getByRole('button', { name: view }));
+
+            expect(screen.queryByText('Monthly savings card')).toBeNull();
+            expect(screen.getByText('Month in review')).toBeTruthy();
         },
     );
 
