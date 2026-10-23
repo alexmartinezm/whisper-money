@@ -68,6 +68,8 @@ function makeBudget(overrides: Partial<Budget> = {}): Budget {
         notify_on_close_to_limit: false,
         notify_on_over_limit: false,
         is_catch_all: false,
+        position: null,
+        archived_at: null,
         created_at: '2026-05-26T00:00:00.000000Z',
         updated_at: '2026-05-26T00:00:00.000000Z',
         deleted_at: null,
