@@ -6,8 +6,10 @@ use App\Enums\BudgetPeriodType;
 use App\Enums\CashflowBlock;
 use App\Models\BudgetPeriod;
 use App\Models\Transaction;
-use App\Services\Concerns\ConvertsTransactionCurrency;
+use Closure;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Support\Collection;
 
 /**
  * What the user's budgets still hold back from a cashflow period, and how much
@@ -15,30 +17,33 @@ use Illuminate\Database\Eloquent\Builder;
  *
  * @phpstan-type BudgetMarginRow array{budget_id: string, budget_period_id: string, name: string, start_date: string, end_date: string, expense_type: string, allocated: int, spent: int, margin: int}
  * @phpstan-type ExpenseSplit array{fixed_expense: int, variable_expense: int, general_expense: int}
+ *
+ * @phpstan-import-type TrackedIds from CashflowBlockQuery
  */
 class CashflowBudgetReserveService
 {
-    use ConvertsTransactionCurrency;
-
     /**
      * The longest a quarter gets; any longer range is read as a year.
      */
     private const MAX_QUARTER_DAYS = 92;
 
-    public function __construct(
-        private ExchangeRateService $exchangeRateService,
-        private CashflowBlockQuery $blocks,
-    ) {}
+    public function __construct(private CashflowBlockQuery $blocks) {}
 
     /**
-     * `reserved` adds up the positive margins of the budget periods that
-     * overlap the range and are in progress today: money still earmarked for
-     * spending. An over-budget period adds nothing rather than eating into the
-     * rest, a closed one adds nothing because whatever it left over is already
-     * back in the net, and a future one adds nothing because none of this
-     * range's income is promised to it yet. `budgets` lists the same periods,
-     * with margins that may be negative. A margin, like the budget screens,
-     * ignores any carried-over amount.
+     * What to append to a period's cashflow summary and to the one before it,
+     * read off the summary's own postings: the same transactions, expanded the
+     * same way, and added up with $sum, the summary's own conversion.
+     *
+     * The current period gets `reserved`, which adds up the positive margins
+     * of the budget periods that overlap the range and are in progress today:
+     * money still earmarked for spending. An over-budget period adds nothing
+     * rather than eating into the rest, a closed one adds nothing because
+     * whatever it left over is already back in the net, and a future one adds
+     * nothing because none of this range's income is promised to it yet.
+     * `budgets` lists the same periods, with margins that may be negative. A
+     * margin, like the budget screens, ignores any carried-over amount. The
+     * previous period gets neither: what budgets still reserve is about today,
+     * which a past period has nothing to say about.
      *
      * Both only count the budgets whose period fits the range: weekly,
      * bi-weekly and monthly budgets for a range of up to a quarter (the month
@@ -46,49 +51,82 @@ class CashflowBudgetReserveService
      * yearly budget's margin is not money held back from one month's income,
      * and a monthly one's says little about a whole year.
      *
-     * `fixed_expense` is the part of `$expense` booked to categories (or
-     * their children) and labels tracked by a budget marked fixed with a
-     * period in the range, `variable_expense` the part tracked by one marked
-     * variable, and `general_expense` the rest: spending no budget tracks. A
-     * transaction tracked by both a fixed and a variable budget counts once,
-     * as fixed. See {@see self::expenseSplit()}.
+     * Both periods get the expense split, see {@see self::expenseSplit()}.
      *
      * Budget amounts are read as stored, in the user's currency, the same way
      * the budget screens read them.
      *
-     * @return array{reserved: int, budgets: list<BudgetMarginRow>, fixed_expense: int, variable_expense: int, general_expense: int}
+     * @param  array{current: Collection<int, Transaction>, previous: Collection<int, Transaction>}  $postings
+     * @param  Closure(Collection<int, Transaction>): int  $sum
+     * @return array{current: array{reserved: int, budgets: list<BudgetMarginRow>, fixed_expense: int, variable_expense: int, general_expense: int}, previous: ExpenseSplit}
      */
-    public function forPeriod(string $userId, string $userCurrency, PeriodComparator $period, int $expense): array
+    public function forComparedPeriods(string $userId, PeriodComparator $period, PeriodComparator $previousPeriod, array $postings, Closure $sum): array
     {
+        [$tracked, $previousTracked] = $this->blocks->trackedIdsByPeriod($userId, [$period, $previousPeriod]);
+        $this->loadLabelsIfTracked($postings, [$tracked, $previousTracked]);
         $budgets = $this->openBudgetMargins($userId, $period);
 
         return [
-            'reserved' => array_sum(array_map(fn (array $row): int => max(0, $row['margin']), $budgets)),
-            'budgets' => $budgets,
-            ...$this->expenseSplit($userId, $userCurrency, $period, $expense),
+            'current' => [
+                'reserved' => array_sum(array_map(fn (array $row): int => max(0, $row['margin']), $budgets)),
+                'budgets' => $budgets,
+                ...$this->expenseSplit($postings['current'], $tracked, $sum),
+            ],
+            'previous' => $this->expenseSplit($postings['previous'], $previousTracked, $sum),
         ];
     }
 
     /**
-     * `$expense` split by the expense type of the budgets tracking it: fixed,
-     * variable, and general for what no budget tracks. A split transaction is
-     * read line by line, the way budgets read it: a tracked label on it claims
-     * every line, otherwise each line goes by its own category. The three
-     * always add up to `$expense` (any can be negative in a month of refunds,
-     * as `$expense` can). Unlike `reserved`, it reads as well for a past period
-     * as for the current one.
+     * The period's expense split by the expense type of the budgets tracking
+     * it, with a period in the range: `fixed_expense` for what a budget marked
+     * fixed tracks, `variable_expense` for what one marked variable tracks,
+     * `general_expense` for what no budget tracks. A posting tracked by both a
+     * fixed and a variable budget counts once, as fixed.
      *
+     * It is read posting by posting, the way budgets read a transaction: a
+     * tracked label on a split transaction claims every line, otherwise each
+     * line goes by its own category. Every expense-side posting falls in
+     * exactly one of the three, so they always add up to the summary's
+     * `expense` (any can be negative in a month of refunds, as `expense` can).
+     * Unlike `reserved`, it reads as well for a past period as for the current
+     * one. The classifier is {@see CashflowBlockQuery::blockOf()}, whose SQL
+     * twin filters the transactions list by block, so a block's list holds
+     * every posting its figure counts.
+     *
+     * @param  Collection<int, Transaction>  $postings
+     * @param  array<string, TrackedIds>  $tracked
+     * @param  Closure(Collection<int, Transaction>): int  $sum
      * @return ExpenseSplit
      */
-    public function expenseSplit(string $userId, string $userCurrency, PeriodComparator $period, int $expense): array
+    private function expenseSplit(Collection $postings, array $tracked, Closure $sum): array
     {
-        $budgeted = $this->budgetedExpense($userId, $userCurrency, $period);
+        $byBlock = $postings->groupBy(fn (Transaction $posting): string => $this->blocks->blockOf($posting, $tracked)->value ?? '');
+        $expenseIn = fn (CashflowBlock $block): int => -$sum($byBlock->get($block->value, collect()));
 
         return [
-            'fixed_expense' => $budgeted['fixed'],
-            'variable_expense' => $budgeted['variable'],
-            'general_expense' => $expense - $budgeted['fixed'] - $budgeted['variable'],
+            'fixed_expense' => $expenseIn(CashflowBlock::Fixed),
+            'variable_expense' => $expenseIn(CashflowBlock::Variable),
+            'general_expense' => $expenseIn(CashflowBlock::General),
         ];
+    }
+
+    /**
+     * Load the labels of every posting at once, and only when some budget
+     * tracks a label: a split line shares its parent's, and without tracked
+     * labels the classifier never reads them.
+     *
+     * @param  array{current: Collection<int, Transaction>, previous: Collection<int, Transaction>}  $postings
+     * @param  list<array<string, TrackedIds>>  $trackedByPeriod
+     */
+    private function loadLabelsIfTracked(array $postings, array $trackedByPeriod): void
+    {
+        $tracksLabels = collect($trackedByPeriod)
+            ->flatten(1)
+            ->contains(fn (array $tracked): bool => $tracked['labels'] !== []);
+
+        if ($tracksLabels) {
+            EloquentCollection::make($postings['current']->concat($postings['previous']))->load('labels:id');
+        }
     }
 
     /**
@@ -142,53 +180,5 @@ class CashflowBudgetReserveService
         }
 
         return [BudgetPeriodType::Weekly, BudgetPeriodType::Biweekly, BudgetPeriodType::Monthly];
-    }
-
-    /**
-     * Expense-side spending in the range on what fixed and variable budgets
-     * track, in the user's currency. It is read posting by posting, so a split
-     * transaction counts as its lines, each under its own category, and each
-     * posting is converted exactly as {@see CashflowSummaryService} converts
-     * `expense`: both figures are exact parts of it.
-     *
-     * Only transactions some budget reaches are loaded; every posting the
-     * classifier counts belongs to one of them. The classifier is
-     * {@see CashflowBlockQuery::blockOf()}, whose SQL twin filters the
-     * transactions list by block, so a block's list holds every posting its
-     * figure counts.
-     *
-     * @return array{fixed: int, variable: int}
-     */
-    private function budgetedExpense(string $userId, string $userCurrency, PeriodComparator $period): array
-    {
-        $tracked = $this->blocks->trackedIds($userId, $period);
-        $trackedByAny = [
-            'categories' => array_merge(...array_column($tracked, 'categories')),
-            'labels' => array_merge(...array_column($tracked, 'labels')),
-        ];
-
-        if ($trackedByAny['categories'] === [] && $trackedByAny['labels'] === []) {
-            return ['fixed' => 0, 'variable' => 0];
-        }
-
-        $transactions = $this->blocks->whereTrackedBy(
-            Transaction::query()
-                ->where('transactions.user_id', $userId)
-                ->whereBetween('transactions.transaction_date', [$period->from, $period->to])
-                ->countingTowardsTotals(),
-            $trackedByAny,
-        )
-            ->with(['account', 'category', 'splits.category', 'labels:id'])
-            ->get();
-
-        $this->preloadExchangeRates($transactions, $userCurrency);
-
-        $postings = $this->effectiveTransactions($transactions, $userCurrency)
-            ->groupBy(fn (Transaction $posting): string => $this->blocks->blockOf($posting, $tracked)->value ?? '');
-
-        return [
-            'fixed' => -$this->sumConvertedAmounts($postings->get(CashflowBlock::Fixed->value, collect()), $userCurrency),
-            'variable' => -$this->sumConvertedAmounts($postings->get(CashflowBlock::Variable->value, collect()), $userCurrency),
-        ];
     }
 }

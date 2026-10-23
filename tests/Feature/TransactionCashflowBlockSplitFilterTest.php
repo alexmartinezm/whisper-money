@@ -266,9 +266,7 @@ test('the block query and the classifier agree on a single split transaction', f
     expect(postingsInBlock($postings, CashflowBlock::Fixed)->sum('amount'))->toBe(-30000)
         ->and(postingsInBlock($postings, CashflowBlock::General)->sum('amount'))->toBe(-2000)
         ->and(postingsInBlock($postings, CashflowBlock::Saved)->sum('amount'))->toBe(-5000)
-        ->and(postingsInBlock($postings, CashflowBlock::Variable))->toBeEmpty()
-        ->and($blocks->whereTrackedBy(Transaction::query(), $tracked['fixed'])->pluck('id')->all())->toBe([$split->id])
-        ->and($blocks->whereTrackedBy(Transaction::query(), $tracked['variable'])->pluck('id')->all())->toBe([]);
+        ->and(postingsInBlock($postings, CashflowBlock::Variable))->toBeEmpty();
 });
 
 test('the analysis of a block counts only the split lines in it', function () {

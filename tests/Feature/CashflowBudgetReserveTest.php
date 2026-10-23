@@ -552,3 +552,30 @@ test('the previous period reads a split transaction line by line', function () {
         ->and($previous['general_expense'])->toBe(2500)
         ->and($previous['expense'])->toBe(71500);
 });
+
+test('each period splits by its own budgets, from the transactions the summary already loaded', function () {
+    $rent = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Expense]);
+    $food = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Expense]);
+    $trip = Label::factory()->create(['user_id' => $this->user->id]);
+
+    // Fixed rent only from October; the trip label is tracked in both months.
+    budgetPeriodWithSpend(Budget::factory()->monthly()->fixed()->forCategories($rent)->create(['user_id' => $this->user->id]), '2026-10-01', '2026-10-31', 80000, 0);
+    $tripBudget = Budget::factory()->monthly()->forLabels($trip)->create(['user_id' => $this->user->id]);
+    budgetPeriodWithSpend($tripBudget, '2026-09-01', '2026-09-30', 50000, 0);
+    budgetPeriodWithSpend($tripBudget, '2026-10-01', '2026-10-31', 50000, 0);
+
+    expenseOn($this, $rent, -70000, date: '2026-09-03');
+    splitTransactionOn($this, [[$food, -4000], [$rent, -1000]], $trip, '2026-09-20');
+    expenseOn($this, $rent, -70000, date: '2026-10-03');
+    splitTransactionOn($this, [[$food, -6000], [$rent, -2000]], date: '2026-10-20');
+
+    $queries = countQueries(function () use (&$response): void {
+        $response = $this->getJson('/api/cashflow/summary?'.http_build_query(['from' => '2026-10-01', 'to' => '2026-10-31']))->assertOk();
+    })['queries'];
+
+    expect($response->json('current'))->toMatchArray(['fixed_expense' => 72000, 'variable_expense' => 0, 'general_expense' => 6000, 'expense' => 78000])
+        ->and($response->json('previous'))->toMatchArray(['fixed_expense' => 0, 'variable_expense' => 5000, 'general_expense' => 70000, 'expense' => 75000])
+        ->and(collect($queries)->filter(fn (string $sql): bool => str_starts_with($sql, 'select `transactions`.*'))->count())->toBe(1)
+        ->and(collect($queries)->filter(fn (string $sql): bool => str_contains($sql, 'pivot_transaction_id'))->count())->toBe(1)
+        ->and(collect($queries)->filter(fn (string $sql): bool => str_starts_with($sql, 'select `budgets`.*'))->count())->toBe(1);
+});

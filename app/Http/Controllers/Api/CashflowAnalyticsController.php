@@ -16,6 +16,7 @@ use App\Services\ExchangeRateService;
 use App\Services\PeriodComparator;
 use App\Services\SavingsGoals\MonthlySavingsGoalTotals;
 use Carbon\Carbon;
+use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -48,19 +49,13 @@ class CashflowAnalyticsController extends Controller
         $previousPeriod = $period->previous();
         $user = $request->user();
 
-        $summaries = $this->summaries->forComparedPeriods($user->id, $user->currency_code, $period, $previousPeriod);
-        $summaries['current'] = [
-            ...$summaries['current'],
-            ...$this->budgetReserve->forPeriod($user->id, $user->currency_code, $period, $summaries['current']['expense']),
-        ];
-        // Only the split: what budgets still reserve is about today, which a
-        // past period has nothing to say about.
-        $summaries['previous'] = [
-            ...$summaries['previous'],
-            ...$this->budgetReserve->expenseSplit($user->id, $user->currency_code, $previousPeriod, $summaries['previous']['expense']),
-        ];
-
-        return $this->cashflowJson($summaries);
+        return $this->cashflowJson($this->summaries->forComparedPeriods(
+            $user->id,
+            $user->currency_code,
+            $period,
+            $previousPeriod,
+            fn (array $postings, Closure $sum): array => $this->budgetReserve->forComparedPeriods($user->id, $period, $previousPeriod, $postings, $sum),
+        ));
     }
 
     public function sankey(Request $request): JsonResponse
