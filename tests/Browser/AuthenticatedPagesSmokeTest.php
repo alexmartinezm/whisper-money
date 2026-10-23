@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Enums\AccountType;
 use App\Enums\CategoryType;
+use App\Features\SavingsGoals;
 use App\Models\Account;
 use App\Models\AccountBalance;
 use App\Models\AutomationRule;
@@ -17,6 +18,7 @@ use App\Models\MonthlySummary;
 use App\Models\SavingsGoal;
 use App\Models\Transaction;
 use App\Models\User;
+use Laravel\Pennant\Feature;
 
 use function Pest\Laravel\actingAs;
 
@@ -118,6 +120,8 @@ function seedSmokeReader(): User
         'end_date' => now()->endOfMonth(),
     ]);
 
+    // This fork keeps savings goals behind their rollout flag.
+    Feature::for($user)->activate(SavingsGoals::class);
     SavingsGoal::factory()->create([
         'user_id' => $user->id,
         'name' => 'Smoke Goal',
@@ -172,7 +176,7 @@ dataset('authenticated pages (smoke)', [
     'budget' => ['/budgets/{budget}', 'Smoke Budget'],
     'savings goal' => ['/savings-goals/{savingsGoal}', 'Smoke Goal'],
     'cashflow' => ['/cashflow', 'Track your income, expenses, and savings'],
-    'monthly summary' => ['/monthly-summary', 'Month in review'],
+    'monthly summary' => ['/monthly-summary', 'A reading of one closed month'],
     'profile settings' => ['/settings/profile', 'Profile information'],
     'account settings' => ['/settings/account', 'Profile information'],
     'bank account settings' => ['/settings/accounts', 'Bank accounts'],

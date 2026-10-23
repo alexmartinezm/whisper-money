@@ -292,7 +292,7 @@ it('keeps the account page up when a fifth year digit is typed into the date', f
         'type' => 'checking',
     ]);
 
-    Transaction::factory()->create([
+    Transaction::factory()->plaintext()->create([
         'user_id' => $user->id,
         'account_id' => $account->id,
         'description' => 'Typo-prone transaction',

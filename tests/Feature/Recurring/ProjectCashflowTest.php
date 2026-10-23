@@ -233,9 +233,11 @@ it('rolls a stale expected date forward instead of reporting a past charge', fun
 
     $forecast = $this->project->forUser($this->user, 30);
 
+    // The factory's cadence is monthly, so the stale date moves on a calendar
+    // month, not 30 days: the two differ whenever that month has 31 days.
     expect($forecast['occurrences'])->toHaveCount(1)
         ->and($forecast['occurrences'][0]['date'])
-        ->toBe(CarbonImmutable::today()->addDays(26)->toDateString());
+        ->toBe(CarbonImmutable::today()->subDays(4)->addMonthNoOverflow()->toDateString());
 });
 
 it('copes with a user who has no accounts', function () {
