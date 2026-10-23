@@ -207,8 +207,9 @@ function useConvertedAmount(
 
 /**
  * A date as the dialog shows it in plain text (the "original date" hint and
- * the date chip): the year is dropped when it is the current one. A value
- * parseISO cannot read is shown as it came.
+ * the date chip): the year is dropped when it is the current one, and the
+ * month name is capitalized for the locales that put it first in lowercase.
+ * A value parseISO cannot read is shown as it came.
  */
 function formatSourceDate(date: string, locale: string): string {
     const parsed = parseISO(date);
@@ -217,11 +218,13 @@ function formatSourceDate(date: string, locale: string): string {
         return date;
     }
 
-    return formatDate(
+    const formatted = formatDate(
         parsed,
         getYear(parsed) === getYear(new Date()) ? 'MMMM d' : 'MMMM d, yyyy',
         locale,
     );
+
+    return formatted.charAt(0).toUpperCase() + formatted.slice(1);
 }
 
 export function EditTransactionDialog({
@@ -366,24 +369,26 @@ export function EditTransactionDialog({
             setShowDateField(false);
             defaultDate.current = today;
             const availableAccounts = filterTransactionalAccounts(accounts);
-            // The chip always opens filled in: the duplicated transaction's
-            // account wins, then the account being read, then the one the last
-            // manual transaction went to, then simply the first. Pre-filling is
-            // fine because the chip shows what it picked — it is hiding it
-            // that would not be.
+            // The chip opens filled in: the duplicated transaction's account
+            // wins, then the account being read, then the one the last manual
+            // transaction went to, then simply the first. Pre-filling is fine
+            // because the chip shows what it picked — it is hiding it that
+            // would not be. An account page that cannot take a transaction
+            // (an archived account) is the exception: the field stays empty,
+            // so saving asks for an account instead of landing on another one.
             const initialAccount =
                 availableAccounts.find(
                     (account) => account.id === duplicateFrom?.account_id,
                 ) ??
-                availableAccounts.find(
-                    (account) => account.id === initialAccountId,
-                ) ??
-                availableAccounts.find(
-                    (account) =>
-                        account.id ===
-                        readStoredValue(STORAGE_KEY_LAST_ACCOUNT),
-                ) ??
-                availableAccounts[0];
+                (initialAccountId
+                    ? availableAccounts.find(
+                          (account) => account.id === initialAccountId,
+                      )
+                    : (availableAccounts.find(
+                          (account) =>
+                              account.id ===
+                              readStoredValue(STORAGE_KEY_LAST_ACCOUNT),
+                      ) ?? availableAccounts[0]));
             setAccountId(initialAccount?.id ?? '');
             defaultAccountId.current = initialAccount?.id ?? '';
             setCurrencyCode(initialAccount?.currency_code ?? userCurrencyCode);

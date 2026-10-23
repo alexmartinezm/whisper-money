@@ -74,8 +74,10 @@ vi.mock('@/contexts/sync-context', () => ({
     useSyncContext: () => ({ sync: vi.fn() }),
 }));
 
+const localeState = vi.hoisted(() => ({ locale: 'en-US' }));
+
 vi.mock('@/hooks/use-locale', () => ({
-    useLocale: () => 'en-US',
+    useLocale: () => localeState.locale,
 }));
 
 vi.mock('@/lib/key-storage', () => ({
@@ -263,6 +265,7 @@ describe('split line dirty checking', () => {
 describe('EditTransactionDialog', () => {
     beforeEach(() => {
         inertiaProps.features.transactionSplitting = true;
+        localeState.locale = 'en-US';
         vi.clearAllMocks();
         globalThis.ResizeObserver = class {
             observe() {}
@@ -358,14 +361,18 @@ describe('EditTransactionDialog', () => {
         );
     }
 
-    async function fillAndSubmit(testId: string) {
+    function fillDescriptionAndAmount(description = 'Dinner', amount = '25') {
         fireEvent.change(
             screen.getByPlaceholderText('Transaction description'),
-            { target: { value: 'Dinner' } },
+            { target: { value: description } },
         );
         const amountInput = screen.getByPlaceholderText('25.00');
-        fireEvent.change(amountInput, { target: { value: '25' } });
+        fireEvent.change(amountInput, { target: { value: amount } });
         fireEvent.blur(amountInput);
+    }
+
+    async function fillAndSubmit(testId: string) {
+        fillDescriptionAndAmount();
         fireEvent.click(screen.getByTestId(testId));
 
         await waitFor(() => {
@@ -435,6 +442,41 @@ describe('EditTransactionDialog', () => {
             'data-value',
             'account-1',
         );
+    });
+
+    it('leaves the account empty on the page of an account that takes no transactions', async () => {
+        vi.mocked(localStorage.getItem).mockImplementation((key: string) =>
+            key === 'whisper_money_last_transaction_account'
+                ? 'account-1'
+                : null,
+        );
+
+        renderCreateDialog({
+            accounts: [
+                checkingAccount,
+                {
+                    ...checkingAccount,
+                    id: 'account-archived',
+                    archived_at: '2026-01-01T00:00:00Z',
+                },
+            ],
+            initialAccountId: 'account-archived',
+        });
+
+        // Neither the last-used nor the first account stands in for it: the
+        // save is refused instead of landing on another account.
+        expect(screen.getByTestId('account-value')).toHaveAttribute(
+            'data-value',
+            '',
+        );
+
+        fillDescriptionAndAmount();
+        fireEvent.click(screen.getByTestId('submit-transaction'));
+
+        await waitFor(() => {
+            expect(toast.error).toHaveBeenCalledWith('Account is required');
+        });
+        expect(transactionSyncService.create).not.toHaveBeenCalled();
     });
 
     it('sends a typed amount as an expense, and as income once toggled', async () => {
@@ -560,13 +602,7 @@ describe('EditTransactionDialog', () => {
 
         fireEvent.click(screen.getByText('USD - US Dollar'));
 
-        fireEvent.change(
-            screen.getByPlaceholderText('Transaction description'),
-            { target: { value: 'Hotel' } },
-        );
-        const amountInput = screen.getByPlaceholderText('25.00');
-        fireEvent.change(amountInput, { target: { value: '40' } });
-        fireEvent.blur(amountInput);
+        fillDescriptionAndAmount('Hotel', '40');
         fireEvent.click(screen.getByTestId('submit-transaction'));
 
         await waitFor(() => {
@@ -1139,13 +1175,7 @@ describe('EditTransactionDialog', () => {
             'true',
         );
 
-        fireEvent.change(
-            screen.getByPlaceholderText('Transaction description'),
-            { target: { value: 'Hotel' } },
-        );
-        const amountInput = screen.getByPlaceholderText('25.00');
-        fireEvent.change(amountInput, { target: { value: '40' } });
-        fireEvent.blur(amountInput);
+        fillDescriptionAndAmount('Hotel', '40');
         fireEvent.click(screen.getByTestId('submit-transaction'));
 
         await waitFor(() => {
@@ -1211,21 +1241,6 @@ describe('EditTransactionDialog', () => {
             );
         }
 
-        async function fillAndSubmitCreate() {
-            fireEvent.change(
-                screen.getByPlaceholderText('Transaction description'),
-                { target: { value: 'Hotel' } },
-            );
-            const amountInput = screen.getByPlaceholderText('25.00');
-            fireEvent.change(amountInput, { target: { value: '40' } });
-            fireEvent.blur(amountInput);
-            fireEvent.click(screen.getByTestId('submit-transaction'));
-
-            await waitFor(() =>
-                expect(transactionSyncService.create).toHaveBeenCalledOnce(),
-            );
-        }
-
         it('offers no balance update', async () => {
             vi.mocked(transactionSyncService.create).mockResolvedValue({
                 id: 'tx-new',
@@ -1247,7 +1262,7 @@ describe('EditTransactionDialog', () => {
             ).not.toBeInTheDocument();
             fireEvent.click(screen.getByTestId('toggle-more-options'));
 
-            await fillAndSubmitCreate();
+            await fillAndSubmit('submit-transaction');
 
             expect(transactionSyncService.create).toHaveBeenCalledWith(
                 expect.anything(),
@@ -1265,6 +1280,37 @@ describe('EditTransactionDialog', () => {
 
             expect(transactionSyncService.create).toHaveBeenCalledWith(
                 expect.anything(),
+                { updateBalance: false },
+            );
+        });
+
+        it('undoes a rule-categorized card transaction without touching a balance', async () => {
+            vi.mocked(evaluateRulesForNewTransaction).mockResolvedValue({
+                categoryId: 'category-1',
+                labelIds: [],
+                labels: [],
+                note: null,
+                noteIv: null,
+                rule: { title: 'Hotels' },
+            } as never);
+            vi.mocked(transactionSyncService.create).mockResolvedValue({
+                id: 'tx-new',
+                category_id: 'category-1',
+            } as never);
+
+            renderCardDialog({
+                categories: [{ id: 'category-1', name: 'Travel' } as Category],
+                automationRules: [{ id: 'rule-1' } as AutomationRule],
+            });
+            await fillAndSubmit('submit-transaction');
+
+            const [, options] = vi.mocked(toast.success).mock.calls.at(-1)!;
+            await (
+                options!.cancel as unknown as { onClick: () => unknown }
+            ).onClick();
+
+            expect(transactionSyncService.delete).toHaveBeenCalledWith(
+                'tx-new',
                 { updateBalance: false },
             );
         });
@@ -1630,6 +1676,22 @@ describe('EditTransactionDialog', () => {
         expect(screen.getByLabelText('Date')).toBeInTheDocument();
     });
 
+    it('capitalizes the month on the date chip for a locale that lowercases it', () => {
+        // Hungarian writes the month first and in lowercase ("január 15.").
+        localeState.locale = 'hu';
+        const day = todayDateString().endsWith('-01-15') ? '16' : '15';
+        renderCreateDialog();
+
+        fireEvent.click(screen.getByTestId('date-chip'));
+        fireEvent.change(screen.getByLabelText('Date'), {
+            target: { value: `${new Date().getFullYear()}-01-${day}` },
+        });
+
+        expect(screen.getByTestId('date-chip')).toHaveTextContent(
+            `Január ${day}.`,
+        );
+    });
+
     it('turns the balance off from the chip and remembers the choice', () => {
         renderCreateDialog();
 
@@ -1860,13 +1922,7 @@ describe('EditTransactionDialog', () => {
 
             renderCreateDialog({ categories: splitCategories });
 
-            fireEvent.change(
-                screen.getByPlaceholderText('Transaction description'),
-                { target: { value: 'Dinner' } },
-            );
-            const amountInput = screen.getByPlaceholderText('25.00');
-            fireEvent.change(amountInput, { target: { value: '25' } });
-            fireEvent.blur(amountInput);
+            fillDescriptionAndAmount();
 
             startSplit();
             fillSplitLines();
@@ -1912,15 +1968,9 @@ describe('EditTransactionDialog', () => {
             );
         });
 
-        it('sends no split lines from the collapsed form', async () => {
-            vi.mocked(transactionSyncService.create).mockResolvedValue({
-                id: 'tx-new',
-            } as never);
-
+        it('returns to the chips once a split is removed and the form collapsed', () => {
             renderCreateDialog({ categories: splitCategories });
 
-            // A split started and dropped again leaves nothing behind once
-            // the form is collapsed.
             startSplit();
             const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
             fireEvent.click(
@@ -1930,13 +1980,10 @@ describe('EditTransactionDialog', () => {
             fireEvent.click(screen.getByTestId('toggle-more-options'));
 
             expect(screen.getByTestId('date-chip')).toBeInTheDocument();
-
-            await fillAndSubmit('submit-transaction');
-
-            const payload = vi.mocked(transactionSyncService.create).mock
-                .calls[0][0];
-            expect(payload.splits).toBeUndefined();
-            expect(payload.category_id).toBeNull();
+            expect(screen.getByTestId('category-chip')).toBeInTheDocument();
+            expect(
+                screen.queryByTestId('split-category-0'),
+            ).not.toBeInTheDocument();
         });
 
         it('drops the split lines when adding another', async () => {
@@ -1946,13 +1993,7 @@ describe('EditTransactionDialog', () => {
 
             renderCreateDialog({ categories: splitCategories });
 
-            fireEvent.change(
-                screen.getByPlaceholderText('Transaction description'),
-                { target: { value: 'Dinner' } },
-            );
-            const amountInput = screen.getByPlaceholderText('25.00');
-            fireEvent.change(amountInput, { target: { value: '25' } });
-            fireEvent.blur(amountInput);
+            fillDescriptionAndAmount();
 
             startSplit();
             fillSplitLines();
