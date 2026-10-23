@@ -147,4 +147,17 @@ describe('EditBudgetDialog', () => {
 
         expect(screen.queryByLabelText('Expense Type')).not.toBeInTheDocument();
     });
+
+    it('does not send an expense type for a catch-all budget', () => {
+        pageProps.current = { features: { cashflowAvailableFree: true } };
+
+        renderDialog(makeBudget({ is_catch_all: true, categories: [] }));
+        fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+        expect(router.patch).toHaveBeenLastCalledWith(
+            '/budgets/budget-1',
+            { name: 'Monthly budget' },
+            expect.any(Object),
+        );
+    });
 });

@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools;
 
+use App\Enums\BudgetExpenseType;
 use App\Enums\BudgetPeriodType;
 use App\Enums\RolloverType;
 use App\Mcp\Tools\Concerns\InteractsWithBudgets;
@@ -32,6 +33,7 @@ class CreateBudget extends WriteTool
             'rollover_type' => $schema->string()->enum(array_column(RolloverType::cases(), 'value'))->description('Carry remaining amount or reset.')->required(),
             'allocated_amount' => $schema->integer()->min(0)->description('Allocation in minor units.')->required(),
             'is_catch_all' => $schema->boolean()->description('Track all otherwise unclaimed expenses.'),
+            'expense_type' => $schema->string()->enum(array_column(BudgetExpenseType::cases(), 'value'))->description(self::EXPENSE_TYPE_DESCRIPTION.' Defaults to variable.'),
             'space' => $schema->string()->description('Space id. Defaults to the personal space.'),
         ];
     }
@@ -49,6 +51,7 @@ class CreateBudget extends WriteTool
             'rollover_type' => ['required', Rule::enum(RolloverType::class)],
             'allocated_amount' => ['required', 'integer', 'min:0'],
             'is_catch_all' => ['sometimes', 'boolean'],
+            'expense_type' => ['sometimes', Rule::enum(BudgetExpenseType::class)],
         ]);
 
         $periodType = $request->enum('period_type', BudgetPeriodType::class);
@@ -65,6 +68,7 @@ class CreateBudget extends WriteTool
                 'period_type' => $periodType->value,
                 'period_start_day' => $periodStartDay,
                 'rollover_type' => $request->enum('rollover_type', RolloverType::class)->value,
+                'expense_type' => $request->enum('expense_type', BudgetExpenseType::class) ?? BudgetExpenseType::Variable,
                 'allocated_amount' => $request->integer('allocated_amount'),
                 'is_catch_all' => $request->boolean('is_catch_all'),
             ],

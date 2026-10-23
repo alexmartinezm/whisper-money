@@ -128,4 +128,24 @@ describe('CreateBudgetDialog', () => {
 
         expect(screen.queryByLabelText('Expense Type')).not.toBeInTheDocument();
     });
+
+    it('sends the default variable expense type with a new budget', () => {
+        enableCashflow();
+        openDialog();
+
+        const dialog = screen.getByRole('dialog');
+        fireEvent.change(within(dialog).getByLabelText('Budget Name'), {
+            target: { value: 'Everything else' },
+        });
+        fireEvent.click(within(dialog).getByLabelText('Catch-all budget'));
+        fireEvent.click(
+            within(dialog).getByRole('button', { name: 'Create Budget' }),
+        );
+
+        expect(post).toHaveBeenLastCalledWith(
+            '/budgets',
+            expect.objectContaining({ expense_type: 'variable' }),
+            expect.any(Object),
+        );
+    });
 });

@@ -13,6 +13,11 @@ use Illuminate\Validation\ValidationException;
 
 trait InteractsWithBudgets
 {
+    /**
+     * How create_budget and update_budget describe `expense_type`.
+     */
+    private const EXPENSE_TYPE_DESCRIPTION = 'Fixed spending repeats at the same amount every period (rent, subscriptions); variable spending can be adjusted (groceries, restaurants). Only the cashflow expense split reads it. A catch-all budget is always variable, whatever is sent.';
+
     protected function budgetFor(User $user, Space $space, string $budgetId): Budget
     {
         $budget = Budget::query()
@@ -94,6 +99,7 @@ trait InteractsWithBudgets
             'period_type' => $budget->period_type->value,
             'period_start_day' => $budget->period_start_day,
             'rollover_type' => $budget->rollover_type->value,
+            'expense_type' => $budget->expense_type->value,
             'is_catch_all' => (bool) $budget->is_catch_all,
             'categories' => $budget->categories
                 ->sortBy(fn (Category $category): string => $category->name.'|'.$category->id)

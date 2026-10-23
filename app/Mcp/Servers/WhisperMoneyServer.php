@@ -83,6 +83,9 @@ themselves.
   and labels. Tracking changes preserve closed-period history and recalculate the
   active period. Cadence, start day and rollover remain immutable. Historical
   assignment may still be processing after creation or a tracking change.
+  Each budget also has an `expense_type`, `fixed` or `variable` (the default),
+  which both tools accept and `update_budget` can change at any time; only the
+  cashflow expense split reads it. A catch-all budget is always `variable`.
 - For monthly budgets, allocation changes use the server application date. A change
   on the first day includes the current period; after that it affects periods whose
   start date is on or after the application date, plus future periods.
