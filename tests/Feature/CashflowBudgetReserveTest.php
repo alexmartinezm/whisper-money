@@ -400,9 +400,9 @@ test('a range reads as a year once it is longer than a quarter', function (strin
  *
  * @param  list<array{0: Category, 1: int}>  $lines
  */
-function splitTransactionOn(object $test, array $lines, ?Label $label = null): Transaction
+function splitTransactionOn(object $test, array $lines, ?Label $label = null, string $date = '2026-10-10'): Transaction
 {
-    $transaction = expenseOn($test, null, array_sum(array_column($lines, 1)), $label);
+    $transaction = expenseOn($test, null, array_sum(array_column($lines, 1)), $label, $date);
 
     foreach (array_values($lines) as $position => [$category, $amount]) {
         TransactionSplit::factory()->create([
@@ -527,4 +527,28 @@ test('the previous period carries the expense split but nothing reserved', funct
         ->and($previous['general_expense'])->toBe(3000)
         ->and($previous['expense'])->toBe(83000)
         ->and($previous)->not->toHaveKeys(['reserved', 'budgets']);
+});
+
+test('the previous period reads a split transaction line by line', function () {
+    $rent = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Expense]);
+    $food = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Expense]);
+    $shopping = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Expense]);
+
+    foreach ([
+        Budget::factory()->monthly()->fixed()->forCategories($rent)->create(['user_id' => $this->user->id]),
+        Budget::factory()->monthly()->forCategories($food)->create(['user_id' => $this->user->id]),
+    ] as $budget) {
+        BudgetPeriod::factory()->create(['budget_id' => $budget->id, 'start_date' => '2026-09-01', 'end_date' => '2026-09-30', 'allocated_amount' => 50000]);
+    }
+
+    splitTransactionOn($this, [[$rent, -60000], [$food, -9000], [$shopping, -2500]], date: '2026-09-05');
+
+    $previous = $this->getJson('/api/cashflow/summary?'.http_build_query(['from' => '2026-10-01', 'to' => '2026-10-31']))
+        ->assertOk()
+        ->json('previous');
+
+    expect($previous['fixed_expense'])->toBe(60000)
+        ->and($previous['variable_expense'])->toBe(9000)
+        ->and($previous['general_expense'])->toBe(2500)
+        ->and($previous['expense'])->toBe(71500);
 });
