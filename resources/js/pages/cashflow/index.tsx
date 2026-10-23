@@ -1,5 +1,6 @@
 import { index as monthlySummary } from '@/actions/App/Http/Controllers/MonthlySummaryController';
 import { BreakdownCard } from '@/components/cashflow/breakdown-card';
+import { MonthlySavingsCashflowCard } from '@/components/cashflow/monthly-savings-cashflow-card';
 import { NetCashflowCard } from '@/components/cashflow/net-cashflow-card';
 import { PeriodNavigation } from '@/components/cashflow/period-navigation';
 import { SavedInvestedCard } from '@/components/cashflow/saved-invested-card';
@@ -208,6 +209,15 @@ export default function CashflowPage() {
                         currency={auth.user.currency_code}
                     />
                 </div>
+
+                {/* Only a month lines up with a monthly goal's target. */}
+                {periodType === 'month' && (
+                    <MonthlySavingsCashflowCard
+                        month={currentDate}
+                        net={showPlaceholders ? null : summary.current.net}
+                        currencyCode={auth.user.currency_code}
+                    />
+                )}
 
                 {/* Trend Chart */}
                 <CashflowTrendChart

@@ -627,6 +627,15 @@ class User extends Authenticatable implements HasLocalePreference, MustVerifyEma
         return $this->setting->notify_on_inactive_no_bank ?? true;
     }
 
+    /**
+     * Where a new monthly savings goal's month-end reminder starts. On unless
+     * the user turned the default off.
+     */
+    public function wantsSavingsGoalRemindersByDefault(): bool
+    {
+        return $this->setting->savings_goal_notify_on_month_end_reminder ?? true;
+    }
+
     public function routeNotificationForMail(?Notification $notification = null): ?string
     {
         if (! $this->canReceiveEmails()) {

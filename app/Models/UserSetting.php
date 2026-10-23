@@ -23,6 +23,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property bool $notify_runway_shortfall
  * @property ?Carbon $runway_alerted_low_on
  * @property bool $notify_price_changes
+ * @property bool $savings_goal_notify_on_month_end_reminder
  */
 class UserSetting extends Model
 {
@@ -43,6 +44,7 @@ class UserSetting extends Model
         'notify_runway_shortfall',
         'runway_alerted_low_on',
         'notify_price_changes',
+        'savings_goal_notify_on_month_end_reminder',
     ];
 
     protected function casts(): array
@@ -60,6 +62,7 @@ class UserSetting extends Model
             'notify_runway_shortfall' => 'boolean',
             'runway_alerted_low_on' => 'date',
             'notify_price_changes' => 'boolean',
+            'savings_goal_notify_on_month_end_reminder' => 'boolean',
         ];
     }
 

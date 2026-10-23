@@ -2,8 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\AccountType;
 use App\Enums\BudgetPeriodType;
-use App\Features\SavingsGoals;
 use App\Http\Requests\ReorderPlanningItemsRequest;
 use App\Http\Requests\StoreBudgetRequest;
 use App\Http\Requests\UpdateBudgetPeriodRequest;
@@ -15,8 +15,11 @@ use App\Models\BudgetPeriod;
 use App\Models\Category;
 use App\Models\Label;
 use App\Models\SavingsGoal;
+use App\Models\User;
 use App\Services\BudgetManagementService;
 use App\Services\BudgetPeriodService;
+use App\Services\SavingsGoals\MonthlySavingsGoalStats;
+use App\Services\SavingsGoals\MonthlySavingsGoalTotals;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\RedirectResponse;
@@ -24,7 +27,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
-use Laravel\Pennant\Feature;
 
 class BudgetController extends Controller
 {
@@ -33,6 +35,8 @@ class BudgetController extends Controller
     public function __construct(
         protected BudgetPeriodService $budgetPeriodService,
         protected BudgetManagementService $budgetManagementService,
+        protected MonthlySavingsGoalStats $monthlySavingsGoals,
+        protected MonthlySavingsGoalTotals $monthlySavingsTotals,
     ) {}
 
     public function index(Request $request): Response
@@ -72,15 +76,56 @@ class BudgetController extends Controller
             ]);
         });
 
-        $savingsGoalsEnabled = Feature::active(SavingsGoals::class);
+        // Both kinds come from one query; each is presented its own way.
+        [$monthlyGoals, $oneOffGoals] = $user->savingsGoals()->listed()->get()
+            ->partition(fn (SavingsGoal $goal): bool => $goal->isMonthly());
+
+        $presentedMonthlyGoals = $this->monthlySavingsGoals->present($monthlyGoals);
 
         return Inertia::render('budgets/index', [
             'budgets' => $budgets,
             'budgetSummary' => $this->buildBudgetSummary($budgets),
-            'savingsGoals' => $savingsGoalsEnabled ? SavingsGoal::withStatsForUser($user) : [],
-            'savingsGoalsEnabled' => $savingsGoalsEnabled,
+            'savingsGoals' => SavingsGoal::withStats($oneOffGoals),
+            'monthlySavingsGoals' => $presentedMonthlyGoals,
+            // Archived goals included, as on the cashflow card and the summary.
+            'monthlySavingsLastMonth' => $this->monthlySavingsTotals->verdicts($presentedMonthlyGoals, today()->subMonthNoOverflow()),
+            // Only when the create dialog asks for them: the savings accounts of
+            // the active space, the same set the server validates the auto-tag
+            // account against, each with the running goal it already feeds.
+            'autoTagAccounts' => Inertia::optional(fn () => $this->autoTagAccounts($user)),
+            // What the create dialog's month-end reminder starts at.
+            'savingsGoalReminderDefault' => $user->wantsSavingsGoalRemindersByDefault(),
             'currencyCode' => $user->currency_code ?? 'USD',
         ]);
+    }
+
+    /**
+     * @return list<array{id: string, name: string, bank: array{name: string}|null, used_by: string|null}>
+     */
+    private function autoTagAccounts(User $user): array
+    {
+        $usedBy = SavingsGoal::query()
+            ->where('user_id', $user->id)
+            ->monthly()
+            ->notArchived()
+            ->whereNotNull('auto_tag_account_id')
+            ->pluck('name', 'auto_tag_account_id');
+
+        return Account::query()
+            ->forSpace($user->activeSpace())
+            ->where('user_id', $user->id)
+            ->where('type', AccountType::Savings->value)
+            ->whereNull('archived_at')
+            ->with('bank:id,name')
+            ->orderBy('name')
+            ->get(['id', 'name', 'bank_id'])
+            ->map(fn (Account $account): array => [
+                'id' => $account->id,
+                'name' => $account->name,
+                'bank' => $account->bank ? ['name' => $account->bank->name] : null,
+                'used_by' => $usedBy->get($account->id),
+            ])
+            ->all();
     }
 
     /**

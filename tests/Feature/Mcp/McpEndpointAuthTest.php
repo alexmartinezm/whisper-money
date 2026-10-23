@@ -114,6 +114,7 @@ it('publishes the clearable arguments as nullable in the schema', function (stri
     ['update_category', 'parent_id'],
     ['update_automation_rule', 'action_category_id'],
     ['update_automation_rule', 'action_note'],
+    ['update_savings_goal', 'target_date'],
 ]);
 
 it('keeps a nullable argument required when the call must carry it', function () {

@@ -2,9 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Enums\LabelColor;
-use App\Enums\LabelSource;
-use App\Features\SavingsGoals;
 use App\Http\Requests\StoreSavingsGoalRequest;
 use App\Http\Requests\SyncSavingsGoalTransactionsRequest;
 use App\Http\Requests\UpdateSavingsGoalRequest;
@@ -15,17 +12,17 @@ use App\Models\Category;
 use App\Models\Label;
 use App\Models\SavingsGoal;
 use App\Models\Transaction;
-use Closure;
+use App\Services\SavingsGoals\MonthlySavingsGoalStats;
+use App\Services\SavingsGoals\SavingsGoalPeriodService;
+use App\Services\SavingsGoals\SavingsGoalService;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Routing\Controllers\HasMiddleware;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Collection;
 use Inertia\Inertia;
 use Inertia\Response;
-use Laravel\Pennant\Feature;
 
-class SavingsGoalController extends Controller implements HasMiddleware
+class SavingsGoalController extends Controller
 {
     use AuthorizesRequests;
 
@@ -48,40 +45,15 @@ class SavingsGoalController extends Controller implements HasMiddleware
      */
     private const TRANSACTION_RELATIONS = ['account.bank', 'category', 'labels'];
 
-    /**
-     * Hide the whole savings-goals surface behind the rollout feature flag.
-     *
-     * @return array<int, Closure>
-     */
-    public static function middleware(): array
-    {
-        return [
-            function (Request $request, Closure $next): mixed {
-                abort_unless(Feature::active(SavingsGoals::class), 404);
-
-                return $next($request);
-            },
-        ];
-    }
+    public function __construct(
+        private SavingsGoalService $goals,
+        private MonthlySavingsGoalStats $monthlyStats,
+        private SavingsGoalPeriodService $periods,
+    ) {}
 
     public function store(StoreSavingsGoalRequest $request): RedirectResponse
     {
-        $goal = DB::transaction(function () use ($request) {
-            $label = $request->user()->labels()->create([
-                'name' => $request->name,
-                'color' => LabelColor::Emerald->value,
-                'source' => LabelSource::SavingsGoal,
-            ]);
-
-            return $request->user()->savingsGoals()->create([
-                'label_id' => $label->id,
-                'name' => $request->name,
-                'target_amount' => $request->target_amount,
-                // Nullable input coerced to 0 cents: the column is NOT NULL.
-                'initial_amount' => $request->integer('initial_amount'),
-                'target_date' => $request->target_date,
-            ]);
-        });
+        $goal = $this->goals->createFromInput($request->user(), $request->validated());
 
         return redirect()->route('savings-goals.show', $goal);
     }
@@ -102,19 +74,15 @@ class SavingsGoalController extends Controller implements HasMiddleware
                 ->get()
             : collect();
 
-        $stats = SavingsGoal::project(
-            $savingsGoal->savedAmountInCents(),
-            $savingsGoal->target_amount,
-            SavingsGoal::effectiveStart($savingsGoal->created_at, $transactions->first()?->transaction_date),
-            $savingsGoal->target_date,
-            $savingsGoal->measuredAt(),
-            $savingsGoal->initial_amount,
-        );
+        $isMonthly = $savingsGoal->isMonthly();
 
         return Inertia::render('savings-goals/show', [
             'savingsGoal' => $savingsGoal,
             'transactions' => $transactions->values(),
-            'stats' => $stats,
+            // A monthly goal is read month by month; the one-off projection
+            // towards a total means nothing for it.
+            'stats' => $isMonthly ? null : $this->oneOffStats($savingsGoal, $transactions),
+            'monthly' => $isMonthly ? $this->monthlyStats->forGoal($savingsGoal) : null,
             'categories' => Category::query()
                 ->where('user_id', $user->id)
                 ->forDisplay()
@@ -147,6 +115,24 @@ class SavingsGoalController extends Controller implements HasMiddleware
                 ->limit($this->recentTransactionsLimit($request))
                 ->get()),
         ]);
+    }
+
+    /**
+     * Progress and projection of a one-off goal towards its total.
+     *
+     * @param  Collection<int, Transaction>  $transactions  its tagged transactions, oldest first
+     * @return array<string, mixed>
+     */
+    private function oneOffStats(SavingsGoal $savingsGoal, Collection $transactions): array
+    {
+        return SavingsGoal::project(
+            $savingsGoal->savedAmountInCents(),
+            $savingsGoal->target_amount,
+            SavingsGoal::effectiveStart($savingsGoal->created_at, $transactions->first()?->transaction_date),
+            $savingsGoal->target_date,
+            $savingsGoal->measuredAt(),
+            $savingsGoal->initial_amount,
+        );
     }
 
     /**
@@ -187,6 +173,11 @@ class SavingsGoalController extends Controller implements HasMiddleware
 
         $changes = $label->transactions()->sync($ids);
 
+        // A write, so the months a read only showed are persisted here too.
+        if ($savingsGoal->isMonthly() && ! $savingsGoal->isArchived()) {
+            $this->periods->advance($savingsGoal);
+        }
+
         $touched = array_merge($changes['attached'], $changes['detached']);
 
         if ($touched !== []) {
@@ -205,44 +196,19 @@ class SavingsGoalController extends Controller implements HasMiddleware
     {
         $this->authorize('update', $savingsGoal);
 
-        DB::transaction(function () use ($request, $savingsGoal) {
-            $savingsGoal->update($request->only(['name', 'target_amount', 'initial_amount', 'target_date']));
-
-            if ($request->has('name') && $savingsGoal->label) {
-                $savingsGoal->label->update(['name' => $request->name]);
-            }
-        });
+        $this->goals->update($savingsGoal, $request->safe()->except('kind'));
 
         return redirect()->route('savings-goals.show', $savingsGoal);
     }
 
     /**
-     * Archiving is one-way and freezes the goal.
-     *
-     * Its label goes with it — the goal is done, so the label must never be
-     * pickable again, and soft-deleting it takes it out of every picker at once
-     * through the global scope. That also means the saved amount can no longer
-     * be derived (the sum would collapse to the starting balance, and re-tagging
-     * one of those transactions later would move a final figure), so it is
-     * snapshotted here. Both writes and the archive date share one transaction:
-     * a goal that is half-archived has no meaning.
+     * Archiving is one-way and freezes the goal; see SavingsGoalService::archive().
      */
     public function archive(Request $request, SavingsGoal $savingsGoal): RedirectResponse
     {
         $this->authorize('archive', $savingsGoal);
 
-        DB::transaction(function () use ($savingsGoal) {
-            // Read before the archive date is written: savedAmountInCents()
-            // switches to the snapshot the moment the goal counts as archived.
-            $saved = $savingsGoal->savedAmountInCents();
-
-            $savingsGoal->update([
-                'archived_at' => now(),
-                'archived_saved_amount' => $saved,
-            ]);
-
-            $savingsGoal->label?->delete();
-        });
+        $this->goals->archive($savingsGoal);
 
         // Named route, not back(): see syncTransactions — the previous-url
         // redirect resolves to the app's internal host behind a proxy.
@@ -253,10 +219,7 @@ class SavingsGoalController extends Controller implements HasMiddleware
     {
         $this->authorize('delete', $savingsGoal);
 
-        DB::transaction(function () use ($savingsGoal) {
-            $savingsGoal->label?->delete();
-            $savingsGoal->delete();
-        });
+        $this->goals->delete($savingsGoal);
 
         return redirect()->route('budgets.index');
     }

@@ -9,6 +9,7 @@ use App\Mcp\Tools\CreateBalance;
 use App\Mcp\Tools\CreateBudget;
 use App\Mcp\Tools\CreateCategory;
 use App\Mcp\Tools\CreateLabel;
+use App\Mcp\Tools\CreateSavingsGoal;
 use App\Mcp\Tools\CreateTransaction;
 use App\Mcp\Tools\DeleteAutomationRule;
 use App\Mcp\Tools\DeleteBalance;
@@ -27,6 +28,7 @@ use App\Mcp\Tools\ListBudgets;
 use App\Mcp\Tools\ListCategories;
 use App\Mcp\Tools\ListLabels;
 use App\Mcp\Tools\ListRecurringSeries;
+use App\Mcp\Tools\ListSavingsGoals;
 use App\Mcp\Tools\ListSpaces;
 use App\Mcp\Tools\SearchTransactions;
 use App\Mcp\Tools\SpendingByCategory;
@@ -37,6 +39,7 @@ use App\Mcp\Tools\UpdateBudget;
 use App\Mcp\Tools\UpdateBudgetPeriod;
 use App\Mcp\Tools\UpdateCategory;
 use App\Mcp\Tools\UpdateLabel;
+use App\Mcp\Tools\UpdateSavingsGoal;
 use App\Mcp\Tools\UpdateTransaction;
 use Laravel\Mcp\Server;
 use Laravel\Mcp\Server\Attributes\Instructions;
@@ -59,8 +62,9 @@ themselves.
 
 - All amounts are integers in minor units (cents). Divide by 100 for a display value.
 - Data is organised into "spaces" (the personal space and any shared spaces).
-  Transaction, account, category, label, budget, balance and automation-rule tools accept an
-  optional `space` id and default to the personal space; call `list_spaces` to discover ids.
+  Transaction, account, category, label, budget, balance, automation-rule and savings goal
+  tools accept an optional `space` id and default to the personal space; call
+  `list_spaces` to discover ids.
   `get_cashflow`, `get_net_worth` and `spending_by_category` are the exception: they take no
   `space` and aggregate every space the user has, with no way to narrow them to one. Never
   present their figures next to a space-filtered total as if the two were comparable — the
@@ -89,6 +93,28 @@ themselves.
   allocation change through `update_budget` keeps one-off amounts and only moves their
   regular allocation; `update_budget_period` with `reset: true` puts a period back on
   the regular allocation.
+- A savings goal is tracked through a label: its contributions are the
+  transactions tagged with it. A `one_off` goal saves towards a total, optionally
+  by a date, and `list_savings_goals` reports its `progress`. A `monthly` goal
+  starts over every calendar month with a target that is either a fixed `amount`
+  or an `income_rate`, a share of the average income of the three previous
+  complete months, frozen when the month opens. Each month is judged against its
+  own target: `monthly.history` lists every month since the goal was created
+  with its `target`, `saved`, signed `difference` and `status` (`met`, `missed`,
+  `in_progress`, `partial` or `archived`); nothing carries over between months,
+  and a transaction tagged late recalculates the month it belongs to. A
+  `partial` month (the goal was created in the month's last 5 days) and an
+  `archived` one (the goal was archived during it) show what was saved but
+  have no verdict: they are left out of `months_met`, `months_closed`, the
+  streaks and `cumulative_difference`, so never report them as met or missed.
+  A savings account can feed only one running monthly goal's auto-tag rule. A goal's kind is fixed, and
+  editing a monthly target only changes the month in progress and later ones.
+  A transaction counts towards a goal once it carries the goal's `label_id`
+  (`label_transaction`). `create_savings_goal` can also add an automation rule
+  that tags incoming transfers to one of the user's savings accounts
+  (`auto_tag_account_id`), including the ones already there since the start of
+  the month; the response reports the rule and how many it tagged. Archiving
+  and deleting a goal happen in the app only.
 - Recurring charges (subscriptions, bills, standing payments) are detected server-side
   on a schedule. Read them with `list_recurring_series` instead of grouping
   `search_transactions` results by merchant and cadence yourself. Expected amounts are
@@ -184,6 +210,7 @@ class WhisperMoneyServer extends Server
         ListCategories::class,
         ListLabels::class,
         ListRecurringSeries::class,
+        ListSavingsGoals::class,
         ListSpaces::class,
 
         // Write
@@ -210,5 +237,7 @@ class WhisperMoneyServer extends Server
         UpdateBudget::class,
         UpdateBudgetPeriod::class,
         DeleteBudget::class,
+        CreateSavingsGoal::class,
+        UpdateSavingsGoal::class,
     ];
 }

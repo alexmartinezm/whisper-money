@@ -13,7 +13,6 @@
 use App\Enums\AccountType;
 use App\Enums\CategoryType;
 use App\Enums\TransactionSource;
-use App\Features\SavingsGoals;
 use App\Features\TransactionSplitting;
 use App\Models\Account;
 use App\Models\Budget;
@@ -40,7 +39,6 @@ function syncWorld(): array
     fakeCurrencyApi();
 
     $user = User::factory()->onboarded()->create(['currency_code' => 'EUR']);
-    Feature::for($user)->activate(SavingsGoals::class);
     Feature::for($user)->activate(TransactionSplitting::class);
 
     $space = $user->personalSpace;

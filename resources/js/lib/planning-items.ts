@@ -45,21 +45,14 @@ export function planningAttentionTier(item: PlanningItem): number {
  *
  * A dragged item carries a `position` and wins outright. Everything still at
  * null — a list nobody has ever reordered, or an item created after the last
- * drag — sorts after those, by attention and then by the chosen tiebreak.
- *
- * With both types on the list that tiebreak is the name: sorting by name rather
- * than by type is what keeps the two kinds interleaved; grouping the leftovers
- * by type would just rebuild the two sections this list replaced.
- *
- * With budgets alone there is nothing to interleave, so the list keeps the
- * allocation ordering it had before savings goals existed: the biggest budget
- * leads, and a budget with no active period sinks to the bottom.
+ * drag — sorts after those, by attention and then by name. Sorting by name
+ * rather than by type is what keeps the two kinds interleaved; grouping the
+ * leftovers by type would just rebuild the two sections this list replaced.
  */
 export function mergePlanningItems(
     budgets: Budget[],
     savingsGoals: SavingsGoal[],
     locale?: string,
-    tiebreak: 'name' | 'allocation' = 'name',
 ): PlanningItem[] {
     const items: PlanningItem[] = [
         ...budgets.map(
@@ -92,35 +85,8 @@ export function mergePlanningItems(
 
         const byTier = planningAttentionTier(a) - planningAttentionTier(b);
 
-        if (byTier !== 0) {
-            return byTier;
-        }
-
-        if (tiebreak === 'allocation') {
-            const byAllocation = allocationOf(b) - allocationOf(a);
-
-            if (byAllocation !== 0) {
-                return byAllocation;
-            }
-        }
-
-        return a.name.localeCompare(b.name, locale);
+        return byTier !== 0 ? byTier : a.name.localeCompare(b.name, locale);
     });
-}
-
-/**
- * A budget's active allocation, or -1 when it has no active period so those
- * sink below every budget that has one. Goals report 0 and fall through to the
- * name, which only matters if a goal ever reaches this branch.
- */
-function allocationOf(item: PlanningItem): number {
-    if (item.type !== 'budget') {
-        return 0;
-    }
-
-    const period = item.budget.periods?.[0];
-
-    return period ? period.allocated_amount : -1;
 }
 
 /**

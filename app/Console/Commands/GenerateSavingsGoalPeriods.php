@@ -1,0 +1,58 @@
+<?php
+
+namespace App\Console\Commands;
+
+use App\Models\SavingsGoal;
+use App\Models\User;
+use App\Services\SavingsGoals\MonthlySavingsGoalNotifier;
+use App\Services\SavingsGoals\SavingsGoalPeriodService;
+use Illuminate\Console\Command;
+use Throwable;
+
+class GenerateSavingsGoalPeriods extends Command
+{
+    protected $signature = 'savings-goals:generate-periods';
+
+    protected $description = 'Open the current month of every monthly savings goal, close the months that are over and send the month-end reminders';
+
+    public function __construct(
+        protected SavingsGoalPeriodService $periods,
+        protected MonthlySavingsGoalNotifier $notifier,
+    ) {
+        parent::__construct();
+    }
+
+    public function handle(): int
+    {
+        $closedCount = 0;
+
+        // Archived goals stopped counting, so they get no further months.
+        $goals = SavingsGoal::query()->monthly()->notArchived()->with('user')->lazyById();
+
+        foreach ($goals as $goal) {
+            // One goal that fails must not hold back everybody else's months.
+            try {
+                $closedCount += $this->periods->advance($goal)->count();
+            } catch (Throwable $exception) {
+                report($exception);
+            }
+        }
+
+        // One reminder per user, listing every goal of theirs that is behind.
+        $users = User::query()
+            ->whereIn('id', SavingsGoal::query()->monthly()->notArchived()->select('user_id'))
+            ->lazyById();
+
+        foreach ($users as $user) {
+            try {
+                $this->notifier->remind($user);
+            } catch (Throwable $exception) {
+                report($exception);
+            }
+        }
+
+        $this->info("Closed {$closedCount} monthly savings goal periods");
+
+        return Command::SUCCESS;
+    }
+}
