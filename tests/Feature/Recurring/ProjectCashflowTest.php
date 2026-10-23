@@ -20,7 +20,7 @@ beforeEach(function () {
 });
 
 /** An account holding a known balance as of today. */
-function accountWithBalance(
+function projectedAccountWithBalance(
     User $user,
     int $balance,
     AccountType $type = AccountType::Checking,
@@ -46,7 +46,7 @@ function accountWithBalance(
 }
 
 it('walks today balance forward through the expected charges', function () {
-    accountWithBalance($this->user, 100000);
+    projectedAccountWithBalance($this->user, 100000);
 
     RecurringSeries::factory()->create([
         'user_id' => $this->user->id,
@@ -69,7 +69,7 @@ it('walks today balance forward through the expected charges', function () {
 
 it('counts a weekly charge every time it lands in the window', function () {
     // The old list showed one row per series; a weekly fee hits four times.
-    accountWithBalance($this->user, 50000);
+    projectedAccountWithBalance($this->user, 50000);
 
     RecurringSeries::factory()->cadence(RecurringCadence::Weekly)->create([
         'user_id' => $this->user->id,
@@ -87,7 +87,7 @@ it('counts a weekly charge every time it lands in the window', function () {
 });
 
 it('reports the lowest point, not just the ending balance', function () {
-    accountWithBalance($this->user, 10000);
+    projectedAccountWithBalance($this->user, 10000);
 
     RecurringSeries::factory()->create([
         'user_id' => $this->user->id,
@@ -117,13 +117,13 @@ it('reports the lowest point, not just the ending balance', function () {
 it('counts only the accounts a direct debit can come out of', function () {
     // A runway is about liquidity, not wealth: a flat cannot pay Netflix, and
     // a mortgage would drag the figure below zero every day of the year.
-    accountWithBalance($this->user, 30000, AccountType::Checking);
-    accountWithBalance($this->user, 20000, AccountType::Savings);
-    accountWithBalance($this->user, 5000, AccountType::Others);
-    accountWithBalance($this->user, 500000, AccountType::Investment, 'EUR', true, true);
-    accountWithBalance($this->user, 900000, AccountType::RealEstate);
-    accountWithBalance($this->user, 100000, AccountType::Loan);
-    accountWithBalance($this->user, 400000, AccountType::CreditCard);
+    projectedAccountWithBalance($this->user, 30000, AccountType::Checking);
+    projectedAccountWithBalance($this->user, 20000, AccountType::Savings);
+    projectedAccountWithBalance($this->user, 5000, AccountType::Others);
+    projectedAccountWithBalance($this->user, 500000, AccountType::Investment, 'EUR', true, true);
+    projectedAccountWithBalance($this->user, 900000, AccountType::RealEstate);
+    projectedAccountWithBalance($this->user, 100000, AccountType::Loan);
+    projectedAccountWithBalance($this->user, 400000, AccountType::CreditCard);
 
     RecurringSeries::factory()->create([
         'user_id' => $this->user->id,
@@ -137,7 +137,7 @@ it('counts only the accounts a direct debit can come out of', function () {
 });
 
 it('does not count a spendable account left out of net worth', function () {
-    accountWithBalance($this->user, 40000, AccountType::Checking, 'EUR', false);
+    projectedAccountWithBalance($this->user, 40000, AccountType::Checking, 'EUR', false);
 
     $forecast = $this->project->forUser($this->user, 30);
 
@@ -149,8 +149,8 @@ it('does not count a spendable account left out of net worth', function () {
 });
 
 it('does not call an excluded property a held-back spendable account', function () {
-    accountWithBalance($this->user, 900000, AccountType::RealEstate, 'EUR', false);
-    accountWithBalance($this->user, 500000, AccountType::Investment, 'EUR', false);
+    projectedAccountWithBalance($this->user, 900000, AccountType::RealEstate, 'EUR', false);
+    projectedAccountWithBalance($this->user, 500000, AccountType::Investment, 'EUR', false);
 
     // A flat was never going to pay a direct debit, so excluding it changes
     // nothing about the runway and is not worth mentioning.
@@ -159,8 +159,8 @@ it('does not call an excluded property a held-back spendable account', function 
 
 it('names the accounts behind the figure', function () {
     // "It does not match my accounts" is answered by saying which ones count.
-    $checking = accountWithBalance($this->user, 30000, AccountType::Checking);
-    accountWithBalance($this->user, 900000, AccountType::RealEstate);
+    $checking = projectedAccountWithBalance($this->user, 30000, AccountType::Checking);
+    projectedAccountWithBalance($this->user, 900000, AccountType::RealEstate);
 
     $forecast = $this->project->forUser($this->user, 30);
 
@@ -171,8 +171,8 @@ it('names the accounts behind the figure', function () {
 });
 
 it('converts a second currency instead of dropping it', function () {
-    accountWithBalance($this->user, 100000);
-    accountWithBalance($this->user, 100000, AccountType::Checking, 'USD');
+    projectedAccountWithBalance($this->user, 100000);
+    projectedAccountWithBalance($this->user, 100000, AccountType::Checking, 'USD');
 
     RecurringSeries::factory()->create([
         'user_id' => $this->user->id,
@@ -199,7 +199,7 @@ it('converts a second currency instead of dropping it', function () {
 });
 
 it('ignores dismissed and lapsed series', function () {
-    accountWithBalance($this->user, 100000);
+    projectedAccountWithBalance($this->user, 100000);
 
     RecurringSeries::factory()->ignored()->create([
         'user_id' => $this->user->id,
@@ -221,7 +221,7 @@ it('ignores dismissed and lapsed series', function () {
 
 it('rolls a stale expected date forward instead of reporting a past charge', function () {
     // Detection runs daily, so a series can be a few days out of date.
-    accountWithBalance($this->user, 100000);
+    projectedAccountWithBalance($this->user, 100000);
 
     RecurringSeries::factory()->create([
         'user_id' => $this->user->id,
@@ -249,7 +249,7 @@ it('copes with a user who has no accounts', function () {
 
 it('surfaces a quarterly charge that never lands inside the window', function () {
     // The gap this list exists for: detected, but shown against no date before.
-    accountWithBalance($this->user, 100000);
+    projectedAccountWithBalance($this->user, 100000);
 
     RecurringSeries::factory()->cadence(RecurringCadence::Quarterly)->create([
         'user_id' => $this->user->id,
@@ -277,7 +277,7 @@ it('surfaces a quarterly charge that never lands inside the window', function ()
 it('leaves out anything already billing every month', function () {
     // Twelve months of Netflix, Spotify and the gym would bury the one premium
     // this list exists for, and the projection above already shows them.
-    accountWithBalance($this->user, 100000);
+    projectedAccountWithBalance($this->user, 100000);
 
     RecurringSeries::factory()->cadence(RecurringCadence::Monthly)->create([
         'user_id' => $this->user->id,
@@ -303,7 +303,7 @@ it('leaves out anything already billing every month', function () {
 });
 
 it('keeps calendar-monthly charges out of the later outlook when their gaps exceed 31 days', function () {
-    accountWithBalance($this->user, 100000);
+    projectedAccountWithBalance($this->user, 100000);
 
     RecurringSeries::factory()->create([
         'user_id' => $this->user->id,
@@ -319,7 +319,7 @@ it('keeps calendar-monthly charges out of the later outlook when their gaps exce
 });
 
 it('lists only the months that have something due', function () {
-    accountWithBalance($this->user, 100000);
+    projectedAccountWithBalance($this->user, 100000);
 
     RecurringSeries::factory()->cadence(RecurringCadence::Yearly)->create([
         'user_id' => $this->user->id,
@@ -335,7 +335,7 @@ it('lists only the months that have something due', function () {
 });
 
 it('orders the charges by the day they land', function () {
-    accountWithBalance($this->user, 100000);
+    projectedAccountWithBalance($this->user, 100000);
 
     foreach ([['Later', 58], ['Sooner', 40], ['Middle', 50]] as [$name, $offset]) {
         RecurringSeries::factory()->cadence(RecurringCadence::Yearly)->create([
@@ -358,7 +358,7 @@ it('orders the charges by the day they land', function () {
 });
 
 it('keeps the outlook clear of the projection window', function () {
-    accountWithBalance($this->user, 100000);
+    projectedAccountWithBalance($this->user, 100000);
     $nextExpected = CarbonImmutable::today()->addDays(5);
 
     RecurringSeries::factory()->cadence(RecurringCadence::Quarterly)->create([
@@ -383,7 +383,7 @@ it('keeps the outlook clear of the projection window', function () {
 });
 
 it('totals a month rather than restating a lone charge', function () {
-    accountWithBalance($this->user, 100000);
+    projectedAccountWithBalance($this->user, 100000);
 
     // Anchored to a month start so both charges are guaranteed the same month.
     $monthStart = CarbonImmutable::today()->addDays(60)->startOfMonth();
@@ -405,7 +405,7 @@ it('totals a month rather than restating a lone charge', function () {
 });
 
 it('walks the window again with everyday spending in it', function () {
-    $account = accountWithBalance($this->user, 300000);
+    $account = projectedAccountWithBalance($this->user, 300000);
     $groceries = Category::factory()->create([
         'user_id' => $this->user->id,
         'type' => CategoryType::Expense,
@@ -442,7 +442,7 @@ it('walks the window again with everyday spending in it', function () {
 });
 
 it('warns on the estimate, where the dip actually happens', function () {
-    $account = accountWithBalance($this->user, 50000);
+    $account = projectedAccountWithBalance($this->user, 50000);
     $groceries = Category::factory()->create([
         'user_id' => $this->user->id,
         'type' => CategoryType::Expense,
@@ -471,7 +471,7 @@ it('warns on the estimate, where the dip actually happens', function () {
 });
 
 it('stays quiet about spending it cannot measure', function () {
-    accountWithBalance($this->user, 100000);
+    projectedAccountWithBalance($this->user, 100000);
 
     RecurringSeries::factory()->create([
         'user_id' => $this->user->id,
@@ -485,7 +485,7 @@ it('stays quiet about spending it cannot measure', function () {
 });
 
 it('leaves money moving between your own accounts out of the runway', function () {
-    $current = accountWithBalance($this->user, 100000);
+    $current = projectedAccountWithBalance($this->user, 100000);
     $transfers = Category::factory()->create([
         'user_id' => $this->user->id,
         'type' => CategoryType::Transfer,
@@ -510,10 +510,10 @@ it('leaves money moving between your own accounts out of the runway', function (
 });
 
 it('does not count an inflow to an account the balance leaves out', function () {
-    $current = accountWithBalance($this->user, 100000);
+    $current = projectedAccountWithBalance($this->user, 100000);
     // Outside the starting balance, so its charges cannot move the projected
     // one either — counting only one side is what made the runway read rich.
-    $excluded = accountWithBalance($this->user, 50000, includeInNetWorth: false);
+    $excluded = projectedAccountWithBalance($this->user, 50000, includeInNetWorth: false);
 
     RecurringSeries::factory()->create([
         'user_id' => $this->user->id,
@@ -546,7 +546,7 @@ it('does not count an inflow to an account the balance leaves out', function () 
 it('still walks a series that has no account', function () {
     // Rows written before the account was recorded cannot be shown to sit
     // outside the balance, and dropping them would flatter the runway.
-    accountWithBalance($this->user, 100000);
+    projectedAccountWithBalance($this->user, 100000);
 
     RecurringSeries::factory()->create([
         'user_id' => $this->user->id,
@@ -564,7 +564,7 @@ it('keeps counting a savings contribution, which does leave the account', functi
     // Internal in the sense that the money is not gone, but it is gone from
     // here, and net-worth projection needs it in the forecast to report it as a
     // contribution rather than as spending.
-    $current = accountWithBalance($this->user, 100000);
+    $current = projectedAccountWithBalance($this->user, 100000);
     $savings = Category::factory()->create([
         'user_id' => $this->user->id,
         'type' => CategoryType::Savings,
