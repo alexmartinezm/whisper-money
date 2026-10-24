@@ -28,6 +28,7 @@ const entry: ImportHistoryEntry = {
     summary: {
         accounts: [{ name: 'Wise', transactions: 12 }],
         categories: 2,
+        categories_kept: 0,
         transactions: 15,
         balances: 4,
         later_transactions: 3,
@@ -36,10 +37,10 @@ const entry: ImportHistoryEntry = {
     },
 };
 
-function renderDialog(onOpenChange = vi.fn()) {
+function renderDialog(onOpenChange = vi.fn(), shown = entry) {
     render(
         <UndoImportDialog
-            entry={entry}
+            entry={shown}
             open
             onOpenChange={onOpenChange}
             locale="en-US"
@@ -81,6 +82,41 @@ describe('UndoImportDialog', () => {
         expect(
             screen.getByText(
                 'Revolut (Banktrack) is now connected to your bank, so it stays; only the imported transactions are removed.',
+            ),
+        ).toBeInTheDocument();
+    });
+
+    // Undo keeps the imported categories split lines still use, so the
+    // dialog must not promise to remove them.
+    it('counts apart the imported categories undo keeps for split lines', () => {
+        renderDialog(vi.fn(), {
+            ...entry,
+            summary: { ...entry.summary!, categories: 3, categories_kept: 2 },
+        });
+
+        expect(screen.getByText('1 new category')).toBeInTheDocument();
+        expect(
+            screen.getByText(
+                '2 imported categories stay, because split transactions use them.',
+            ),
+        ).toBeInTheDocument();
+    });
+
+    it('promises no category removal when undo keeps them all', () => {
+        renderDialog(vi.fn(), {
+            ...entry,
+            summary: { ...entry.summary!, categories: 1, categories_kept: 1 },
+        });
+
+        expect(screen.queryByText(/new categor/)).not.toBeInTheDocument();
+        expect(
+            screen.queryByText(
+                'Subcategories you created under the imported categories are removed too.',
+            ),
+        ).not.toBeInTheDocument();
+        expect(
+            screen.getByText(
+                '1 imported category stays, because split transactions use it.',
             ),
         ).toBeInTheDocument();
     });

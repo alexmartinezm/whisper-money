@@ -24,7 +24,10 @@ class ImportHistoryPresenter
     /** The history Settings lists: enough to recognise an import, not every one ever made. */
     private const HISTORY_LIMIT = 20;
 
-    public function __construct(private AiCategorizationGate $gate) {}
+    public function __construct(
+        private AiCategorizationGate $gate,
+        private ImportUndoer $undoer,
+    ) {}
 
     /**
      * @return array<string, mixed>
@@ -175,6 +178,8 @@ class ImportHistoryPresenter
             ])->values()->all(),
             'connected_accounts' => $connected->map(fn (Account $account): array => ['name' => $account->name])->values()->all(),
             'categories' => $import->categories()->count(),
+            // Of those, the ones split lines still use: undo keeps them.
+            'categories_kept' => $this->undoer->categoriesKeptForSplits($import),
             'transactions' => $import->transactions()->count(),
             'balances' => $import->balances()->count(),
             'into_own_accounts' => $this->ownAccountLines($intoOwn),

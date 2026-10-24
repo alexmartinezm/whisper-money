@@ -276,6 +276,11 @@ export interface ImportStatus {
 export interface ImportUndoSummary {
     accounts: { name: string; transactions: number }[];
     categories: number;
+    /**
+     * Of `categories`, the ones split lines still use: undo keeps them (and
+     * the imported ones above them) instead of removing them.
+     */
+    categories_kept: number;
     transactions: number;
     balances: number;
     /**

@@ -3291,6 +3291,8 @@
     "1 transaction added to these accounts afterwards (by hand or by another import) is deleted too.": "También se borrará 1 transacción añadida después a estas cuentas (a mano o con otra importación).",
     ":count transactions added to these accounts afterwards (by hand or by another import) are deleted too.": "También se borrarán :count transacciones añadidas después a estas cuentas (a mano o con otra importación).",
     "Subcategories you created under the imported categories are removed too.": "Las subcategorías que creaste dentro de las categorías importadas también se quitan.",
+    "1 imported category stays, because split transactions use it.": "1 categoría importada se queda, porque la usan transacciones divididas.",
+    ":count imported categories stay, because split transactions use them.": ":count categorías importadas se quedan, porque las usan transacciones divididas.",
     "The import could not be undone. Try again.": "No se pudo deshacer la importación. Inténtalo de nuevo.",
     "Undo the :source import?": "¿Deshacer la importación de :source?",
     "We delete everything it created on :date:": "Borraremos todo lo que creó el :date:",

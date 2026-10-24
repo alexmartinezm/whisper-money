@@ -45,6 +45,9 @@ function SummaryList({
         return null;
     }
 
+    const keptCategories = summary.categories_kept ?? 0;
+    const removedCategories = Math.max(0, summary.categories - keptCategories);
+
     return (
         <>
             <ul className="flex list-disc flex-col gap-1 pl-5 text-foreground">
@@ -64,13 +67,13 @@ function SummaryList({
                         )}
                     </li>
                 )}
-                {summary.categories > 0 && (
+                {removedCategories > 0 && (
                     <li>
                         {countLabel(
-                            summary.categories,
+                            removedCategories,
                             __('1 new category'),
                             __(':count new categories', {
-                                count: summary.categories,
+                                count: removedCategories,
                             }),
                         )}
                     </li>
@@ -124,10 +127,24 @@ function SummaryList({
                     )}
                 </span>
             )}
-            {summary.categories > 0 && (
+            {removedCategories > 0 && (
                 <span>
                     {__(
                         'Subcategories you created under the imported categories are removed too.',
+                    )}
+                </span>
+            )}
+            {keptCategories > 0 && (
+                <span>
+                    {countLabel(
+                        keptCategories,
+                        __(
+                            '1 imported category stays, because split transactions use it.',
+                        ),
+                        __(
+                            ':count imported categories stay, because split transactions use them.',
+                            { count: keptCategories },
+                        ),
                     )}
                 </span>
             )}

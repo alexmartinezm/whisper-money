@@ -115,6 +115,43 @@ it('keeps the imported categories a split line still files money into, with the 
         ->and($ownRow->splits()->pluck('category_id')->all())->toContain($gastos->id);
 });
 
+it('tells the history how many imported categories undo keeps for split lines', function () {
+    $user = Fixtures::user();
+    $own = Account::factory()->create(['user_id' => $user->id, 'name' => 'BBVA', 'type' => AccountType::Checking, 'currency_code' => 'EUR']);
+    $ownRow = Transaction::factory()->create(['user_id' => $user->id, 'account_id' => $own->id, 'amount' => -1000, 'description' => 'Mine']);
+
+    $import = Fixtures::run($this, $user, Fixtures::plan(
+        accounts: [Fixtures::newAccount('a0', 'Wise')],
+        categories: [
+            ['key' => 'c0', 'action' => 'create', 'name' => 'Empresa', 'type' => 'expense', 'icon' => 'Wallet', 'color' => 'blue'],
+            ['key' => 'c1', 'action' => 'create', 'name' => 'Gastos Empresa', 'parent_key' => 'c0', 'icon' => 'Wallet', 'color' => 'blue'],
+            ['key' => 'c2', 'action' => 'create', 'name' => 'Ocio', 'type' => 'expense', 'icon' => 'Wallet', 'color' => 'blue'],
+        ],
+    ), [
+        Fixtures::row('a0', '2026-09-02', -200, 'Cinema', ['category_key' => 'c2']),
+    ]);
+
+    // A line of the user's own movement keeps "Gastos Empresa" and its
+    // parent. A line of an imported movement goes with it, so "Ocio" does not stay.
+    $ownRow->splits()->createMany([
+        ['category_id' => Category::query()->where('name', 'Gastos Empresa')->value('id'), 'amount' => -600, 'position' => 0],
+        ['category_id' => Fixtures::seeded($user, 'Groceries')->id, 'amount' => -400, 'position' => 1],
+    ]);
+    Transaction::query()->where('import_id', $import->id)->sole()->splits()->create([
+        'category_id' => Category::query()->where('name', 'Ocio')->value('id'), 'amount' => -200, 'position' => 0,
+    ]);
+
+    $this->actingAs($user)->get(route('full-import.index'))
+        ->assertInertia(fn ($page) => $page
+            ->where('imports.0.summary.categories', 3)
+            ->where('imports.0.summary.categories_kept', 2));
+
+    $this->delete(route('full-import.destroy', $import))->assertSessionHas('success');
+
+    expect(Category::query()->whereIn('name', ['Empresa', 'Gastos Empresa'])->count())->toBe(2)
+        ->and(Category::query()->where('name', 'Ocio')->exists())->toBeFalse();
+});
+
 it('lists what undoing would remove', function () {
     $user = Fixtures::user();
     $own = Account::factory()->create(['user_id' => $user->id, 'name' => 'BBVA', 'type' => AccountType::Checking, 'currency_code' => 'EUR']);

@@ -12,6 +12,7 @@ use App\Models\Transaction;
 use App\Models\TransactionSplit;
 use App\Services\CategoryTree;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Facades\Log;
@@ -111,10 +112,25 @@ class ImportUndoer
     }
 
     /**
+     * How many of the categories the import created an undo now would keep
+     * because split lines use them, for the undo dialog to say so instead of
+     * promising to remove them.
+     */
+    public function categoriesKeptForSplits(Import $import): int
+    {
+        return count($this->categoriesHoldingSplitLines(
+            $import,
+            Category::query()->where('import_id', $import->id)->get(),
+        ));
+    }
+
+    /**
      * The categories of the import that must stay because a split line files
      * money into them or into a category below them (the line's category and
-     * every ancestor of it, as far as the import created them). The import's
-     * own rows are already gone by now, and their lines with them.
+     * every ancestor of it, as far as the import created them). Lines on
+     * rows the undo deletes do not count: the import's own rows and those on
+     * the accounts it created and deletes. During the undo those are already
+     * gone; before it, the dialog must not count them either.
      *
      * @param  EloquentCollection<int, Category>  $created
      * @return array<string, true>
@@ -134,6 +150,7 @@ class ImportUndoer
 
         $referenced = TransactionSplit::query()
             ->whereIn('category_id', $subtreeIds)
+            ->whereNotIn('transaction_id', $this->rowsUndoDeletes($import))
             ->distinct()
             ->pluck('category_id');
 
@@ -153,6 +170,24 @@ class ImportUndoer
         }
 
         return $kept;
+    }
+
+    /**
+     * The rows an undo deletes: the import's own, and every row on an account
+     * it created that is not connected to a bank since.
+     *
+     * @return Builder<Transaction>
+     */
+    private function rowsUndoDeletes(Import $import): Builder
+    {
+        return Transaction::withTrashed()
+            ->select('id')
+            ->where(fn (Builder $rows) => $rows
+                ->where('import_id', $import->id)
+                ->orWhereIn('account_id', Account::withTrashed()
+                    ->select('id')
+                    ->where('import_id', $import->id)
+                    ->whereNull('banking_connection_id')));
     }
 
     /**
