@@ -4,11 +4,14 @@ namespace App\Services\Imports;
 
 use App\Enums\CategorySource;
 use App\Enums\ImportChunkKind;
+use App\Enums\LabelColor;
+use App\Enums\LabelSource;
 use App\Enums\TransactionSource;
 use App\Jobs\ReassignTransactionsToBudgets;
 use App\Models\Account;
 use App\Models\Import;
 use App\Models\ImportChunk;
+use App\Models\Label;
 use App\Models\Transaction;
 use App\Services\TransactionDuplicateMatcher;
 use Carbon\CarbonInterface;
@@ -30,7 +33,11 @@ use Illuminate\Support\Facades\DB;
  * are committed together, so a run that stops at its deadline leaves exactly
  * the chunks still to do, and the next run carries on from there.
  *
- * @phpstan-type TransactionRow array{account_key: string, date: string, amount: int, description: string, notes?: ?string, category_key?: ?string, external_id?: ?string, currency_code?: ?string}
+ * A row Money Pro had split across several categories, without saying how
+ * much went to each, comes in whole and uncategorized, with the label the
+ * user finds them by to split them by hand.
+ *
+ * @phpstan-type TransactionRow array{account_key: string, date: string, amount: int, description: string, notes?: ?string, category_key?: ?string, external_id?: ?string, currency_code?: ?string, source_split?: bool}
  */
 class ImportTransactionWriter
 {
@@ -42,6 +49,9 @@ class ImportTransactionWriter
 
     /** @var array<string, array{account_id: string, name: string, created: bool, imported: int, duplicates: int}> */
     private array $perAccount = [];
+
+    /** @var array<string, string> space id => the label the import puts on the rows split in Money Pro */
+    private array $sourceSplitLabelIds = [];
 
     /** @var array{total: int, processed: int, imported: int, duplicates: int, skipped: int} */
     private array $totals = ['total' => 0, 'processed' => 0, 'imported' => 0, 'duplicates' => 0, 'skipped' => 0];
@@ -86,7 +96,7 @@ class ImportTransactionWriter
             'skipped' => (int) ($stats['skipped'] ?? 0),
         ];
         $this->perAccount = collect($import->stats['per_account'] ?? [])->keyBy('account_id')->all();
-        $this->externalIds = $this->duplicateKeys = [];
+        $this->externalIds = $this->duplicateKeys = $this->sourceSplitLabelIds = [];
 
         $import->recordStats(['transactions' => $this->totals]);
     }
@@ -137,8 +147,6 @@ class ImportTransactionWriter
             return null;
         }
 
-        $categoryId = isset($row['category_key']) ? ($categoryIds[$row['category_key']] ?? null) : null;
-
         $transaction = Transaction::query()->create([
             'user_id' => $import->user_id,
             // Spelled out so each row does not look its account's space up again.
@@ -150,15 +158,59 @@ class ImportTransactionWriter
             'currency_code' => $row['currency_code'] ?? $account->currency_code,
             'description' => $row['description'],
             'notes' => $row['notes'] ?? null,
-            'category_id' => $categoryId,
-            'category_source' => $categoryId !== null ? CategorySource::Manual : null,
+            ...$this->classification($row, $categoryIds),
             'source' => TransactionSource::Imported,
             'external_transaction_id' => $row['external_id'] ?? null,
         ]);
 
+        if ((bool) ($row['source_split'] ?? false)) {
+            $transaction->labels()->attach($this->sourceSplitLabelId($import, $account));
+        }
+
         $this->tally($accounts, $account, 'imported');
 
         return $transaction;
+    }
+
+    /**
+     * The category a row comes in with. One from the file is what the user
+     * chose in their previous app, so it is marked as categorized by hand and
+     * no rule overrides it. A row split in Money Pro comes in uncategorized and
+     * marked the same way: blank is the user's call there, for them to split
+     * it by hand, so neither the rules nor the import's AI pass file it whole
+     * ({@see Transaction::scopeOpenToImportAi()}).
+     *
+     * @param  TransactionRow  $row
+     * @param  array<string, string>  $categoryIds
+     * @return array{category_id: ?string, category_source: ?CategorySource}
+     */
+    private function classification(array $row, array $categoryIds): array
+    {
+        if ((bool) ($row['source_split'] ?? false)) {
+            return ['category_id' => null, 'category_source' => CategorySource::Manual];
+        }
+
+        $categoryId = isset($row['category_key']) ? ($categoryIds[$row['category_key']] ?? null) : null;
+
+        return ['category_id' => $categoryId, 'category_source' => $categoryId !== null ? CategorySource::Manual : null];
+    }
+
+    /**
+     * The one label the import puts on the rows split in Money Pro, named in
+     * the user's language: theirs when the space already has it (from an
+     * earlier import, or made by hand), new otherwise. Undoing the import
+     * takes the rows out and leaves the label.
+     */
+    private function sourceSplitLabelId(Import $import, Account $account): string
+    {
+        return $this->sourceSplitLabelIds[(string) $account->space_id] ??= Label::query()->firstOrCreate([
+            'user_id' => $import->user_id,
+            'space_id' => $account->space_id,
+            'name' => __('Split in Money Pro', [], $import->user?->preferredLocale()),
+        ], [
+            'color' => LabelColor::Amber->value,
+            'source' => LabelSource::User,
+        ])->id;
     }
 
     /**

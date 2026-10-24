@@ -1,7 +1,9 @@
 import {
+    categoryVocabulary,
     collectCurrencySymbols,
     currencySymbolOf,
     defaultSymbolCurrency,
+    isMultiCategoryCell,
     moneyProReader,
 } from '@/lib/full-import-money-pro';
 import {
@@ -476,5 +478,322 @@ describe('a Money Pro export with month names in its dates', () => {
             date: '2025-12-01',
             balance: 100000,
         });
+    });
+});
+
+/**
+ * An invented Money Pro export where some rows were split across several
+ * categories: Money Pro writes all of them in the one cell, without amounts.
+ */
+const SPLIT_EXPORT = [
+    'Fecha;Cantidad;Cuenta;Monto recibido;Cuenta de destino;Saldo;Categoría;Descripción;Tipo de transacción;Agente;N.º de cheque;Clase;',
+    ...[
+        ['1', 'Supermercado : Alimentación', 'Súper inventado'],
+        ['2', 'Compras', 'Tienda inventada'],
+        ['3', 'Salud', 'Farmacia inventada'],
+        ['4', 'Restaurantes', ''],
+        ['5', 'Familia: Colegio', 'Colegio inventado'],
+        ['6', 'Suscripciones Online', 'Servicio inventado'],
+        ['7', 'Empresa: Empresa', 'Gasto inventado'],
+        [
+            '8',
+            'Familia: Ropa Supermercado : Hogar Supermercado : Alimentación',
+            'Compra grande inventada',
+        ],
+        ['9', 'Restaurantes Restaurantes Restaurantes', ''],
+        [
+            '10',
+            'Supermercado : Alimentación Compras Salud',
+            'Compra mixta inventada',
+        ],
+        ['11', 'Compras Compras Salud', 'Otra compra inventada'],
+        ['12', 'Coche: Gasolina Viajes: Playa', 'Viaje inventado'],
+        ['13', 'Familia: Libros Papel Compras', 'Regalos inventados'],
+        ['14', 'Supermercado: Alimentación', ''],
+    ].map(
+        ([day, category, description]) =>
+            `${day} feb 2026, 10:00:00;10,00 €;Cuenta Ficticia;;;100,00 €;${category};${description};Gasto;;;;`,
+    ),
+    '15 feb 2026, 9:00:00;1.500,00 €;Cuenta Ficticia;;;1.600,00 €;Salario: Nómina;Nómina inventada;Ingreso;;;;',
+].join('\n');
+
+describe('a Money Pro export with split transactions', () => {
+    async function readSplits(
+        categories: {
+            id: string;
+            name: string;
+            parent_id: string | null;
+        }[] = [],
+    ) {
+        const parsed = await parseImportFile(
+            new File([SPLIT_EXPORT], 'money-pro.csv', { type: 'text/csv' }),
+            'es-ES',
+        );
+        const mapping = defaultMapping('money_pro', parsed, 'es-ES');
+        const normalized = normalizeRows(
+            parsed,
+            mapping,
+            {
+                fileName: 'money-pro.csv',
+                supportedCurrencies: SUPPORTED,
+                userCurrency: 'EUR',
+            },
+            moneyProReader(parsed.headers, { rows: parsed.rows, categories }),
+        );
+
+        return { parsed, mapping, normalized };
+    }
+
+    const byDescription = <T extends { description: string }>(
+        rows: T[],
+        description: string,
+    ): T | undefined => rows.find((row) => row.description === description);
+
+    it('reads a cell of one category as before, whatever the spacing round its colon', async () => {
+        const { normalized } = await readSplits();
+
+        expect(normalized.unreadable).toEqual([]);
+        expect(
+            normalized.rows
+                .filter((row) => !row.sourceSplit)
+                .map((row) => [row.description, row.categoryPath]),
+        ).toEqual([
+            ['Súper inventado', ['Supermercado', 'Alimentación']],
+            ['Tienda inventada', ['Compras']],
+            ['Farmacia inventada', ['Salud']],
+            ['Restaurantes', ['Restaurantes']],
+            ['Colegio inventado', ['Familia', 'Colegio']],
+            ['Servicio inventado', ['Suscripciones Online']],
+            ['Gasto inventado', ['Empresa', 'Empresa']],
+            ['Alimentación', ['Supermercado', 'Alimentación']],
+            ['Nómina inventada', ['Salario', 'Nómina']],
+        ]);
+        expect(
+            normalized.rows.filter((row) => !row.sourceSplit),
+        ).not.toContainEqual(expect.objectContaining({ sourceSplit: true }));
+    });
+
+    it('takes a cell of several categories in whole, uncategorized, with the cell in its notes', async () => {
+        const { normalized } = await readSplits();
+        const split = normalized.rows.filter((row) => row.sourceSplit);
+
+        expect(split.map((row) => row.description)).toEqual([
+            'Compra grande inventada',
+            // No description: the categories it had stand in for one.
+            'Restaurantes Restaurantes Restaurantes',
+            'Compra mixta inventada',
+            'Otra compra inventada',
+            'Viaje inventado',
+            'Regalos inventados',
+        ]);
+        expect(
+            split.every(
+                (row) =>
+                    row.kind === 'movement' &&
+                    row.categoryPath.length === 0 &&
+                    row.amount === -10,
+            ),
+        ).toBe(true);
+        expect(byDescription(split, 'Compra mixta inventada')?.notes).toBe(
+            'Split in Money Pro: Supermercado : Alimentación Compras Salud',
+        );
+        expect(
+            byDescription(split, 'Restaurantes Restaurantes Restaurantes')
+                ?.notes,
+        ).toBe('Split in Money Pro: Restaurantes Restaurantes Restaurantes');
+    });
+
+    it('adds the split note after a note of its own', async () => {
+        const parsed = await parseImportFile(
+            new File(
+                [
+                    'Fecha;Cantidad;Cuenta;Monto recibido;Cuenta de destino;Saldo;Categoría;Descripción;Tipo de transacción;Nota\n1 feb 2026, 10:00:00;10,00 €;Cuenta Ficticia;;;100,00 €;Compras Salud;Compra inventada;Gasto;Pagado a medias\n',
+                ],
+                'money-pro.csv',
+                { type: 'text/csv' },
+            ),
+            'es-ES',
+        );
+        const normalized = normalizeRows(
+            parsed,
+            { ...defaultMapping('money_pro', parsed, 'es-ES'), notes: 'Nota' },
+            { fileName: 'money-pro.csv', supportedCurrencies: SUPPORTED },
+            moneyProReader(parsed.headers, {
+                rows: parsed.rows,
+                categories: [
+                    { id: 'c1', name: 'Compras', parent_id: null },
+                    { id: 'c2', name: 'Salud', parent_id: null },
+                ],
+            }),
+        );
+
+        expect(normalized.rows[0]).toMatchObject({
+            sourceSplit: true,
+            categoryPath: [],
+            notes: 'Pagado a medias\nSplit in Money Pro: Compras Salud',
+        });
+    });
+
+    it('tells the cells apart by what the file writes alone and what the user has', () => {
+        const rows = [
+            'Compras',
+            'Salud',
+            'Supermercado : Alimentación',
+            'Familia: Colegio',
+            'Suscripciones Online',
+            'Suscripciones Online',
+        ].map((cell) => ({ Categoría: cell }));
+        const vocabulary = categoryVocabulary({ rows }, 'Categoría');
+        const multi = (cell: string) => isMultiCategoryCell(cell, vocabulary);
+
+        // Two parents or more: several categories, whatever else.
+        expect(multi('Coche: Gasolina Viajes: Playa')).toBe(true);
+        expect(multi('A:B:C')).toBe(true);
+        // Repeats, and the "Parent : Child" spacing.
+        expect(multi('Salud Salud')).toBe(true);
+        expect(multi('Supermercado: Alimentación Compras')).toBe(true);
+        expect(multi('Compras Supermercado : Alimentación')).toBe(true);
+        // One category, with a space in its name or not, alone or a one-off.
+        expect(multi('Suscripciones Online')).toBe(false);
+        expect(multi('Supermercado : Alimentación')).toBe(false);
+        expect(multi('Familia: Colegio')).toBe(false);
+        expect(multi('Viajes Familiares')).toBe(false);
+        expect(multi('Compras Online')).toBe(false);
+        expect(multi('Salario: Nómina')).toBe(false);
+        expect(multi('')).toBe(false);
+        // A one-off with two categories and an unknown word between them.
+        expect(multi('Familia: Libros Papel Compras')).toBe(true);
+        // The same cell, repeated, is a category of its own.
+        expect(
+            isMultiCategoryCell(
+                'Familia: Libros Papel Compras',
+                categoryVocabulary(
+                    {
+                        rows: [
+                            ...rows,
+                            { Categoría: 'Familia: Libros Papel Compras' },
+                            { Categoría: 'Familia: Libros Papel Compras' },
+                        ],
+                    },
+                    'Categoría',
+                ),
+            ),
+        ).toBe(false);
+    });
+
+    it("knows the user's categories, and never cuts one of them", () => {
+        const vocabulary = categoryVocabulary(
+            {
+                categories: [
+                    { id: 'food', name: 'Comida', parent_id: null },
+                    { id: 'out', name: 'Restaurantes', parent_id: 'food' },
+                    { id: 'tv', name: 'Televisión', parent_id: null },
+                    {
+                        id: 'tv-out',
+                        name: 'Comida Televisión',
+                        parent_id: null,
+                    },
+                ],
+            },
+            'Categoría',
+        );
+
+        expect(
+            isMultiCategoryCell('Restaurantes Restaurantes', vocabulary),
+        ).toBe(true);
+        expect(
+            isMultiCategoryCell('Comida: Restaurantes Televisión', vocabulary),
+        ).toBe(true);
+        expect(isMultiCategoryCell('Comida Televisión', vocabulary)).toBe(
+            false,
+        );
+        expect(isMultiCategoryCell('Comida: Restaurantes', vocabulary)).toBe(
+            false,
+        );
+    });
+
+    it('creates no category from a split cell, and sends its rows marked', async () => {
+        const { mapping, normalized } = await readSplits();
+        const nodes = detectCategories(
+            normalized.rows.filter((row) => row.kind === 'movement'),
+        );
+        const target = (name: string): TransferTarget => ({
+            category_id: null,
+            name,
+            icon: 'Split',
+            color: 'stone',
+        });
+        const built = buildImport({
+            source: 'money_pro',
+            fileName: 'money-pro.csv',
+            mode: 'add',
+            mapping,
+            rows: normalized.rows,
+            fileAccounts: detectAccounts(normalized.rows),
+            accountPlan: {
+                'cuenta ficticia': {
+                    action: 'create',
+                    name: 'Cuenta Ficticia',
+                    type: 'checking',
+                    currencyCode: 'EUR',
+                    bank: null,
+                    newBankName: null,
+                    targetAccountId: null,
+                    mergeIntoKey: null,
+                    archive: false,
+                },
+            },
+            inactiveAccountKeys: new Set(),
+            contextAccounts: [],
+            nodes,
+            categoryPlan: resolveCategoryPlan(
+                nodes,
+                {},
+                { categories: [], defaultNames: [] },
+            ),
+            categories: [],
+            transfers: {
+                own: { categoryId: null, target: target('Own transfers') },
+                ignored: { categoryId: null, target: target('Ignored') },
+            },
+        });
+
+        expect(
+            built.payload.categories.map((entry) => entry.name).sort(),
+        ).toEqual(
+            [
+                'Alimentación',
+                'Compras',
+                'Colegio',
+                'Empresa',
+                'Empresa',
+                'Familia',
+                'Restaurantes',
+                'Salario',
+                'Salud',
+                'Supermercado',
+                'Suscripciones Online',
+                'Nómina',
+            ].sort(),
+        );
+
+        const split = built.transactions.filter((row) => row.source_split);
+
+        expect(split).toHaveLength(6);
+        expect(split.every((row) => row.category_key === null)).toBe(true);
+        expect(split[0]).toMatchObject({
+            description: 'Compra grande inventada',
+            amount: -1000,
+            notes: 'Split in Money Pro: Familia: Ropa Supermercado : Hogar Supermercado : Alimentación',
+            source_split: true,
+        });
+        expect(
+            built.transactions.filter((row) => !row.source_split),
+        ).not.toContainEqual(expect.objectContaining({ category_key: null }));
+        expect(
+            built.transactions.filter((row) => !row.source_split),
+        ).not.toContainEqual(
+            expect.objectContaining({ source_split: expect.anything() }),
+        );
     });
 });

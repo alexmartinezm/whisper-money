@@ -26,10 +26,12 @@ class ImportAiScheduler
     public function decide(Import $import): ImportAiStatus
     {
         $uncategorized = $import->transactions()->whereNull('category_id')->count();
+        // A row left blank on purpose (split in Money Pro) is not the AI's.
+        $forAi = $import->transactions()->openToImportAi()->count();
         $user = $import->user;
 
         $status = match (true) {
-            $uncategorized === 0 => ImportAiStatus::Skipped,
+            $forAi === 0 => ImportAiStatus::Skipped,
             ! $user->isOnboarded() => ImportAiStatus::Onboarding,
             ! $this->gate->allows($user) => ImportAiStatus::Unavailable,
             default => ImportAiStatus::Queued,
@@ -37,7 +39,7 @@ class ImportAiScheduler
 
         $import->recordStats([
             'uncategorized' => $uncategorized,
-            'ai' => ['status' => $status->value, 'total' => $uncategorized, 'processed' => 0, 'applied' => 0],
+            'ai' => ['status' => $status->value, 'total' => $forAi, 'processed' => 0, 'applied' => 0],
         ]);
 
         return $status;

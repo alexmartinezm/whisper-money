@@ -106,13 +106,19 @@ export function useFullImportPlan({
     );
 
     // Money Pro's rows carry their sign, transfers and balances in columns
-    // the mapping has no field for, so they get a reader of their own.
+    // the mapping has no field for, so they get a reader of their own. It
+    // tells a split's categories from one category by the ones the file
+    // writes alone and the ones the user has.
+    const contextCategories = context?.categories;
     const readRow = useMemo(
         () =>
             source === 'money_pro' && parsed
-                ? moneyProReader(parsed.headers)
+                ? moneyProReader(parsed.headers, {
+                      rows: parsed.rows,
+                      categories: contextCategories,
+                  })
                 : undefined,
-        [source, parsed],
+        [source, parsed, contextCategories],
     );
 
     const reading = useMemo(
@@ -231,9 +237,12 @@ export function useFullImportPlan({
                     (row) => !row.ignored && row.kind === 'transfer',
                 ).length,
             ignored: movements.filter((row) => row.ignored).length,
+            // A split from the other app is left uncategorized on purpose:
+            // neither the AI nor the rules file it.
             uncategorized: categorizedRows.filter(
-                (row) => row.categoryPath.length === 0,
+                (row) => row.categoryPath.length === 0 && !row.sourceSplit,
             ).length,
+            split: categorizedRows.filter((row) => row.sourceSplit).length,
             skippedAccounts:
                 movementRows(normalized.rows).length - movements.length,
         };

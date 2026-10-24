@@ -1095,6 +1095,7 @@ export function buildImport(input: BuildImportInput): BuiltImport {
             category_key: categoryKeyFor(row, categories.keys, ownNodeIds),
             external_id: row.externalId,
             currency_code: row.currency,
+            ...(row.sourceSplit ? { source_split: true as const } : {}),
         };
     });
 

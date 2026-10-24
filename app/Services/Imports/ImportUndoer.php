@@ -28,6 +28,9 @@ use Illuminate\Support\Facades\Log;
  * Runs from UndoImportJob, in short steps rather than one transaction, and
  * every step only removes what is still there, so a retry finishes the job.
  *
+ * The label the import put on the rows split in Money Pro stays: it goes
+ * off those rows with them, and the user may have put it on others since.
+ *
  * What a "start from scratch" import wiped before it ran is gone for good;
  * undo cannot bring it back.
  */

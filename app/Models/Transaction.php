@@ -412,6 +412,24 @@ class Transaction extends Model
     }
 
     /**
+     * The uncategorized rows of a full import its single AI pass may file:
+     * all but the ones it left blank on purpose and marked as categorized by
+     * hand, the rows split in Money Pro the user is to split here. Only the
+     * import narrows by this: elsewhere a blank row marked manual can be one
+     * whose category the user deleted, which the AI may file again.
+     *
+     * @param  Builder<Transaction>  $query
+     * @return Builder<Transaction>
+     */
+    public function scopeOpenToImportAi(Builder $query): Builder
+    {
+        return $query->whereNull('category_id')
+            ->where(fn (Builder $query): Builder => $query
+                ->whereNull('category_source')
+                ->orWhere('category_source', '!=', CategorySource::Manual->value));
+    }
+
+    /**
      * The owner's share of an amount held by this transaction's account, for
      * the row-by-row PHP paths. Falls back to the full amount when the account
      * is not loaded, so a partial select never silently zeroes the figure.

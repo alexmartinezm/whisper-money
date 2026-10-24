@@ -887,6 +887,7 @@ export function FullImportWizard({
                             onChange: plan.setIgnoredChoice,
                         }}
                         uncategorized={counts.uncategorized}
+                        split={counts.split}
                         aiAvailable={context.aiAvailable}
                         locale={locale}
                         footer={footer()}
@@ -907,6 +908,7 @@ export function FullImportWizard({
                             built={built}
                             unreadable={normalized.unreadable}
                             uncategorized={counts.uncategorized}
+                            split={counts.split}
                             aiNote={aiReviewNote}
                             confirmWipe={confirmWipe}
                             onConfirmWipeChange={setConfirmWipe}

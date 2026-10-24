@@ -79,7 +79,7 @@ class CategorizeImportedTransactionsJob implements ShouldBeUnique, ShouldQueue
                 'total' => $total,
                 'applied' => $applied,
             ]]),
-            fn (Builder $query): Builder => $query->where('import_id', $this->import->id),
+            fn (Builder $query): Builder => $query->where('import_id', $this->import->id)->openToImportAi(),
         );
 
         $this->import->recordStats(['ai' => [

@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Api;
 
 use App\Enums\ImportChunkKind;
+use App\Enums\ImportSource;
 use App\Models\Import;
 use App\Rules\StorableDate;
 use App\Services\CurrencyOptions;
@@ -89,7 +90,19 @@ class StoreFullImportChunkRequest extends FormRequest
             'rows.*.category_key' => ['nullable', 'string', Rule::in($this->planKeys('categories'))],
             'rows.*.external_id' => ['nullable', 'string', 'max:255'],
             'rows.*.currency_code' => ['nullable', 'string', Rule::in(app(CurrencyOptions::class)->accountCodes())],
+            'rows.*.source_split' => $this->importSource() === ImportSource::MoneyPro ? ['sometimes', 'boolean'] : ['prohibited'],
         ];
+    }
+
+    /**
+     * Only Money Pro writes a split's categories into one cell, so only its
+     * rows can arrive marked as split there (and labelled so on import).
+     */
+    private function importSource(): ?ImportSource
+    {
+        $import = $this->route('import');
+
+        return $import instanceof Import ? $import->source : null;
     }
 
     /**

@@ -29,7 +29,7 @@ import {
     type UnreadableRow,
 } from '@/types/full-import';
 import { __ } from '@/utils/i18n';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, Split } from 'lucide-react';
 import { type ReactNode } from 'react';
 
 interface StepReviewProps {
@@ -41,6 +41,8 @@ interface StepReviewProps {
     built: BuiltImport;
     unreadable: UnreadableRow[];
     uncategorized: number;
+    /** Rows the other app had split, which come in whole and labelled. */
+    split: number;
     aiNote: string | null;
     confirmWipe: boolean;
     onConfirmWipeChange: (confirmed: boolean) => void;
@@ -132,6 +134,42 @@ function skippedNote(
         : __('Ones already in your accounts are skipped');
 }
 
+/**
+ * What happens to the rows Money Pro had split across several categories:
+ * they come in whole, uncategorized, with a note and a label to find them.
+ */
+export function SourceSplitNotice({
+    count,
+    locale,
+}: {
+    count: number;
+    locale: string;
+}) {
+    if (count === 0) {
+        return null;
+    }
+
+    const label = __('Split in Money Pro');
+
+    return (
+        <Notice icon={Split}>
+            <span>
+                {countLabel(
+                    count,
+                    __(
+                        '1 transaction came split in Money Pro: it is imported without a category, with the note and the label «:label» so you can split it here.',
+                        { label },
+                    ),
+                    __(
+                        ':count transactions came split in Money Pro: they are imported without a category, with the note and the label «:label» so you can split them here.',
+                        { count: formatCount(count, locale), label },
+                    ),
+                )}
+            </span>
+        </Notice>
+    );
+}
+
 /** How many balances each plan account key carries. */
 function balancesPerAccount(built: BuiltImport): Map<string, number> {
     const tally = new Map<string, number>();
@@ -152,6 +190,7 @@ export function StepReview({
     built,
     unreadable,
     uncategorized,
+    split,
     aiNote,
     confirmWipe,
     onConfirmWipeChange,
@@ -319,6 +358,8 @@ export function StepReview({
                     );
                 })}
             </SectionCard>
+
+            <SourceSplitNotice count={split} locale={locale} />
 
             {aiNote && uncategorized > 0 && (
                 <Notice icon={Sparkles}>{aiNote}</Notice>

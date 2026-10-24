@@ -3538,5 +3538,9 @@
     "Suggested by AI": "Sugerencia hecha con IA",
     "Detect columns with AI": "Detectar columnas con IA",
     "The AI could not read the columns. Try again later.": "La IA no ha podido leer las columnas. Inténtalo más tarde.",
-    "This field is not accepted.": "Este campo no se acepta."
+    "This field is not accepted.": "Este campo no se acepta.",
+    "Split in Money Pro": "Dividida en Money Pro",
+    "Split in Money Pro: :categories": "Dividida en Money Pro: :categories",
+    "1 transaction came split in Money Pro: it is imported without a category, with the note and the label «:label» so you can split it here.": "1 movimiento venía dividido en Money Pro: se importa sin categoría, con la nota y la etiqueta «:label» para que lo dividas aquí.",
+    ":count transactions came split in Money Pro: they are imported without a category, with the note and the label «:label» so you can split them here.": ":count movimientos venían divididos en Money Pro: se importan sin categoría, con la nota y la etiqueta «:label» para que los dividas aquí."
 }

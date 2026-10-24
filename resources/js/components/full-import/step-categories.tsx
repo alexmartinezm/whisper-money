@@ -5,6 +5,7 @@ import {
     SectionRow,
     WizardScreen,
 } from '@/components/full-import/full-import-layout';
+import { SourceSplitNotice } from '@/components/full-import/step-review';
 import { CategoryCombobox } from '@/components/shared/category-combobox';
 import {
     Select,
@@ -53,6 +54,8 @@ interface StepCategoriesProps {
     own: TransferSlot;
     ignored: TransferSlot;
     uncategorized: number;
+    /** Rows the other app had split, which come in whole and labelled. */
+    split: number;
     aiAvailable: boolean;
     locale: string;
     footer: ReactNode;
@@ -97,6 +100,7 @@ export function StepCategories({
     own,
     ignored,
     uncategorized,
+    split,
     aiAvailable,
     locale,
     footer,
@@ -333,6 +337,8 @@ export function StepCategories({
                     })}
                 </SectionCard>
             )}
+
+            <SourceSplitNotice count={split} locale={locale} />
 
             {uncategorized > 0 && (
                 <Notice icon={Sparkles}>

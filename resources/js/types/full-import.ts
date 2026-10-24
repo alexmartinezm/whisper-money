@@ -87,6 +87,12 @@ export interface NormalizedRow {
     iban: string | null;
     externalId: string | null;
     ignored: boolean;
+    /**
+     * The other app had split it across several categories without saying
+     * how much went to each (Money Pro writes them all in one cell): it
+     * comes in whole and uncategorized, labelled for the user to split.
+     */
+    sourceSplit?: true;
 }
 
 export interface UnreadableRow {
@@ -339,6 +345,8 @@ export interface TransactionPayloadRow {
     category_key: string | null;
     external_id: string | null;
     currency_code: string | null;
+    /** {@link NormalizedRow.sourceSplit}: the server labels it. */
+    source_split?: true;
 }
 
 /** A daily balance as the server takes it. */
