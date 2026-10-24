@@ -11,6 +11,7 @@ use App\Models\Category;
 use App\Models\Import;
 use App\Models\User;
 use App\Services\Ai\AiCategorizationGate;
+use App\Services\CategoryTree;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 
@@ -27,6 +28,7 @@ class ImportHistoryPresenter
     public function __construct(
         private AiCategorizationGate $gate,
         private ImportUndoer $undoer,
+        private CategoryTree $tree,
     ) {}
 
     /**
@@ -59,18 +61,24 @@ class ImportHistoryPresenter
      */
     public function history(User $user): array
     {
-        return $user->imports()
+        $imports = $user->imports()
             ->where('status', '!=', ImportStatus::Draft->value)
             ->latest()
             ->limit(self::HISTORY_LIMIT)
-            ->get()
+            ->get();
+        // The user's category tree, read once for every summary below.
+        $parentMap = $imports->contains(fn (Import $import): bool => $import->isUndoable())
+            ? $this->tree->parentMap($user->id)
+            : null;
+
+        return $imports
             ->map(fn (Import $import): array => [
                 ...$this->status($import),
                 'undoable' => $import->isUndoable(),
                 // The last undo broke off: the import is back as it was and
                 // can be undone again. Why it broke off stays server-side.
                 'undo_failed' => $import->isUndoable() && (bool) ($import->stats['undo']['failed'] ?? false),
-                'summary' => $import->isUndoable() ? $this->undoSummary($import) : null,
+                'summary' => $import->isUndoable() ? $this->undoSummary($import, $parentMap) : null,
             ])
             ->all();
     }
@@ -146,9 +154,10 @@ class ImportHistoryPresenter
     }
 
     /**
+     * @param  array<string, ?string>|null  $parentMap  the user's category tree
      * @return array<string, mixed>
      */
-    private function undoSummary(Import $import): array
+    private function undoSummary(Import $import, ?array $parentMap): array
     {
         // An account the import created that has since been connected to a
         // bank is not deleted by undo: only what the import wrote leaves it.
@@ -179,7 +188,7 @@ class ImportHistoryPresenter
             'connected_accounts' => $connected->map(fn (Account $account): array => ['name' => $account->name])->values()->all(),
             'categories' => $import->categories()->count(),
             // Of those, the ones split lines still use: undo keeps them.
-            'categories_kept' => $this->undoer->categoriesKeptForSplits($import),
+            'categories_kept' => $this->undoer->categoriesKeptForSplits($import, $parentMap),
             'transactions' => $import->transactions()->count(),
             'balances' => $import->balances()->count(),
             'into_own_accounts' => $this->ownAccountLines($intoOwn),

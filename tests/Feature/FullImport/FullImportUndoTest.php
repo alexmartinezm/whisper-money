@@ -9,6 +9,8 @@ use App\Models\BankingConnection;
 use App\Models\Category;
 use App\Models\Import;
 use App\Models\Transaction;
+use App\Services\Imports\ImportHistoryPresenter;
+use App\Services\Imports\ImportUndoer;
 use Illuminate\Bus\UniqueLock;
 use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Support\Facades\Bus;
@@ -150,6 +152,34 @@ it('tells the history how many imported categories undo keeps for split lines', 
 
     expect(Category::query()->whereIn('name', ['Empresa', 'Gastos Empresa'])->count())->toBe(2)
         ->and(Category::query()->where('name', 'Ocio')->exists())->toBeFalse();
+});
+
+it('reads the category tree once for the undo summary, however many categories the import created', function () {
+    $importWithRootCategories = function (int $roots): array {
+        $user = Fixtures::user();
+        $categories = [];
+
+        foreach (range(0, $roots - 1) as $index) {
+            $categories[] = ['key' => "r{$index}", 'action' => 'create', 'name' => "Root {$index}", 'type' => 'expense', 'icon' => 'Wallet', 'color' => 'blue'];
+            $categories[] = ['key' => "s{$index}", 'action' => 'create', 'name' => "Sub {$index}", 'parent_key' => "r{$index}", 'icon' => 'Wallet', 'color' => 'blue'];
+        }
+
+        $import = Fixtures::run($this, $user, Fixtures::plan([Fixtures::newAccount('a0', 'Wise')], $categories), [
+            Fixtures::row('a0', '2026-09-01', -100, 'Coffee', ['category_key' => 's0']),
+        ]);
+
+        return [$user, $import];
+    };
+    [$oneUser, $one] = $importWithRootCategories(1);
+    [$manyUser, $many] = $importWithRootCategories(6);
+    $undoer = app(ImportUndoer::class);
+    $presenter = app(ImportHistoryPresenter::class);
+
+    expect($many->categories()->count())->toBe(12)
+        ->and(countQueries(fn () => $undoer->categoriesKeptForSplits($many))['count'])
+        ->toBe(countQueries(fn () => $undoer->categoriesKeptForSplits($one))['count'])
+        ->and(countQueries(fn () => $presenter->history($manyUser))['count'])
+        ->toBe(countQueries(fn () => $presenter->history($oneUser))['count']);
 });
 
 it('lists what undoing would remove', function () {

@@ -115,12 +115,18 @@ class ImportUndoer
      * How many of the categories the import created an undo now would keep
      * because split lines use them, for the undo dialog to say so instead of
      * promising to remove them.
+     *
+     * Listing several imports of one user, pass that user's
+     * {@see CategoryTree::parentMap()} so the tree is read once for all of them.
+     *
+     * @param  array<string, ?string>|null  $parentMap
      */
-    public function categoriesKeptForSplits(Import $import): int
+    public function categoriesKeptForSplits(Import $import, ?array $parentMap = null): int
     {
         return count($this->categoriesHoldingSplitLines(
             $import,
             Category::query()->where('import_id', $import->id)->get(),
+            $parentMap,
         ));
     }
 
@@ -132,21 +138,26 @@ class ImportUndoer
      * the accounts it created and deletes. During the undo those are already
      * gone; before it, the dialog must not count them either.
      *
+     * The user's tree is read once, into a parent map, whatever the number
+     * of categories the import created.
+     *
      * @param  EloquentCollection<int, Category>  $created
+     * @param  array<string, ?string>|null  $parentMap
      * @return array<string, true>
      */
-    private function categoriesHoldingSplitLines(Import $import, EloquentCollection $created): array
+    private function categoriesHoldingSplitLines(Import $import, EloquentCollection $created, ?array $parentMap = null): array
     {
         if ($created->isEmpty()) {
             return [];
         }
 
+        $parentMap ??= $this->tree->parentMap($import->user_id);
         $createdIds = $created->pluck('id')->flip();
-        $subtreeIds = $created
+        $rootIds = $created
             ->reject(fn (Category $category): bool => $category->parent_id !== null && $createdIds->has($category->parent_id))
-            ->flatMap(fn (Category $root): array => [$root->id, ...$this->tree->descendantIds($root)])
-            ->unique()
-            ->values();
+            ->pluck('id')
+            ->all();
+        $subtreeIds = $this->tree->expand($import->user_id, $rootIds, parentMap: $parentMap);
 
         $referenced = TransactionSplit::query()
             ->whereIn('category_id', $subtreeIds)
@@ -158,7 +169,6 @@ class ImportUndoer
             return [];
         }
 
-        $parentMap = $this->tree->parentMap($import->user_id);
         $kept = [];
 
         foreach ($referenced as $categoryId) {
