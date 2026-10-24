@@ -328,6 +328,21 @@ export function detectDateFormat(
         .map((row) => row[dateColumnName])
         .filter(Boolean);
 
+    // Dates that name their month read the same in every format: "1 dic 2025"
+    // is no guess, only the order the format picker shows changes.
+    const named = sampledValues.map((value) =>
+        readNamedMonthDate(stripTimeOfDay(String(value).trim())),
+    );
+
+    if (named.length > 0 && named.every((one) => one?.date)) {
+        return {
+            format: named.every((one) => one?.monthFirst)
+                ? DateFormat.MonthDayYear
+                : DateFormat.DayMonthYear,
+            ambiguous: false,
+        };
+    }
+
     for (const dateValue of sampledValues) {
         for (const format of formats) {
             const parsedDate = parseDate(dateValue as string | number, format);
@@ -693,6 +708,83 @@ function isStorableYear(year: number): boolean {
     return year >= MIN_STORABLE_YEAR && year <= MAX_STORABLE_YEAR;
 }
 
+// Month names as Spanish and English exports write them, abbreviated or in
+// full ("1 dic 2025, 0:00:00" from Money Pro in Spanish, "Dec 1, 2025").
+// Keys are lower case without accents.
+const MONTH_NUMBERS: Record<string, number> = {
+    ...monthNames(
+        ['ene', 'feb', 'mar', 'abr', 'may', 'jun'],
+        ['jul', 'ago', 'sep', 'oct', 'nov', 'dic'],
+    ),
+    ...monthNames(
+        ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio'],
+        ['julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'],
+    ),
+    ...monthNames(
+        ['jan', 'feb', 'mar', 'apr', 'may', 'jun'],
+        ['jul', 'aug', 'sep', 'oct', 'nov', 'dec'],
+    ),
+    ...monthNames(
+        ['january', 'february', 'march', 'april', 'may', 'june'],
+        ['july', 'august', 'september', 'october', 'november', 'december'],
+    ),
+    sept: 9,
+    setiembre: 9,
+};
+
+function monthNames(
+    firstHalf: string[],
+    secondHalf: string[],
+): Record<string, number> {
+    return Object.fromEntries(
+        [...firstHalf, ...secondHalf].map((name, index) => [name, index + 1]),
+    );
+}
+
+// "1 dic 2025", "01-dic-25", "1 de diciembre de 2025", "1 Dec. 2025".
+const DAY_MONTH_NAME_YEAR =
+    /^(\d{1,2})(?:\s+de\s+|\s*[-./\s]\s*)(\p{L}+)\.?(?:\s+de\s+|\s*[-./,\s]\s*)(\d{4}|\d{2})$/u;
+
+// "Dec 1, 2025", "December 1 2025".
+const MONTH_NAME_DAY_YEAR = /^(\p{L}+)\.?\s+(\d{1,2}),?\s+(\d{4})$/u;
+
+interface NamedMonthDate {
+    date: Date | null;
+    monthFirst: boolean;
+}
+
+function monthNumber(name: string): number | undefined {
+    return MONTH_NUMBERS[
+        name.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+    ];
+}
+
+/**
+ * A date that writes its month by name, read the same whatever numeric
+ * format was picked. Null when the text is not shaped like one, so a date
+ * written in digits never reads here.
+ */
+function readNamedMonthDate(value: string): NamedMonthDate | null {
+    const dayFirst = DAY_MONTH_NAME_YEAR.exec(value);
+    const monthFirst = dayFirst ? null : MONTH_NAME_DAY_YEAR.exec(value);
+    const [, day, name, year] = dayFirst ?? [];
+    const [, monthFirstName, monthFirstDay, monthFirstYear] = monthFirst ?? [];
+    const month = monthNumber(name ?? monthFirstName ?? '');
+
+    if (month === undefined) {
+        return null;
+    }
+
+    return {
+        date: calendarDate(
+            Number(year ?? monthFirstYear),
+            month,
+            Number(day ?? monthFirstDay),
+        ),
+        monthFirst: monthFirst !== null,
+    };
+}
+
 export function parseDate(
     dateStr: string | number,
     format: DateFormat,
@@ -709,6 +801,12 @@ export function parseDate(
     }
 
     let str = stripTimeOfDay(String(dateStr).trim());
+    const named = readNamedMonthDate(str);
+
+    if (named) {
+        return named.date;
+    }
+
     str = str
         .replace(/\//g, '-')
         .replace(/\./g, '-')
@@ -755,6 +853,18 @@ export function parseDate(
         }
     }
 
+    return calendarDate(year, month, day);
+}
+
+/**
+ * The day a year, month and day name, or null when they name none the server
+ * stores. A missing year is this year's; a two-digit one is 1950–2049.
+ */
+function calendarDate(
+    year: number | undefined,
+    month: number | undefined,
+    day: number | undefined,
+): Date | null {
     if (year === undefined) {
         year = new Date().getFullYear();
     }
@@ -763,7 +873,7 @@ export function parseDate(
         year += year < 50 ? 2000 : 1900;
     }
 
-    if (year === undefined || month === undefined || day === undefined) {
+    if (month === undefined || day === undefined) {
         return null;
     }
 

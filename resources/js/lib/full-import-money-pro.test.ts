@@ -6,8 +6,11 @@ import {
 } from '@/lib/full-import-money-pro';
 import {
     buildImport,
+    categoryNodeId,
     detectAccounts,
+    detectCategories,
     OWN_TRANSFER_KEY,
+    resolveCategoryPlan,
     type BuildImportInput,
 } from '@/lib/full-import-plan';
 import {
@@ -16,7 +19,10 @@ import {
     normalizeRows,
 } from '@/lib/full-import-profiles';
 import { parseImportFile } from '@/lib/transaction-import';
-import { type FullImportMapping } from '@/types/full-import';
+import {
+    type FullImportMapping,
+    type TransferTarget,
+} from '@/types/full-import';
 import { DateFormat } from '@/types/import';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -320,5 +326,155 @@ describe('importing a Money Pro export', () => {
             { account_key: savingsKey, date: '2018-01-30', balance: 800000000 },
             { account_key: savingsKey, date: '2018-02-02', balance: 675000000 },
         ]);
+    });
+});
+
+/**
+ * A Money Pro export from its Spanish UI, which writes the month by name
+ * ("1 dic 2025, 0:00:00"). Invented accounts and amounts.
+ */
+const MONTH_NAME_EXPORT = [
+    'Fecha;Cantidad;Cuenta;Monto recibido;Cuenta de destino;Saldo;Categoría;Descripción;Tipo de transacción;Agente;N.º de cheque;Clase;',
+    '1 dic 2025, 0:00:00;1.000,00 €;Cuenta Ficticia;;;1.000,00 €;;;Saldo de apertura;;;;',
+    '3 dic 2025, 17:02:00;45,90 €;Cuenta Ficticia;;;954,10 €;Empresa: Seguros;Póliza inventada;Gasto;;;;',
+    '5 dic 2025, 14:00:00;1.250,00 €;Cuenta Ficticia;;;2.204,10 €;Salario;Nómina inventada;Ingreso;;;;',
+    '8 ene 2026, 9:30:00;200,00 €;Cuenta Ficticia;200,00 €;Hucha Ficticia;2.004,10 €;;;Transferencia de dinero;;;;',
+].join('\n');
+
+describe('a Money Pro export with month names in its dates', () => {
+    async function readMonthNames() {
+        const parsed = await parseImportFile(
+            new File([MONTH_NAME_EXPORT], 'money-pro.csv', {
+                type: 'text/csv',
+            }),
+            'es-ES',
+        );
+        const mapping = defaultMapping('money_pro', parsed, 'es-ES');
+        const normalized = normalizeRows(
+            parsed,
+            mapping,
+            {
+                fileName: 'money-pro.csv',
+                supportedCurrencies: SUPPORTED,
+                userCurrency: 'EUR',
+            },
+            moneyProReader(parsed.headers),
+        );
+
+        return { parsed, mapping, normalized };
+    }
+
+    it('reads every row, its dates, amounts, categories and the transfer', async () => {
+        const { parsed, mapping, normalized } = await readMonthNames();
+
+        expect(detectSource(parsed.headers)).toBe('money_pro');
+        expect(mapping).toMatchObject({
+            date: 'Fecha',
+            dateFormat: DateFormat.DayMonthYear,
+        });
+        expect(normalized.unreadable).toEqual([]);
+        expect(
+            normalized.rows.map((row) => [
+                row.kind,
+                row.date,
+                row.accountName,
+                row.amount,
+                row.categoryPath,
+            ]),
+        ).toEqual([
+            ['balance', '2025-12-01', 'Cuenta Ficticia', 0, []],
+            [
+                'movement',
+                '2025-12-03',
+                'Cuenta Ficticia',
+                -45.9,
+                ['Empresa', 'Seguros'],
+            ],
+            ['movement', '2025-12-05', 'Cuenta Ficticia', 1250, ['Salario']],
+            ['transfer', '2026-01-08', 'Cuenta Ficticia', -200, []],
+            ['transfer', '2026-01-08', 'Hucha Ficticia', 200, []],
+        ]);
+        expect(normalized.rows[1]).toMatchObject({
+            description: 'Póliza inventada',
+            currency: 'EUR',
+            balance: 954.1,
+        });
+    });
+
+    it('builds the import with each row on its day, in minor units', async () => {
+        const { mapping, normalized } = await readMonthNames();
+        const fileAccounts = detectAccounts(normalized.rows);
+        const nodes = detectCategories(normalized.rows);
+        const plan = (name: string) => ({
+            action: 'create' as const,
+            name,
+            type: 'checking' as const,
+            currencyCode: 'EUR',
+            bank: null,
+            newBankName: null,
+            targetAccountId: null,
+            mergeIntoKey: null,
+            archive: false,
+        });
+        const target = (name: string): TransferTarget => ({
+            category_id: null,
+            name,
+            icon: 'Split',
+            color: 'stone',
+        });
+        const built = buildImport({
+            source: 'money_pro',
+            fileName: 'money-pro.csv',
+            mode: 'add',
+            mapping,
+            rows: normalized.rows,
+            fileAccounts,
+            accountPlan: {
+                'cuenta ficticia': plan('Cuenta Ficticia'),
+                'hucha ficticia': plan('Hucha Ficticia'),
+            },
+            inactiveAccountKeys: new Set(),
+            contextAccounts: [],
+            nodes,
+            categoryPlan: resolveCategoryPlan(
+                nodes,
+                {},
+                { categories: [], defaultNames: [] },
+            ),
+            categories: [],
+            transfers: {
+                own: { categoryId: null, target: target('Own transfers') },
+                ignored: { categoryId: null, target: target('Ignored') },
+            },
+        });
+        const subcategory = built.payload.categories.find(
+            (entry) => entry.name === 'Seguros',
+        );
+
+        expect(built.transactions.map((row) => [row.date, row.amount])).toEqual(
+            [
+                ['2025-12-03', -4590],
+                ['2025-12-05', 125000],
+                ['2026-01-08', -20000],
+                ['2026-01-08', 20000],
+            ],
+        );
+        expect(
+            built.transactions.slice(2).map((row) => row.category_key),
+        ).toEqual([OWN_TRANSFER_KEY, OWN_TRANSFER_KEY]);
+        expect(subcategory).toMatchObject({
+            action: 'create',
+            parent_key: built.payload.categories.find(
+                (entry) => entry.name === 'Empresa',
+            )?.key,
+        });
+        expect(built.transactions[0].category_key).toBe(subcategory?.key);
+        expect(nodes.map((node) => node.id)).toContain(
+            categoryNodeId(['Empresa', 'Seguros']),
+        );
+        expect(built.balances[0]).toMatchObject({
+            date: '2025-12-01',
+            balance: 100000,
+        });
     });
 });

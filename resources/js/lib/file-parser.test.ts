@@ -1193,3 +1193,84 @@ describe('type column detection', () => {
         expect(detectExpenseTypes(rows, 'Type')).toEqual(['Af', 'Soll']);
     });
 });
+
+describe('parseDate with a month name', () => {
+    const parsedDay = (value: string, format: DateFormat): string | null => {
+        const date = parseDate(value, format);
+
+        return date ? formatLocalDate(date) : null;
+    };
+
+    it.each([
+        ['1 dic 2025, 0:00:00', '2025-12-01'],
+        ['3 dic 2025, 17:02:00', '2025-12-03'],
+        ['5 dic 2025, 14:00:00', '2025-12-05'],
+        ['1 dic 2025', '2025-12-01'],
+        ['1 dic. 2025', '2025-12-01'],
+        ['01-dic-25', '2025-12-01'],
+        ['7 ENE 2026, 9:15', '2026-01-07'],
+        ['12 sept 2025', '2025-09-12'],
+        ['1 de diciembre de 2025', '2025-12-01'],
+        ['28 Febrero 2026', '2026-02-28'],
+        ['3 Ágo 2025', '2025-08-03'],
+        ['1 Dec 2025', '2025-12-01'],
+        ['1 December 2025, 5:00 PM', '2025-12-01'],
+        ['Dec 1, 2025', '2025-12-01'],
+        ['Dec. 1, 2025, 17:02:00', '2025-12-01'],
+        ['August 3 2025', '2025-08-03'],
+    ])('reads %s as %s in every format', (value, expected) => {
+        for (const format of Object.values(DateFormat)) {
+            expect(parsedDay(value, format)).toBe(expected);
+        }
+    });
+
+    it('turns down a day the month does not have or a word that is no month', () => {
+        expect(parsedDay('31 feb 2026', DateFormat.DayMonthYear)).toBeNull();
+        expect(parsedDay('1 foo 2025', DateFormat.DayMonthYear)).toBeNull();
+        expect(parsedDay('Foo 1, 2025', DateFormat.MonthDayYear)).toBeNull();
+    });
+
+    it('reads numeric dates exactly as before', () => {
+        expect(parsedDay('01/12/2025', DateFormat.DayMonthYear)).toBe(
+            '2025-12-01',
+        );
+        expect(parsedDay('01/12/2025', DateFormat.MonthDayYear)).toBe(
+            '2025-01-12',
+        );
+        expect(parsedDay('2025-12-01', DateFormat.YearMonthDay)).toBe(
+            '2025-12-01',
+        );
+        expect(parsedDay('2025-12-01', DateFormat.DayMonthYear)).toBeNull();
+        expect(parsedDay('1.12.25', DateFormat.DayMonthYear)).toBe(
+            '2025-12-01',
+        );
+        expect(parsedDay('20251201', DateFormat.YearMonthDayCompact)).toBe(
+            '2025-12-01',
+        );
+        expect(parsedDay('Fecha: 01/12/2025', DateFormat.DayMonthYear)).toBe(
+            '2025-12-01',
+        );
+        expect(parsedDay('13/01/2025', DateFormat.MonthDayYear)).toBeNull();
+    });
+
+    it('detects a column of month-name dates without asking', () => {
+        expect(
+            detectDateFormat(
+                [
+                    { date: '1 dic 2025, 0:00:00' },
+                    { date: '3 dic 2025, 17:02:00' },
+                    { date: '5 dic 2025, 14:00:00' },
+                ],
+                'date',
+                'es',
+            ),
+        ).toEqual({ format: DateFormat.DayMonthYear, ambiguous: false });
+        expect(
+            detectDateFormat(
+                [{ date: 'Dec 1, 2025' }, { date: 'Dec 3, 2025' }],
+                'date',
+                'en-US',
+            ),
+        ).toEqual({ format: DateFormat.MonthDayYear, ambiguous: false });
+    });
+});
