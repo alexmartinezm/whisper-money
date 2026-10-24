@@ -55,6 +55,26 @@ describe('getTransactionRowActions', () => {
         expect(handlers.onDuplicate).toHaveBeenCalledWith(transaction);
     });
 
+    it.each([
+        ['description', { description_iv: 'iv-1', notes_iv: null }],
+        ['notes', { description_iv: null, notes_iv: 'iv-2' }],
+    ])(
+        'does not offer duplicating a row whose %s is still encrypted on the client',
+        (_field, ivs) => {
+            const ids = getTransactionRowActions({
+                transaction: { ...transaction, ...ivs } as DecryptedTransaction,
+                ...handlers,
+            }).map((action) => action.id);
+
+            expect(ids).toEqual([
+                'edit',
+                're-evaluate-rules',
+                'automate',
+                'delete',
+            ]);
+        },
+    );
+
     it('keeps delete as the only destructive action', () => {
         const destructive = getTransactionRowActions({
             transaction,

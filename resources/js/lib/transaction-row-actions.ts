@@ -18,6 +18,15 @@ interface TransactionRowActionsOptions {
 }
 
 /**
+ * A row still on the legacy client-side encryption holds its description and
+ * notes as ciphertext, which the duplicate would copy as an empty description
+ * or as unreadable text, so it is not offered there.
+ */
+function canBeDuplicated(transaction: DecryptedTransaction): boolean {
+    return !transaction.description_iv && !transaction.notes_iv;
+}
+
+/**
  * What a row offers, shared by the dropdown in the actions column and the
  * right-click menus on the row itself, so they can never drift apart.
  *
@@ -38,11 +47,15 @@ export function getTransactionRowActions({
             label: __('Edit'),
             onSelect: () => onEdit(transaction),
         },
-        {
-            id: 'duplicate',
-            label: __('Duplicate'),
-            onSelect: () => onDuplicate(transaction),
-        },
+        ...(canBeDuplicated(transaction)
+            ? [
+                  {
+                      id: 'duplicate',
+                      label: __('Duplicate'),
+                      onSelect: () => onDuplicate(transaction),
+                  },
+              ]
+            : []),
         {
             id: 're-evaluate-rules',
             label: __('Re-evaluate rules'),

@@ -1019,6 +1019,7 @@ export function TransactionList({
                                         filterTransactionalAccounts(accounts)
                                             .length > 0
                                     }
+                                    onLabelCreated={handleLabelCreated}
                                     onReEvaluateComplete={() => {
                                         setRowSelection({});
                                         setTimeout(() => {

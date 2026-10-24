@@ -36,20 +36,28 @@ vi.mock('@inertiajs/react', () => ({
     ),
 }));
 
+let addButtonLabelCreated: ((label: unknown) => void) | undefined;
+
 vi.mock('./add-transaction-button', () => ({
     AddTransactionButton: ({
         hasTransactionalAccounts,
         onSaved,
+        onLabelCreated,
     }: {
         hasTransactionalAccounts: boolean;
         onSaved?: () => void;
-    }) => (
-        <button
-            aria-label="Add transaction"
-            aria-disabled={!hasTransactionalAccounts}
-            onClick={onSaved}
-        />
-    ),
+        onLabelCreated?: (label: unknown) => void;
+    }) => {
+        addButtonLabelCreated = onLabelCreated;
+
+        return (
+            <button
+                aria-label="Add transaction"
+                aria-disabled={!hasTransactionalAccounts}
+                onClick={onSaved}
+            />
+        );
+    },
 }));
 
 vi.mock('./transaction-analysis-drawer', () => ({
@@ -76,12 +84,14 @@ function renderMenu(
     onReEvaluateComplete?: () => void,
     hasTransactionalAccounts = true,
     onTransactionSaved?: () => void,
+    onLabelCreated?: (label: unknown) => void,
 ) {
     return render(
         <TransactionActionsMenu
             transactions={transactions}
             hasTransactionalAccounts={hasTransactionalAccounts}
             onTransactionSaved={onTransactionSaved}
+            onLabelCreated={onLabelCreated}
             filters={filters}
             onReEvaluateComplete={onReEvaluateComplete}
         />,
@@ -182,6 +192,22 @@ describe('TransactionActionsMenu action bar layout', () => {
         );
 
         expect(onTransactionSaved).toHaveBeenCalledTimes(1);
+    });
+
+    it('hands the label hand-off to the add button', () => {
+        const onLabelCreated = vi.fn();
+        renderMenu(
+            emptyFilters,
+            [],
+            undefined,
+            true,
+            undefined,
+            onLabelCreated,
+        );
+
+        addButtonLabelCreated?.({ id: 'label-1' });
+
+        expect(onLabelCreated).toHaveBeenCalledWith({ id: 'label-1' });
     });
 
     it('keeps add transaction in the bar and moves categorize to the dropdown on mobile', async () => {

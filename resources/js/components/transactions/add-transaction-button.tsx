@@ -9,6 +9,7 @@ import {
 import { useTransactionDialogData } from '@/hooks/use-transaction-dialog-data';
 import { refreshPageAfterWrite } from '@/lib/refresh-page';
 import { cn } from '@/lib/utils';
+import { type Label } from '@/types/label';
 import { type DecryptedTransaction } from '@/types/transaction';
 import { __ } from '@/utils/i18n';
 import { Plus } from 'lucide-react';
@@ -24,6 +25,12 @@ interface AddTransactionButtonProps {
      * stays mounted for the rule toast's "Change category".
      */
     onSaved?: () => void;
+    /**
+     * A label created from inside the dialog. A page that refreshes in place
+     * only reloads its rows, so it needs this to show the new label in its
+     * filters and pickers without a full visit.
+     */
+    onLabelCreated?: (label: Label) => void;
 }
 
 /**
@@ -34,6 +41,7 @@ interface AddTransactionButtonProps {
 export function AddTransactionButton({
     hasTransactionalAccounts,
     onSaved = refreshPageAfterWrite,
+    onLabelCreated,
 }: AddTransactionButtonProps) {
     const { data, loading, load } = useTransactionDialogData();
     const [open, setOpen] = useState(false);
@@ -118,6 +126,7 @@ export function AddTransactionButton({
                     }}
                     mode={editing ? 'edit' : 'create'}
                     origin="quick_add"
+                    onLabelCreated={onLabelCreated}
                     onRequestEdit={(created) => {
                         setEditing(created);
                         setOpen(true);

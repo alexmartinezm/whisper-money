@@ -34,6 +34,7 @@ vi.mock('./edit-transaction-dialog', () => ({
         onSuccess,
         onOpenChange,
         onRequestEdit,
+        onLabelCreated,
     }: {
         open: boolean;
         mode: 'create' | 'edit';
@@ -42,6 +43,7 @@ vi.mock('./edit-transaction-dialog', () => ({
         onSuccess: (transaction: unknown) => void;
         onOpenChange: (open: boolean) => void;
         onRequestEdit?: (transaction: unknown) => void;
+        onLabelCreated?: (label: unknown) => void;
     }) =>
         open ? (
             <div
@@ -68,6 +70,12 @@ vi.mock('./edit-transaction-dialog', () => ({
                         onOpenChange(false);
                         onRequestEdit?.({ id: 'tx-1' });
                     }}
+                />
+                <button
+                    data-testid="create-label"
+                    onClick={() =>
+                        onLabelCreated?.({ id: 'label-1', name: 'Holidays' })
+                    }
                 />
             </div>
         ) : null,
@@ -132,6 +140,29 @@ describe('AddTransactionButton', () => {
         const dialog = await screen.findByTestId('create-dialog');
         expect(dialog).toHaveAttribute('data-mode', 'edit');
         expect(dialog).toHaveAttribute('data-transaction', 'tx-1');
+        // The page refreshed in place, so this button was never remounted
+        // by a full visit and the reopened dialog is still its own.
+        expect(onSaved).toHaveBeenCalledTimes(1);
+        expect(refreshPageAfterWrite).not.toHaveBeenCalled();
+    });
+
+    it('passes a label created in the dialog up to the page', async () => {
+        const onLabelCreated = vi.fn();
+        render(
+            <AddTransactionButton
+                hasTransactionalAccounts
+                onSaved={vi.fn()}
+                onLabelCreated={onLabelCreated}
+            />,
+        );
+
+        fireEvent.click(screen.getByTestId('add-transaction-button'));
+        fireEvent.click(await screen.findByTestId('create-label'));
+
+        expect(onLabelCreated).toHaveBeenCalledWith({
+            id: 'label-1',
+            name: 'Holidays',
+        });
     });
 
     it('leaves the page alone when the dialog closes with nothing saved', async () => {

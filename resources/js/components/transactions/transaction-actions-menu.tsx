@@ -16,6 +16,7 @@ import {
 import { useIsMobile } from '@/hooks/use-mobile';
 import { hasActiveFilters } from '@/lib/transaction-filter-serialization';
 import { reEvaluateTransactionRules } from '@/lib/transaction-re-evaluation';
+import { type Label } from '@/types/label';
 
 import {
     type DecryptedTransaction,
@@ -34,6 +35,8 @@ interface TransactionActionsMenuProps {
     hasTransactionalAccounts: boolean;
     /** How the list learns about a transaction added from the bar. */
     onTransactionSaved?: () => void;
+    /** A label created while adding a transaction from the bar. */
+    onLabelCreated?: (label: Label) => void;
     onReEvaluateComplete?: () => void;
     filters: TransactionFilters;
 }
@@ -47,6 +50,7 @@ export function TransactionActionsMenu({
     transactions,
     hasTransactionalAccounts,
     onTransactionSaved,
+    onLabelCreated,
     onReEvaluateComplete,
     filters,
 }: TransactionActionsMenuProps) {
@@ -136,6 +140,7 @@ export function TransactionActionsMenu({
                 <AddTransactionButton
                     hasTransactionalAccounts={hasTransactionalAccounts}
                     onSaved={onTransactionSaved}
+                    onLabelCreated={onLabelCreated}
                 />
 
                 {!isMobile && (

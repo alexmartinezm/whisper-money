@@ -1381,6 +1381,7 @@ export default function Transactions({
                                         hasTransactionalAccounts
                                     }
                                     onTransactionSaved={refreshTransactions}
+                                    onLabelCreated={handleLabelCreated}
                                     onReEvaluateComplete={() => {
                                         setRowSelection({});
                                         refreshTransactions();
