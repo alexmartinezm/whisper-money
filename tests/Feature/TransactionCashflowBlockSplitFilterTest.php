@@ -281,3 +281,36 @@ test('the analysis of a block counts only the split lines in it', function () {
     expect($analysis->json('summary.expense'))->toBe(60000 + 1500 + 500 + 1000 + 80000)
         ->and($analysis->json('summary.count'))->toBe(4);
 });
+
+test('a select-all bulk edit over a block reaches the split transactions listed under it and nothing else', function () {
+    $seeded = seedSplitCashflowMonth();
+    $note = 'Reviewed fixed costs';
+    $fixed = splitSeededIds($seeded, 'rent_and_shopping', 'subscription_food_and_shopping', 'rent_and_food', 'rent');
+
+    $this->patchJson(route('transactions.bulk-update'), [
+        'filters' => ['cashflow_block' => 'fixed', 'date_from' => '2026-10-01', 'date_to' => '2026-10-31'],
+        'notes' => $note,
+    ])->assertOk()->assertJsonPath('count', 4);
+
+    expect(Transaction::query()->where('notes', $note)->pluck('id')->sort()->values()->all())
+        ->toBe($fixed)
+        ->toBe(idsListedInBlock(CashflowBlock::Fixed));
+});
+
+test('a select-all category change over a block leaves the general transactions alone', function () {
+    $seeded = seedSplitCashflowMonth();
+    $newCategory = splitBlockCategory(CategoryType::Expense);
+    $food = $seeded['food']->category_id;
+
+    $response = $this->patchJson(route('transactions.bulk-update'), [
+        'filters' => ['cashflow_block' => 'fixed', 'date_from' => '2026-10-01', 'date_to' => '2026-10-31'],
+        'category_id' => $newCategory->id,
+    ])->assertOk();
+
+    expect($response->json('updated_ids'))->toBe([$seeded['rent']->id])
+        ->and(collect($response->json('skipped_split_ids'))->sort()->values()->all())
+        ->toBe(splitSeededIds($seeded, 'rent_and_shopping', 'subscription_food_and_shopping', 'rent_and_food'))
+        ->and($seeded['uncategorized_out']->fresh()->category_id)->toBeNull()
+        ->and($seeded['food']->fresh()->category_id)->toBe($food)
+        ->and(Transaction::query()->where('category_id', $newCategory->id)->pluck('id')->all())->toBe([$seeded['rent']->id]);
+});
