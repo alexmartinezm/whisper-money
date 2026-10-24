@@ -65,9 +65,11 @@ export async function fetchColumnSuggestions(
 }
 
 /**
- * The answer with each field's column named by the file's own header, read
- * from the position the AI picked: a header that was never sent comes back
- * unnamed, and every other one shortened to what the server keeps.
+ * The answer with each field's column named by the file's own header at the
+ * position the AI picked, in full and whether or not that header was sent (a
+ * header that may be a value never is, and the rest go out shortened): the
+ * mapping names its columns the way the file does. A field the AI left
+ * unmapped stays without a column.
  */
 export function withFileHeaders(
     suggestions: ColumnSuggestions,
