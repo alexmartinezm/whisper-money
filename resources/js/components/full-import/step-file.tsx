@@ -199,7 +199,7 @@ export function StepFile({
                 )}
 
                 <span className="text-[13px] text-muted-foreground">
-                    {__('CSV, XLS, XLSX or Numbers, up to 10 MB.')}
+                    {__('CSV, XLS or XLSX, up to 10 MB.')}
                 </span>
             </div>
 

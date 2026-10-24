@@ -262,7 +262,7 @@ export default function FullImport({
                                     </Button>
                                     <span className="text-[13px] text-muted-foreground">
                                         {__(
-                                            'Banktrack, or any CSV, Excel or Numbers file',
+                                            'Banktrack, or any CSV or Excel file',
                                         )}
                                     </span>
                                 </>
