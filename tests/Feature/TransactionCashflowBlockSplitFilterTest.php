@@ -314,3 +314,51 @@ test('a select-all category change over a block leaves the general transactions 
         ->and($seeded['food']->fresh()->category_id)->toBe($food)
         ->and(Transaction::query()->where('category_id', $newCategory->id)->pluck('id')->all())->toBe([$seeded['rent']->id]);
 });
+
+/**
+ * October's summary figures, as the cashflow page reads them.
+ *
+ * @return array<string, int>
+ */
+function octoberCashflowSummary(): array
+{
+    return test()->getJson('/api/cashflow/summary?'.http_build_query(['from' => '2026-10-01', 'to' => '2026-10-31']))
+        ->assertOk()
+        ->json('current');
+}
+
+test('an uncategorized outflow carrying a fixed budget label is fixed on both faces, not general', function () {
+    $streaming = Label::factory()->create(['user_id' => $this->user->id]);
+    splitBlockBudget(Budget::factory()->monthly()->fixed()->forLabels($streaming)->create(['user_id' => $this->user->id]));
+    $subscription = splitBlockTransaction(null, -1299, label: $streaming);
+
+    $summary = octoberCashflowSummary();
+    $postings = cashflowPostingsOf([$subscription->id]);
+
+    expect(idsListedInBlock(CashflowBlock::Fixed))->toBe([$subscription->id])
+        ->and(idsListedInBlock(CashflowBlock::General))->toBe([])
+        ->and(postingsInBlock($postings, CashflowBlock::Fixed)->sum('amount'))->toBe(-1299)
+        ->and(postingsInBlock($postings, CashflowBlock::General))->toBeEmpty()
+        ->and($summary['fixed_expense'])->toBe(1299)
+        ->and($summary['general_expense'])->toBe(0);
+});
+
+test('a split transaction on an archived account after its archive date is in no block', function () {
+    $rent = splitBlockCategory(CategoryType::Expense);
+    $shopping = splitBlockCategory(CategoryType::Expense);
+    splitBlockBudget(Budget::factory()->monthly()->fixed()->forCategories($rent)->create(['user_id' => $this->user->id]));
+    $archived = Account::factory()->create(['user_id' => $this->user->id, 'currency_code' => 'EUR', 'type' => AccountType::Checking, 'archived_at' => '2026-10-05']);
+
+    $split = splitBlockTransaction(null, 0, [[$rent, -30000], [$shopping, -2000]], account: $archived);
+
+    $summary = octoberCashflowSummary();
+
+    expect(cashflowPostingsOf([$split->id]))->toBeEmpty()
+        ->and($summary['expense'])->toBe(0)
+        ->and($summary['fixed_expense'])->toBe(0)
+        ->and($summary['general_expense'])->toBe(0);
+
+    foreach (CashflowBlock::cases() as $block) {
+        expect(idsListedInBlock($block))->not->toContain($split->id, "block {$block->value}");
+    }
+});
