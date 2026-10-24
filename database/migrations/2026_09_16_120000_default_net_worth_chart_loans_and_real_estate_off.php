@@ -16,10 +16,9 @@ use Illuminate\Support\Str;
  * A `user_settings` row is only written the first time someone touches a
  * preference, so "no row" is what an untouched account looks like — including
  * every account that predates this change. Flipping the defaults on their own
- * would retroactively rewrite those users' net worth wherever it is read back:
- * the dashboard, the achievements history and the monthly summary email. The
- * backfill writes down the value they have been living with, so only genuinely
- * new users get the new default.
+ * would retroactively redraw those users' net worth chart without their loans
+ * and real estate. The backfill writes down the value they have been living
+ * with, so only genuinely new users get the new default.
  */
 return new class extends Migration
 {

@@ -664,7 +664,11 @@ export function AccountBalanceChart({
     ]);
 
     // Convert data for useChartViews hook
-    const { data: hookData, accounts: hookAccounts } = useMemo(() => {
+    const {
+        data: hookData,
+        accounts: hookAccounts,
+        netWorthOptions: hookNetWorthOptions,
+    } = useMemo(() => {
         return convertSingleAccountData(
             activeChartData,
             account.id,
@@ -676,6 +680,7 @@ export function AccountBalanceChart({
     const chartViews = useChartViews({
         data: hookData,
         accounts: hookAccounts,
+        netWorthOptions: hookNetWorthOptions,
         initialView: 'stacked',
         hasStackedView: true,
     });
