@@ -83,9 +83,7 @@ class UncategorizedTransactionMatcher implements TransactionMatcher
     {
         return Transaction::query()
             ->where('user_id', $user->id)
-            ->whereNull('category_id')
-            ->whereNull('description_iv')
-            ->whereDoesntHave('splits');
+            ->pendingAiCategorization();
     }
 
     /**

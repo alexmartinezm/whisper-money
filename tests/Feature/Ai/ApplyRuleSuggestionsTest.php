@@ -1,11 +1,14 @@
 <?php
 
+use App\Enums\CategorySource;
 use App\Models\Account;
 use App\Models\AutomationRule;
 use App\Models\Category;
+use App\Models\Import;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Ai\ApplyRuleSuggestions;
+use App\Services\Ai\UncategorizedTransactionMatcher;
 
 beforeEach(function () {
     $this->user = User::factory()->create();
@@ -135,4 +138,31 @@ it('lets the more specific rule win an overlapping transaction', function () {
     $this->action->apply($this->user, [$broad, $narrow], applyToExisting: true);
 
     expect($bundle->fresh()->category_id)->toBe($streaming->id);
+});
+
+it('leaves a row split in Money Pro blank when applying a rule to existing rows', function () {
+    $repairs = Category::factory()->for($this->user)->create(['name' => 'Repairs', 'type' => 'expense']);
+    $import = Import::factory()->create(['user_id' => $this->user->id]);
+
+    $plain = ($this->makeTxn)(['creditor_name' => 'TALLER NORTE', 'description' => 'TALLER NORTE 1', 'amount' => -12000]);
+    $sourceSplit = ($this->makeTxn)([
+        'import_id' => $import->id,
+        'category_source' => CategorySource::Manual,
+        'creditor_name' => 'TALLER NORTE',
+        'description' => 'TALLER NORTE 2',
+        'amount' => -30000,
+    ]);
+
+    expect(app(UncategorizedTransactionMatcher::class)->total($this->user))->toBe(1);
+
+    $result = $this->action->apply($this->user, [
+        ($this->group)([
+            'conditions' => [['field' => 'creditor_name', 'operator' => 'equals', 'token' => 'taller norte']],
+            'proposed_category_id' => $repairs->id,
+        ]),
+    ], applyToExisting: true);
+
+    expect($result['transactions_categorized'])->toBe(1)
+        ->and($plain->fresh()->category_id)->toBe($repairs->id)
+        ->and($sourceSplit->fresh()->category_id)->toBeNull();
 });

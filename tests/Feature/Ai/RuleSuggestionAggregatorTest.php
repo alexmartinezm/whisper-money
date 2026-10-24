@@ -1,7 +1,9 @@
 <?php
 
+use App\Enums\CategorySource;
 use App\Models\Account;
 use App\Models\Category;
+use App\Models\Import;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Ai\RuleSuggestionAggregator;
@@ -90,4 +92,32 @@ it('builds a closed category list with paths, direction and leaf flags', functio
     expect($groceriesOption['path'])->toBe('Food > Groceries')
         ->and($groceriesOption['is_leaf'])->toBeTrue()
         ->and($foodOption['is_leaf'])->toBeFalse();
+});
+
+it('leaves rows split in Money Pro out of the groups sent for suggestions', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->for($user)->create();
+    $import = Import::factory()->create(['user_id' => $user->id]);
+
+    for ($i = 0; $i < 3; $i++) {
+        makeTxn($user, $account, [
+            'creditor_name' => 'PANADERIA SOL',
+            'description' => "PANADERIA SOL {$i}",
+            'amount' => -350,
+        ]);
+        makeTxn($user, $account, [
+            'import_id' => $import->id,
+            'category_source' => CategorySource::Manual,
+            'creditor_name' => 'TALLER NORTE',
+            'description' => "TALLER NORTE {$i}",
+            'amount' => -12000,
+        ]);
+    }
+
+    $groups = collect($this->aggregator->groupsFor($user));
+
+    expect($groups)->toHaveCount(1)
+        ->and($groups->first()['key'])->toBe('panaderia sol')
+        ->and($groups->first()['count'])->toBe(3)
+        ->and($groups->pluck('samples')->flatten()->implode(' '))->not->toContain('TALLER');
 });

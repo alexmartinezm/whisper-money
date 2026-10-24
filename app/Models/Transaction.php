@@ -399,11 +399,13 @@ class Transaction extends Model
     }
 
     /**
-     * Transactions the AI backfill can act on: still uncategorized, stored in
-     * plaintext (encrypted descriptions are never sent to the AI provider) and
-     * not left blank on purpose by an import. A full import brings a row split
-     * in Money Pro in uncategorized and marked as categorized by hand, for the
-     * user to split here, so the backfill must not file it whole. Only rows an
+     * Transactions the AI backfill and the AI rule suggestions (their groups
+     * and the rows a suggested rule files) can act on: still uncategorized,
+     * stored in plaintext (encrypted descriptions are never sent to the AI
+     * provider) and not left blank on purpose by an import. A full import
+     * brings a row split in Money Pro in uncategorized and marked as
+     * categorized by hand, for the user to split here, so the AI must not
+     * file it whole. Only rows an
      * import wrote are narrowed this way: elsewhere a blank row marked manual
      * can be one whose category the user deleted, which the AI may file again
      * ({@see Transaction::scopeOpenToImportAi()}). Written as a positive OR so
