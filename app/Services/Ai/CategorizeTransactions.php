@@ -4,6 +4,7 @@ namespace App\Services\Ai;
 
 use App\Ai\Agents\TransactionCategorizationAgent;
 use App\Enums\CategorySource;
+use App\Jobs\ReassignTransactionsToBudgets;
 use App\Jobs\RetryTransientAiCategorizationJob;
 use App\Models\Transaction;
 use App\Models\User;
@@ -83,7 +84,31 @@ class CategorizeTransactions
             );
         }
 
+        $this->reassignImportedBudgets($outcomes);
+
         return $outcomes;
+    }
+
+    /**
+     * Imported rows the model filed are saved quietly (see
+     * {@see self::recordOutcome()}), so no per-row budget job with emails
+     * runs for them. They are reassigned here in one batch, without budget
+     * emails, like the import's own budget pass: an import of old movements
+     * must not email about limits crossed long ago.
+     *
+     * @param  list<CategorizationOutcome>  $outcomes
+     */
+    private function reassignImportedBudgets(array $outcomes): void
+    {
+        $importedIds = collect($outcomes)
+            ->filter(fn (CategorizationOutcome $outcome): bool => $outcome->applied && $outcome->transaction->import_id !== null)
+            ->map(fn (CategorizationOutcome $outcome): string => $outcome->transaction->id)
+            ->values()
+            ->all();
+
+        if ($importedIds !== []) {
+            ReassignTransactionsToBudgets::dispatch($importedIds, notify: false);
+        }
     }
 
     /**
@@ -140,7 +165,13 @@ class CategorizeTransactions
                 $locked->category_source = CategorySource::Ai;
             }
 
-            $locked->save();
+            // An imported row leaves its budgets to reassignImportedBudgets().
+            if ($locked->import_id === null) {
+                $locked->save();
+            } else {
+                $locked->saveQuietly();
+            }
+
             $transaction->setRawAttributes($locked->getAttributes(), true);
 
             return true;
