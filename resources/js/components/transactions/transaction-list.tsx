@@ -1011,7 +1011,7 @@ export function TransactionList({
                     accounts={accounts}
                     hideAccountFilter={hideAccountFilter}
                     actions={
-                        <div className="flex justify-end gap-2">
+                        <div className="flex flex-wrap justify-end gap-2">
                             {showActionsMenu && (
                                 <TransactionActionsMenu
                                     transactions={transactions}
