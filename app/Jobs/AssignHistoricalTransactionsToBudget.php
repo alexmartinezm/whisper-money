@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Jobs\Concerns\DefersDataVersionBumps;
 use App\Models\Budget;
 use App\Models\BudgetPeriod;
 use App\Services\BudgetTransactionService;
@@ -13,7 +14,7 @@ use Throwable;
 
 class AssignHistoricalTransactionsToBudget implements ShouldQueue
 {
-    use Queueable;
+    use DefersDataVersionBumps, Queueable;
 
     /**
      * The number of times the job may be attempted.

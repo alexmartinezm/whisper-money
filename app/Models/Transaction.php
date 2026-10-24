@@ -12,6 +12,7 @@ use App\Events\TransactionCreated;
 use App\Events\TransactionDeleted;
 use App\Events\TransactionUpdated;
 use App\Models\Concerns\BelongsToSpace;
+use App\Models\Concerns\BumpsDataVersion;
 use App\Services\CashflowBlockQuery;
 use App\Services\CategoryTree;
 use App\Services\PeriodComparator;
@@ -49,7 +50,7 @@ use LogicException;
 class Transaction extends Model
 {
     /** @use HasFactory<TransactionFactory> */
-    use BelongsToSpace, HasFactory, HasUuids, SoftDeletes;
+    use BelongsToSpace, BumpsDataVersion, HasFactory, HasUuids, SoftDeletes;
 
     /** Preserve microsecond cursor precision for transaction delta sync. */
     protected $dateFormat = 'Y-m-d H:i:s.u';

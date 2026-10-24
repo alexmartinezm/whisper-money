@@ -6,6 +6,7 @@ use App\Contracts\BankingProviderInterface;
 use App\Enums\TransactionSource;
 use App\Models\Account;
 use App\Models\AccountBalance;
+use App\Services\Cache\DataVersion;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -141,6 +142,7 @@ class BalanceSyncService
             // `derived` is left out of the update list on purpose: every row this
             // can collide with was skipped above unless the walk already owned it.
             AccountBalance::upsert($rows, ['account_id', 'balance_date'], ['balance', 'updated_at']);
+            DataVersion::bumpOwnerOf($account);
         }
 
         Log::info('Calculated historical balances', [
