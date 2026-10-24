@@ -2,9 +2,9 @@
     "summary march": {
         "current": {
             "income": 291479,
-            "expense": 100829,
-            "net": 190650,
-            "savings_rate": 65.4,
+            "expense": 76160,
+            "net": 215319,
+            "savings_rate": 73.9,
             "savings": 32000,
             "investments": 40000,
             "reserved": 92151,
@@ -76,15 +76,15 @@
                     "margin": 13000
                 }
             ],
-            "fixed_expense": 68673,
-            "variable_expense": 30070,
-            "general_expense": 2086
+            "fixed_expense": 68994,
+            "variable_expense": 8157,
+            "general_expense": -991
         },
         "previous": {
-            "income": 250777,
+            "income": 248463,
             "expense": 115642,
-            "net": 135135,
-            "savings_rate": 53.9,
+            "net": 132821,
+            "savings_rate": 53.5,
             "savings": 0,
             "investments": 0,
             "fixed_expense": 100239,
@@ -170,27 +170,27 @@
                 }
             ],
             "fixed_expense": 68673,
-            "variable_expense": 17132,
-            "general_expense": -259
+            "variable_expense": 20209,
+            "general_expense": -3336
         },
         "previous": {
-            "income": 777,
-            "expense": 15473,
-            "net": -14696,
-            "savings_rate": -1891.4,
+            "income": -1537,
+            "expense": 3473,
+            "net": -5010,
+            "savings_rate": 0,
             "savings": 0,
             "investments": 0,
             "fixed_expense": 5239,
-            "variable_expense": 12000,
+            "variable_expense": 0,
             "general_expense": -1766
         }
     },
     "summary first quarter": {
         "current": {
-            "income": 792256,
-            "expense": 315431,
-            "net": 476825,
-            "savings_rate": 60.2,
+            "income": 789942,
+            "expense": 290762,
+            "net": 499180,
+            "savings_rate": 63.2,
             "savings": 52000,
             "investments": 40000,
             "reserved": 92151,
@@ -262,9 +262,9 @@
                     "margin": 13000
                 }
             ],
-            "fixed_expense": 268912,
-            "variable_expense": 46199,
-            "general_expense": 320
+            "fixed_expense": 269233,
+            "variable_expense": 24286,
+            "general_expense": -2757
         },
         "previous": {
             "income": 0,
@@ -280,10 +280,10 @@
     },
     "summary year": {
         "current": {
-            "income": 792256,
-            "expense": 315431,
-            "net": 476825,
-            "savings_rate": 60.2,
+            "income": 789942,
+            "expense": 290762,
+            "net": 499180,
+            "savings_rate": 63.2,
             "savings": 52000,
             "investments": 40000,
             "reserved": 51000,
@@ -300,9 +300,9 @@
                     "margin": 51000
                 }
             ],
-            "fixed_expense": 268912,
-            "variable_expense": 46199,
-            "general_expense": 320
+            "fixed_expense": 269233,
+            "variable_expense": 24286,
+            "general_expense": -2757
         },
         "previous": {
             "income": 0,
@@ -318,6 +318,21 @@
     },
     "sankey march": {
         "income_categories": [
+            {
+                "category_id": "category:Gifts",
+                "category": {
+                    "id": "category:Gifts",
+                    "name": "Gifts",
+                    "icon": "Tag",
+                    "color": "blue",
+                    "type": "income",
+                    "cashflow_direction": "hidden",
+                    "parent_id": null
+                },
+                "amount": 4321,
+                "has_children": false,
+                "is_direct": false
+            },
             {
                 "category_id": "category:Work",
                 "category": {
@@ -379,21 +394,6 @@
                 "is_direct": false
             },
             {
-                "category_id": "category:Gifts",
-                "category": {
-                    "id": "category:Gifts",
-                    "name": "Gifts",
-                    "icon": "Tag",
-                    "color": "blue",
-                    "type": "income",
-                    "cashflow_direction": "hidden",
-                    "parent_id": null
-                },
-                "amount": 4321,
-                "has_children": false,
-                "is_direct": false
-            },
-            {
                 "category_id": null,
                 "category": {
                     "id": null,
@@ -408,6 +408,21 @@
             }
         ],
         "expense_categories": [
+            {
+                "category_id": "category:Pharmacy",
+                "category": {
+                    "id": "category:Pharmacy",
+                    "name": "Pharmacy",
+                    "icon": "Tag",
+                    "color": "blue",
+                    "type": "expense",
+                    "cashflow_direction": "hidden",
+                    "parent_id": null
+                },
+                "amount": 999,
+                "has_children": false,
+                "is_direct": false
+            },
             {
                 "category_id": "category:Home",
                 "category": {
@@ -434,7 +449,7 @@
                     "cashflow_direction": "hidden",
                     "parent_id": null
                 },
-                "amount": 30284,
+                "amount": 5605,
                 "has_children": true,
                 "is_direct": false
             },
@@ -464,7 +479,7 @@
                     "cashflow_direction": "hidden",
                     "parent_id": null
                 },
-                "amount": 10170,
+                "amount": 10180,
                 "has_children": false,
                 "is_direct": false
             },
@@ -499,21 +514,6 @@
                 "is_direct": false
             },
             {
-                "category_id": "category:Pharmacy",
-                "category": {
-                    "id": "category:Pharmacy",
-                    "name": "Pharmacy",
-                    "icon": "Tag",
-                    "color": "blue",
-                    "type": "expense",
-                    "cashflow_direction": "hidden",
-                    "parent_id": null
-                },
-                "amount": 999,
-                "has_children": false,
-                "is_direct": false
-            },
-            {
                 "category_id": null,
                 "category": {
                     "id": null,
@@ -528,7 +528,7 @@
             }
         ],
         "total_income": 330737,
-        "total_expense": 194087
+        "total_expense": 169418
     },
     "sankey february": {
         "income_categories": [
@@ -623,6 +623,21 @@
                 "is_direct": false
             },
             {
+                "category_id": "category:Gifts",
+                "category": {
+                    "id": "category:Gifts",
+                    "name": "Gifts (reversal)",
+                    "icon": "Tag",
+                    "color": "blue",
+                    "type": "income",
+                    "cashflow_direction": "hidden",
+                    "parent_id": null
+                },
+                "amount": 2314,
+                "has_children": false,
+                "is_direct": false
+            },
+            {
                 "category_id": null,
                 "category": {
                     "id": null,
@@ -637,7 +652,7 @@
             }
         ],
         "total_income": 253777,
-        "total_expense": 118642
+        "total_expense": 120956
     },
     "sankey march drilled into Home": {
         "income_categories": [],
@@ -692,8 +707,7 @@
         "total_expense": 58289
     },
     "sankey march drilled into Food": {
-        "income_categories": [],
-        "expense_categories": [
+        "income_categories": [
             {
                 "category_id": "category:Groceries",
                 "category": {
@@ -705,10 +719,12 @@
                     "cashflow_direction": "hidden",
                     "parent_id": "category:Food"
                 },
-                "amount": 21199,
+                "amount": 3801,
                 "has_children": false,
                 "is_direct": false
-            },
+            }
+        ],
+        "expense_categories": [
             {
                 "category_id": "category:Dining",
                 "category": {
@@ -720,13 +736,13 @@
                     "cashflow_direction": "hidden",
                     "parent_id": "category:Food"
                 },
-                "amount": 9085,
+                "amount": 9406,
                 "has_children": false,
                 "is_direct": false
             }
         ],
-        "total_income": 0,
-        "total_expense": 30284
+        "total_income": 3801,
+        "total_expense": 9406
     },
     "sankey march drilled into Work": {
         "income_categories": [
@@ -829,15 +845,15 @@
             },
             {
                 "month": "2026-02",
-                "income": 250777,
+                "income": 248463,
                 "expense": 115642,
-                "net": 135135
+                "net": 132821
             },
             {
                 "month": "2026-03",
                 "income": 291479,
-                "expense": 100829,
-                "net": 190650
+                "expense": 76160,
+                "net": 215319
             }
         ]
     },
@@ -851,15 +867,15 @@
             },
             {
                 "month": "2026-02",
-                "income": 250777,
+                "income": 248463,
                 "expense": 115642,
-                "net": 135135
+                "net": 132821
             },
             {
                 "month": "2026-03",
                 "income": 291479,
-                "expense": 100829,
-                "net": 190650
+                "expense": 76160,
+                "net": 215319
             }
         ]
     },
@@ -873,15 +889,163 @@
             },
             {
                 "month": "2026-02",
-                "income": 250777,
+                "income": 248463,
                 "expense": 115642,
-                "net": 135135
+                "net": 132821
             },
             {
                 "month": "2026-03",
                 "income": 291479,
-                "expense": 100829,
-                "net": 190650
+                "expense": 76160,
+                "net": 215319
+            }
+        ]
+    },
+    "trend capped at the longest window": {
+        "data": [
+            {
+                "month": "2024-04",
+                "income": 0,
+                "expense": 0,
+                "net": 0
+            },
+            {
+                "month": "2024-05",
+                "income": 0,
+                "expense": 0,
+                "net": 0
+            },
+            {
+                "month": "2024-06",
+                "income": 0,
+                "expense": 0,
+                "net": 0
+            },
+            {
+                "month": "2024-07",
+                "income": 0,
+                "expense": 0,
+                "net": 0
+            },
+            {
+                "month": "2024-08",
+                "income": 0,
+                "expense": 0,
+                "net": 0
+            },
+            {
+                "month": "2024-09",
+                "income": 0,
+                "expense": 0,
+                "net": 0
+            },
+            {
+                "month": "2024-10",
+                "income": 0,
+                "expense": 0,
+                "net": 0
+            },
+            {
+                "month": "2024-11",
+                "income": 0,
+                "expense": 0,
+                "net": 0
+            },
+            {
+                "month": "2024-12",
+                "income": 0,
+                "expense": 0,
+                "net": 0
+            },
+            {
+                "month": "2025-01",
+                "income": 0,
+                "expense": 0,
+                "net": 0
+            },
+            {
+                "month": "2025-02",
+                "income": 0,
+                "expense": 0,
+                "net": 0
+            },
+            {
+                "month": "2025-03",
+                "income": 0,
+                "expense": 0,
+                "net": 0
+            },
+            {
+                "month": "2025-04",
+                "income": 0,
+                "expense": 0,
+                "net": 0
+            },
+            {
+                "month": "2025-05",
+                "income": 0,
+                "expense": 0,
+                "net": 0
+            },
+            {
+                "month": "2025-06",
+                "income": 0,
+                "expense": 0,
+                "net": 0
+            },
+            {
+                "month": "2025-07",
+                "income": 0,
+                "expense": 0,
+                "net": 0
+            },
+            {
+                "month": "2025-08",
+                "income": 0,
+                "expense": 0,
+                "net": 0
+            },
+            {
+                "month": "2025-09",
+                "income": 0,
+                "expense": 0,
+                "net": 0
+            },
+            {
+                "month": "2025-10",
+                "income": 0,
+                "expense": 0,
+                "net": 0
+            },
+            {
+                "month": "2025-11",
+                "income": 0,
+                "expense": 0,
+                "net": 0
+            },
+            {
+                "month": "2025-12",
+                "income": 0,
+                "expense": 0,
+                "net": 0
+            },
+            {
+                "month": "2026-01",
+                "income": 250000,
+                "expense": 98960,
+                "net": 151040
+            },
+            {
+                "month": "2026-02",
+                "income": 248463,
+                "expense": 115642,
+                "net": 132821
+            },
+            {
+                "month": "2026-03",
+                "income": 291479,
+                "expense": 76160,
+                "net": 215319
             }
         ]
     },
@@ -899,25 +1063,8 @@
                 },
                 "category_id": "category:Home",
                 "amount": 58289,
-                "percentage": 57.8,
+                "percentage": 76.5,
                 "previous_amount": 100239,
-                "has_children": true,
-                "is_direct": false
-            },
-            {
-                "category": {
-                    "id": "category:Food",
-                    "name": "Food",
-                    "icon": "Tag",
-                    "color": "blue",
-                    "type": "expense",
-                    "cashflow_direction": "hidden",
-                    "parent_id": null
-                },
-                "category_id": "category:Food",
-                "amount": 30284,
-                "percentage": 30,
-                "previous_amount": 12000,
                 "has_children": true,
                 "is_direct": false
             },
@@ -932,10 +1079,27 @@
                     "parent_id": null
                 },
                 "category_id": "category:Fun",
-                "amount": 10170,
-                "percentage": 10.1,
+                "amount": 10180,
+                "percentage": 13.4,
                 "previous_amount": 5169,
                 "has_children": false,
+                "is_direct": false
+            },
+            {
+                "category": {
+                    "id": "category:Food",
+                    "name": "Food",
+                    "icon": "Tag",
+                    "color": "blue",
+                    "type": "expense",
+                    "cashflow_direction": "hidden",
+                    "parent_id": null
+                },
+                "category_id": "category:Food",
+                "amount": 5605,
+                "percentage": 7.4,
+                "previous_amount": 12000,
+                "has_children": true,
                 "is_direct": false
             },
             {
@@ -948,7 +1112,7 @@
                 },
                 "category_id": null,
                 "amount": 2345,
-                "percentage": 2.3,
+                "percentage": 3.1,
                 "previous_amount": 1234,
                 "has_children": false,
                 "is_direct": false
@@ -965,7 +1129,7 @@
                 },
                 "category_id": "category:Pharmacy",
                 "amount": 999,
-                "percentage": 1,
+                "percentage": 1.3,
                 "previous_amount": 0,
                 "has_children": false,
                 "is_direct": false
@@ -982,13 +1146,13 @@
                 },
                 "category_id": "category:Shopping",
                 "amount": -1258,
-                "percentage": -1.2,
+                "percentage": -1.7,
                 "previous_amount": -3000,
                 "has_children": false,
                 "is_direct": false
             }
         ],
-        "total": 100829,
+        "total": 76160,
         "previous_total": 115642
     },
     "breakdown march income": {
@@ -1023,7 +1187,7 @@
                 "category_id": "category:Gifts",
                 "amount": 4321,
                 "percentage": 1.5,
-                "previous_amount": 0,
+                "previous_amount": -2314,
                 "has_children": false,
                 "is_direct": false
             },
@@ -1044,7 +1208,7 @@
             }
         ],
         "total": 291479,
-        "previous_total": 250777
+        "previous_total": 248463
     },
     "breakdown march expense drilled into Home": {
         "data": [
@@ -1107,23 +1271,6 @@
         "data": [
             {
                 "category": {
-                    "id": "category:Groceries",
-                    "name": "Groceries",
-                    "icon": "Tag",
-                    "color": "blue",
-                    "type": "expense",
-                    "cashflow_direction": "hidden",
-                    "parent_id": "category:Food"
-                },
-                "category_id": "category:Groceries",
-                "amount": 21199,
-                "percentage": 70,
-                "previous_amount": 7000,
-                "has_children": false,
-                "is_direct": false
-            },
-            {
-                "category": {
                     "id": "category:Dining",
                     "name": "Dining",
                     "icon": "Tag",
@@ -1133,14 +1280,31 @@
                     "parent_id": "category:Food"
                 },
                 "category_id": "category:Dining",
-                "amount": 9085,
-                "percentage": 30,
+                "amount": 9406,
+                "percentage": 167.8,
                 "previous_amount": 5000,
+                "has_children": false,
+                "is_direct": false
+            },
+            {
+                "category": {
+                    "id": "category:Groceries",
+                    "name": "Groceries",
+                    "icon": "Tag",
+                    "color": "blue",
+                    "type": "expense",
+                    "cashflow_direction": "hidden",
+                    "parent_id": "category:Food"
+                },
+                "category_id": "category:Groceries",
+                "amount": -3801,
+                "percentage": -67.8,
+                "previous_amount": 7000,
                 "has_children": false,
                 "is_direct": false
             }
         ],
-        "total": 30284,
+        "total": 5605,
         "previous_total": 12000
     },
     "breakdown march income drilled into Work": {
@@ -1186,17 +1350,17 @@
     "dashboard cashflowSummary": {
         "current": {
             "income": 291479,
-            "expense": 100829,
-            "net": 190650,
-            "savings_rate": 65.4,
+            "expense": 76160,
+            "net": 215319,
+            "savings_rate": 73.9,
             "savings": 32000,
             "investments": 40000
         },
         "previous": {
-            "income": 250777,
+            "income": 248463,
             "expense": 115642,
-            "net": 135135,
-            "savings_rate": 53.9,
+            "net": 132821,
+            "savings_rate": 53.5,
             "savings": 0,
             "investments": 0
         }
@@ -1211,18 +1375,18 @@
             "investments": 0
         },
         "2026-02": {
-            "income": 250777,
+            "income": 248463,
             "expense": 115642,
-            "net": 135135,
-            "savings_rate": 53.9,
+            "net": 132821,
+            "savings_rate": 53.5,
             "savings": 0,
             "investments": 0
         },
         "2026-03": {
             "income": 291479,
-            "expense": 100829,
-            "net": 190650,
-            "savings_rate": 65.4,
+            "expense": 76160,
+            "net": 215319,
+            "savings_rate": 73.9,
             "savings": 32000,
             "investments": 40000
         }
@@ -1263,18 +1427,18 @@
             "investments": 0
         },
         "2026-02": {
-            "income": 250777,
+            "income": 248463,
             "expense": 115642,
-            "net": 135135,
-            "savings_rate": 53.9,
+            "net": 132821,
+            "savings_rate": 53.5,
             "savings": 0,
             "investments": 0
         },
         "2026-03": {
             "income": 291479,
-            "expense": 94829,
-            "net": 196650,
-            "savings_rate": 67.5,
+            "expense": 70160,
+            "net": 221319,
+            "savings_rate": 75.9,
             "savings": 32000,
             "investments": 40000
         }
@@ -1284,9 +1448,9 @@
         "summary": {
             "current": {
                 "income": 291479,
-                "expense": 100829,
-                "net": 190650,
-                "savings_rate": 65.4,
+                "expense": 76160,
+                "net": 215319,
+                "savings_rate": 73.9,
                 "savings": 32000,
                 "investments": 40000,
                 "reserved": 92151,
@@ -1358,15 +1522,15 @@
                         "margin": 13000
                     }
                 ],
-                "fixed_expense": 68673,
-                "variable_expense": 30070,
-                "general_expense": 2086
+                "fixed_expense": 68994,
+                "variable_expense": 8157,
+                "general_expense": -991
             },
             "previous": {
-                "income": 250777,
+                "income": 248463,
                 "expense": 115642,
-                "net": 135135,
-                "savings_rate": 53.9,
+                "net": 132821,
+                "savings_rate": 53.5,
                 "savings": 0,
                 "investments": 0,
                 "fixed_expense": 100239,
@@ -1376,6 +1540,21 @@
         },
         "sankey": {
             "income_categories": [
+                {
+                    "category_id": "category:Gifts",
+                    "category": {
+                        "id": "category:Gifts",
+                        "name": "Gifts",
+                        "icon": "Tag",
+                        "color": "blue",
+                        "type": "income",
+                        "cashflow_direction": "hidden",
+                        "parent_id": null
+                    },
+                    "amount": 4321,
+                    "has_children": false,
+                    "is_direct": false
+                },
                 {
                     "category_id": "category:Work",
                     "category": {
@@ -1437,21 +1616,6 @@
                     "is_direct": false
                 },
                 {
-                    "category_id": "category:Gifts",
-                    "category": {
-                        "id": "category:Gifts",
-                        "name": "Gifts",
-                        "icon": "Tag",
-                        "color": "blue",
-                        "type": "income",
-                        "cashflow_direction": "hidden",
-                        "parent_id": null
-                    },
-                    "amount": 4321,
-                    "has_children": false,
-                    "is_direct": false
-                },
-                {
                     "category_id": null,
                     "category": {
                         "id": null,
@@ -1466,6 +1630,21 @@
                 }
             ],
             "expense_categories": [
+                {
+                    "category_id": "category:Pharmacy",
+                    "category": {
+                        "id": "category:Pharmacy",
+                        "name": "Pharmacy",
+                        "icon": "Tag",
+                        "color": "blue",
+                        "type": "expense",
+                        "cashflow_direction": "hidden",
+                        "parent_id": null
+                    },
+                    "amount": 999,
+                    "has_children": false,
+                    "is_direct": false
+                },
                 {
                     "category_id": "category:Home",
                     "category": {
@@ -1492,7 +1671,7 @@
                         "cashflow_direction": "hidden",
                         "parent_id": null
                     },
-                    "amount": 30284,
+                    "amount": 5605,
                     "has_children": true,
                     "is_direct": false
                 },
@@ -1522,7 +1701,7 @@
                         "cashflow_direction": "hidden",
                         "parent_id": null
                     },
-                    "amount": 10170,
+                    "amount": 10180,
                     "has_children": false,
                     "is_direct": false
                 },
@@ -1557,21 +1736,6 @@
                     "is_direct": false
                 },
                 {
-                    "category_id": "category:Pharmacy",
-                    "category": {
-                        "id": "category:Pharmacy",
-                        "name": "Pharmacy",
-                        "icon": "Tag",
-                        "color": "blue",
-                        "type": "expense",
-                        "cashflow_direction": "hidden",
-                        "parent_id": null
-                    },
-                    "amount": 999,
-                    "has_children": false,
-                    "is_direct": false
-                },
-                {
                     "category_id": null,
                     "category": {
                         "id": null,
@@ -1586,15 +1750,15 @@
                 }
             ],
             "total_income": 330737,
-            "total_expense": 194087
+            "total_expense": 169418
         },
         "trend": {
             "data": [
                 {
                     "month": "2026-03",
                     "income": 291479,
-                    "expense": 100829,
-                    "net": 190650
+                    "expense": 76160,
+                    "net": 215319
                 }
             ]
         }

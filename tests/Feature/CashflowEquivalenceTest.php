@@ -33,11 +33,12 @@ use Illuminate\Support\Str;
  * points at, and lists keep the order they came back in: the order is part of
  * what must not change.
  *
- * Today's queries have no ORDER BY, so that order is the query plan's. On the
- * test database MySQL reads `accounts` first and each account's transactions
- * by id, so categories show up in the order of their first row account by
- * account, not by date (see the February sankey and the two rows recorded
- * late in March).
+ * The queries before the port have no ORDER BY, so that order is the query
+ * plan's: MySQL may read `accounts` first and each account's transactions by
+ * id, or the transactions by date. The household is laid out so that both
+ * give the same first-seen order of categories, which is also the order the
+ * SQL aggregation promises, by (transaction_date, id): a category's first row
+ * by date is also its first row on the first account that has it.
  */
 
 const CASHFLOW_EQUIVALENCE_GOLDEN = __DIR__.'/../Fixtures/cashflow-equivalence.json';
@@ -54,9 +55,8 @@ beforeEach(function () {
  * The invented household every consumer reads.
  *
  * Every row gets an id from a counter, in creation order, so the order rows
- * come back in never depends on a random uuid. Transactions are created in
- * date order except the two recorded late. `names` maps each id to a readable
- * name for the golden file.
+ * come back in never depends on a random uuid. `names` maps each id to a
+ * readable name for the golden file.
  *
  * @return array{user: User, household: Space, personal: Space, names: array<string, string>, ids: array<string, string>}
  */
@@ -213,23 +213,29 @@ function cashflowEquivalenceWorld(): array
     // February: the previous period.
     $transaction('Feb salary', $checking, $salary, 250000, '2026-02-03');
     $febRent = $transaction('Feb rent', $checking, $rent, -95000, '2026-02-03');
+    $febSplit = $transaction('Feb food split', $checking, null, -12000, '2026-02-03', labels: [$holiday], lines: [[$groceries, -7000], [$dining, -5000]]);
     $transaction('Feb fun, no currency on a USD account', $dollars, $fun, -5099, '2026-02-03', currency: '');
     $transaction('Feb archived fun', $archived, $fun, -444, '2026-02-10');
-    $febSplit = $transaction('Feb food split', $checking, null, -12000, '2026-02-20', labels: [$holiday], lines: [[$groceries, -7000], [$dining, -5000]]);
     $transaction('Feb shopping refund', $checking, $shopping, 3000, '2026-02-20');
     $transaction('Feb uncategorized out', $checking, null, -1234, '2026-02-20');
     $transaction('Feb uncategorized in', $checking, null, 777, '2026-02-20');
     $transaction('Feb utilities GBP 50%', $sharedPounds, $utilities, -8765, '2026-02-20');
+    // Gifts nets negative in February and crosses to the expense side as a reversal.
+    $transaction('Feb gift given back USD', $dollars, $gifts, -2500, '2026-02-20');
     $transaction('Feb partner salary', $partnerChecking, $partnerSalary, 180000, '2026-02-25');
 
     // March: the current period.
     $transaction('Mar partner salary', $partnerChecking, $partnerSalary, 180000, '2026-03-01');
+    $transaction('Mar gift', $checking, $gifts, 4321, '2026-03-01');
+    $transaction('Mar pharmacy', $checking, $pharmacy, -999, '2026-03-01');
     $transaction('Mar salary', $checking, $salary, 260000, '2026-03-02');
     $transaction('Mar bonus', $checking, $bonus, 15001, '2026-03-02');
     $marRentSplit = $transaction('Mar rent and sublet split', $checking, null, -40000, '2026-03-02', lines: [[$rent, -50000], [$salary, 10000]]);
     $marHolidaySplit = $transaction('Mar groceries and savings split', $checking, null, -30000, '2026-03-03', labels: [$holiday], lines: [[$groceries, -10000], [$emergencyFund, -20000]]);
     // Lines add up to -9999 against a -10001 parent: the last line takes the residue.
-    $transaction('Mar USD split with residue', $dollars, $shopping, -10001, '2026-03-04', lines: [[$dining, -3333], [$fun, -3333], [$shopping, -3333]]);
+    // The Holiday label (tracked by a variable budget) claims the untracked
+    // shopping line; dining stays fixed, since fixed wins an overlap.
+    $transaction('Mar USD split with residue', $dollars, $shopping, -10001, '2026-03-04', labels: [$holiday], lines: [[$dining, -3333], [$fun, -3333], [$shopping, -3333]]);
     $transaction('Mar archived groceries before archiving', $archived, $groceries, -1111, '2026-03-04');
     $transaction('Mar archived groceries on archive day', $archived, $groceries, -2222, '2026-03-05');
     $transaction('Mar GBP 50% split', $sharedPounds, null, -5001, '2026-03-06', lines: [[$groceries, -2501], [$dining, -2500]]);
@@ -261,13 +267,15 @@ function cashflowEquivalenceWorld(): array
     $transaction('Mar groceries in USD on a EUR account', $checking, $groceries, -2500, '2026-03-12', currency: 'USD');
     $transaction('Mar fun in EUR on a USD account', $dollars, $fun, -1800, '2026-03-12', currency: 'EUR');
     $transaction('Mar salary, no currency on a USD account', $dollars, $salary, 1234, '2026-03-12', currency: '');
+    // Converted row by row, each -5 USD rounds to -5 EUR (-10); converted as a sum it would be -9.
+    $transaction('Mar coin fun USD, first', $dollars, $fun, -5, '2026-03-12');
+    $transaction('Mar coin fun USD, second', $dollars, $fun, -5, '2026-03-12');
+    // The user's currency spelled in lowercase is still the user's currency.
+    $transaction('Mar dining in lowercase eur on a USD account', $dollars, $dining, -321, '2026-03-12', currency: 'eur');
     $transaction('Mar joint groceries', $joint, $groceries, -6000, '2026-03-13');
     $transaction('Mar partner groceries', $partnerChecking, $partnerGroceries, -4567, '2026-03-13');
-    // Recorded last but dated first: their ids sort after every other March
-    // row while their date sorts before, so the first-seen order of the
-    // categories shows which of the two the rows come back in.
-    $transaction('Mar gift, recorded late', $checking, $gifts, 4321, '2026-03-01');
-    $transaction('Mar pharmacy, recorded late', $checking, $pharmacy, -999, '2026-03-01');
+    // A refund big enough that Groceries nets positive inside the Food drill-down.
+    $transaction('Mar groceries refund', $checking, $groceries, 25000, '2026-03-13');
 
     // Budgets come after the transactions, so nothing assigns them on the way
     // in: what each period has spent is set below, as stored.
@@ -412,6 +420,7 @@ function cashflowEquivalenceOutputs(array $world): array
         'trend default' => $api('trend', []),
         'trend 3 months' => $api('trend', ['months' => 3]),
         'trend january to march' => $api('trend', ['from' => '2026-01-01', 'to' => '2026-03-31']),
+        'trend capped at the longest window' => $api('trend', ['from' => '2023-01-01', 'to' => '2026-03-31']),
         'breakdown march expense' => $api('breakdown', [...$march, 'type' => 'expense']),
         'breakdown march income' => $api('breakdown', [...$march, 'type' => 'income']),
         'breakdown march expense drilled into Home' => $api('breakdown', [...$march, 'type' => 'expense', 'parent' => $ids['category:Home']]),
@@ -471,25 +480,30 @@ test('the pinned figures add up by hand', function () {
     //   (the account is not loaded, so neither its currency nor its share applies)
     //   trashed category 7777: out of every figure
     //   groceries 2500 USD on a EUR account at 1.0873 -> 2299; fun 1800 EUR on a USD account
-    //   joint account groceries 6000; pharmacy 999
+    //   two coin rows of 5 USD at 1.0873: 4.60 -> 5 each, so 10 (converted as a sum it would be 9)
+    //   dining 321 in lowercase "eur" on a USD account: not converted
+    //   joint account groceries 6000; pharmacy 999; groceries refund 25000
     $expectedExpense = 50000 + 10000 + 3076 + 3076 + 3077 + 1111 + 1459 + 1459 + 330 + 990 + 165 + 166
-        + 2000 - 6500 + 1299 + 4550 + 6789 + 1500 + 2345 + 1000 + 1839 + 2299 + 1800 + 6000 + 999;
+        + 2000 - 6500 + 1299 + 4550 + 6789 + 1500 + 2345 + 1000 + 1839 + 2299 + 1800 + 5 + 5 + 321 + 6000 + 999 - 25000;
     expect($march['expense'])->toBe($expectedExpense)
         ->and($march['net'])->toBe($march['income'] - $march['expense']);
 
     // Fixed: what Housing (Home tree), Dining out (dining) and Subscriptions (label) track:
     //   rent line 50000 + utilities 6789 + home 1500
-    //   + dining 4550 + USD split dining line 3076 + GBP split dining line 1459 (fixed beats Food's variable)
+    //   + dining 4550 + USD split dining line 3076 + GBP split dining line 1459 + lowercase eur 321
+    //   (fixed beats Food's variable, and beats the Holiday label on the USD split)
     //   + subscription 1299 (fixed label beats Yearly fun's variable category)
     // Variable: Food budget (groceries) and Yearly fun (fun), and the Holiday label:
     //   groceries line 10000 + archived 1111 + GBP line 1459 + 33% 330 + USD-on-EUR 2299 + joint 6000
+    //   - groceries refund 25000
     //   + fun: USD split line 3076 + 33% 990 + 33% split line 166 + trashed account 1000 + 1839 + 1800
+    //   + coins 5 + 5
+    //   + the USD split's shopping residue line 3077, claimed by the Holiday label on its parent
     // General: what nothing tracks, the trashed label included:
-    //   shopping: USD split residue line 3077 + 33% split line 165 + 2000 - 6500; uncategorized 2345;
-    //   pharmacy 999
-    expect($march['fixed_expense'])->toBe(50000 + 6789 + 1500 + 4550 + 3076 + 1459 + 1299)
-        ->and($march['variable_expense'])->toBe(10000 + 1111 + 1459 + 330 + 2299 + 6000 + 3076 + 990 + 166 + 1000 + 1839 + 1800)
-        ->and($march['general_expense'])->toBe(3077 + 165 + 2000 - 6500 + 2345 + 999)
+    //   shopping: 33% split line 165 + 2000 - 6500; uncategorized 2345; pharmacy 999
+    expect($march['fixed_expense'])->toBe(50000 + 6789 + 1500 + 4550 + 3076 + 1459 + 321 + 1299)
+        ->and($march['variable_expense'])->toBe(10000 + 1111 + 1459 + 330 + 2299 + 6000 - 25000 + 3076 + 990 + 166 + 1000 + 1839 + 1800 + 5 + 5 + 3077)
+        ->and($march['general_expense'])->toBe(165 + 2000 - 6500 + 2345 + 999)
         ->and($march['fixed_expense'] + $march['variable_expense'] + $march['general_expense'])->toBe($march['expense']);
 
     // Savings: the checking legs only (the savings-account legs are skipped):
@@ -509,6 +523,20 @@ test('the pinned figures add up by hand', function () {
     expect($sankeyIncome->get('Shopping (refund)')['amount'])->toBe(1258)
         ->and($sankeyIncome->get('Car fund (withdrawal)')['amount'])->toBe(8000)
         ->and($sankeyIncome->get('Transfer in')['amount'])->toBe(30000);
+
+    // February's gift given back, -2500 USD at 1.0805 -> -2314, nets Gifts negative: a reversal
+    // on the expense side.
+    expect(collect($outputs['sankey february']['expense_categories'])->keyBy('category.name')->get('Gifts (reversal)')['amount'])->toBe(2314);
+
+    // Inside the Food drill-down, the 25000 refund nets Groceries positive
+    // (25000 - 10000 - 1111 - 1459 - 330 - 2299 - 6000 = 3801): it crosses to
+    // the income side under its own name, and the breakdown lists it negative.
+    expect($outputs['sankey march drilled into Food']['income_categories'][0])->toMatchArray(['category_id' => 'category:Groceries', 'amount' => 3801])
+        ->and(collect($outputs['breakdown march expense drilled into Food']['data'])->firstWhere('category_id', 'category:Groceries')['amount'])->toBe(-3801);
+
+    // The trend never reaches back further than 24 months.
+    expect($outputs['trend capped at the longest window']['data'])->toHaveCount(24)
+        ->and($outputs['trend capped at the longest window']['data'][0]['month'])->toBe('2024-04');
 
     // forMonths in the household space counts both members' rows there:
     // partner salary 180000 in; joint groceries 6000 + partner groceries 4567 out.
