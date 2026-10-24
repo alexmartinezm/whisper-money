@@ -3487,5 +3487,14 @@
     "The import stopped before it finished.": "La importación se detuvo antes de terminar.",
     "An earlier import is still being undone. Try again in a moment.": "Todavía se está deshaciendo una importación anterior. Inténtalo de nuevo en un momento.",
     "The undo could not be started. Try again.": "No se ha podido empezar a deshacer. Inténtalo de nuevo.",
-    "Couldn't undo this import. Try again.": "No se ha podido deshacer esta importación. Inténtalo de nuevo."
+    "Couldn't undo this import. Try again.": "No se ha podido deshacer esta importación. Inténtalo de nuevo.",
+    "That file is over 10 MB": "Ese fichero pasa de 10 MB",
+    "There are no rows in it": "No tiene ninguna fila",
+    "Date can't be read": "La fecha no se puede leer",
+    "No date": "Sin fecha",
+    "Amount can't be read": "El importe no se puede leer",
+    "No amount": "Sin importe",
+    "No description": "Sin concepto",
+    "That file has no format we recognise": "Ese fichero no tiene un formato que reconozcamos",
+    ":format is not supported": ":format no está soportado"
 }
