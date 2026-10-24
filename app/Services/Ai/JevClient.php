@@ -20,9 +20,9 @@ use Illuminate\Support\Sleep;
  */
 class JevClient
 {
-    public const string ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
+    private const string ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 
-    public const int MAX_ATTEMPTS = 3;
+    private const int MAX_ATTEMPTS = 3;
 
     public function model(): string
     {

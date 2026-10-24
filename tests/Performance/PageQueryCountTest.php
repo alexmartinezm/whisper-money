@@ -104,32 +104,34 @@ test('settings accounts page does not exceed query threshold', function () {
     }, 'Settings Accounts');
 });
 
+// Settings pages run one query more than the rest: the full import's menu entry
+// checks whether the user has an import that can still be undone (upstream #1081).
 test('settings categories page does not exceed query threshold', function () {
-    assertMaxQueries(17, function () {
+    assertMaxQueries(18, function () {
         $this->get(route('categories.index'))->assertOk();
     }, 'Settings Categories');
 });
 
 test('settings labels page does not exceed query threshold', function () {
-    assertMaxQueries(17, function () {
+    assertMaxQueries(18, function () {
         $this->get(route('labels.index'))->assertOk();
     }, 'Settings Labels');
 });
 
 test('settings automation rules page does not exceed query threshold', function () {
-    assertMaxQueries(17, function () {
+    assertMaxQueries(18, function () {
         $this->get(route('automation-rules.index'))->assertOk();
     }, 'Settings Automation Rules');
 });
 
 test('settings account/profile page does not exceed query threshold', function () {
-    assertMaxQueries(17, function () {
+    assertMaxQueries(18, function () {
         $this->get(route('account.edit'))->assertOk();
     }, 'Settings Account/Profile');
 });
 
 test('settings appearance page does not exceed query threshold', function () {
-    assertMaxQueries(17, function () {
+    assertMaxQueries(18, function () {
         $this->get(route('appearance.edit'))->assertOk();
     }, 'Settings Appearance');
 });
