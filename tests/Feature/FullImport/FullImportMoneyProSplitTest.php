@@ -87,7 +87,7 @@ it('stages the split marker of a Money Pro row, and refuses it from any other ap
     $chunk($store('banktrack'), true)->assertUnprocessable()->assertJsonValidationErrors('rows.0.source_split');
 });
 
-it('imports a row split in Money Pro whole, uncategorized, with its note and one label per import that no rule overrides', function () {
+it('imports a row split in Money Pro whole, uncategorized, with its note and one label per space that no rule overrides', function () {
     $user = Fixtures::user();
     // Seeded in English, so the categories are found by their English names.
     $user->update(['locale' => 'es']);
