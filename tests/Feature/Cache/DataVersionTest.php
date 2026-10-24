@@ -264,8 +264,7 @@ it('writes the token once for a batch job that touches many rows', function () {
         'start_date' => now()->subDays(30),
         'end_date' => now()->addDays(30),
     ]);
-    $transactions = Transaction::factory()->count(4)->create([
-        'user_id' => $this->user->id,
+    $transactions = Transaction::factory()->forUser($this->user)->count(4)->create([
         'category_id' => $category->id,
         'transaction_date' => now()->subDay(),
         'amount' => -1000,
