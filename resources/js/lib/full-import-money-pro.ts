@@ -219,6 +219,14 @@ export interface CategoryVocabulary {
     parents: Map<string, number>;
     /** How many rows of the file carry each cell. */
     cellCounts: Map<string, number>;
+    /**
+     * The most words a piece of a cell is read in: the longest known
+     * category's, and never under two ("parent: child"). A longer piece
+     * cuts no more categories than shorter ones do.
+     */
+    longestPiece: number;
+    /** The verdict on each cell already read, by its key. */
+    verdicts: Map<string, boolean>;
 }
 
 /** "familia" of "familia: colegio", null for a key without a parent. */
@@ -282,7 +290,20 @@ export function categoryVocabulary(
         }
     }
 
-    return { existing, known, parents, cellCounts };
+    let longestPiece = 2;
+
+    for (const key of known) {
+        longestPiece = Math.max(longestPiece, key.split(' ').length);
+    }
+
+    return {
+        existing,
+        known,
+        parents,
+        cellCounts,
+        longestPiece,
+        verdicts: new Map(),
+    };
 }
 
 /**
@@ -290,10 +311,14 @@ export function categoryVocabulary(
  * aside: `all` over cuts where every piece is known ("Compras Compras
  * Salud"), `some` over cuts that leave pieces nothing names in between,
  * counting the ones only `recognised` too. A piece ends on a name, never on
- * the colon after a parent. -1 is no such cut.
+ * the colon after a parent, and has at most `longestPiece` words: no known
+ * category is longer, a recognised one ("parent: child") already counts at
+ * its shortest, and the words past it count nothing either way. -1 is no
+ * such cut.
  */
 function knownPieces(
     words: string[],
+    longestPiece: number,
     known: (piece: string) => boolean,
     recognised: (piece: string) => boolean,
 ): { all: number; some: number } {
@@ -308,7 +333,11 @@ function knownPieces(
             continue;
         }
 
-        for (let start = 0; start < end; start++) {
+        for (
+            let start = Math.max(0, end - longestPiece);
+            start < end;
+            start++
+        ) {
             if (some[start] < 0 || (start === 0 && end === words.length)) {
                 continue;
             }
@@ -352,17 +381,32 @@ export function isMultiCategoryCell(
         return false;
     }
 
+    const verdict =
+        vocabulary.verdicts.get(key) ?? cutsIntoSeveral(key, vocabulary);
+
+    vocabulary.verdicts.set(key, verdict);
+
+    return verdict;
+}
+
+/** Whether a cell of at most one parent, not the user's, cuts in several. */
+function cutsIntoSeveral(key: string, vocabulary: CategoryVocabulary): boolean {
     const known = (piece: string) => vocabulary.known.has(piece);
     // In a one-off, "Familia: Libros" reads as a category of its own even if
     // nothing else writes it, under a parent another cell or the user has.
     const ownParent = vocabulary.cellCounts.has(key) ? parentOf(key) : null;
-    const pieces = knownPieces(key.split(' '), known, (piece) => {
-        const parent = parentOf(piece);
-        const named =
-            parent === null ? 0 : (vocabulary.parents.get(parent) ?? 0);
+    const pieces = knownPieces(
+        key.split(' '),
+        vocabulary.longestPiece,
+        known,
+        (piece) => {
+            const parent = parentOf(piece);
+            const named =
+                parent === null ? 0 : (vocabulary.parents.get(parent) ?? 0);
 
-        return named - (parent === ownParent ? 1 : 0) > 0;
-    });
+            return named - (parent === ownParent ? 1 : 0) > 0;
+        },
+    );
 
     return (
         pieces.all >= 2 ||

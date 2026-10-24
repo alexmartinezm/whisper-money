@@ -27,7 +27,7 @@ import {
 } from '@/types/full-import';
 import { DateFormat } from '@/types/import';
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 const SUPPORTED = ['EUR', 'USD', 'COP', 'GBP', 'MXN'];
 
@@ -737,6 +737,42 @@ describe('a Money Pro export with split transactions', () => {
         expect(isMultiCategoryCell('Compras: Online Compras', vocabulary)).toBe(
             true,
         );
+    });
+
+    it('reads a long cell in pieces no longer than a known category, once', () => {
+        const vocabulary = categoryVocabulary(
+            {
+                rows: [
+                    'Compras',
+                    'Salud',
+                    'Supermercado : Alimentación',
+                    'Familia: Colegio',
+                ].map((cell) => ({ Categoría: cell })),
+            },
+            'Categoría',
+        );
+        const lookups = vi.spyOn(vocabulary.known, 'has');
+        const unknown = Array.from({ length: 60 }, (_, i) => `palabra${i}`);
+        const mixed = Array.from({ length: 30 }, () => 'Compras Salud');
+        const started = performance.now();
+
+        expect(isMultiCategoryCell(unknown.join(' '), vocabulary)).toBe(false);
+        expect(isMultiCategoryCell(mixed.join(' '), vocabulary)).toBe(true);
+        expect(
+            isMultiCategoryCell(
+                `Familia: Libros ${unknown.slice(2).join(' ')} Compras`,
+                vocabulary,
+            ),
+        ).toBe(true);
+        expect(performance.now() - started).toBeLessThan(250);
+        // Pieces of at most two words: about two lookups a word, not one
+        // for every pair of words (1,830 for 60 words).
+        expect(lookups.mock.calls.length).toBeLessThan(3 * 3 * 60);
+
+        lookups.mockClear();
+
+        expect(isMultiCategoryCell(mixed.join(' '), vocabulary)).toBe(true);
+        expect(lookups).not.toHaveBeenCalled();
     });
 
     it('creates no category from a split cell, and sends its rows marked', async () => {
