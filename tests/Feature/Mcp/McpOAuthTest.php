@@ -57,7 +57,10 @@ function issueOAuthToken(User $user, array $scopes = ['mcp:use']): string
         'state' => 'state-token',
         'code_challenge' => $challenge,
         'code_challenge_method' => 'S256',
-    ]))->assertOk();
+    ]))->assertOk()
+        // The consent screen uses the self-hosted fonts from app.css, so it
+        // calls no third-party font CDN.
+        ->assertDontSee('fonts.bunny.net', false);
 
     // The consent form carries the single-use auth token we must echo back.
     preg_match('/name="auth_token" value="([^"]+)"/', $authorize->getContent(), $matches);
