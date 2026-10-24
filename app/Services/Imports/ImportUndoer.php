@@ -9,8 +9,10 @@ use App\Models\Bank;
 use App\Models\Category;
 use App\Models\Import;
 use App\Models\Transaction;
+use App\Models\TransactionSplit;
 use App\Services\CategoryTree;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Facades\Log;
 
@@ -48,7 +50,7 @@ class ImportUndoer
         // Kept, and no longer counted as the import's.
         Account::withTrashed()->whereIn('id', $connected->pluck('id'))->update(['import_id' => null]);
 
-        $categories = $this->deleteCreatedCategories($import);
+        ['created' => $categories, 'kept' => $categoriesKept] = $this->deleteCreatedCategories($import);
         $banks = $this->deleteCreatedBanks($import);
 
         $import->forceFill([
@@ -64,6 +66,7 @@ class ImportUndoer
             'accounts_deleted' => $manual->count(),
             'accounts_kept_connected' => $connected->count(),
             'categories' => $categories,
+            'categories_kept_for_splits' => $categoriesKept,
             'banks_deleted' => $banks,
             'duration_seconds' => $requestedAt !== null ? Carbon::parse($requestedAt)->diffInSeconds(now()) : null,
         ]));
@@ -76,15 +79,21 @@ class ImportUndoer
      * user filed there by hand. Uncategorized for real, too: a row filed by
      * hand into a category that is gone is no longer the user's choice, so
      * the rules and the AI may file it again.
+     *
+     * A split line cannot be left uncategorized, so a category a split line
+     * still files money into stays, with every category above it, and is no
+     * longer counted as the import's. The rest goes.
+     *
+     * @return array{created: int, kept: int} how many categories the import
+     *                                        created, and how many of them stay
      */
-    /**
-     * @return int how many categories the import created
-     */
-    private function deleteCreatedCategories(Import $import): int
+    private function deleteCreatedCategories(Import $import): array
     {
         $created = Category::query()->where('import_id', $import->id)->get();
-        $createdIds = $created->pluck('id')->flip();
-        $roots = $created->reject(fn (Category $category): bool => $category->parent_id !== null && $createdIds->has($category->parent_id));
+        $kept = $this->categoriesHoldingSplitLines($import, $created);
+        $deletable = $created->reject(fn (Category $category): bool => isset($kept[$category->id]));
+        $deletableIds = $deletable->pluck('id')->flip();
+        $roots = $deletable->reject(fn (Category $category): bool => $category->parent_id !== null && $deletableIds->has($category->parent_id));
 
         foreach ($roots as $root) {
             Transaction::query()
@@ -95,7 +104,55 @@ class ImportUndoer
             $this->tree->deleteSubtree($root);
         }
 
-        return $created->count();
+        // Kept, and no longer counted as the import's.
+        Category::query()->whereKey(array_keys($kept))->update(['import_id' => null]);
+
+        return ['created' => $created->count(), 'kept' => count($kept)];
+    }
+
+    /**
+     * The categories of the import that must stay because a split line files
+     * money into them or into a category below them (the line's category and
+     * every ancestor of it, as far as the import created them). The import's
+     * own rows are already gone by now, and their lines with them.
+     *
+     * @param  EloquentCollection<int, Category>  $created
+     * @return array<string, true>
+     */
+    private function categoriesHoldingSplitLines(Import $import, EloquentCollection $created): array
+    {
+        if ($created->isEmpty()) {
+            return [];
+        }
+
+        $createdIds = $created->pluck('id')->flip();
+        $subtreeIds = $created
+            ->reject(fn (Category $category): bool => $category->parent_id !== null && $createdIds->has($category->parent_id))
+            ->flatMap(fn (Category $root): array => [$root->id, ...$this->tree->descendantIds($root)])
+            ->unique()
+            ->values();
+
+        $referenced = TransactionSplit::query()
+            ->whereIn('category_id', $subtreeIds)
+            ->distinct()
+            ->pluck('category_id');
+
+        if ($referenced->isEmpty()) {
+            return [];
+        }
+
+        $parentMap = $this->tree->parentMap($import->user_id);
+        $kept = [];
+
+        foreach ($referenced as $categoryId) {
+            foreach ($this->tree->ancestorAndSelfIds($import->user_id, $categoryId, $parentMap) as $id) {
+                if ($createdIds->has($id)) {
+                    $kept[$id] = true;
+                }
+            }
+        }
+
+        return $kept;
     }
 
     /**
