@@ -13,6 +13,12 @@ use App\Models\Transaction;
 use App\Models\User;
 use Tests\Support\FullImportFixtures as Fixtures;
 
+// The master switch is off by default on this instance (only the FullImport
+// flag opens the import); these tests run with the onboarding window open.
+beforeEach(function () {
+    config(['full_import.enabled' => true]);
+});
+
 /**
  * A user with what the end-to-end import lands on: a manual "BBVA Conjunta"
  * already holding two movements and a balance, and a connected "Revolut".

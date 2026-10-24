@@ -15,6 +15,12 @@ use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Queue;
 use Tests\Support\FullImportFixtures as Fixtures;
 
+// The master switch is off by default on this instance (only the FullImport
+// flag opens the import); these tests run with the onboarding window open.
+beforeEach(function () {
+    config(['full_import.enabled' => true]);
+});
+
 it('takes everything the import wrote back out, and nothing the user had', function () {
     $user = Fixtures::user();
     $own = Account::factory()->create(['user_id' => $user->id, 'name' => 'BBVA', 'type' => AccountType::Checking, 'currency_code' => 'EUR']);

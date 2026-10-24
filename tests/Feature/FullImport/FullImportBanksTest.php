@@ -5,6 +5,12 @@ use App\Models\Account;
 use App\Models\Bank;
 use Tests\Support\FullImportFixtures as Fixtures;
 
+// The master switch is off by default on this instance (only the FullImport
+// flag opens the import); these tests run with the onboarding window open.
+beforeEach(function () {
+    config(['full_import.enabled' => true]);
+});
+
 it('creates a bank of the user\'s own for an account whose bank is not in the catalog', function () {
     $user = Fixtures::user();
 

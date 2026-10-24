@@ -6,6 +6,12 @@ use App\Models\Bank;
 use App\Models\User;
 use Tests\Support\FullImportFixtures as Fixtures;
 
+// The master switch is off by default on this instance (only the FullImport
+// flag opens the import); these tests run with the onboarding window open.
+beforeEach(function () {
+    config(['full_import.enabled' => true]);
+});
+
 it('matches account names to banks by name, case and accents aside, without creating any', function () {
     $user = Fixtures::user();
     $wise = Bank::factory()->create(['name' => 'Wise', 'user_id' => null]);

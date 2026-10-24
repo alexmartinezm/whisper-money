@@ -22,6 +22,12 @@ use Illuminate\Support\Facades\Queue;
 use Tests\Support\FullImportFixtures as Fixtures;
 use Tests\TestCase;
 
+// The master switch is off by default on this instance (only the FullImport
+// flag opens the import); these tests run with the onboarding window open.
+beforeEach(function () {
+    config(['full_import.enabled' => true]);
+});
+
 /**
  * Stage a plan and its rows without starting the job, so a test can run the
  * importer itself.

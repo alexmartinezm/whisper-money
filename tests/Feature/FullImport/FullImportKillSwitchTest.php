@@ -58,6 +58,7 @@ it('keeps it open to a user with the FullImport flag, so it can still be tried i
 });
 
 it('lets an import already running finish', function () {
+    config(['full_import.enabled' => true]);
     $user = Fixtures::user();
 
     Queue::fake([ProcessFullImportJob::class]);
@@ -79,6 +80,7 @@ it('lets an import already running finish', function () {
 });
 
 it('keeps the history and the undo of past imports', function () {
+    config(['full_import.enabled' => true]);
     $user = Fixtures::user();
     $import = Fixtures::run($this, $user, Fixtures::plan([Fixtures::newAccount('a0', 'Wise')]), [
         Fixtures::row('a0', '2026-09-01', -100, 'Coffee'),
@@ -100,6 +102,7 @@ it('keeps the history and the undo of past imports', function () {
 });
 
 it('refuses the rest of an upload started before the switch went off', function () {
+    config(['full_import.enabled' => true]);
     $user = Fixtures::user();
 
     $id = $this->actingAs($user)->postJson(route('api.full-imports.store'), [
@@ -118,6 +121,14 @@ it('refuses the rest of an upload started before the switch went off', function 
     expect(Import::query()->find($id)->status)->toBe(ImportStatus::Draft);
 });
 
-it('is on unless configured otherwise', function () {
-    expect(config('full_import.enabled'))->toBeTrue();
+it('is off unless configured otherwise, leaving the import to the FullImport flag', function () {
+    expect(config('full_import.enabled'))->toBeFalse();
+
+    $user = Fixtures::user(['onboarded_at' => now()->subDays(2)]);
+
+    expect($user->canUseFullImport())->toBeFalse();
+
+    Feature::for($user)->activate(FullImport::class);
+
+    expect($user->canUseFullImport())->toBeTrue();
 });
