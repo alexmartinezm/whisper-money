@@ -62,6 +62,7 @@ describe('CategoryCombobox and keyboard shortcuts', () => {
         fireEvent.change(input, { target: { value: 'food' } });
         fireEvent.keyDown(input, { key: 'Enter', ctrlKey: true });
 
+        expect(onValueChange).toHaveBeenCalledWith('food');
         expect(save).not.toHaveBeenCalled();
     });
 

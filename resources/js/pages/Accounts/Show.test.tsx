@@ -315,7 +315,7 @@ describe('AccountShow', () => {
         );
     });
 
-    it('reloads only the deferred transactions prop after a transaction is created', () => {
+    it('reloads the deferred transactions and the labels after a transaction is created', () => {
         renderPage();
 
         const { onSuccess } = editTransactionDialog.mock.calls.at(-1)![0] as {
@@ -323,7 +323,10 @@ describe('AccountShow', () => {
         };
         act(() => onSuccess());
 
-        expect(router.reload).toHaveBeenCalledWith({ only: ['transactions'] });
+        // A label created inside the dialog reaches the list and its pickers.
+        expect(router.reload).toHaveBeenCalledWith({
+            only: ['transactions', 'labels'],
+        });
     });
 
     it('opens create transaction dialog for connected transactional accounts', () => {
@@ -457,7 +460,7 @@ describe('AccountShow', () => {
             act(() => onSuccess());
 
             expect(router.reload).toHaveBeenCalledWith({
-                only: ['transactions', 'account'],
+                only: ['transactions', 'labels', 'account'],
             });
         });
 

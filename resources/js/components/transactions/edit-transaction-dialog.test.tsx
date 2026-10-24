@@ -44,7 +44,8 @@ vi.mock('@/components/shared/label-combobox', () => ({
 
 vi.mock('@/components/transactions/category-select', () => ({
     // Stands in for the combobox: it reports what it holds and offers every
-    // category as a button, so a pick is one click.
+    // category as a button, so a pick is one click. Like the real trigger, the
+    // element under the test id is a focusable combobox.
     CategorySelect: ({
         value,
         onValueChange,
@@ -56,7 +57,12 @@ vi.mock('@/components/transactions/category-select', () => ({
         categories: Category[];
         'data-testid'?: string;
     }) => (
-        <div data-testid={dataTestId} data-value={value}>
+        <div
+            role="combobox"
+            tabIndex={0}
+            data-testid={dataTestId}
+            data-value={value}
+        >
             {categories.map((category) => (
                 <button
                     key={category.id}
@@ -2529,7 +2535,7 @@ describe('EditTransactionDialog', () => {
                 );
             }
 
-            it('leaves an n typed into a split line amount alone', () => {
+            it('leaves an n typed into a split line alone, and opens the notes from outside it', () => {
                 startSplitOnFilledForm();
                 const lineAmount = screen.getByLabelText('Amount 1');
                 lineAmount.focus();
@@ -2539,6 +2545,26 @@ describe('EditTransactionDialog', () => {
                     screen.queryByPlaceholderText('Add notes...'),
                 ).not.toBeInTheDocument();
                 expect(lineAmount).toHaveFocus();
+
+                const lineCategory = screen.getByTestId('split-category-0');
+                lineCategory.focus();
+
+                expect(fireEvent.keyDown(lineCategory, { key: 'n' })).toBe(
+                    true,
+                );
+                expect(
+                    screen.queryByPlaceholderText('Add notes...'),
+                ).not.toBeInTheDocument();
+                expect(lineCategory).toHaveFocus();
+
+                // The same form answers N once no field holds the focus.
+                lineCategory.blur();
+                expect(fireEvent.keyDown(document.body, { key: 'n' })).toBe(
+                    false,
+                );
+                expect(
+                    screen.getByPlaceholderText('Add notes...'),
+                ).toHaveFocus();
             });
 
             it('refuses Ctrl+Enter on an incomplete split, as Save would', async () => {

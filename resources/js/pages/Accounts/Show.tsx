@@ -178,10 +178,14 @@ export default function AccountShow({
     );
 
     function handleTransactionCreated() {
-        // A credit card's statement estimate is computed on the server from
-        // the ledger, so it is refreshed along with it.
+        // The labels come along so one created inside the dialog reaches the
+        // list's filter and the edit dialog's picker. A credit card's statement
+        // estimate is computed on the server from the ledger, so it is
+        // refreshed along with it.
         router.reload({
-            only: isCreditCard ? ['transactions', 'account'] : ['transactions'],
+            only: isCreditCard
+                ? ['transactions', 'labels', 'account']
+                : ['transactions', 'labels'],
         });
         handleBalanceUpdated();
     }
