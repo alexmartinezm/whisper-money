@@ -59,7 +59,7 @@ it('still queues the per-transaction AI call for a row typed by hand', function 
 
     Queue::fake([CallQueuedListener::class]);
 
-    Transaction::factory()->create(['user_id' => $user->id, 'category_id' => null]);
+    Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'category_id' => null]);
 
     expect(perRowAiJobsQueued())->toBe(1);
 });

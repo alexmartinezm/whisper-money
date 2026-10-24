@@ -671,3 +671,9 @@ test('categories index returns the standard category field set without internal 
     expect(array_keys($props['categories'][0]))
         ->toEqualCanonicalizing(['id', 'name', 'icon', 'color', 'type', 'cashflow_direction', 'parent_id']);
 });
+
+test('a default category name resolves to the one it is seeded under in each locale', function () {
+    expect(CreateDefaultCategories::localizedCategoryName('Own account', 'es'))->toBe('Cuenta propia')
+        ->and(CreateDefaultCategories::localizedCategoryName('Own account', 'en'))->toBe('Own account')
+        ->and(CreateDefaultCategories::localizedCategoryName('Not seeded', 'es'))->toBe('Not seeded');
+});
