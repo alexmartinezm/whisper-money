@@ -6,6 +6,7 @@ use App\Enums\ImportStatus;
 use App\Jobs\ProcessFullImportJob;
 use App\Jobs\ReassignTransactionsToBudgets;
 use App\Listeners\AssignTransactionToBudget;
+use App\Mail\BudgetNotificationEmail;
 use App\Models\Account;
 use App\Models\AccountBalance;
 use App\Models\Budget;
@@ -18,6 +19,7 @@ use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Imports\FullImporter;
 use Illuminate\Events\CallQueuedListener;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Queue;
 use Tests\Support\FullImportFixtures as Fixtures;
 use Tests\TestCase;
@@ -145,6 +147,39 @@ it('puts imported rows into the budget that tracks their category', function () 
     ]);
 
     expect(BudgetTransaction::query()->where('budget_period_id', $period->id)->count())->toBe(1);
+});
+
+it('assigns imported rows through the budget service without sending budget emails', function () {
+    Mail::fake();
+    $user = Fixtures::user();
+    $groceries = Fixtures::seeded($user, 'Groceries');
+    $budget = Budget::factory()->forCategories($groceries)->create([
+        'user_id' => $user->id,
+        'notify_on_new_transaction' => true,
+        'notify_on_over_limit' => true,
+        'notify_on_close_to_limit' => true,
+    ]);
+    // The current period: the only one budget emails are ever about.
+    $period = BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => now()->subDays(10)->toDateString(),
+        'end_date' => now()->addDays(20)->toDateString(),
+        'allocated_amount' => 1000,
+    ]);
+
+    Fixtures::run($this, $user, Fixtures::plan([Fixtures::newAccount('a0', 'Wise')], [
+        ['key' => 'c0', 'action' => 'match', 'category_id' => $groceries->id],
+    ]), [
+        Fixtures::row('a0', now()->subDays(2)->toDateString(), -4250, 'Mercadona', ['category_key' => 'c0']),
+        Fixtures::row('a0', now()->subDay()->toDateString(), -1250, 'Lidl', ['category_key' => 'c0']),
+    ]);
+
+    // Both rows count against the budget, which they took past its limit, and
+    // an import of old movements sends no budget email about it.
+    expect(BudgetTransaction::query()->where('budget_period_id', $period->id)->sum('amount'))->toEqual(5500);
+
+    Mail::assertNotQueued(BudgetNotificationEmail::class);
+    Mail::assertNotSent(BudgetNotificationEmail::class);
 });
 
 it('merges stats written from a stale copy of the import instead of overwriting them', function () {
