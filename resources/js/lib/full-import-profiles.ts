@@ -11,6 +11,7 @@ import {
     parseDate,
 } from '@/lib/file-parser';
 import { type ParsedImportFile } from '@/lib/transaction-import';
+import { truncateText } from '@/lib/utils';
 import {
     SINGLE_ACCOUNT_COLUMN,
     type FullImportMapping,
@@ -579,7 +580,8 @@ function normalizeRow(
             : null,
         balance: balanceOf(row, mapping),
         iban: cellText(row, mapping.iban) || null,
-        externalId: cellText(row, mapping.externalId).slice(0, 255) || null,
+        externalId:
+            truncateText(cellText(row, mapping.externalId), 255) || null,
         ignored: parseIgnoredFlag(cellText(row, mapping.ignored)),
     };
 }

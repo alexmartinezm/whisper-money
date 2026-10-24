@@ -6,6 +6,7 @@ import {
 } from '@/lib/full-import-plan';
 import { isLeavingPage } from '@/lib/leave-page';
 import { captureEvent } from '@/lib/posthog';
+import { truncateText } from '@/lib/utils';
 import {
     type AccountPlanEntry,
     type FullImportMode,
@@ -90,7 +91,7 @@ function columnNames(file: {
     return file.headers
         .filter((header) => valueKind(header) === null)
         .slice(0, MAX_HEADERS)
-        .map((header) => header.slice(0, MAX_HEADER_LENGTH));
+        .map((header) => truncateText(header, MAX_HEADER_LENGTH));
 }
 
 /**

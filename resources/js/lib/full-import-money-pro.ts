@@ -11,6 +11,7 @@ import {
     type NormalizeOptions,
     type RowReader,
 } from '@/lib/full-import-profiles';
+import { truncateText } from '@/lib/utils';
 import { type Category } from '@/types/category';
 import {
     type FullImportMapping,
@@ -424,7 +425,7 @@ function splitNotes(notes: string | null, cell: string): string {
     const note = __('Split in Money Pro: :categories', { categories: cell });
     const room = MAX_NOTES_LENGTH - note.length - 1;
 
-    return notes && room > 0 ? `${notes.slice(0, room)}\n${note}` : note;
+    return notes && room > 0 ? `${truncateText(notes, room)}\n${note}` : note;
 }
 
 /** A Money Pro account is a name the user gave it, never a bank's. */

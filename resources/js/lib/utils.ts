@@ -31,3 +31,19 @@ export function appendNoteIfNotPresent(
 
     return `${existingNotes}\n${newNote}`;
 }
+
+/**
+ * `text` cut to at most `max` UTF-16 units, never through the middle of a
+ * character written as two of them (an emoji): the lone half left behind
+ * makes the JSON invalid, and the server turns down the whole request.
+ */
+export function truncateText(text: string, max: number): string {
+    if (text.length <= max) {
+        return text;
+    }
+
+    const cut = text.slice(0, max);
+    const last = cut.charCodeAt(cut.length - 1);
+
+    return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+}

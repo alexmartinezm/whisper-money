@@ -4,6 +4,7 @@ import {
     normalizeText,
     toSavedProfile,
 } from '@/lib/full-import-profiles';
+import { truncateText } from '@/lib/utils';
 import {
     type Category,
     type CategoryColor,
@@ -836,7 +837,7 @@ export function accountPayloadKey(index: number): string {
 function newBankField(
     entry: AccountPlanEntry,
 ): Pick<AccountPayloadEntry, 'new_bank_name'> {
-    const name = entry.newBankName?.trim().slice(0, 255);
+    const name = truncateText(entry.newBankName?.trim() ?? '', 255);
 
     return entry.bank === null && name ? { new_bank_name: name } : {};
 }
@@ -1094,8 +1095,8 @@ export function buildImport(input: BuildImportInput): BuiltImport {
             account_key: accounts.keys.get(row.accountKey) as string,
             date: row.date,
             amount: toMinorUnits(row.amount, row.currency ?? currency),
-            description: row.description.slice(0, 2000),
-            notes: row.notes ? row.notes.slice(0, MAX_NOTES_LENGTH) : null,
+            description: truncateText(row.description, 2000),
+            notes: row.notes ? truncateText(row.notes, MAX_NOTES_LENGTH) : null,
             category_key: categoryKeyFor(row, categories.keys, ownNodeIds),
             external_id: row.externalId,
             currency_code: row.currency,

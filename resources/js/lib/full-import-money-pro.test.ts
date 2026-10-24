@@ -650,6 +650,17 @@ describe('a Money Pro export with split transactions', () => {
         );
     });
 
+    it('cuts a long note of its own without splitting an emoji', async () => {
+        const split = '\nSplit in Money Pro: Compras Salud';
+        // What is left of the 5,000 characters ends between the emoji's halves.
+        const room = 5000 - split.length;
+        const own = `${'x'.repeat(room - 1)}😀 y más`;
+        const notes = (await readSplitWithNote(own)).notes ?? '';
+
+        expect(notes).toBe(`${'x'.repeat(room - 1)}${split}`);
+        expect(() => encodeURIComponent(notes)).not.toThrow();
+    });
+
     it('tells the cells apart by what the file writes alone and what the user has', () => {
         const rows = [
             'Compras',

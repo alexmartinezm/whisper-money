@@ -1,6 +1,7 @@
 import { detectDateFormat } from '@/lib/file-parser';
 import { normalizeText } from '@/lib/full-import-profiles';
 import { type ParsedImportFile } from '@/lib/transaction-import';
+import { truncateText } from '@/lib/utils';
 import { type ParsedRow } from '@/types/import';
 import { __ } from '@/utils/i18n';
 
@@ -137,5 +138,5 @@ export function importFileName(
     }
 
     // The server keeps 255 characters; past that the list is cut short.
-    return [...new Set(parsed.rowFiles)].join(', ').slice(0, 255);
+    return truncateText([...new Set(parsed.rowFiles)].join(', '), 255);
 }

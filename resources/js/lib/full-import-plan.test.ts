@@ -835,6 +835,30 @@ describe('buildImport', () => {
         ).toEqual([]);
     });
 
+    it('cuts a long description or note without splitting an emoji', () => {
+        // The limit falls between the two halves of the emoji: a lone half
+        // would make the server turn the whole chunk down.
+        const built = buildImport(
+            input({
+                rows: [
+                    {
+                        ...rows[0],
+                        description: `${'a'.repeat(1999)}😀 tail`,
+                        notes: `${'n'.repeat(4999)}😀 tail`,
+                    },
+                    ...rows.slice(1),
+                ],
+            }),
+        );
+        const [first] = built.transactions;
+
+        expect(first.description).toBe('a'.repeat(1999));
+        expect(first.notes).toBe('n'.repeat(4999));
+        expect(() =>
+            encodeURIComponent(`${first.description}${first.notes}`),
+        ).not.toThrow();
+    });
+
     it('sends a new bank name only when no known bank was picked', () => {
         const created = (entry: Partial<AccountPlanEntry>) =>
             buildImport(

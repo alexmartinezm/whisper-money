@@ -1,4 +1,5 @@
 import { isDateText } from '@/lib/file-parser';
+import { truncateText } from '@/lib/utils';
 import { type ParsedRow } from '@/types/import';
 
 /**
@@ -349,7 +350,7 @@ export function describeColumns(
         return {
             header:
                 hasHeaderRow && valueKind(header) === null
-                    ? header.slice(0, 120)
+                    ? truncateText(header, 120)
                     : null,
             shape: columnShape(sample(values), values),
         };
