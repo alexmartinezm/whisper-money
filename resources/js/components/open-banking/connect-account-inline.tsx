@@ -29,8 +29,10 @@ import { useConnectCountries, useConnectFlow } from '@/hooks/use-connect-flow';
 import { useWebHaptics } from '@/hooks/use-web-haptics';
 import { ProviderCredentialFields } from '@/lib/connect-providers';
 import { cn } from '@/lib/utils';
+import type { SharedData } from '@/types';
 import type { BankingConnection } from '@/types/banking';
 import { __ } from '@/utils/i18n';
+import { usePage } from '@inertiajs/react';
 import { Search } from 'lucide-react';
 import { useCallback } from 'react';
 
@@ -70,6 +72,10 @@ export function ConnectAccountInline({
     } = useConnectFlow(connections);
 
     const countries = useConnectCountries();
+    // With open banking off the institutions endpoint answers with an empty
+    // catalogue, so this list is only the API-key providers: the wording names
+    // them instead of a bank the install cannot connect.
+    const { openBankingEnabled } = usePage<SharedData>().props;
 
     const { trigger } = useWebHaptics();
 
@@ -132,7 +138,11 @@ export function ConnectAccountInline({
                         <div className="relative">
                             <Search className="pointer-events-none absolute top-1/2 left-4 size-[18px] -translate-y-1/2 text-muted-foreground" />
                             <Input
-                                placeholder={__('Search banks...')}
+                                placeholder={
+                                    openBankingEnabled
+                                        ? __('Search banks...')
+                                        : __('Search providers...')
+                                }
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 autoFocus
@@ -186,7 +196,9 @@ export function ConnectAccountInline({
                         </StepList>
                     ) : (
                         <p className="py-6 text-center text-sm text-muted-foreground">
-                            {__('No banks found.')}
+                            {openBankingEnabled
+                                ? __('No banks found.')
+                                : __('No providers found.')}
                         </p>
                     )}
                 </>
@@ -254,8 +266,16 @@ export function ConnectAccountInline({
 
     return (
         <StepScreen
-            title={__('Connect Your Bank')}
-            description={__('Select your country and bank to get started.')}
+            title={
+                openBankingEnabled
+                    ? __('Connect Your Bank')
+                    : __('Connect an account')
+            }
+            description={
+                openBankingEnabled
+                    ? __('Select your country and bank to get started.')
+                    : __('Select your country and provider to get started.')
+            }
             footer={
                 <>
                     {action}

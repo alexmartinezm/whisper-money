@@ -89,7 +89,7 @@ export function StepCreateAccount({
     onConnectedAccountSelected,
     onContinue,
 }: StepCreateAccountProps) {
-    const { pricing, subscriptionsEnabled, locale } =
+    const { pricing, subscriptionsEnabled, openBankingEnabled, locale } =
         usePage<SharedData>().props;
     const cheapestMonthlyPrice = useCheapestMonthlyPrice();
     // Someone who signed up from the free card gets no bank connections, so the
@@ -544,6 +544,13 @@ export function StepCreateAccount({
         );
     }
 
+    // Without EnableBanking credentials no bank can be connected, but the
+    // brokers and exchanges still can: they sign in with their own API key. The
+    // connected row stays and stops promising a bank.
+    const connectedDescription = openBankingEnabled
+        ? __('Auto-sync transactions directly from your bank')
+        : __('Connect a broker or an exchange and sync it automatically.');
+
     // How to set the account up. Tapping a row commits the choice, so the plan
     // price has to be readable inside the row itself.
     return (
@@ -556,9 +563,7 @@ export function StepCreateAccount({
                     <StepRow
                         icon={Zap}
                         title={__('Connected')}
-                        description={__(
-                            'Auto-sync transactions directly from your bank',
-                        )}
+                        description={connectedDescription}
                         badge={
                             subscriptionsEnabled ? (
                                 <StepBadge>Standard</StepBadge>

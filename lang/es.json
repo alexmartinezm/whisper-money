@@ -3198,5 +3198,7 @@
     "Connect an account": "Conectar una cuenta",
     "Select the country you are in.": "Selecciona el país en el que estás.",
     "Select a provider.": "Selecciona un proveedor.",
-    "Search providers...": "Buscar proveedores..."
+    "Search providers...": "Buscar proveedores...",
+    "No providers found.": "No se encontraron proveedores.",
+    "Select your country and provider to get started.": "Selecciona tu país y proveedor para empezar."
 }
