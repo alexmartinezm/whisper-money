@@ -3541,6 +3541,6 @@
     "This field is not accepted.": "Este campo no se acepta.",
     "Split in Money Pro": "Dividida en Money Pro",
     "Split in Money Pro: :categories": "Dividida en Money Pro: :categories",
-    "1 transaction came split in Money Pro: it is imported without a category, with the note and the label «:label» so you can split it here.": "1 movimiento venía dividido en Money Pro: se importa sin categoría, con la nota y la etiqueta «:label» para que lo dividas aquí.",
-    ":count transactions came split in Money Pro: they are imported without a category, with the note and the label «:label» so you can split them here.": ":count movimientos venían divididos en Money Pro: se importan sin categoría, con la nota y la etiqueta «:label» para que los dividas aquí."
+    "1 transaction came split in Money Pro: it is imported without a category, with the note and the label «:label» so you can split it here.": "1 transacción venía dividida en Money Pro: se importa sin categoría, con la nota y la etiqueta «:label» para que la dividas aquí.",
+    ":count transactions came split in Money Pro: they are imported without a category, with the note and the label «:label» so you can split them here.": ":count transacciones venían divididas en Money Pro: se importan sin categoría, con la nota y la etiqueta «:label» para que las dividas aquí."
 }
