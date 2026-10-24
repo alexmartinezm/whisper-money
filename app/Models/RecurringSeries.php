@@ -7,6 +7,7 @@ use App\Enums\RecurringCadence;
 use App\Enums\RecurringSeriesStatus;
 use App\Enums\RecurringSeriesUserState;
 use App\Models\Concerns\BelongsToSpace;
+use App\Models\Concerns\BumpsDataVersion;
 use Carbon\Carbon;
 use Database\Factories\RecurringSeriesFactory;
 use Illuminate\Database\Eloquent\Builder;
@@ -34,7 +35,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class RecurringSeries extends Model
 {
     /** @use HasFactory<RecurringSeriesFactory> */
-    use BelongsToSpace, HasFactory, HasUuids, SoftDeletes;
+    use BelongsToSpace, BumpsDataVersion, HasFactory, HasUuids, SoftDeletes;
 
     protected $table = 'recurring_series';
 

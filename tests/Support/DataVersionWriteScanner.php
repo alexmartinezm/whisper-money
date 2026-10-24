@@ -37,8 +37,11 @@ final class DataVersionWriteScanner
         'labels',
         'loan_details',
         'real_estate_details',
+        'recurring_series',
+        'recurring_series_transaction',
         'savings_goal_periods',
         'savings_goals',
+        'transaction_splits',
         'transactions',
         'user_settings',
     ];

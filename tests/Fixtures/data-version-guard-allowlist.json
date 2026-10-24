@@ -7,6 +7,10 @@
         "$account->balances()->delete(": "Account::deleted on $account->delete() right after",
         "$connection->accounts()->update(": "DataVersion::bumpOwnerOf($connection) right after"
     },
+    "app/Console/Commands/AuditTransactionSplitsCommand.php": {
+        "$linesReviewed = (int) DB::table('transaction_splits')": "not a write: a read-only count of split lines for the audit report",
+        "$orphanedLineIds = DB::table('transaction_splits as split')": "not a write: a read-only lookup of orphaned split lines for the audit report"
+    },
     "app/Console/Commands/BackfillSpaces.php": {
         "DB::table((new $model)": "one-off space_id backfill: no figure changes, only the tenant column",
         "DB::table((new $model)->getTable()) ->whereNull('space_id') ->where('user_id', $ownerId) ->update(": "one-off space_id backfill: no figure changes, only the tenant column"
@@ -26,22 +30,35 @@
         "$user->bankingConnections()->forceDelete(": "DataVersion::bumpUser($user) right after",
         "$user->subscriptions()->delete(": "not watched: subscriptions"
     },
+    "app/Console/Commands/ReconcileTransactionSplitsCommand.php": {
+        "DB::table('transactions')": "DataVersion::bumpOwnerOf($locked) right after, collected by deferBumps() around the sweep",
+        "DB::table('transactions') ->where('id', $locked->id) ->update(": "DataVersion::bumpOwnerOf($locked) right after, collected by deferBumps() around the sweep"
+    },
     "app/Console/Commands/ResetDemoAccountCommand.php": {
         "$user->transactions()->forceDelete(": "DataVersion::bumpUser($user) at the end of deleteExistingData()",
         "$user->accounts()->forceDelete(": "DataVersion::bumpUser($user) at the end of deleteExistingData()",
-        "$user->savingsGoals()->forceDelete(": "DataVersion::bumpUser($user) at the end of deleteExistingData()",
         "$user->labels()->forceDelete(": "DataVersion::bumpUser($user) at the end of deleteExistingData()",
         "$user->automationRules()->forceDelete(": "DataVersion::bumpUser($user) at the end of deleteExistingData()",
         "$user->categories()->forceDelete(": "DataVersion::bumpUser($user) at the end of deleteExistingData()",
         "$user->budgets()->forceDelete(": "DataVersion::bumpUser($user) at the end of deleteExistingData()",
         "$transaction->labels()->attach(": "custom LabelTransaction pivot: attach/detach fire its model events (BumpsDataVersion)",
         "$rule->labels()->attach(": "not watched: automation rule labels",
-        "$budget->categories()->sync(": "BudgetPeriod::created for the periods generateHistoricalPeriods() writes right after",
         "$count = $account->transactions()->update(": "DataVersion::bumpOwnerOf($account) right after",
-        "$user->subscriptions()->delete(": "not watched: subscriptions"
+        "$user->subscriptions()->delete(": "not watched: subscriptions",
+        "$user->encryptedMessage()->delete(": "not watched: encrypted_messages (the encryption key check); DataVersion::bumpUser($user) right after anyway"
     },
     "app/Console/Commands/ResetUserCategories.php": {
         "$user->categories()->forceDelete(": "DataVersion::bumpUser($user) right after"
+    },
+    "app/Console/Commands/SendPriceChangeAlertsCommand.php": {
+        "$rise->series->forceFill(['price_alerted_amount' => $rise->currentAmount])->saveQuietly(": "alert bookkeeping only: price_alerted_amount is read by DetectPriceChanges to stay quiet, never shown on a screen or in a figure"
+    },
+    "app/Console/Commands/SendRecurringRemindersCommand.php": {
+        "$series->forceFill(['last_reminded_on' => $series->next_expected_on])->saveQuietly(": "alert bookkeeping only: last_reminded_on stops a second reminder, never shown on a screen or in a figure"
+    },
+    "app/Console/Commands/SendRunwayShortfallAlertsCommand.php": {
+        "$setting->forceFill(['runway_alerted_low_on' => null])->saveQuietly(": "alert bookkeeping only: runway_alerted_low_on stops a repeated alert, never shown on a screen or in a figure",
+        "$setting?->forceFill(['runway_alerted_low_on' => $lowest['date']])->saveQuietly(": "alert bookkeeping only: runway_alerted_low_on stops a repeated alert, never shown on a screen or in a figure"
     },
     "app/Console/Commands/TestScheduledDripEmailCommand.php": {
         "$deleted = UserMailLog::query() ->where('user_id', $user->id) ->whereIn('email_type', [ DripEmailType::Welcome, DripEmailType::OnboardingReminder, DripEmailType::PromoCode, DripEmailType::ImportHelp, DripEmailType::Feedback, ]) ->delete(": "not watched: user_mail_logs"
@@ -84,13 +101,20 @@
     },
     "app/Http/Controllers/TransactionController.php": {
         "$transaction->labels()->sync(": "custom LabelTransaction pivot: attach/detach fire its model events (BumpsDataVersion)",
-        "$this->bulkSelection($request->user()->id, $transactionIds, $filters)->update(": "DataVersion::bumpOwnersOf($transactions) at the end of bulkUpdate()"
+        "Transaction::query()->whereIn('id', $candidates->pluck('id'))->update(": "DataVersion::bumpOwnersOf($result['transactions']) at the end of bulkUpdate()",
+        "$changes = $transaction->labels()->sync(": "custom LabelTransaction pivot: attach/detach fire its model events (BumpsDataVersion)"
     },
     "app/Http/Middleware/SetLocale.php": {
         "$request->user()->update(": "not watched: a users row. The user columns a cached figure reads (currency_code, locale, timezone, current_space_id) belong in the PR2 cache key, not in the token"
     },
     "app/Http/Middleware/TrackLastActiveAt.php": {
         "$user->saveQuietly(": "not watched: a users row. The user columns a cached figure reads (currency_code, locale, timezone, current_space_id) belong in the PR2 cache key, not in the token"
+    },
+    "app/Jobs/AssignHistoricalTransactionsToBudget.php": {
+        "BudgetPeriod::query() ->whereKey($period->id) ->when( $this->reconciliationToken === null, fn ($query) => $query->whereNull('reconciliation_token'), fn ($query) => $query->where('reconciliation_token', $this->reconciliationToken), ) ->update(": "DataVersion::bumpOwnerOf($this->budget) right after (processing_historical is shown on the budget page)"
+    },
+    "app/Jobs/PurgeResidualEncryptionArtifactsJob.php": {
+        "$user->encryptedMessage()->delete(": "not watched: encrypted_messages (the encryption key check, which no list or figure reads)"
     },
     "app/Listeners/PersistUpsellSourceFromStripe.php": {
         "Subscription::query() ->where('stripe_id', $stripeId) ->whereNull('upsell_source') ->update(": "not watched: subscriptions"
@@ -114,9 +138,6 @@
     "app/Mcp/Tools/UpdateAutomationRule.php": {
         "$rule->labels()->sync(": "not watched: automation rule labels"
     },
-    "app/Mcp/Tools/UpdateBudget.php": {
-        "app(BudgetService::class)->update(": "service call, not a builder: BudgetService::update() bumps"
-    },
     "app/Mcp/Tools/UpdateSavingsGoal.php": {
         "app(SavingsGoalService::class)->update(": "service call, not a builder: SavingsGoalService::update() saves models"
     },
@@ -130,17 +151,18 @@
         "$this->aiConsents()->active($scope)->update(": "not watched: ai_consents",
         "$this->forceFill([ 'email' => $this->deletedEmail(), ])->saveQuietly(": "not watched: a users row. The user columns a cached figure reads (currency_code, locale, timezone, current_space_id) belong in the PR2 cache key, not in the token"
     },
-    "app/Services/Achievements/Awarder.php": {
-        "$user->forceFill(['achievements_count' => $user->achievements()->count()])->saveQuietly(": "not watched: a users row. The user columns a cached figure reads (currency_code, locale, timezone, current_space_id) belong in the PR2 cache key, not in the token"
-    },
     "app/Services/Ai/AiRuleLearner.php": {
         "$outcome->transaction->saveQuietly(": "DataVersion::bumpOwnerOf() right after"
     },
+    "app/Services/Ai/CategorizeTransactions.php": {
+        "$locked->saveQuietly(": "DataVersion::bumpOwnerOf($locked) right after"
+    },
     "app/Services/AutomationRuleService.php": {
-        "Transaction::query() ->whereIn('id', $transactionIds) ->update(": "DataVersion::bumpOwnerOf($rule) in applyRuleActionsToTransactions()",
-        "$transaction->saveQuietly(": "DataVersion::bumpOwnerOf($transaction) right after",
+        "$transaction->saveQuietly(": "applyNoteInBulk(): DataVersion::bumpOwnerOf($rule) in applyRuleActionsToTransactions()",
         "LabelTransaction::query()->insertOrIgnore(": "DataVersion::bumpOwnerOf($rule) in applyRuleActionsToTransactions()",
-        "$result = $transaction->labels()->syncWithoutDetaching(": "custom LabelTransaction pivot: attach/detach fire its model events (BumpsDataVersion)"
+        "Transaction::query() ->whereIn('id', $eligibleIds) ->update(": "DataVersion::bumpOwnerOf($rule) in applyRuleActionsToTransactions()",
+        "$locked->saveQuietly(": "DataVersion::bumpOwnerOf($locked) right after",
+        "$result = $locked->labels()->syncWithoutDetaching(": "custom LabelTransaction pivot: attach/detach fire its model events (BumpsDataVersion)"
     },
     "app/Services/Banking/BalanceSyncService.php": {
         "AccountBalance::upsert(": "DataVersion::bumpOwnerOf($account) right after"
@@ -148,28 +170,26 @@
     "app/Services/Banking/EnableBankingProvider.php": {
         "$response = $this->client()->delete(": "not a database write: an HTTP DELETE to Enable Banking"
     },
+    "app/Services/BudgetManagementService.php": {
+        "$budget->categories()->sync(": "create(): Budget::created in the same transaction, the bump runs after commit; applyTrackingChange(): DataVersion::bumpOwnerOf($budget) right after",
+        "$budget->labels()->sync(": "create(): Budget::created in the same transaction, the bump runs after commit; applyTrackingChange(): DataVersion::bumpOwnerOf($budget) right after"
+    },
     "app/Services/BudgetNotificationService.php": {
         "BudgetPeriod::query() ->whereKey($period->id) ->where(fn ($query) => $query->where('close_to_limit_notified', true)->orWhere('over_limit_notified', true)) ->update(": "alert bookkeeping flags only, which no cached figure reads",
         "$claimed = BudgetPeriod::query() ->whereKey($period->id) ->where($primaryFlag, false) ->update(": "alert bookkeeping flags only, which no cached figure reads"
     },
-    "app/Services/BudgetService.php": {
-        "$budget->categories()->sync(": "Budget::created in the same transaction: the bump runs after commit",
-        "$budget->labels()->sync(": "Budget::created in the same transaction: the bump runs after commit",
-        "$budget->periods() ->where('end_date', '>=', today()) ->update(": "DataVersion::bumpOwnerOf($budget) right after"
-    },
     "app/Services/BudgetTransactionService.php": {
-        "BudgetTransaction::query() ->where('transaction_id', $transaction->id) ->when( $matchingPeriodIds !== [], fn ($q) => $q->whereNotIn('budget_period_id', $matchingPeriodIds), ) ->delete(": "DataVersion::bumpOwnerOf($transaction) right after",
-        "BudgetTransaction::where('transaction_id', $transaction->id)->delete(": "DataVersion::bumpOwnerOf($transaction) right after",
         "BudgetTransaction::upsert(": "DataVersion::bumpOwnerOf() right after",
-        "$reweighed = DB::table('budget_transactions')": "DataVersion::bumpOwnerOf($account) at the end of reweighAccountSnapshots()",
-        "$reweighed = DB::table('budget_transactions') ->join('transactions', 'transactions.id', '=', 'budget_transactions.transaction_id') ->join('accounts', 'accounts.id', '=', 'transactions.account_id') ->where('accounts.id', $account->id) ->update(": "DataVersion::bumpOwnerOf($account) at the end of reweighAccountSnapshots()",
-        "BudgetPeriod::query() ->whereHas( 'budgetTransactions.transaction', fn (Builder $query) => $query->where('account_id', $account->id), ) ->update(": "DataVersion::bumpOwnerOf($account) at the end of reweighAccountSnapshots()"
+        "BudgetPeriod::query() ->whereHas( 'budgetTransactions.transaction', fn (Builder $query) => $query->where('account_id', $account->id), ) ->update(": "DataVersion::bumpOwnerOf($account) right after",
+        "BudgetTransaction::query() ->where('transaction_id', $transaction->id) ->whereHas('budgetPeriod.budget', fn ($query) => $query->whereNull('archived_at')) ->when($matchingPeriodIds !== [], fn ($query) => $query->whereNotIn('budget_period_id', $matchingPeriodIds)) ->delete(": "DataVersion::bumpOwnerOf($transaction) right after",
+        "BudgetTransaction::query()->where('transaction_id', $transaction->id)->delete(": "DataVersion::bumpOwnerOf($transaction) right after",
+        "BudgetTransaction::query() ->where('budget_period_id', $period->id) ->whereIn('transaction_id', $uncountedIds) ->delete(": "DataVersion::bumpOwnerOf() right after the upsert that follows"
     },
     "app/Services/CategoryTree.php": {
         "Category::query() ->where('user_id', $category->user_id) ->whereIn('id', $descendantIds) ->update(": "DataVersion::bumpOwnerOf($category) right after",
         "$category->children()->update(": "deleteSubtree() right after bumps",
-        "Transaction::query() ->where('user_id', $category->user_id) ->whereIn('category_id', $ids) ->update(": "DataVersion::bumpOwnerOf($category) at the end of deleteSubtree()",
-        "Category::query() ->where('user_id', $category->user_id) ->whereIn('id', $ids) ->delete(": "DataVersion::bumpOwnerOf($category) right after"
+        "$uncategorized = Transaction::query() ->where('user_id', $category->user_id) ->whereIn('category_id', $ids) ->update(": "DataVersion::bumpOwnerOf($category) at the end of deleteSubtree()",
+        "$deleted = Category::query() ->where('user_id', $category->user_id) ->whereIn('id', $ids) ->delete(": "DataVersion::bumpOwnerOf($category) right after"
     },
     "app/Services/ExchangeRateService.php": {
         "ExchangeRate::query()->upsert(": "DataVersion::bumpRates() right after"
@@ -185,11 +205,15 @@
         "AccountBalance::query()->upsert(": "DataVersion::bumpOwnerOf($import) inside each chunk's transaction",
         "$totals['imported'] += count($created) + ($preexisting === [] ? 0 : AccountBalance::query()->insertOrIgnore(": "DataVersion::bumpOwnerOf($import) inside each chunk's transaction"
     },
+    "app/Services/Imports/ImportTransactionWriter.php": {
+        "$transaction->labels()->attach(": "custom LabelTransaction pivot: attach/detach fire its model events (BumpsDataVersion)"
+    },
     "app/Services/Imports/ImportUndoer.php": {
         "Account::withTrashed()->whereIn('id', $connected->pluck('id'))->update(": "DataVersion::bumpOwnerOf($import) in the finally of undo(), so a failure halfway still bumps",
         "Transaction::query() ->where('user_id', $root->user_id) ->whereIn('category_id', [$root->id, ...$this->tree->descendantIds($root)]) ->update(": "DataVersion::bumpOwnerOf($import) in the finally of undo(), so a failure halfway still bumps",
         "$deleted = Bank::withTrashed() ->where('import_id', $import->id) ->whereNotExists(fn (QueryBuilder $accounts) => $accounts ->selectRaw('1') ->from('accounts') ->whereColumn('accounts.bank_id', 'banks.id')) ->forceDelete(": "DataVersion::bumpOwnerOf($import) in the finally of undo(), so a failure halfway still bumps (covers the accounts the bank cascade takes)",
-        "Bank::withTrashed()->where('import_id', $import->id)->update(": "DataVersion::bumpOwnerOf($import) in the finally of undo(), so a failure halfway still bumps"
+        "Bank::withTrashed()->where('import_id', $import->id)->update(": "DataVersion::bumpOwnerOf($import) in the finally of undo(), so a failure halfway still bumps",
+        "Category::query()->whereKey(array_keys($kept))->update(": "DataVersion::bumpOwnerOf($import) in the finally of undo(), so a failure halfway still bumps"
     },
     "app/Services/LoanBalanceGeneratorService.php": {
         "AccountBalance::upsert(": "DataVersion::bumpOwnerOf($account) at the end of generateHistoricalBalances()"
@@ -197,12 +221,13 @@
     "app/Services/ManualBalanceAdjuster.php": {
         "$account->balances() ->where('balance_date', '>=', $fromDate) ->increment(": "DataVersion::bumpOwnerOf($account) right after"
     },
-    "app/Services/Notifications/NotificationFeed.php": {
-        "$user->unreadNotifications()->update(": "not watched: notifications",
-        "DatabaseNotification::query() ->where('notifiable_type', (new User)->getMorphClass()) ->where('notifiable_id', $summary->user_id) ->whereNull('read_at') ->where('type', MonthlySummaryReady::class) ->where('data->summary_id', $summary->id) ->update(": "not watched: notifications"
-    },
     "app/Services/RealEstateBalanceGeneratorService.php": {
         "AccountBalance::upsert(": "DataVersion::bumpOwnerOf($account) at the end of generateHistoricalBalances()"
+    },
+    "app/Services/Recurring/DetectRecurringSeries.php": {
+        "RecurringSeriesTransaction::query() ->whereIn('transaction_id', $appliedTransactionIds) ->delete(": "DataVersion::bumpOwner($user->id, $space->id) right after",
+        "$item['row']->transactions()->attach(": "custom RecurringSeriesTransaction pivot: attach fires its model events (BumpsDataVersion)",
+        "RecurringSeriesTransaction::query() ->where('recurring_series_id', $row->id) ->update(": "RecurringSeries::updated and ::deleted on the absorbed row right after (BumpsDataVersion)"
     },
     "app/Services/SavingsGoals/MonthlySavingsGoalNotifier.php": {
         "SavingsGoalPeriod::query()->whereKey($periodIds)->update(": "notification markers only, which no cached figure reads",
@@ -212,11 +237,11 @@
         "$claimed = SavingsGoalPeriod::query() ->whereKey($period->id) ->whereNull('closed_at') ->update(": "DataVersion::bumpOwnerOf($goal) when the claim succeeds"
     },
     "app/Services/SavingsGoals/SavingsGoalService.php": {
-        "$goal->user->notifications() ->where('type', MonthlySavingsGoalClosed::class) ->where('data->savings_goal_id', $goal->id) ->delete(": "not watched: notifications",
         "$rule->labels()->detach(": "not watched: automation rule labels",
         "$rule->labels()->sync(": "not watched: automation rule labels"
     },
-    "app/Services/TransactionSplitter.php": {
-        "$created->labels()->sync(": "custom LabelTransaction pivot: attach/detach fire its model events (BumpsDataVersion)"
+    "app/Services/Transactions/ReplaceTransactionSplits.php": {
+        "$locked->splits()->delete(": "Transaction::updated: replace() always saves the locked parent with a new updated_at at the end, in the same transaction",
+        "$transaction->splits()->delete(": "Transaction::updated: replace() always saves the locked parent with a new updated_at at the end, in the same transaction"
     }
 }

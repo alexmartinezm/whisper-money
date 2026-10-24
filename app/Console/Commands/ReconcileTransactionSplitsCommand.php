@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\Transaction;
 use App\Services\BudgetTransactionService;
+use App\Services\Cache\DataVersion;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Throwable;
@@ -39,25 +40,30 @@ class ReconcileTransactionSplitsCommand extends Command
         $chunk = max(1, (int) $this->option('chunk'));
 
         if ($execute) {
-            Transaction::query()->whereHas('splits')->chunkById($chunk, function ($transactions) use (&$reconciled, &$errors): void {
-                foreach ($transactions as $transaction) {
-                    try {
-                        DB::transaction(function () use ($transaction): void {
-                            $locked = Transaction::query()->whereKey($transaction->id)->lockForUpdate()->firstOrFail();
-                            $this->budgets->assignTransaction($locked);
-                            $nextTimestamp = now();
-                            if ($locked->updated_at === null || $nextTimestamp->gt($locked->updated_at)) {
-                                DB::table('transactions')
-                                    ->where('id', $locked->id)
-                                    ->update(['updated_at' => $nextTimestamp->format('Y-m-d H:i:s.u')]);
-                            }
-                        }, attempts: 5);
-                        $reconciled++;
-                    } catch (Throwable $exception) {
-                        report($exception);
-                        $errors++;
+            // A sweep over every user: one data-version bump per user at the
+            // end, not one per row it writes.
+            DataVersion::deferBumps(function () use ($chunk, &$reconciled, &$errors): void {
+                Transaction::query()->whereHas('splits')->chunkById($chunk, function ($transactions) use (&$reconciled, &$errors): void {
+                    foreach ($transactions as $transaction) {
+                        try {
+                            DB::transaction(function () use ($transaction): void {
+                                $locked = Transaction::query()->whereKey($transaction->id)->lockForUpdate()->firstOrFail();
+                                $this->budgets->assignTransaction($locked);
+                                $nextTimestamp = now();
+                                if ($locked->updated_at === null || $nextTimestamp->gt($locked->updated_at)) {
+                                    DB::table('transactions')
+                                        ->where('id', $locked->id)
+                                        ->update(['updated_at' => $nextTimestamp->format('Y-m-d H:i:s.u')]);
+                                    DataVersion::bumpOwnerOf($locked);
+                                }
+                            }, attempts: 5);
+                            $reconciled++;
+                        } catch (Throwable $exception) {
+                            report($exception);
+                            $errors++;
+                        }
                     }
-                }
+                });
             });
         }
 

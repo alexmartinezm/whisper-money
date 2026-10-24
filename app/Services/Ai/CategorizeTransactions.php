@@ -8,6 +8,7 @@ use App\Jobs\ReassignTransactionsToBudgets;
 use App\Jobs\RetryTransientAiCategorizationJob;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\Cache\DataVersion;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -170,6 +171,7 @@ class CategorizeTransactions
                 $locked->save();
             } else {
                 $locked->saveQuietly();
+                DataVersion::bumpOwnerOf($locked);
             }
 
             $transaction->setRawAttributes($locked->getAttributes(), true);
