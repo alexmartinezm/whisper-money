@@ -212,6 +212,22 @@ describe('isHeaderRow', () => {
 
         expect(isHeaderRow(columns, 0)).toBe(true);
     });
+
+    it('turns down a single row, with nothing below it to tell', () => {
+        // A file of one movement and no header row: its texts are no headers.
+        const columns = [['01/12/2025'], ['MERCADONA VALENCIA'], ['-45,20']];
+
+        expect(isHeaderRow(columns, 0)).toBe(false);
+    });
+
+    it('turns down a row with only empty cells below it', () => {
+        const columns = [
+            ['Fecha', '', null],
+            ['Concepto', undefined, '  '],
+        ];
+
+        expect(isHeaderRow(columns, 0)).toBe(false);
+    });
 });
 
 describe('the headers sent', () => {

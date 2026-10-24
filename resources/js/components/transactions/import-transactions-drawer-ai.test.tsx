@@ -4,7 +4,13 @@ import {
 } from '@/lib/transaction-import';
 import type { Account } from '@/types/account';
 import { DateFormat, type ColumnMapping } from '@/types/import';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+    act,
+    fireEvent,
+    render,
+    screen,
+    waitFor,
+} from '@testing-library/react';
 import { type ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ImportTransactionsDrawer } from './import-transactions-drawer';
@@ -325,6 +331,33 @@ describe('ImportTransactionsDrawer with AI column mapping', () => {
             description: 'REWE Markt Berlin',
             amount: '-12,40',
         });
+    });
+
+    it('does not ask the AI about a file of one row and no header row', async () => {
+        // The reader took the only movement for the headers: no row is left.
+        const onlyRow = ['01.03.2025', 'REWE Markt Berlin', '-12,40'];
+        vi.mocked(parseImportFile).mockResolvedValueOnce({
+            ...guessed(),
+            headers: onlyRow,
+            hasHeaderRow: false,
+            rows: [],
+            rowNumbers: [],
+            columnOptions: onlyRow.map((header) => ({
+                value: header,
+                label: header,
+                examples: [],
+            })),
+            mapping: { ...guessed().mapping, transaction_date: null },
+        });
+
+        await reachMapping();
+        await waitFor(() => expect(applyStoredImportConfig).toHaveBeenCalled());
+        await act(async () => {});
+
+        expect(fetchColumnSuggestions).not.toHaveBeenCalled();
+        expect(
+            screen.getByRole('button', { name: 'Detect columns with AI' }),
+        ).toBeInTheDocument();
     });
 
     it('saves the layout only once the import brought rows in, flagged as the suggestion', async () => {

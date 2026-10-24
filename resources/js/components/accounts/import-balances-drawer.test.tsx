@@ -2,7 +2,13 @@ import { parseFile } from '@/lib/file-parser';
 import type { Account } from '@/types/account';
 import type { BalanceColumnMapping } from '@/types/balance-import';
 import { DateFormat } from '@/types/import';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+    act,
+    fireEvent,
+    render,
+    screen,
+    waitFor,
+} from '@testing-library/react';
 import { type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ImportBalancesDrawer } from './import-balances-drawer';
@@ -226,6 +232,27 @@ describe('ImportBalancesDrawer with AI column mapping', () => {
             balance: '10.200,00',
             invested_amount: '9.000,00',
         });
+    });
+
+    it('does not ask the AI about a file of one row and no header row', async () => {
+        // The reader took the only balance for the headers: no row is left.
+        const onlyRow = ['31.01.2025', '10.200,00', '9.000,00'];
+        vi.mocked(parseFile).mockResolvedValueOnce({
+            headers: onlyRow,
+            data: [],
+            rowNumbers: [],
+            columns: onlyRow.map((cell) => [cell]),
+            headerRowIndex: 0,
+        });
+
+        await reachMapping();
+        await waitFor(() => expect(loadBalanceImportConfig).toHaveBeenCalled());
+        await act(async () => {});
+
+        expect(fetchColumnSuggestions).not.toHaveBeenCalled();
+        expect(
+            screen.getByRole('button', { name: 'Detect columns with AI' }),
+        ).toBeInTheDocument();
     });
 
     it('saves the layout only once balances made it in', async () => {

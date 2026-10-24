@@ -371,15 +371,20 @@ export function ImportBalancesDrawer({
                       }
                     : null,
                 BALANCE_FIELDS,
-                () =>
-                    requestSuggestion(
-                        file,
-                        headers,
-                        data,
-                        hasHeaderRow,
-                        false,
-                        token,
-                    ),
+                () => {
+                    // With no row below the one taken for headers there is
+                    // no column to describe, so the AI is not asked.
+                    if (data.length > 0) {
+                        requestSuggestion(
+                            file,
+                            headers,
+                            data,
+                            hasHeaderRow,
+                            false,
+                            token,
+                        );
+                    }
+                },
             );
 
             if (savedConfig && fits) {

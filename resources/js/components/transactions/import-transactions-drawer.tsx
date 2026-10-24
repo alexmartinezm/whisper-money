@@ -311,17 +311,21 @@ export function ImportTransactionsDrawer({
                 ? await applyStoredImportConfig(parsed, accountId)
                 : null;
 
-            ai.afterStoredLayout(token, stored, TRANSACTION_FIELDS, () =>
-                requestSuggestion(
-                    file,
-                    parsed.headers,
-                    parsed.rows,
-                    parsed.hasHeaderRow,
-                    parsed.mapping.description,
-                    false,
-                    token,
-                ),
-            );
+            ai.afterStoredLayout(token, stored, TRANSACTION_FIELDS, () => {
+                // With no row below the one taken for headers there is no
+                // column to describe, so the AI is not asked.
+                if (parsed.rows.length > 0) {
+                    requestSuggestion(
+                        file,
+                        parsed.headers,
+                        parsed.rows,
+                        parsed.hasHeaderRow,
+                        parsed.mapping.description,
+                        false,
+                        token,
+                    );
+                }
+            });
 
             if (!stored) {
                 return;

@@ -289,36 +289,44 @@ function cellKind(cell: unknown): ValueKind | null {
     return typeof cell === 'string' ? valueKind(cell) : null;
 }
 
+/** A cell that holds something, not an empty or missing one. */
+function isFilled(cell: unknown): boolean {
+    return cell !== null && cell !== undefined && String(cell).trim() !== '';
+}
+
 /**
  * Whether the row the reader took for headers (`columns` are the file's raw
  * columns, every row included) really is one. It is not when one of its
  * cells is a value of the kind most of its column holds — a date over the
  * dates, an amount over the amounts —, which is how a file that starts with
  * its first movement looks: the merchant name next to that date is a cell
- * too, and nothing in its shape would say so.
+ * too, and nothing in its shape would say so. Nor is it when nothing sits
+ * below it: a file of one movement and no header row has no column to
+ * compare it with, and its texts must not go out as headers.
  */
 export function isHeaderRow(
     columns: unknown[][],
     headerRowIndex: number,
 ): boolean {
-    return !columns.some((column) => {
+    const valuesBelow = columns.map((column) =>
+        column
+            .slice(headerRowIndex + 1)
+            .filter(isFilled)
+            .map(String),
+    );
+
+    if (valuesBelow.every((values) => values.length === 0)) {
+        return false;
+    }
+
+    return !columns.some((column, index) => {
         const kind = cellKind(column[headerRowIndex]);
 
         if (kind === null) {
             return false;
         }
 
-        const below = sample(
-            column
-                .slice(headerRowIndex + 1)
-                .filter(
-                    (cell) =>
-                        cell !== null &&
-                        cell !== undefined &&
-                        String(cell).trim() !== '',
-                )
-                .map(String),
-        );
+        const below = sample(valuesBelow[index]);
         const alike = below.filter((cell) => cellKind(cell) === kind).length;
 
         return below.length > 0 && alike / below.length >= 0.5;
