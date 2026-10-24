@@ -2,9 +2,11 @@
 
 use App\Ai\Agents\TransactionCategorizationAgent;
 use App\Enums\CategoryCashflowDirection;
+use App\Enums\CategorySource;
 use App\Enums\CategoryType;
 use App\Jobs\CategorizeUncategorizedTransactionsJob;
 use App\Models\Category;
+use App\Models\Import;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Ai\CategorizeTransactions;
@@ -226,4 +228,61 @@ it('de-duplicates the backfill per user so a concurrent dispatch cannot double-b
 
     expect($job)->toBeInstanceOf(ShouldBeUnique::class)
         ->and($job->uniqueId())->toBe($user->id);
+});
+
+/**
+ * A row split in Money Pro (left blank and marked manual by a full import)
+ * next to the blank rows the backfill must still pick: a plain one, an
+ * imported one with no category source, and a manual one outside an import.
+ *
+ * @return array{source_split: Transaction, picked: list<string>}
+ */
+$seedBackfillCandidates = function (User $user): array {
+    $import = Import::factory()->create(['user_id' => $user->id]);
+    $blank = fn (array $attributes = []): Transaction => Transaction::factory()->plaintext()->create([
+        'user_id' => $user->id,
+        'category_id' => null,
+        ...$attributes,
+    ]);
+
+    $sourceSplit = $blank(['import_id' => $import->id, 'category_source' => CategorySource::Manual]);
+
+    return ['source_split' => $sourceSplit, 'picked' => [
+        $blank()->id,
+        $blank(['import_id' => $import->id, 'category_source' => null])->id,
+        $blank(['category_source' => CategorySource::Manual])->id,
+    ]];
+};
+
+it('leaves a row split in Money Pro out of the backfill count', function () use ($seedBackfillCandidates) {
+    Bus::fake();
+    $user = User::factory()->create();
+    $seedBackfillCandidates($user);
+
+    actingAs($user)->postJson(route('ai.consent.store'))
+        ->assertOk()
+        ->assertJsonPath('categorization.total', 3);
+});
+
+it('never sends a row split in Money Pro to the AI in the backfill', function () use ($seedBackfillCandidates) {
+    $user = User::factory()->create();
+    $user->recordAiConsent();
+    ['source_split' => $sourceSplit, 'picked' => $picked] = $seedBackfillCandidates($user);
+
+    $sent = [];
+    $this->mock(CategorizeTransactions::class, function ($mock) use (&$sent) {
+        $mock->shouldReceive('forTransactions')->andReturnUsing(function ($user, $transactions) use (&$sent) {
+            foreach ($transactions as $transaction) {
+                $sent[] = $transaction->id;
+            }
+
+            return [];
+        });
+    });
+
+    app()->call([new CategorizeUncategorizedTransactionsJob($user, 'source-split-job'), 'handle']);
+
+    expect($sent)->not->toContain($sourceSplit->id)
+        ->and($sent)->toEqualCanonicalizing($picked)
+        ->and(Cache::get(CategorizeUncategorizedTransactionsJob::cacheKeyForJobId($user->id, 'source-split-job'))['total'])->toBe(3);
 });

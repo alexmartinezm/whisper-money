@@ -989,7 +989,7 @@ export function FullImportWizard({
 
     if (variant === 'embedded') {
         return (
-            <main className="flex flex-1 flex-col px-5 md:items-center md:px-7">
+            <main className="ph-no-capture flex flex-1 flex-col px-5 md:items-center md:px-7">
                 <div className="flex w-full max-w-[800px] flex-col gap-8 py-6 md:py-14">
                     <WizardHeader
                         variant="embedded"
@@ -1004,7 +1004,7 @@ export function FullImportWizard({
     }
 
     return (
-        <div className="min-h-screen bg-background text-foreground">
+        <div className="ph-no-capture min-h-screen bg-background text-foreground">
             <WizardHeader
                 variant="page"
                 steps={pills}

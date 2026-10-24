@@ -4,7 +4,9 @@ use App\Models\Account;
 use App\Models\Category;
 use App\Models\Label;
 use App\Models\Transaction;
+use App\Models\TransactionSplit;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 
 use function Pest\Laravel\actingAs;
 
@@ -72,6 +74,131 @@ test('filter by date range', function () {
     $response->assertInertia(fn ($page) => $page
         ->has('transactions.data', 1)
     );
+});
+
+test('date range includes its first and last day', function () {
+    foreach (['2025-05-31', '2025-06-01', '2025-06-30', '2025-07-01'] as $date) {
+        Transaction::factory()->plaintext()->create([
+            'user_id' => $this->user->id,
+            'account_id' => $this->account->id,
+            'transaction_date' => $date,
+        ]);
+    }
+
+    actingAs($this->user)->get(route('transactions.index', [
+        'date_from' => '2025-06-01',
+        'date_to' => '2025-06-30',
+    ]))->assertInertia(fn ($page) => $page
+        ->has('transactions.data', 2)
+        ->where('transactions.data.0.transaction_date', '2025-06-30')
+        ->where('transactions.data.1.transaction_date', '2025-06-01')
+    );
+});
+
+test('date range scope keeps the whole boundary day when a bound carries a time', function () {
+    foreach (['2025-05-31', '2025-06-01', '2025-06-30', '2025-07-01'] as $date) {
+        Transaction::factory()->plaintext()->create([
+            'user_id' => $this->user->id,
+            'account_id' => $this->account->id,
+            'transaction_date' => $date,
+        ]);
+    }
+
+    // Saved filters and queued re-evaluations carry whatever was stored when
+    // they were written, so the scope cannot rely on the request validator.
+    $dates = Transaction::query()
+        ->applyFilters(['date_from' => '2025-06-01 18:30:00', 'date_to' => '2025-06-30T09:15:00'])
+        ->orderBy('transaction_date')
+        ->pluck('transaction_date')
+        ->map->toDateString()
+        ->all();
+
+    expect($dates)->toBe(['2025-06-01', '2025-06-30']);
+});
+
+test('date range scope matches nothing for an unparseable bound instead of throwing or dropping it', function () {
+    Transaction::factory()->plaintext()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'transaction_date' => '2025-06-15',
+    ]);
+
+    expect(Transaction::query()->applyFilters(['date_from' => 'not-a-date'])->count())->toBe(0);
+});
+
+test('a date range lets transactions be read by index instead of scanning the user\'s rows', function () {
+    // A handful of rows makes any plan a full scan, so this checks what the
+    // index can do for the query rather than which one MySQL picks. The index
+    // leads with user_id, so it is on offer either way; what the date filter
+    // decides is whether the range narrows the lookup past user_id. Forcing
+    // the index makes the plan show which of its parts the lookup reaches.
+    Transaction::factory()->plaintext()->count(3)->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'transaction_date' => '2025-06-15',
+    ]);
+
+    $query = Transaction::query()
+        ->where('user_id', $this->user->id)
+        ->applyFilters(['date_from' => '2025-06-01', 'date_to' => '2025-06-30']);
+
+    $plan = collect(DB::select('explain '.$query->toSql(), $query->getBindings()))
+        ->firstWhere('table', 'transactions');
+
+    $forced = (clone $query)->forceIndex('idx_transactions_budget_lookup');
+    $access = json_decode(
+        DB::selectOne('explain format=json '.$forced->toSql(), $forced->getBindings())->EXPLAIN,
+        true,
+    )['query_block']['table'];
+
+    expect(explode(',', (string) $plan->possible_keys))->toContain('idx_transactions_budget_lookup')
+        ->and($access['access_type'])->toBe('range')
+        ->and($access['used_key_parts'])->toBe(['user_id', 'transaction_date']);
+});
+
+test('a split transaction on a range boundary day is filtered by its lines', function () {
+    $groceries = Category::factory()->create(['user_id' => $this->user->id]);
+    $household = Category::factory()->create(['user_id' => $this->user->id]);
+
+    $splitOn = function (string $date) use ($groceries, $household): Transaction {
+        $transaction = Transaction::factory()->plaintext()->create([
+            'user_id' => $this->user->id,
+            'account_id' => $this->account->id,
+            'category_id' => null,
+            'amount' => -5000,
+            'transaction_date' => $date,
+        ]);
+
+        foreach ([[$groceries, -3000], [$household, -2000]] as $position => [$category, $amount]) {
+            TransactionSplit::factory()->create([
+                'transaction_id' => $transaction->id,
+                'category_id' => $category->id,
+                'amount' => $amount,
+                'position' => $position,
+            ]);
+        }
+
+        return $transaction;
+    };
+
+    $firstDay = $splitOn('2025-06-01');
+    $lastDay = $splitOn('2025-06-30');
+    $splitOn('2025-05-31');
+    $splitOn('2025-07-01');
+
+    $ids = Transaction::query()
+        ->applyFilters([
+            'date_from' => '2025-06-01',
+            'date_to' => '2025-06-30',
+            'category_ids' => [$groceries->id],
+            'user_id' => $this->user->id,
+        ])
+        ->pluck('id')
+        ->sort()
+        ->values()
+        ->all();
+
+    expect($ids)->toBe(collect([$firstDay->id, $lastDay->id])->sort()->values()->all());
 });
 
 test('rejects a date filter that is not a plain Y-m-d date', function (string $date) {

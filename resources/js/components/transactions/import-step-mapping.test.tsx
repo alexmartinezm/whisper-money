@@ -172,4 +172,18 @@ describe('ImportStepMapping', () => {
         expect(screen.getByText('-€4.50')).not.toBeNull();
         expect(screen.getByText('€2,500.00')).not.toBeNull();
     });
+
+    it('keeps the column names of the file in the open picker out of autocapture', () => {
+        renderStep(true);
+
+        fireEvent.keyDown(document.getElementById('date-column')!, {
+            key: 'ArrowDown',
+        });
+
+        const content = screen
+            .getByRole('option', { name: 'Saldo' })
+            .closest('[data-slot="select-content"]');
+
+        expect(content).toHaveClass('ph-no-capture');
+    });
 });

@@ -74,6 +74,7 @@ export function ImportBankField({
                 onCreateCustomBank={(query) =>
                     onChange({ bank: null, newBankName: query.trim() || null })
                 }
+                contentClassName="ph-no-capture"
             />
             {!bank && suggestedName && (
                 <button

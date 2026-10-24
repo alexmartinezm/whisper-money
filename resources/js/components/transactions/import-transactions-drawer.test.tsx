@@ -231,6 +231,14 @@ describe('ImportTransactionsDrawer', () => {
         );
     });
 
+    // The drawer is portalled out of the page, so only a class on its own
+    // content keeps PostHog autocapture off the names and amounts inside.
+    it('keeps PostHog autocapture off the whole drawer', async () => {
+        await reachMapping();
+
+        expect(screen.getByRole('dialog')).toHaveClass('ph-no-capture');
+    });
+
     // The drawer stays open on a partial import so the failures can be retried.
     // Retrying used to resend every row, creating the ones that were already in
     // a second time.
@@ -259,6 +267,40 @@ describe('ImportTransactionsDrawer', () => {
         await waitFor(() => {
             expect(createdDescriptions()).toEqual(['Rent']);
         });
+    });
+
+    // Console output ends up in Sentry breadcrumbs: a failed row is logged by
+    // its number and message only, never with its description or amount, nor
+    // with the raw error, whose request config carries the row it sent.
+    it('logs a failed row without the transaction or the request it sent', async () => {
+        const consoleError = vi
+            .spyOn(console, 'error')
+            .mockImplementation(() => {});
+        create.mockImplementation(
+            async (transaction: { description: string; amount: number }) =>
+                transaction.description === 'Rent'
+                    ? Promise.reject(
+                          Object.assign(new Error('Server said no'), {
+                              config: { data: JSON.stringify(transaction) },
+                          }),
+                      )
+                    : { id: transaction.description },
+        );
+
+        await reachPreview();
+        fireEvent.click(screen.getByText('Import 3 Transactions'));
+
+        await screen.findByText('Import 1 Transaction');
+
+        expect(consoleError).toHaveBeenCalledWith(
+            'Transaction 2 failed:',
+            'Server said no',
+        );
+        const logged = JSON.stringify(consoleError.mock.calls);
+        expect(logged).not.toContain('Rent');
+        expect(logged).not.toContain('90000');
+
+        consoleError.mockRestore();
     });
 
     it('marks the rows that made it in and locks them out of the selection', async () => {

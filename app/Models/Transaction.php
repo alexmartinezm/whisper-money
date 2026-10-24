@@ -16,6 +16,7 @@ use App\Services\CashflowBlockQuery;
 use App\Services\CategoryTree;
 use App\Services\PeriodComparator;
 use Carbon\Carbon;
+use Carbon\Exceptions\InvalidFormatException;
 use Closure;
 use Database\Factories\TransactionFactory;
 use Illuminate\Contracts\Database\Query\Expression;
@@ -398,8 +399,17 @@ class Transaction extends Model
     }
 
     /**
-     * Transactions the AI backfill can act on: still uncategorized and stored
-     * in plaintext (encrypted descriptions are never sent to the AI provider).
+     * Transactions the AI backfill and the AI rule suggestions (their groups
+     * and the rows a suggested rule files) can act on: still uncategorized,
+     * stored in plaintext (encrypted descriptions are never sent to the AI
+     * provider) and not left blank on purpose by an import. A full import
+     * brings a row split in Money Pro in uncategorized and marked as
+     * categorized by hand, for the user to split here, so the AI must not
+     * file it whole. Only rows an
+     * import wrote are narrowed this way: elsewhere a blank row marked manual
+     * can be one whose category the user deleted, which the AI may file again
+     * ({@see Transaction::scopeOpenToImportAi()}). Written as a positive OR so
+     * rows with a null import or category source stay in.
      *
      * @param  Builder<Transaction>  $query
      * @return Builder<Transaction>
@@ -408,7 +418,11 @@ class Transaction extends Model
     {
         return $query->whereNull('category_id')
             ->whereNull('description_iv')
-            ->whereDoesntHave('splits');
+            ->whereDoesntHave('splits')
+            ->where(fn (Builder $query): Builder => $query
+                ->whereNull('import_id')
+                ->orWhereNull('category_source')
+                ->orWhere('category_source', '!=', CategorySource::Manual->value));
     }
 
     /**
@@ -529,6 +543,39 @@ class Transaction extends Model
     }
 
     /**
+     * Inclusive `transaction_date` range, either end optional.
+     *
+     * Plain comparisons rather than `whereDate()`: the column is already a
+     * DATE, and MySQL wraps a `whereDate()` column in `cast(... as date)`,
+     * which keeps the range off `idx_transactions_budget_lookup` and reads
+     * every row the user has. Bounds are cut to `Y-m-d` first so a value with
+     * a time of day (`2026-01-31 15:00`) still includes its own day.
+     *
+     * @param  Builder<Transaction>  $query
+     * @return Builder<Transaction>
+     */
+    public function scopeTransactionDateWithin(Builder $query, ?string $from, ?string $to): Builder
+    {
+        return $query
+            ->when(filled($from), fn (Builder $q) => $q->where('transaction_date', '>=', self::dateBound($from)))
+            ->when(filled($to), fn (Builder $q) => $q->where('transaction_date', '<=', self::dateBound($to)));
+    }
+
+    /**
+     * An unparseable bound goes through untouched rather than throwing or being
+     * dropped: dropping it would widen what a bulk update or rule re-evaluation
+     * writes to, and MySQL matches nothing against it, as `whereDate()` did.
+     */
+    private static function dateBound(string $value): string
+    {
+        try {
+            return Carbon::parse($value)->toDateString();
+        } catch (InvalidFormatException) {
+            return $value;
+        }
+    }
+
+    /**
      * @param  Builder<Transaction>  $query
      * @param  array<string, mixed>  $filters
      * @return Builder<Transaction>
@@ -536,8 +583,7 @@ class Transaction extends Model
     public function scopeApplyFilters(Builder $query, array $filters): Builder
     {
         $query
-            ->when(isset($filters['date_from']), fn (Builder $q) => $q->whereDate('transaction_date', '>=', $filters['date_from']))
-            ->when(isset($filters['date_to']), fn (Builder $q) => $q->whereDate('transaction_date', '<=', $filters['date_to']))
+            ->transactionDateWithin($filters['date_from'] ?? null, $filters['date_to'] ?? null)
             // Amounts arrive in major units from the UI but are stored in cents.
             ->when(isset($filters['amount_min']), fn (Builder $q) => $q->where('amount', '>=', $filters['amount_min'] * 100))
             ->when(isset($filters['amount_max']), fn (Builder $q) => $q->where('amount', '<=', $filters['amount_max'] * 100))

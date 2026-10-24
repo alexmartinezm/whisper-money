@@ -742,6 +742,20 @@ describe('FullImportWizard', () => {
         await screen.findByText('Importing your data');
         expect(api.fetchImport).toHaveBeenCalledWith('import-1');
     });
+
+    it.each(['page', 'embedded'] as const)(
+        'keeps PostHog autocapture off the whole %s wizard',
+        async (variant) => {
+            api.fetchImportContext.mockResolvedValue(context());
+            const { container } = render(
+                <FullImportWizard variant={variant} onClose={vi.fn()} />,
+            );
+
+            await screen.findByText('Where are you coming from?');
+
+            expect(container.firstElementChild).toHaveClass('ph-no-capture');
+        },
+    );
 });
 
 describe('FullImportWizard with AI column mapping', () => {

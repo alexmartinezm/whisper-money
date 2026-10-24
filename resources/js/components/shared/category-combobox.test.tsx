@@ -87,3 +87,36 @@ describe('CategoryCombobox and keyboard shortcuts', () => {
         expect(save).toHaveBeenCalledOnce();
     });
 });
+
+describe('CategoryCombobox dropdown classes', () => {
+    function openDropdown(contentClassName?: string) {
+        render(
+            <CategoryCombobox
+                value={null}
+                onValueChange={vi.fn()}
+                categories={categories}
+                contentClassName={contentClassName}
+            />,
+        );
+
+        fireEvent.click(screen.getByRole('combobox'));
+
+        return screen
+            .getByPlaceholderText('Search categories...')
+            .closest('[data-slot="popover-content"]');
+    }
+
+    it('puts the given classes on the dropdown it renders in a portal', () => {
+        const content = openDropdown('ph-no-capture');
+
+        expect(content).toHaveClass('ph-no-capture', 'p-0');
+        expect(document.body).toContainElement(content as HTMLElement);
+    });
+
+    it('keeps the dropdown as it was when no classes are given', () => {
+        const content = openDropdown();
+
+        expect(content).toHaveClass('p-0');
+        expect(content).not.toHaveClass('ph-no-capture');
+    });
+});

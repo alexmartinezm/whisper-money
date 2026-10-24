@@ -362,3 +362,31 @@ test('a split transaction on an archived account after its archive date is in no
         expect(idsListedInBlock($block))->not->toContain($split->id, "block {$block->value}");
     }
 });
+
+test('a split transaction is listed under the blocks of its lines only when it is dated in the period', function () {
+    $rent = splitBlockCategory(CategoryType::Expense);
+    $shopping = splitBlockCategory(CategoryType::Expense);
+    splitBlockBudget(Budget::factory()->monthly()->fixed()->forCategories($rent)->create(['user_id' => $this->user->id]));
+
+    $lines = [[$rent, -30000], [$shopping, -2000]];
+    $inPeriod = splitBlockTransaction(null, 0, $lines);
+    $lastDay = splitBlockTransaction(null, 0, $lines);
+    $lastDay->update(['transaction_date' => '2026-10-31']);
+    $before = splitBlockTransaction(null, 0, $lines);
+    $before->update(['transaction_date' => '2026-09-30']);
+    $after = splitBlockTransaction(null, 0, $lines);
+    $after->update(['transaction_date' => '2026-11-01']);
+
+    $inside = collect([$inPeriod->id, $lastDay->id])->sort()->values()->all();
+    $blocks = app(CashflowBlockQuery::class);
+    $period = PeriodComparator::fromRequest(['from' => '2026-10-01', 'to' => '2026-10-31']);
+    $applied = fn (CashflowBlock $block): array => $blocks->apply(Transaction::query(), $block, $this->user->id, $period)
+        ->pluck('id')->sort()->values()->all();
+
+    expect(idsListedInBlock(CashflowBlock::Fixed))->toBe($inside)
+        ->and(idsListedInBlock(CashflowBlock::General))->toBe($inside)
+        ->and(idsListedInBlock(CashflowBlock::Variable))->toBe([])
+        ->and($applied(CashflowBlock::Fixed))->toBe($inside)
+        ->and($applied(CashflowBlock::General))->toBe($inside)
+        ->and($applied(CashflowBlock::Variable))->toBe([]);
+});

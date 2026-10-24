@@ -273,8 +273,7 @@ class DetectRecurringSeries
             ->where('user_id', $user->id)
             ->where('space_id', $space->id)
             ->whereNull('description_iv')
-            ->whereDate('transaction_date', '>=', $since->toDateString())
-            ->whereDate('transaction_date', '<=', CarbonImmutable::today()->toDateString())
+            ->transactionDateWithin($since->toDateString(), CarbonImmutable::today()->toDateString())
             ->whereHas('account', fn (Builder $query): Builder => $query->whereNull('archived_at'));
     }
 

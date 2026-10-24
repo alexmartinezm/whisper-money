@@ -119,7 +119,7 @@ export function ImportBalanceStepMapping({
                                 placeholder={__('Select date column')}
                             />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="ph-no-capture">
                             {columnOptions.map((option, index) => (
                                 <SelectItem
                                     key={`date-${option.value}-${index}`}
@@ -154,7 +154,7 @@ export function ImportBalanceStepMapping({
                                 }
                             />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="ph-no-capture">
                             {columnOptions.map((option, index) => (
                                 <SelectItem
                                     key={`balance-${option.value}-${index}`}
@@ -185,7 +185,7 @@ export function ImportBalanceStepMapping({
                                     )}
                                 />
                             </SelectTrigger>
-                            <SelectContent>
+                            <SelectContent className="ph-no-capture">
                                 {columnOptions.map((option, index) => (
                                     <SelectItem
                                         key={`invested-${option.value}-${index}`}

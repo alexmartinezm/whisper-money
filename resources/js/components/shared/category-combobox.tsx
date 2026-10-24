@@ -59,6 +59,8 @@ interface CategoryComboboxProps {
     disabled?: boolean;
     placeholder?: string;
     triggerClassName?: string;
+    /** Classes for the open dropdown, which renders in a portal under <body>. */
+    contentClassName?: string;
     showUncategorized?: boolean;
     withoutChevronIcon?: boolean;
     /** Label for the empty / "no category" option (defaults to Uncategorized). */
@@ -75,6 +77,7 @@ export function CategoryCombobox({
     disabled = false,
     placeholder = 'Select category',
     triggerClassName,
+    contentClassName,
     showUncategorized = true,
     withoutChevronIcon = false,
     emptyOptionLabel,
@@ -166,7 +169,10 @@ export function CategoryCombobox({
                     )}
                 </Button>
             </PopoverTrigger>
-            <PopoverContent className="p-0" align="start">
+            <PopoverContent
+                className={cn('p-0', contentClassName)}
+                align="start"
+            >
                 {header}
                 <Command shouldFilter={false}>
                     <CommandInput
