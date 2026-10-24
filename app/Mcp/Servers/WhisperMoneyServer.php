@@ -100,8 +100,9 @@ themselves.
   is spending tracked by budgets marked fixed (rent, subscriptions),
   `variable_expense` by budgets marked variable (groceries, leisure), and
   `general_expense` the rest, which no budget tracks. Catch-all budgets do not
-  count; a transaction tracked by both kinds counts once, as fixed. A split
-  transaction is read line by line, so it can be partly fixed, partly variable.
+  count. Each posting (an unsplit transaction, or one line of a split
+  transaction) counts once, as fixed when budgets of both kinds track it, so a
+  split transaction can be partly fixed, partly variable.
   The three add up to `expense`, and any can be negative in a month of
   refunds. Both `current` and `previous` carry the split; only `current`
   carries `reserved` and `budgets` (each with its `expense_type`).
