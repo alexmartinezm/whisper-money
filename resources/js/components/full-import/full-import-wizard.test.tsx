@@ -160,6 +160,32 @@ async function continueTo(title: string) {
     await screen.findByText(title);
 }
 
+/** Pick a CSV nobody recognises, and return the `full_import_file_parsed` it sent. */
+async function fileParsedEventOf(
+    csv: string,
+    variant: 'page' | 'embedded',
+): Promise<Record<string, unknown>> {
+    api.fetchImportContext.mockResolvedValue(context());
+    render(<FullImportWizard variant={variant} onClose={vi.fn()} />);
+
+    await screen.findByText('Where are you coming from?');
+    fireEvent.change(screen.getByTestId('full-import-file-input'), {
+        target: {
+            files: [
+                new File([csv], 'Juana Pérez export.csv', {
+                    type: 'text/csv',
+                }),
+            ],
+        },
+    });
+
+    await waitFor(() =>
+        expect(sent('full_import_file_parsed')).toHaveLength(1),
+    );
+
+    return sent('full_import_file_parsed')[0];
+}
+
 describe('FullImportWizard', () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -505,29 +531,10 @@ describe('FullImportWizard', () => {
     });
 
     it('sends only the headers of a file it does not recognise', async () => {
-        api.fetchImportContext.mockResolvedValue(context());
-        render(<FullImportWizard variant="embedded" onClose={vi.fn()} />);
-
-        await screen.findByText('Where are you coming from?');
-        fireEvent.change(screen.getByTestId('full-import-file-input'), {
-            target: {
-                files: [
-                    new File(
-                        [
-                            'Date,Amount,Memo\n2026-01-01,-5.25,Secret Coffee Shop\n',
-                        ],
-                        'Juana Pérez export.csv',
-                        { type: 'text/csv' },
-                    ),
-                ],
-            },
-        });
-
-        await waitFor(() =>
-            expect(sent('full_import_file_parsed')).toHaveLength(1),
+        const parsed = await fileParsedEventOf(
+            'Date,Amount,Memo\n2026-01-01,-5.25,Secret Coffee Shop\n',
+            'embedded',
         );
-
-        const [parsed] = sent('full_import_file_parsed');
 
         expect(parsed).toEqual({
             recognized: false,
@@ -545,29 +552,12 @@ describe('FullImportWizard', () => {
     });
 
     it('sends no headers of a file without a header row', async () => {
-        api.fetchImportContext.mockResolvedValue(context());
-        render(<FullImportWizard variant="page" onClose={vi.fn()} />);
-
-        await screen.findByText('Where are you coming from?');
-        fireEvent.change(screen.getByTestId('full-import-file-input'), {
-            target: {
-                files: [
-                    new File(
-                        [
-                            '2026-01-01,-5.25,Secret Coffee Shop\n2026-01-02,-7.50,Hidden Bakery\n',
-                        ],
-                        'Juana Pérez export.csv',
-                        { type: 'text/csv' },
-                    ),
-                ],
-            },
-        });
-
-        await waitFor(() =>
-            expect(sent('full_import_file_parsed')).toHaveLength(1),
+        const parsed = await fileParsedEventOf(
+            '2026-01-01,-5.25,Secret Coffee Shop\n2026-01-02,-7.50,Hidden Bakery\n',
+            'page',
         );
 
-        expect(sent('full_import_file_parsed')[0]).toEqual({
+        expect(parsed).toEqual({
             recognized: false,
             source: 'generic',
             extension: 'csv',

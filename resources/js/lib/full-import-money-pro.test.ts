@@ -603,18 +603,20 @@ describe('a Money Pro export with split transactions', () => {
         ).toBe('Split in Money Pro: Restaurantes Restaurantes Restaurantes');
     });
 
-    it('adds the split note after a note of its own', async () => {
+    /** One row split in Money Pro ("Compras Salud"), with this note of its own. */
+    async function readSplitWithNote(note: string) {
         const parsed = await parseImportFile(
             new File(
                 [
-                    'Fecha;Cantidad;Cuenta;Monto recibido;Cuenta de destino;Saldo;Categoría;Descripción;Tipo de transacción;Nota\n1 feb 2026, 10:00:00;10,00 €;Cuenta Ficticia;;;100,00 €;Compras Salud;Compra inventada;Gasto;Pagado a medias\n',
+                    `Fecha;Cantidad;Cuenta;Monto recibido;Cuenta de destino;Saldo;Categoría;Descripción;Tipo de transacción;Nota\n1 feb 2026, 10:00:00;10,00 €;Cuenta Ficticia;;;100,00 €;Compras Salud;Compra inventada;Gasto;${note}\n`,
                 ],
                 'money-pro.csv',
                 { type: 'text/csv' },
             ),
             'es-ES',
         );
-        const normalized = normalizeRows(
+
+        return normalizeRows(
             parsed,
             { ...defaultMapping('money_pro', parsed, 'es-ES'), notes: 'Nota' },
             { fileName: 'money-pro.csv', supportedCurrencies: SUPPORTED },
@@ -625,9 +627,11 @@ describe('a Money Pro export with split transactions', () => {
                     { id: 'c2', name: 'Salud', parent_id: null },
                 ],
             }),
-        );
+        ).rows[0];
+    }
 
-        expect(normalized.rows[0]).toMatchObject({
+    it('adds the split note after a note of its own', async () => {
+        expect(await readSplitWithNote('Pagado a medias')).toMatchObject({
             sourceSplit: true,
             categoryPath: [],
             notes: 'Pagado a medias\nSplit in Money Pro: Compras Salud',
@@ -636,29 +640,7 @@ describe('a Money Pro export with split transactions', () => {
 
     it('cuts a long note of its own first, so the split note always fits', async () => {
         const own = 'Pagado a medias. '.repeat(400);
-        const parsed = await parseImportFile(
-            new File(
-                [
-                    `Fecha;Cantidad;Cuenta;Monto recibido;Cuenta de destino;Saldo;Categoría;Descripción;Tipo de transacción;Nota\n1 feb 2026, 10:00:00;10,00 €;Cuenta Ficticia;;;100,00 €;Compras Salud;Compra inventada;Gasto;${own}\n`,
-                ],
-                'money-pro.csv',
-                { type: 'text/csv' },
-            ),
-            'es-ES',
-        );
-        const normalized = normalizeRows(
-            parsed,
-            { ...defaultMapping('money_pro', parsed, 'es-ES'), notes: 'Nota' },
-            { fileName: 'money-pro.csv', supportedCurrencies: SUPPORTED },
-            moneyProReader(parsed.headers, {
-                rows: parsed.rows,
-                categories: [
-                    { id: 'c1', name: 'Compras', parent_id: null },
-                    { id: 'c2', name: 'Salud', parent_id: null },
-                ],
-            }),
-        );
-        const notes = normalized.rows[0].notes ?? '';
+        const notes = (await readSplitWithNote(own)).notes ?? '';
 
         expect(own.trim().length).toBeGreaterThan(5000);
         expect(notes).toHaveLength(5000);
