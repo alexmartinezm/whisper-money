@@ -7,6 +7,7 @@ use App\Enums\CategoryType;
 use App\Enums\RuleOrigin;
 use App\Models\AutomationRule;
 use App\Models\Category;
+use App\Models\Import;
 use App\Models\Transaction;
 use App\Models\User;
 
@@ -80,4 +81,31 @@ it('reports when there is nothing to backfill', function () {
     artisan('ai:categorize-backfill', ['user' => $user->id])
         ->expectsOutputToContain('No uncategorized transactions to backfill.')
         ->assertSuccessful();
+});
+
+it('leaves a row split in Money Pro blank for the user to split', function () {
+    $user = User::factory()->create();
+    $user->recordAiConsent();
+    $category = bfCategory($user);
+    $import = Import::factory()->create(['user_id' => $user->id]);
+
+    $sourceSplit = Transaction::factory()->plaintext()->create([
+        'user_id' => $user->id,
+        'import_id' => $import->id,
+        'category_id' => null,
+        'category_source' => CategorySource::Manual,
+        'creditor_name' => 'ferreteria lopez',
+    ]);
+    $plain = Transaction::factory()->plaintext()->create([
+        'user_id' => $user->id,
+        'category_id' => null,
+        'creditor_name' => 'ferreteria lopez',
+    ]);
+
+    bfFakeAllToIndex(0);
+
+    artisan('ai:categorize-backfill', ['user' => $user->id])->assertSuccessful();
+
+    expect($sourceSplit->refresh()->category_id)->toBeNull()
+        ->and($plain->refresh()->category_id)->toBe($category->id);
 });

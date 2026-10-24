@@ -399,8 +399,15 @@ class Transaction extends Model
     }
 
     /**
-     * Transactions the AI backfill can act on: still uncategorized and stored
-     * in plaintext (encrypted descriptions are never sent to the AI provider).
+     * Transactions the AI backfill can act on: still uncategorized, stored in
+     * plaintext (encrypted descriptions are never sent to the AI provider) and
+     * not left blank on purpose by an import. A full import brings a row split
+     * in Money Pro in uncategorized and marked as categorized by hand, for the
+     * user to split here, so the backfill must not file it whole. Only rows an
+     * import wrote are narrowed this way: elsewhere a blank row marked manual
+     * can be one whose category the user deleted, which the AI may file again
+     * ({@see Transaction::scopeOpenToImportAi()}). Written as a positive OR so
+     * rows with a null import or category source stay in.
      *
      * @param  Builder<Transaction>  $query
      * @return Builder<Transaction>
@@ -409,7 +416,11 @@ class Transaction extends Model
     {
         return $query->whereNull('category_id')
             ->whereNull('description_iv')
-            ->whereDoesntHave('splits');
+            ->whereDoesntHave('splits')
+            ->where(fn (Builder $query): Builder => $query
+                ->whereNull('import_id')
+                ->orWhereNull('category_source')
+                ->orWhere('category_source', '!=', CategorySource::Manual->value));
     }
 
     /**
