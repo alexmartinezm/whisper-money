@@ -2,6 +2,7 @@ import type { BankingConnection } from '@/types/banking';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConnectAccountDialog } from './connect-account-dialog';
+import { ConnectAccountInline } from './connect-account-inline';
 
 globalThis.ResizeObserver ??= class {
     observe() {}
@@ -87,12 +88,17 @@ function institution(name: string, logo = '', beta = false): Institution {
     return { name, country: 'ES', logo, maximum_consent_validity: null, beta };
 }
 
+/**
+ * The dialog (settings, accounts page) and the inline flow (onboarding) run
+ * the same connect flow, so one driver reaches the bank step on either.
+ */
 async function reachBankStep(
     connections: BankingConnection[],
     institutions: Institution[] = [
         institution('BBVA'),
         institution('CaixaBank'),
     ],
+    surface: 'dialog' | 'inline' = 'dialog',
 ) {
     global.fetch = vi.fn().mockResolvedValue({
         ok: true,
@@ -100,11 +106,15 @@ async function reachBankStep(
     }) as unknown as typeof fetch;
 
     render(
-        <ConnectAccountDialog
-            open
-            onOpenChange={vi.fn()}
-            connections={connections}
-        />,
+        surface === 'dialog' ? (
+            <ConnectAccountDialog
+                open
+                onOpenChange={vi.fn()}
+                connections={connections}
+            />
+        ) : (
+            <ConnectAccountInline onBack={vi.fn()} connections={connections} />
+        ),
     );
 
     fireEvent.change(screen.getByTestId('country-select'), {
@@ -327,6 +337,31 @@ describe('ConnectAccountDialog', () => {
         fireEvent.click(screen.getByRole('button', { name: /^BBVA/ }));
         fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
+        expect(
+            screen.queryByText('This bank is still in beta'),
+        ).not.toBeInTheDocument();
+    });
+});
+
+describe('ConnectAccountInline', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        pageProps.openBankingEnabled = true;
+        pageProps.betaProviders = ['kraken'];
+    });
+
+    // Onboarding's confirm step has to tell a new native integration from a
+    // bank that fails more often, as the dialog does.
+    it('flags a native integration in beta with its own caveat', async () => {
+        await reachBankStep([], [institution('BBVA')], 'inline');
+
+        const kraken = screen.getByRole('button', { name: /Kraken/ });
+        expect(kraken).toHaveTextContent('Beta');
+
+        fireEvent.click(kraken);
+        fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+        expect(screen.getByText('New integration in beta')).toBeInTheDocument();
         expect(
             screen.queryByText('This bank is still in beta'),
         ).not.toBeInTheDocument();
