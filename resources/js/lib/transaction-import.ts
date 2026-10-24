@@ -1,14 +1,17 @@
 import {
     autoDetectColumns,
     detectDateFormat,
+    detectExpenseTypes,
     parseFile,
 } from '@/lib/file-parser';
+import { loadImportConfig } from '@/lib/import-config-storage';
 import {
     DateFormat,
     type ColumnMapping,
     type ColumnOption,
     type ParsedRow,
 } from '@/types/import';
+import { type UUID } from '@/types/uuid';
 import { __ } from '@/utils/i18n';
 
 /**
@@ -123,6 +126,7 @@ export async function parseImportFile(
     const { headers, data, rowNumbers, columns, headerRowIndex } =
         await parseFile(file);
     const mapping = autoDetectColumns(headers);
+    mapping.expense_types = detectExpenseTypes(data, mapping.transaction_type);
 
     let dateFormat = DateFormat.YearMonthDay;
     let dateFormatDetected = false;
@@ -152,5 +156,52 @@ export async function parseImportFile(
         dateFormat,
         dateFormatDetected,
         dateFormatAmbiguous,
+    };
+}
+
+/** Every mapped column is one the file actually has. */
+function mapsOnlyKnownColumns(
+    mapping: ColumnMapping,
+    headers: string[],
+): boolean {
+    // The expense types are values of a column, not columns; and a field set
+    // back to "None" is saved empty, which names no column at all.
+    return Object.entries(mapping)
+        .filter(([field]) => field !== 'expense_types')
+        .map(([, column]) => column)
+        .filter((column) => column !== null && column !== '')
+        .every((column) =>
+            Array.isArray(column)
+                ? column.every((one) => headers.includes(one as string))
+                : headers.includes(column as string),
+        );
+}
+
+/**
+ * Overlay the layout this account was last imported with, so the second file
+ * from the same bank is not mapped by hand again. A stored layout naming
+ * columns this file does not have belongs to a different export and is ignored.
+ *
+ * Null when there is nothing worth applying, so a caller whose user has been
+ * editing the mapping meanwhile can leave their edits alone.
+ */
+export async function applyStoredImportConfig(
+    parsed: ParsedImportFile,
+    accountId: UUID,
+): Promise<ParsedImportFile | null> {
+    const stored = await loadImportConfig(accountId);
+
+    if (
+        !stored ||
+        !mapsOnlyKnownColumns(stored.columnMapping, parsed.headers)
+    ) {
+        return null;
+    }
+
+    return {
+        ...parsed,
+        mapping: { ...parsed.mapping, ...stored.columnMapping },
+        dateFormat: stored.dateFormat,
+        dateFormatDetected: !parsed.dateFormatAmbiguous,
     };
 }

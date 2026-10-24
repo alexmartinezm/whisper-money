@@ -20,13 +20,13 @@ import {
     collectBalancesToImport,
     convertRowsToTransactions,
 } from '@/lib/file-parser';
-import {
-    loadImportConfig,
-    saveImportConfig,
-} from '@/lib/import-config-storage';
+import { saveImportConfig } from '@/lib/import-config-storage';
 import { getStoredKey } from '@/lib/key-storage';
 import { evaluateRulesForNewTransaction } from '@/lib/rule-engine';
-import { parseImportFile } from '@/lib/transaction-import';
+import {
+    applyStoredImportConfig,
+    parseImportFile,
+} from '@/lib/transaction-import';
 import { transactionSyncService } from '@/services/transaction-sync';
 import { type SharedData } from '@/types';
 import { type Account, type Bank } from '@/types/account';
@@ -187,6 +187,7 @@ export function ImportTransactionsDrawer({
         }
 
         try {
+            const parsed = await parseImportFile(file, locale);
             const {
                 headers,
                 rows: data,
@@ -194,8 +195,7 @@ export function ImportTransactionsDrawer({
                 mapping: autoMapping,
                 dateFormat: detectedFormat,
                 dateFormatDetected: formatDetected,
-                dateFormatAmbiguous: formatAmbiguous,
-            } = await parseImportFile(file, locale);
+            } = parsed;
 
             // Show the parsed file immediately with auto-detected columns; the
             // saved per-account config is fetched off the critical path so a
@@ -213,42 +213,24 @@ export function ImportTransactionsDrawer({
 
             const accountId = state.selectedAccountId;
             if (accountId) {
-                const savedConfig = await loadImportConfig(accountId);
+                const stored = await applyStoredImportConfig(parsed, accountId);
 
-                if (savedConfig) {
-                    const isValidMapping = (
-                        mapping: ColumnMapping,
-                    ): boolean => {
-                        const values = Object.values(mapping).filter(
-                            (v) => v !== null,
-                        );
-                        return values.every((value) => {
-                            if (Array.isArray(value)) {
-                                return value.every((v) =>
-                                    headers.includes(v as string),
-                                );
-                            }
-                            return headers.includes(value as string);
-                        });
-                    };
-
-                    if (isValidMapping(savedConfig.columnMapping)) {
-                        // Only apply if this file is still the selected one, so a
-                        // slow load can't clobber a file picked afterwards. Keep
-                        // the saved format as the default, but still show the
-                        // selector when the dates are ambiguous so a
-                        // previously-saved wrong format can be corrected.
-                        setState((prev) =>
-                            prev.file === file
-                                ? {
-                                      ...prev,
-                                      columnMapping: savedConfig.columnMapping,
-                                      dateFormat: savedConfig.dateFormat,
-                                      dateFormatDetected: !formatAmbiguous,
-                                  }
-                                : prev,
-                        );
-                    }
+                if (stored) {
+                    // Only apply if this file is still the selected one, so a
+                    // slow load can't clobber a file picked afterwards. Keep
+                    // the saved format as the default, but still show the
+                    // selector when the dates are ambiguous so a
+                    // previously-saved wrong format can be corrected.
+                    setState((prev) =>
+                        prev.file === file
+                            ? {
+                                  ...prev,
+                                  columnMapping: stored.mapping,
+                                  dateFormat: stored.dateFormat,
+                                  dateFormatDetected: stored.dateFormatDetected,
+                              }
+                            : prev,
+                    );
                 }
             }
         } catch (err) {

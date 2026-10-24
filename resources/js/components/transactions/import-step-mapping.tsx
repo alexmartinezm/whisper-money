@@ -12,21 +12,29 @@ import {
 } from '@/components/ui/select';
 import { useLocale } from '@/hooks/use-locale';
 import {
+    collectTypeValues,
+    detectExpenseTypes,
     getLatestTransactionDate,
+    isSameTypeValue,
     parseAmount,
     parseDate,
+    typeSigner,
 } from '@/lib/file-parser';
 import {
     DateFormat,
     type ColumnMapping,
     type ColumnOption,
     type ParsedRow,
+    type TypeValueCount,
 } from '@/types/import';
 import { formatRelativeDate } from '@/utils/date';
 import { __ } from '@/utils/i18n';
 import { useEffect, useMemo } from 'react';
 
 const NONE = '__none__';
+
+/** How many distinct type values are offered to tick, most common first. */
+const MAX_TYPE_VALUES = 20;
 
 const DATE_FORMAT_LABELS: Record<DateFormat, string> = {
     [DateFormat.YearMonthDay]: 'YYYY-MM-DD',
@@ -148,6 +156,66 @@ export function DateFormatSelect({
     );
 }
 
+/** The type column's values, for the user to tick the ones that are expenses. */
+function ExpenseTypePicker({
+    values,
+    selected,
+    onChange,
+}: {
+    values: TypeValueCount[];
+    selected: string[];
+    onChange: (selected: string[]) => void;
+}) {
+    const isTicked = (value: string) =>
+        selected.some((one) => isSameTypeValue(one, value));
+    // A ticked value stays in sight past the cap: it still turns rows negative,
+    // so it must be there to untick.
+    const shown = values.filter(
+        ({ value }, index) => index < MAX_TYPE_VALUES || isTicked(value),
+    );
+    const hiddenCount = values.length - shown.length;
+
+    const toggle = (value: string, checked: boolean) => {
+        const rest = selected.filter((one) => !isSameTypeValue(one, value));
+        onChange(checked ? [...rest, value] : rest);
+    };
+
+    return (
+        <fieldset className="flex flex-col gap-1.5 pt-2">
+            <legend className="pb-1.5 text-xs text-muted-foreground">
+                {__('Tick the values that mean money going out')}
+            </legend>
+            {shown.map(({ value, count }, index) => (
+                <div key={value} className="flex items-center gap-2">
+                    <Checkbox
+                        id={`expense-type-${index}`}
+                        checked={isTicked(value)}
+                        onCheckedChange={(checked) =>
+                            toggle(value, checked === true)
+                        }
+                    />
+                    <Label
+                        htmlFor={`expense-type-${index}`}
+                        className="cursor-pointer font-normal"
+                    >
+                        {value}{' '}
+                        <span className="text-xs text-muted-foreground">
+                            · {__(':count rows', { count })}
+                        </span>
+                    </Label>
+                </div>
+            ))}
+            {hiddenCount > 0 && (
+                <span className="text-xs text-muted-foreground">
+                    {__(':count more values not shown', {
+                        count: hiddenCount,
+                    })}
+                </span>
+            )}
+        </fieldset>
+    );
+}
+
 export function ImportStepMapping({
     columnOptions,
     columnMapping,
@@ -202,6 +270,21 @@ export function ImportStepMapping({
                 referenceBalance !== null &&
                 referenceBalance !== undefined));
 
+    const typeValues = useMemo(
+        () => collectTypeValues(parsedData, columnMapping.transaction_type),
+        [parsedData, columnMapping.transaction_type],
+    );
+
+    // A new type column brings its own values, so the ticks start over from
+    // the ones that plainly mean an expense.
+    const handleTypeColumnChange = (column: string) => {
+        onMappingChange('transaction_type', column);
+        onMappingChange(
+            'expense_types',
+            detectExpenseTypes(parsedData, column || null),
+        );
+    };
+
     const getDescriptionFromRow = (row: ParsedRow): string => {
         if (!columnMapping.description) {
             return '';
@@ -246,6 +329,8 @@ export function ImportStepMapping({
         }
     };
 
+    const signAmount = typeSigner(columnMapping);
+
     const previewTransactions = parsedData.slice(0, 3).map((row) => {
         const date = columnMapping.transaction_date
             ? parseDate(
@@ -273,7 +358,7 @@ export function ImportStepMapping({
                           style: 'currency',
                           currency: currencyCode,
                       })
-                          .format(amount)
+                          .format(signAmount(amount, row))
                           .replace(/\s/g, '\u202F')
                     : 'Invalid amount',
         };
@@ -546,6 +631,32 @@ export function ImportStepMapping({
                             }
                         />
                     </div>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                    <Label htmlFor="type-column">{__('Type (Optional)')}</Label>
+                    <ColumnSelect
+                        id="type-column"
+                        value={columnMapping.transaction_type ?? null}
+                        placeholder={__('Select type column (optional)')}
+                        optional
+                        columnOptions={columnOptions}
+                        onChange={handleTypeColumnChange}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                        {__(
+                            'For files whose amounts are all positive: ticked rows import as expenses',
+                        )}
+                    </p>
+                    {typeValues.length > 0 && (
+                        <ExpenseTypePicker
+                            values={typeValues}
+                            selected={columnMapping.expense_types ?? []}
+                            onChange={(selected) =>
+                                onMappingChange('expense_types', selected)
+                            }
+                        />
+                    )}
                 </div>
 
                 {!dateFormatDetected && (

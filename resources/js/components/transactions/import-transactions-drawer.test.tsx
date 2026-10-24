@@ -1,4 +1,5 @@
 import type { Account } from '@/types/account';
+import { DateFormat, type ColumnMapping } from '@/types/import';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ImportTransactionsDrawer } from './import-transactions-drawer';
@@ -9,12 +10,16 @@ const {
     convertRowsToTransactions,
     collectBalancesToImport,
     mappingProps,
+    parseFile,
+    loadImportConfig,
 } = vi.hoisted(() => ({
     create: vi.fn(),
     checkDuplicates: vi.fn(),
     convertRowsToTransactions: vi.fn(),
     collectBalancesToImport: vi.fn(),
     mappingProps: vi.fn(),
+    parseFile: vi.fn(),
+    loadImportConfig: vi.fn(async () => null),
 }));
 
 vi.mock('@/services/transaction-sync', () => ({
@@ -24,9 +29,10 @@ vi.mock('@/services/transaction-sync', () => ({
 // The file itself is beside the point here: the rows the mapping would produce
 // are handed straight to the preview.
 vi.mock('@/lib/file-parser', () => ({
-    parseFile: vi.fn(),
+    parseFile,
     autoDetectColumns: vi.fn(() => ({})),
     detectDateFormat: vi.fn(() => null),
+    detectExpenseTypes: vi.fn(() => []),
     convertRowsToTransactions,
     collectBalancesToImport,
     calculateBalancesFromTransactions: vi.fn(() => new Map()),
@@ -34,17 +40,31 @@ vi.mock('@/lib/file-parser', () => ({
 }));
 
 vi.mock('@/lib/import-config-storage', () => ({
-    loadImportConfig: vi.fn(async () => null),
+    loadImportConfig,
     saveImportConfig: vi.fn(),
 }));
 
 // The two steps between the account and the preview only have to be walked
 // through; what they show is covered by their own tests.
 vi.mock('./import-step-upload', () => ({
-    ImportStepUpload: ({ onNext }: { onNext: () => void }) => (
-        <button type="button" onClick={onNext}>
-            leave upload
-        </button>
+    ImportStepUpload: ({
+        onNext,
+        onFileSelect,
+    }: {
+        onNext: () => void;
+        onFileSelect: (file: File) => void;
+    }) => (
+        <>
+            <button
+                type="button"
+                onClick={() => onFileSelect(new File(['x'], 'movements.csv'))}
+            >
+                pick file
+            </button>
+            <button type="button" onClick={onNext}>
+                leave upload
+            </button>
+        </>
     ),
 }));
 
@@ -171,7 +191,7 @@ function createdDescriptions(): string[] {
 function lastMappingProps(): {
     tracksBalance: boolean;
     calculateBalances: boolean;
-    columnMapping: { balance: string | null };
+    columnMapping: Partial<ColumnMapping>;
 } {
     return mappingProps.mock.calls.at(-1)?.[0];
 }
@@ -263,6 +283,49 @@ describe('ImportTransactionsDrawer', () => {
         fireEvent.click(screen.getByLabelText('Select all transactions'));
 
         expect(await screen.findByText('Import 1 Transaction')).not.toBeNull();
+    });
+
+    it("applies the account's stored layout, type column and expense values included", async () => {
+        const stored: ColumnMapping = {
+            transaction_date: 'Fecha',
+            description: 'Concepto',
+            amount: 'Importe',
+            currency: null,
+            balance: null,
+            creditor_name: '',
+            debtor_name: null,
+            transaction_type: 'Tipo',
+            expense_types: ['Gasto', 'Cargo'],
+        };
+        parseFile.mockResolvedValue({
+            headers: ['Fecha', 'Concepto', 'Importe', 'Tipo'],
+            data: [],
+            rowNumbers: [],
+            columns: [],
+            headerRowIndex: 0,
+        });
+        loadImportConfig.mockResolvedValue({
+            columnMapping: stored,
+            dateFormat: DateFormat.DayMonthYear,
+        } as never);
+
+        render(
+            <ImportTransactionsDrawer
+                open
+                onOpenChange={vi.fn()}
+                accounts={[account]}
+                autoSelectSingleAccount
+            />,
+        );
+
+        fireEvent.click(await screen.findByText('pick file'));
+        await waitFor(() => expect(loadImportConfig).toHaveBeenCalled());
+        fireEvent.click(screen.getByText('leave upload'));
+        await screen.findByText('leave mapping');
+
+        await waitFor(() =>
+            expect(lastMappingProps().columnMapping).toEqual(stored),
+        );
     });
 
     describe('balances', () => {

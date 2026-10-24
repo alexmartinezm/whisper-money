@@ -1692,7 +1692,7 @@
     "Two-Factor Authentication": "Authentification en deux passes",
     "Two-factor authentication settings cannot be changed on the demo account.": "Les paramètres d'authentification à deux facteurs ne peuvent pas être modifiés sur le compte démo.",
     "Two-factor authentication settings cannot be\\n                                changed on the demo account.": "Les paramètres d'authentification à deux facteurs ne peuvent pas être modifiés sur le compte démo.",
-    "Type": "Gars",
+    "Type": "Type",
     "Type \"delete all\" to confirm:": "Tapez \"supprimer tout\" pour confirmer :",
     "Type :word to confirm.": "Tapez :word pour confirmer.",
     "Type DELETE": "Tapez SUPPRIMER",
@@ -2709,5 +2709,11 @@
     "Select a provider.": "Sélectionnez un fournisseur.",
     "Search providers...": "Rechercher des fournisseurs...",
     "No providers found.": "Aucun fournisseur n'a été trouvé.",
-    "Select your country and provider to get started.": "Sélectionnez votre pays et votre fournisseur pour commencer."
+    "Select your country and provider to get started.": "Sélectionnez votre pays et votre fournisseur pour commencer.",
+    "Tick the values that mean money going out": "Cochez les valeurs qui indiquent une sortie d'argent",
+    ":count more values not shown": ":count autres valeurs non affichées",
+    "For files whose amounts are all positive: ticked rows import as expenses": "Pour les fichiers dont tous les montants sont positifs : les lignes cochées sont importées comme dépenses",
+    ":count rows": ":count lignes",
+    "Type (Optional)": "Type (facultatif)",
+    "Select type column (optional)": "Sélectionnez la colonne de type (facultatif)"
 }

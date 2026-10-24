@@ -3497,5 +3497,11 @@
     "No amount": "Sin importe",
     "No description": "Sin concepto",
     "That file has no format we recognise": "Ese fichero no tiene un formato que reconozcamos",
-    ":format is not supported": ":format no está soportado"
+    ":format is not supported": ":format no está soportado",
+    "Tick the values that mean money going out": "Marca los valores que indican dinero que sale",
+    ":count more values not shown": ":count valores más sin mostrar",
+    "For files whose amounts are all positive: ticked rows import as expenses": "Para archivos con todos los importes en positivo: las filas marcadas se importan como gastos",
+    ":count rows": ":count filas",
+    "Type (Optional)": "Tipo (opcional)",
+    "Select type column (optional)": "Seleccionar columna de tipo (opcional)"
 }
