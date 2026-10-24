@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatCurrency } from './currency';
+import { formatCurrency, toMinorUnits } from './currency';
 
 describe('formatCurrency', () => {
     it('formats a basic USD amount', () => {
@@ -114,5 +114,17 @@ describe('formatCurrency across regions', () => {
         // grouping at 10,000. Dropping the option is the regression to watch.
         expect(formatCurrency(123456, 'EUR', 'es-ES')).toContain('1.234');
         expect(formatCurrency(123456, 'EUR', 'fr-FR')).toContain('1\u202F234');
+    });
+});
+
+describe('toMinorUnits', () => {
+    it('stores a major-unit amount in hundredths', () => {
+        expect(toMinorUnits(3.99, 'EUR')).toBe(399);
+        expect(toMinorUnits(-1234.5, 'USD')).toBe(-123450);
+    });
+
+    it('rounds a fraction the stored scale cannot hold', () => {
+        expect(toMinorUnits(0.015, 'EUR')).toBe(2);
+        expect(toMinorUnits(10.004, 'EUR')).toBe(1000);
     });
 });

@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils';
 import { AlertCircle } from 'lucide-react';
-import { type PropsWithChildren, type ReactNode } from 'react';
+import { Fragment, type PropsWithChildren, type ReactNode } from 'react';
 
 interface StepScreenProps {
     title?: ReactNode;
@@ -99,6 +99,31 @@ export function StepNote({
             {children}
         </p>
     );
+}
+
+/**
+ * A sentence with the user's own values set into it, each carrying whatever
+ * emphasis it was handed. Written as a single translatable string with the
+ * values left as placeholders (`:gap`, `:total`) and split out after
+ * translation, so each one lands where the sentence puts it in every language
+ * rather than at a fixed position in the English.
+ */
+export function StepFilled({
+    sentence,
+    values,
+}: {
+    sentence: string;
+    values: Record<string, ReactNode>;
+}) {
+    return sentence.split(/(:\w+)/).map((part, index) => {
+        const name = part.slice(1);
+
+        return part.startsWith(':') && name in values ? (
+            <Fragment key={index}>{values[name]}</Fragment>
+        ) : (
+            part
+        );
+    });
 }
 
 /** Onboarding controls are taller than the app's default so they stay easy to hit. */

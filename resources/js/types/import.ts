@@ -18,6 +18,8 @@ export interface ColumnMapping {
     transaction_date: string | null;
     description: string | string[] | null;
     amount: string | null;
+    /** A column holding each row's own currency, for files mixing several. */
+    currency: string | null;
     balance: string | null;
     creditor_name: string | null;
     debtor_name: string | null;

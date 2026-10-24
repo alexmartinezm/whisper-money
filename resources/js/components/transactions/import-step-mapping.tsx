@@ -26,6 +26,15 @@ import { formatRelativeDate } from '@/utils/date';
 import { __ } from '@/utils/i18n';
 import { useEffect, useMemo } from 'react';
 
+const NONE = '__none__';
+
+const DATE_FORMAT_LABELS: Record<DateFormat, string> = {
+    [DateFormat.YearMonthDay]: 'YYYY-MM-DD',
+    [DateFormat.MonthDayYear]: 'MM-DD-YYYY',
+    [DateFormat.DayMonthYear]: 'DD-MM-YYYY',
+    [DateFormat.YearMonthDayCompact]: 'YYYYMMDD',
+};
+
 interface ImportStepMappingProps {
     columnOptions: ColumnOption[];
     columnMapping: ColumnMapping;
@@ -49,6 +58,94 @@ interface ImportStepMappingProps {
     onLatestDateChange: (date: string | null) => void;
     onNext: () => void;
     onBack: () => void;
+}
+
+/**
+ * One "map this field to a column" select, shared by the optional fields of
+ * this step and by the full import's columns step. `extraOptions` sit above
+ * the file's columns, for choices that are not a column (a single-account
+ * file).
+ */
+export function ColumnSelect({
+    id,
+    value,
+    placeholder,
+    optional,
+    columnOptions,
+    extraOptions = [],
+    onChange,
+}: {
+    id: string;
+    value: string | null;
+    placeholder: string;
+    optional?: boolean;
+    columnOptions: ColumnOption[];
+    extraOptions?: { value: string; label: string }[];
+    onChange: (value: string) => void;
+}) {
+    return (
+        <Select
+            value={value || (optional ? NONE : '')}
+            onValueChange={(next) => onChange(next === NONE ? '' : next)}
+        >
+            <SelectTrigger id={id}>
+                <SelectValue placeholder={placeholder} />
+            </SelectTrigger>
+            <SelectContent>
+                {optional && <SelectItem value={NONE}>{__('None')}</SelectItem>}
+                {extraOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                    </SelectItem>
+                ))}
+                {columnOptions.map((option, index) => (
+                    <SelectItem
+                        key={`${id}-${option.value}-${index}`}
+                        value={option.value}
+                    >
+                        {option.label}
+                    </SelectItem>
+                ))}
+            </SelectContent>
+        </Select>
+    );
+}
+
+/** The date format a file is read with, as a compact select (full import). */
+export function DateFormatSelect({
+    id,
+    value,
+    onChange,
+    triggerClassName,
+    ariaLabel,
+}: {
+    id?: string;
+    value: DateFormat;
+    onChange: (format: DateFormat) => void;
+    triggerClassName?: string;
+    ariaLabel?: string;
+}) {
+    return (
+        <Select
+            value={value}
+            onValueChange={(next) => onChange(next as DateFormat)}
+        >
+            <SelectTrigger
+                id={id}
+                className={triggerClassName}
+                aria-label={ariaLabel}
+            >
+                <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+                {Object.entries(DATE_FORMAT_LABELS).map(([format, label]) => (
+                    <SelectItem key={format} value={format}>
+                        {label}
+                    </SelectItem>
+                ))}
+            </SelectContent>
+        </Select>
+    );
 }
 
 export function ImportStepMapping({
@@ -323,28 +420,13 @@ export function ImportStepMapping({
                         {__('Amount')}
                         <span className="text-destructive">*</span>
                     </Label>
-                    <Select
-                        value={columnMapping.amount || ''}
-                        onValueChange={(value) =>
-                            onMappingChange('amount', value)
-                        }
-                    >
-                        <SelectTrigger id="amount-column">
-                            <SelectValue
-                                placeholder={__('Select amount column')}
-                            />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {columnOptions.map((option, index) => (
-                                <SelectItem
-                                    key={`amount-${option.value}-${index}`}
-                                    value={option.value}
-                                >
-                                    {option.label}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
+                    <ColumnSelect
+                        id="amount-column"
+                        value={columnMapping.amount}
+                        placeholder={__('Select amount column')}
+                        columnOptions={columnOptions}
+                        onChange={(value) => onMappingChange('amount', value)}
+                    />
                 </div>
 
                 {tracksBalance && (
@@ -352,36 +434,16 @@ export function ImportStepMapping({
                         <Label htmlFor="balance-column">
                             {__('Balance (Optional)')}
                         </Label>
-                        <Select
-                            value={columnMapping.balance || '__none__'}
-                            onValueChange={(value) =>
-                                onMappingChange(
-                                    'balance',
-                                    value === '__none__' ? '' : value,
-                                )
+                        <ColumnSelect
+                            id="balance-column"
+                            value={columnMapping.balance}
+                            placeholder={__('Select balance column (optional)')}
+                            optional
+                            columnOptions={columnOptions}
+                            onChange={(value) =>
+                                onMappingChange('balance', value)
                             }
-                        >
-                            <SelectTrigger id="balance-column">
-                                <SelectValue
-                                    placeholder={__(
-                                        'Select balance column (optional)',
-                                    )}
-                                />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="__none__">
-                                    {__('None')}
-                                </SelectItem>
-                                {columnOptions.map((option, index) => (
-                                    <SelectItem
-                                        key={`balance-${option.value}-${index}`}
-                                        value={option.value}
-                                    >
-                                        {option.label}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                        />
 
                         {calculateBalancesAvailable && (
                             <div className="flex flex-col gap-3 pt-2">
@@ -455,72 +517,34 @@ export function ImportStepMapping({
                         <Label htmlFor="creditor-column">
                             {__('Creditor name (Optional)')}
                         </Label>
-                        <Select
-                            value={columnMapping.creditor_name || '__none__'}
-                            onValueChange={(value) =>
-                                onMappingChange(
-                                    'creditor_name',
-                                    value === '__none__' ? '' : value,
-                                )
+                        <ColumnSelect
+                            id="creditor-column"
+                            value={columnMapping.creditor_name}
+                            placeholder={__(
+                                'Select creditor column (optional)',
+                            )}
+                            optional
+                            columnOptions={columnOptions}
+                            onChange={(value) =>
+                                onMappingChange('creditor_name', value)
                             }
-                        >
-                            <SelectTrigger id="creditor-column">
-                                <SelectValue
-                                    placeholder={__(
-                                        'Select creditor column (optional)',
-                                    )}
-                                />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="__none__">
-                                    {__('None')}
-                                </SelectItem>
-                                {columnOptions.map((option, index) => (
-                                    <SelectItem
-                                        key={`creditor-${option.value}-${index}`}
-                                        value={option.value}
-                                    >
-                                        {option.label}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                        />
                     </div>
 
                     <div className="flex flex-col gap-2">
                         <Label htmlFor="debtor-column">
                             {__('Debtor name (Optional)')}
                         </Label>
-                        <Select
-                            value={columnMapping.debtor_name || '__none__'}
-                            onValueChange={(value) =>
-                                onMappingChange(
-                                    'debtor_name',
-                                    value === '__none__' ? '' : value,
-                                )
+                        <ColumnSelect
+                            id="debtor-column"
+                            value={columnMapping.debtor_name}
+                            placeholder={__('Select debtor column (optional)')}
+                            optional
+                            columnOptions={columnOptions}
+                            onChange={(value) =>
+                                onMappingChange('debtor_name', value)
                             }
-                        >
-                            <SelectTrigger id="debtor-column">
-                                <SelectValue
-                                    placeholder={__(
-                                        'Select debtor column (optional)',
-                                    )}
-                                />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="__none__">
-                                    {__('None')}
-                                </SelectItem>
-                                {columnOptions.map((option, index) => (
-                                    <SelectItem
-                                        key={`debtor-${option.value}-${index}`}
-                                        value={option.value}
-                                    >
-                                        {option.label}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                        />
                     </div>
                 </div>
 

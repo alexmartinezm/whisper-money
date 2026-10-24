@@ -16,11 +16,9 @@ import { accountHasBalance } from '@/hooks/use-owns-balance-updates';
 import { importKey } from '@/lib/crypto';
 import { getCsrfToken } from '@/lib/csrf';
 import {
-    autoDetectColumns,
     calculateBalancesFromTransactions,
     collectBalancesToImport,
     convertRowsToTransactions,
-    parseFile,
 } from '@/lib/file-parser';
 import {
     loadImportConfig,
@@ -28,6 +26,7 @@ import {
 } from '@/lib/import-config-storage';
 import { getStoredKey } from '@/lib/key-storage';
 import { evaluateRulesForNewTransaction } from '@/lib/rule-engine';
+import { parseImportFile } from '@/lib/transaction-import';
 import { transactionSyncService } from '@/services/transaction-sync';
 import { type SharedData } from '@/types';
 import { type Account, type Bank } from '@/types/account';
@@ -108,6 +107,7 @@ export function ImportTransactionsDrawer({
             transaction_date: null,
             description: null,
             amount: null,
+            currency: null,
             balance: null,
             creditor_name: null,
             debtor_name: null,
@@ -145,6 +145,7 @@ export function ImportTransactionsDrawer({
                     transaction_date: null,
                     description: null,
                     amount: null,
+                    currency: null,
                     balance: null,
                     creditor_name: null,
                     debtor_name: null,
@@ -186,50 +187,15 @@ export function ImportTransactionsDrawer({
         }
 
         try {
-            const { headers, data, columns, headerRowIndex } =
-                await parseFile(file);
-            const autoMapping = autoDetectColumns(headers);
-
-            const columnOptions = headers.map((header, index) => {
-                const columnData = columns[index] || [];
-                const middleIndex = Math.floor(columnData.length / 2);
-                const examples = columnData
-                    .slice(
-                        Math.max(headerRowIndex + 1, middleIndex),
-                        Math.max(headerRowIndex + 1, middleIndex) + 3,
-                    )
-                    .filter(
-                        (cell) =>
-                            cell !== null &&
-                            cell !== undefined &&
-                            String(cell).trim() !== '',
-                    )
-                    .map((cell) => String(cell))
-                    .slice(0, 3);
-
-                return {
-                    value: header,
-                    label: header,
-                    examples,
-                };
-            });
-
-            let detectedFormat = DateFormat.YearMonthDay;
-            let formatDetected = false;
-            let formatAmbiguous = false;
-            if (autoMapping.transaction_date) {
-                const { detectDateFormat } = await import('@/lib/file-parser');
-                const detected = detectDateFormat(
-                    data,
-                    autoMapping.transaction_date,
-                    locale,
-                );
-                if (detected) {
-                    detectedFormat = detected.format;
-                    formatAmbiguous = detected.ambiguous;
-                    formatDetected = !detected.ambiguous;
-                }
-            }
+            const {
+                headers,
+                rows: data,
+                columnOptions,
+                mapping: autoMapping,
+                dateFormat: detectedFormat,
+                dateFormatDetected: formatDetected,
+                dateFormatAmbiguous: formatAmbiguous,
+            } = await parseImportFile(file, locale);
 
             // Show the parsed file immediately with auto-detected columns; the
             // saved per-account config is fetched off the critical path so a

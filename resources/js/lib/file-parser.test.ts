@@ -12,8 +12,10 @@ import {
     getLatestTransactionDate,
     getLocaleDateFormat,
     parseAmount,
+    parseCurrencyCode,
     parseDate,
     parseFile,
+    UNREADABLE_FILE_MESSAGE,
 } from './file-parser';
 
 describe('getLocaleDateFormat', () => {
@@ -78,6 +80,7 @@ describe('convertRowsToTransactions', () => {
                     transaction_date: 'date',
                     description: 'description',
                     amount: 'amount',
+                    currency: null,
                     balance: null,
                     creditor_name: null,
                     debtor_name: null,
@@ -105,6 +108,7 @@ describe('convertRowsToTransactions', () => {
                 transaction_date: 'date',
                 description: 'description',
                 amount: 'amount',
+                currency: null,
                 balance: null,
                 creditor_name: null,
                 debtor_name: null,
@@ -129,6 +133,7 @@ describe('convertRowsToTransactions', () => {
                 transaction_date: 'date',
                 description: 'description',
                 amount: 'amount',
+                currency: null,
                 balance: null,
                 creditor_name: null,
                 debtor_name: null,
@@ -145,6 +150,7 @@ describe('convertRowsToTransactions balance column', () => {
         transaction_date: 'date',
         description: 'description',
         amount: 'amount',
+        currency: null,
         balance: 'balance',
         creditor_name: null,
         debtor_name: null,
@@ -368,6 +374,7 @@ describe('convertRowsToTransactions counterparty fields', () => {
                 transaction_date: 'date',
                 description: 'description',
                 amount: 'amount',
+                currency: null,
                 balance: null,
                 creditor_name: 'creditor',
                 debtor_name: 'debtor',
@@ -539,6 +546,7 @@ describe('parseDate with a time part', () => {
                     transaction_date: 'date',
                     description: 'description',
                     amount: 'amount',
+                    currency: null,
                     balance: null,
                     creditor_name: null,
                     debtor_name: null,
@@ -621,6 +629,7 @@ describe('getLatestTransactionDate', () => {
         transaction_date: 'date',
         description: 'desc',
         amount: 'amount',
+        currency: null,
         balance: null,
         creditor_name: null,
         debtor_name: null,
@@ -773,8 +782,10 @@ describe('parseFile', () => {
         ].join('\n');
         const file = new File([csv], 'transactions.csv', { type: 'text/csv' });
 
-        const { data } = await parseFile(file);
+        const { data, rowNumbers } = await parseFile(file);
 
+        // Row 1 is the header, so the first data row is row 2 of the file.
+        expect(rowNumbers).toEqual([2, 3]);
         expect(data[0].Fecha).toBe('02/06/2026');
         expect(typeof data[0].Fecha).toBe('string');
 
@@ -791,5 +802,71 @@ describe('parseFile', () => {
 
         expect(asDmy?.getMonth()).toBe(5);
         expect(asMdy?.getMonth()).toBe(1);
+    });
+
+    it('keeps each row its own number in the file when blank rows are dropped', async () => {
+        const csv = [
+            'Fecha,Concepto,Importe',
+            '02/06/2026,Internet,-10',
+            ',,',
+            '03/06/2026,Groceries,-25',
+        ].join('\n');
+        const file = new File([csv], 'transactions.csv', { type: 'text/csv' });
+
+        const { data, rowNumbers } = await parseFile(file);
+
+        expect(data).toHaveLength(2);
+        expect(rowNumbers).toEqual([2, 4]);
+    });
+
+    it('rejects with the unreadable message when the browser cannot read the file', async () => {
+        const original = FileReader.prototype.readAsBinaryString;
+        FileReader.prototype.readAsBinaryString = function (this: FileReader) {
+            this.onerror?.(
+                new ProgressEvent('error') as ProgressEvent<FileReader>,
+            );
+        };
+
+        try {
+            await expect(
+                parseFile(new File(['x'], 'folder.csv')),
+            ).rejects.toThrow(UNREADABLE_FILE_MESSAGE);
+        } finally {
+            FileReader.prototype.readAsBinaryString = original;
+        }
+    });
+});
+
+describe('currency column', () => {
+    const SUPPORTED = ['EUR', 'USD', 'PEN'];
+
+    it('normalises the code found in the mapped column', () => {
+        expect(parseCurrencyCode(' pen ', SUPPORTED)).toBe('PEN');
+    });
+
+    it('rejects values that are not a three-letter code', () => {
+        expect(parseCurrencyCode('S/.', SUPPORTED)).toBeNull();
+        expect(parseCurrencyCode('', SUPPORTED)).toBeNull();
+        expect(parseCurrencyCode(null, SUPPORTED)).toBeNull();
+    });
+
+    it('rejects codes the app does not support', () => {
+        expect(parseCurrencyCode('XAU', SUPPORTED)).toBeNull();
+        expect(parseCurrencyCode('XAU')).toBe('XAU');
+    });
+
+    it('detects a currency column by header name', () => {
+        expect(
+            autoDetectColumns(['Date', 'Amount', 'Currency', 'Note']).currency,
+        ).toBe('Currency');
+        expect(autoDetectColumns(['Fecha', 'Importe', 'Moneda']).currency).toBe(
+            'Moneda',
+        );
+    });
+
+    it('does not invent a currency column when there is none', () => {
+        expect(
+            autoDetectColumns(['Date', 'Amount', 'Note']).currency,
+        ).toBeNull();
     });
 });

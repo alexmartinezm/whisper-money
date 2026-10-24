@@ -7,6 +7,12 @@ import {
 import { formatLocalDate } from '@/utils/date';
 import * as XLSX from 'xlsx';
 
+/**
+ * What the reader rejects with when the browser cannot read the file at all, so
+ * a caller can tell "not readable" apart from a file that parsed to nothing.
+ */
+export const UNREADABLE_FILE_MESSAGE = 'Failed to read file';
+
 function detectHeaderRow(columns: unknown[][]): number {
     if (!columns || columns.length === 0) {
         return 0;
@@ -49,6 +55,7 @@ function detectHeaderRow(columns: unknown[][]): number {
 export async function parseFile(file: File): Promise<{
     headers: string[];
     data: ParsedRow[];
+    rowNumbers: number[];
     columns: unknown[][];
     headerRowIndex: number;
 }> {
@@ -59,7 +66,7 @@ export async function parseFile(file: File): Promise<{
             try {
                 const data = e.target?.result;
                 if (!data) {
-                    reject(new Error('Failed to read file'));
+                    reject(new Error(UNREADABLE_FILE_MESSAGE));
                     return;
                 }
 
@@ -146,39 +153,55 @@ export async function parseFile(file: File): Promise<{
                     headerRowIndex + 1,
                 ) as unknown[][];
 
-                const parsedData: ParsedRow[] = dataRows
-                    .filter(
-                        (row) =>
-                            Array.isArray(row) &&
-                            row.some(
-                                (cell) =>
-                                    cell !== null &&
-                                    cell !== undefined &&
-                                    cell !== '',
-                            ),
-                    )
-                    .map((row) => {
-                        const obj: ParsedRow = {};
-                        headers.forEach((header, index) => {
-                            if (header) {
-                                const value = row[index];
-                                obj[header] =
-                                    value === null || value === undefined
-                                        ? null
-                                        : (value as string | number);
-                            }
-                        });
-                        return obj;
+                const parsedData: ParsedRow[] = [];
+                const rowNumbers: number[] = [];
+
+                dataRows.forEach((row, index) => {
+                    const hasValue =
+                        Array.isArray(row) &&
+                        row.some(
+                            (cell) =>
+                                cell !== null &&
+                                cell !== undefined &&
+                                cell !== '',
+                        );
+
+                    if (!hasValue) {
+                        return;
+                    }
+
+                    const obj: ParsedRow = {};
+                    headers.forEach((header, columnIndex) => {
+                        if (header) {
+                            const value = row[columnIndex];
+                            obj[header] =
+                                value === null || value === undefined
+                                    ? null
+                                    : (value as string | number);
+                        }
                     });
 
-                resolve({ headers, data: parsedData, columns, headerRowIndex });
+                    parsedData.push(obj);
+                    // Empty rows are dropped, so the index no longer matches the
+                    // file. Keep the row's own number for anything the user has
+                    // to go and find in their spreadsheet.
+                    rowNumbers.push(headerRowIndex + index + 2);
+                });
+
+                resolve({
+                    headers,
+                    data: parsedData,
+                    rowNumbers,
+                    columns,
+                    headerRowIndex,
+                });
             } catch {
                 reject(new Error('Failed to parse file'));
             }
         };
 
         reader.onerror = () => {
-            reject(new Error('Failed to read file'));
+            reject(new Error(UNREADABLE_FILE_MESSAGE));
         };
 
         reader.readAsBinaryString(file);
@@ -306,6 +329,7 @@ export function autoDetectColumns(headers: string[]): ColumnMapping {
         transaction_date: null,
         description: null,
         amount: null,
+        currency: null,
         balance: null,
         creditor_name: null,
         debtor_name: null,
@@ -352,6 +376,13 @@ export function autoDetectColumns(headers: string[]): ColumnMapping {
         'quantity',
         'cantidad',
     ];
+    const currencyPatterns = [
+        'currency',
+        'currency_code',
+        'moneda',
+        'divisa',
+        'ccy',
+    ];
     const balancePatterns = [
         'balance',
         'saldo',
@@ -389,6 +420,7 @@ export function autoDetectColumns(headers: string[]): ColumnMapping {
     const fieldPatterns = [
         ['transaction_date', datePatterns],
         ['description', descriptionPatterns],
+        ['currency', currencyPatterns],
         ['balance', balancePatterns],
         ['creditor_name', creditorPatterns],
         ['debtor_name', debtorPatterns],
@@ -440,6 +472,7 @@ export function autoDetectColumns(headers: string[]): ColumnMapping {
     mapping.transaction_date = claims.transaction_date?.header ?? null;
     mapping.description = claims.description?.header ?? null;
     mapping.amount = claims.amount?.header ?? null;
+    mapping.currency = claims.currency?.header ?? null;
     mapping.balance = claims.balance?.header ?? null;
     mapping.creditor_name = claims.creditor_name?.header ?? null;
     mapping.debtor_name = claims.debtor_name?.header ?? null;
@@ -590,6 +623,30 @@ export function parseAmount(amountStr: string | number): number | null {
     }
 
     return isNegative ? -Math.abs(amount) : amount;
+}
+
+/**
+ * Normalise a currency cell to an ISO 4217 code. Returns null when the value is
+ * not a three-letter code, or when `supportedCurrencies` is given and does not
+ * contain it, so the caller falls back to the account currency.
+ */
+export function parseCurrencyCode(
+    value: string | number | null | undefined,
+    supportedCurrencies?: readonly string[],
+): string | null {
+    const code = String(value ?? '')
+        .trim()
+        .toUpperCase();
+
+    if (!/^[A-Z]{3}$/.test(code)) {
+        return null;
+    }
+
+    if (supportedCurrencies && !supportedCurrencies.includes(code)) {
+        return null;
+    }
+
+    return code;
 }
 
 function getDescriptionFromRow(row: ParsedRow, mapping: ColumnMapping): string {

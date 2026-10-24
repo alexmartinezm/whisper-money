@@ -15,6 +15,7 @@ function renderStep(tracksBalance: boolean) {
                 transaction_date: null,
                 description: null,
                 amount: null,
+                currency: null,
                 balance: null,
                 creditor_name: null,
                 debtor_name: null,
