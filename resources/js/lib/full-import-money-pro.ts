@@ -208,7 +208,7 @@ export interface MoneyProCategoryContext {
 
 /** The categories a cell can be told apart into. */
 export interface CategoryVocabulary {
-    /** The user's categories, by name and as "Parent: Child". */
+    /** The user's categories: a root by its name, a child as "Parent: Child". */
     existing: Set<string>;
     /** Those, and every cell of the file with at most one parent in it. */
     known: Set<string>;
@@ -246,13 +246,15 @@ export function categoryVocabulary(
     for (const category of byId.values()) {
         const parent = category.parent_id ? byId.get(category.parent_id) : null;
 
-        existing.add(moneyProCategoryKey(category.name));
-
+        // A child by its full path only: a bare "Online" under "Compras"
+        // would cut a cell like "Suscripciones Online" in two.
         if (parent) {
             existing.add(
                 moneyProCategoryKey(`${parent.name}: ${category.name}`),
             );
             parents.set(moneyProCategoryKey(parent.name), Infinity);
+        } else {
+            existing.add(moneyProCategoryKey(category.name));
         }
     }
 

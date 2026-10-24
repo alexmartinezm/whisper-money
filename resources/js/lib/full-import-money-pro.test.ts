@@ -698,9 +698,9 @@ describe('a Money Pro export with split transactions', () => {
             'Categoría',
         );
 
-        expect(
-            isMultiCategoryCell('Restaurantes Restaurantes', vocabulary),
-        ).toBe(true);
+        expect(isMultiCategoryCell('Televisión Televisión', vocabulary)).toBe(
+            true,
+        );
         expect(
             isMultiCategoryCell('Comida: Restaurantes Televisión', vocabulary),
         ).toBe(true);
@@ -709,6 +709,33 @@ describe('a Money Pro export with split transactions', () => {
         );
         expect(isMultiCategoryCell('Comida: Restaurantes', vocabulary)).toBe(
             false,
+        );
+    });
+
+    it("knows a child of the user's by its full path, never by its bare name", () => {
+        const vocabulary = categoryVocabulary(
+            {
+                rows: [
+                    { Categoría: 'Suscripciones Online' },
+                    { Categoría: 'Suscripciones Online' },
+                    { Categoría: 'Compras' },
+                ],
+                categories: [
+                    { id: 'shop', name: 'Compras', parent_id: null },
+                    { id: 'web', name: 'Online', parent_id: 'shop' },
+                    { id: 'subs', name: 'Suscripciones', parent_id: null },
+                ],
+            },
+            'Categoría',
+        );
+
+        expect(vocabulary.known.has('online')).toBe(false);
+        expect(vocabulary.known.has('compras: online')).toBe(true);
+        expect(isMultiCategoryCell('Suscripciones Online', vocabulary)).toBe(
+            false,
+        );
+        expect(isMultiCategoryCell('Compras: Online Compras', vocabulary)).toBe(
+            true,
         );
     });
 
