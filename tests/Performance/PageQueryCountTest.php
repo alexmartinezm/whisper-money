@@ -28,6 +28,16 @@ use App\Models\Transaction;
 | page pays for it on a full load and client-side visits skip it; these
 | tests make a fresh request each time and so always count it.
 |
+| And most ceilings went up by one when the shared lists — accounts,
+| categories, banks, labels, automation rules — and the translations became
+| once props. A rendered page now also reads one fingerprint of those lists
+| (counts and latest `updated_at`, one query of subselects) to key them by, so
+| a client-side visit that holds the current keys skips all five lists and
+| their eager loads. These tests make a fresh request and so pay the extra
+| query; the client-side visit test at the bottom counts what navigation
+| actually costs. The transactions page does not change, and the account
+| and budget show pages had a query of slack to absorb it.
+|
 | Run this suite in isolation:
 |   php artisan test --testsuite=Performance
 |
@@ -43,13 +53,13 @@ beforeEach(function () {
 // ──────────────────────────────────────────────────────────────────────────
 
 test('dashboard page does not exceed query threshold', function () {
-    assertMaxQueries(17, function () {
+    assertMaxQueries(18, function () {
         $this->get(route('dashboard'))->assertOk();
     }, 'Dashboard');
 });
 
 test('accounts index page does not exceed query threshold', function () {
-    assertMaxQueries(17, function () {
+    assertMaxQueries(18, function () {
         $this->get(route('accounts.list'))->assertOk();
     }, 'Accounts Index');
 });
@@ -75,7 +85,7 @@ test('transactions index page does not exceed query threshold', function () {
 test('budgets index page does not exceed query threshold', function () {
     // Savings goals load unconditionally since the SavingsGoals flag was
     // removed: the goals themselves plus their stats aggregate.
-    assertMaxQueries(25, function () {
+    assertMaxQueries(26, function () {
         $this->get(route('budgets.index'))->assertOk();
     }, 'Budgets Index');
 });
@@ -89,7 +99,7 @@ test('budget show page does not exceed query threshold', function () {
 });
 
 test('cashflow page does not exceed query threshold', function () {
-    assertMaxQueries(17, function () {
+    assertMaxQueries(18, function () {
         $this->get(route('cashflow'))->assertOk();
     }, 'Cashflow');
 });
@@ -99,7 +109,7 @@ test('cashflow page does not exceed query threshold', function () {
 // ──────────────────────────────────────────────────────────────────────────
 
 test('settings accounts page does not exceed query threshold', function () {
-    assertMaxQueries(19, function () {
+    assertMaxQueries(20, function () {
         $this->get(route('accounts.index'))->assertOk();
     }, 'Settings Accounts');
 });
@@ -107,31 +117,31 @@ test('settings accounts page does not exceed query threshold', function () {
 // Settings pages run one query more than the rest: the full import's menu entry
 // checks whether the user has an import that can still be undone (upstream #1081).
 test('settings categories page does not exceed query threshold', function () {
-    assertMaxQueries(18, function () {
+    assertMaxQueries(19, function () {
         $this->get(route('categories.index'))->assertOk();
     }, 'Settings Categories');
 });
 
 test('settings labels page does not exceed query threshold', function () {
-    assertMaxQueries(18, function () {
+    assertMaxQueries(19, function () {
         $this->get(route('labels.index'))->assertOk();
     }, 'Settings Labels');
 });
 
 test('settings automation rules page does not exceed query threshold', function () {
-    assertMaxQueries(18, function () {
+    assertMaxQueries(19, function () {
         $this->get(route('automation-rules.index'))->assertOk();
     }, 'Settings Automation Rules');
 });
 
 test('settings account/profile page does not exceed query threshold', function () {
-    assertMaxQueries(18, function () {
+    assertMaxQueries(19, function () {
         $this->get(route('account.edit'))->assertOk();
     }, 'Settings Account/Profile');
 });
 
 test('settings appearance page does not exceed query threshold', function () {
-    assertMaxQueries(18, function () {
+    assertMaxQueries(19, function () {
         $this->get(route('appearance.edit'))->assertOk();
     }, 'Settings Appearance');
 });
@@ -161,7 +171,7 @@ test('dashboard query count does not scale with number of accounts', function ()
     }
 
     // Same threshold as 3 accounts — query count must not grow with data
-    assertMaxQueries(17, function () {
+    assertMaxQueries(18, function () {
         $this->get(route('dashboard'))->assertOk();
     }, 'Dashboard with 10 accounts');
 });
@@ -181,4 +191,19 @@ test('transactions page query count does not scale with number of transactions',
     assertMaxQueries(24, function () {
         $this->get(route('transactions.index'))->assertOk();
     }, 'Transactions with 120 records');
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// Client-side visits
+// ──────────────────────────────────────────────────────────────────────────
+
+test('a client-side visit holding the shared lists does not resolve them again', function () {
+    $headers = ['X-Inertia' => 'true'];
+    $heldKeys = array_keys($this->get(route('dashboard'), $headers)->json('onceProps'));
+
+    assertMaxQueries(5, function () use ($headers, $heldKeys) {
+        $this->get(route('dashboard'), $headers + [
+            'X-Inertia-Except-Once-Props' => implode(',', $heldKeys),
+        ])->assertOk()->assertJsonMissingPath('props.categories');
+    }, 'Dashboard client-side visit');
 });
