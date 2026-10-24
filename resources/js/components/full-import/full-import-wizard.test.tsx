@@ -780,3 +780,38 @@ describe('FullImportWizard with AI column mapping', () => {
         ).not.toBeInTheDocument();
     });
 });
+
+describe('FullImportWizard with AI column mapping off', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        ai.enabled = false;
+    });
+
+    it('never asks the AI about a file of no known app, nor shows its control', async () => {
+        api.fetchImportContext.mockResolvedValue(context());
+        render(<FullImportWizard variant="page" onClose={vi.fn()} />);
+
+        await screen.findByText('Where are you coming from?');
+        fireEvent.change(screen.getByTestId('full-import-file-input'), {
+            target: {
+                files: [
+                    new File(
+                        [
+                            'Valutadatum;Buchungstag;Verwendungszweck;Betrag;Waehrung\n02.03.2026;01.03.2026;REWE Markt;-12,40;EUR\n',
+                        ],
+                        'sparkasse.csv',
+                        { type: 'text/csv' },
+                    ),
+                ],
+            },
+        });
+
+        await continueTo('Check the columns');
+
+        expect(fetchColumnSuggestions).not.toHaveBeenCalled();
+        expect(screen.queryByText('Suggested by AI')).not.toBeInTheDocument();
+        expect(
+            screen.queryByRole('button', { name: 'Detect columns with AI' }),
+        ).not.toBeInTheDocument();
+    });
+});

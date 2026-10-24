@@ -18,6 +18,9 @@ const {
     mappingProps: vi.fn(),
 }));
 
+/** The shared `aiImportMappingEnabled` prop: on here, off in this fork by default. */
+const aiMapping = vi.hoisted(() => ({ enabled: true }));
+
 const headers = ['Datum', 'Depotwert', 'Einstand'];
 const rows = [
     { Datum: '31.01.2025', Depotwert: '10.200,00', Einstand: '9.000,00' },
@@ -108,7 +111,7 @@ vi.mock('sonner', () => ({
 
 vi.mock('@inertiajs/react', () => ({
     usePage: () => ({
-        props: { locale: 'de', aiImportMappingEnabled: true },
+        props: { locale: 'de', aiImportMappingEnabled: aiMapping.enabled },
     }),
 }));
 
@@ -143,6 +146,7 @@ describe('ImportBalancesDrawer with AI column mapping', () => {
 
     beforeEach(() => {
         vi.clearAllMocks();
+        aiMapping.enabled = true;
         vi.stubGlobal('fetch', fetchMock);
         fetchMock.mockResolvedValue({
             ok: true,
@@ -240,6 +244,28 @@ describe('ImportBalancesDrawer with AI column mapping', () => {
             }),
         ).toBeInTheDocument();
         await waitFor(() => expect(shownMapping().invested_amount).toBeNull());
+        expect(fetchColumnSuggestions).not.toHaveBeenCalled();
+    });
+});
+
+describe('ImportBalancesDrawer with AI column mapping off', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        aiMapping.enabled = false;
+        loadBalanceImportConfig.mockResolvedValue(null);
+    });
+
+    afterEach(() => {
+        aiMapping.enabled = true;
+    });
+
+    it('shows no AI control and never asks the AI', async () => {
+        await reachMapping();
+
+        expect(
+            screen.queryByRole('button', { name: 'Detect columns with AI' }),
+        ).not.toBeInTheDocument();
+        expect(screen.queryByText('Suggested by AI')).not.toBeInTheDocument();
         expect(fetchColumnSuggestions).not.toHaveBeenCalled();
     });
 });

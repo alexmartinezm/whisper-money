@@ -242,6 +242,33 @@ describe('useAiColumnSuggestion', () => {
         expect(ask).toHaveBeenCalledOnce();
     });
 
+    it('reads a layout saved as the suggestion as the user’s own once AI column mapping is off', () => {
+        props.aiImportMappingEnabled = false;
+        const { result } = renderHook(() => useAiColumnSuggestion());
+        const ask = vi.fn();
+
+        act(() => {
+            const token = result.current.begin();
+            result.current.afterStoredLayout(
+                token,
+                { mapping: toMapping(), aiSuggested: true },
+                ['amount', 'description'],
+                ask,
+            );
+        });
+
+        expect(ask).not.toHaveBeenCalled();
+        expect(result.current.status(toMapping())).toBe('hidden');
+        expect(
+            result.current.importedWith(
+                toMapping(),
+                'account_drawer',
+                'transaction',
+            ),
+        ).toBe(false);
+        expect(captureEvent).not.toHaveBeenCalled();
+    });
+
     it('drops what an earlier file started once another one is picked', async () => {
         fetchColumnSuggestions.mockResolvedValue(answer);
         const apply = vi.fn();

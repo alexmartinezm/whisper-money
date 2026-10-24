@@ -241,6 +241,34 @@ it('forbids the endpoint when the gate denies the user', function () {
     Http::assertNothingSent();
 });
 
+it('refuses and sends nothing with the shipped defaults, switch off and no TypeSafe key', function () {
+    config()->set('ai_import_mapping', require config_path('ai_import_mapping.php'));
+    config()->set('services.typesafe', (require config_path('services.php'))['typesafe']);
+    Http::fake();
+
+    expect(config('ai_import_mapping.enabled'))->toBeFalse()
+        ->and(config('services.typesafe.enabled'))->toBeFalse();
+
+    $this->postJson(route('api.import.column-suggestions'), [
+        'kind' => 'transaction',
+        'columns' => bankExportColumns(),
+    ])->assertForbidden();
+
+    Http::assertNothingSent();
+});
+
+it('refuses and sends nothing with the switch on but no TypeSafe key', function () {
+    config()->set('services.typesafe', (require config_path('services.php'))['typesafe']);
+    Http::fake();
+
+    $this->postJson(route('api.import.column-suggestions'), [
+        'kind' => 'transaction',
+        'columns' => bankExportColumns(),
+    ])->assertForbidden();
+
+    Http::assertNothingSent();
+});
+
 it('requires authentication', function () {
     auth()->logout();
 

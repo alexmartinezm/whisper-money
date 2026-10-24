@@ -124,7 +124,9 @@ export function useAiColumnSuggestion() {
 
     /**
      * What the account's stored layout means for the AI: none fits the file,
-     * so it is asked; one saved as its suggestion shows the badge.
+     * so it is asked; one saved as its suggestion shows the badge. With AI
+     * column mapping off, a layout saved as a suggestion while it was on is
+     * just the user's layout: no badge, and no suggestion counted on import.
      */
     const afterStoredLayout = useCallback(
         (
@@ -133,7 +135,7 @@ export function useAiColumnSuggestion() {
             fields: readonly string[],
             ask: () => void,
         ) => {
-            if (token !== generation.current) {
+            if (!enabled || token !== generation.current) {
                 return;
             }
 
@@ -148,7 +150,7 @@ export function useAiColumnSuggestion() {
                 setCached(true);
             }
         },
-        [],
+        [enabled],
     );
 
     const status = useCallback(

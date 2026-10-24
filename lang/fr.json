@@ -2749,5 +2749,6 @@
     "The :attribute must be a date between :min and :max.": "Le champ :attribute doit être une date comprise entre :min et :max.",
     "Suggested by AI": "Suggestion faite par l’IA",
     "Detect columns with AI": "Détecter les colonnes avec l’IA",
-    "The AI could not read the columns. Try again later.": "L’IA n’a pas pu lire les colonnes. Réessayez plus tard."
+    "The AI could not read the columns. Try again later.": "L’IA n’a pas pu lire les colonnes. Réessayez plus tard.",
+    "This field is not accepted.": "Ce champ n’est pas accepté."
 }

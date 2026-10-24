@@ -8,12 +8,13 @@ return [
     |--------------------------------------------------------------------------
     |
     | A hard kill switch for AI column-mapping suggestions on CSV/XLSX imports.
-    | When false, no file layout is ever sent to TypeSafe AI's Jev. It also
-    | needs TYPESAFE_API_KEY: without a key the suggestions stay off.
+    | Off by default in this fork: while false, no file layout is ever sent to
+    | TypeSafe AI's Jev and the importers show no AI control. Turning it on
+    | also needs TYPESAFE_API_KEY: without a key the suggestions stay off.
     |
     */
 
-    'enabled' => (bool) env('AI_IMPORT_MAPPING_ENABLED', true),
+    'enabled' => (bool) env('AI_IMPORT_MAPPING_ENABLED', false),
 
     /*
     |--------------------------------------------------------------------------

@@ -22,6 +22,9 @@ const {
     mappingProps: vi.fn(),
 }));
 
+/** The shared `aiImportMappingEnabled` prop: on here, off in this fork by default. */
+const aiMapping = vi.hoisted(() => ({ enabled: true }));
+
 const headers = ['Buchungstag', 'Valutadatum', 'Verwendungszweck', 'Betrag'];
 const rows = [
     {
@@ -191,7 +194,7 @@ vi.mock('@inertiajs/react', () => ({
             locale: 'de',
             features: { calculateBalancesOnImport: false },
             currencies: { accounts: [{ code: 'EUR' }] },
-            aiImportMappingEnabled: true,
+            aiImportMappingEnabled: aiMapping.enabled,
         },
     }),
 }));
@@ -237,6 +240,7 @@ async function importIt() {
 describe('ImportTransactionsDrawer with AI column mapping', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        aiMapping.enabled = true;
         applyStoredImportConfig.mockResolvedValue(null);
         fetchColumnSuggestions.mockResolvedValue(suggestion);
         create.mockImplementation(
@@ -384,5 +388,61 @@ describe('ImportTransactionsDrawer with AI column mapping', () => {
             }),
         ).toBeInTheDocument();
         expect(shownMapping().transaction_date).toBe('Valutadatum');
+    });
+});
+
+describe('ImportTransactionsDrawer with AI column mapping off', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        aiMapping.enabled = false;
+        applyStoredImportConfig.mockResolvedValue(null);
+        fetchColumnSuggestions.mockResolvedValue(suggestion);
+        create.mockImplementation(
+            async (transaction: { description: string }) => ({
+                id: transaction.description,
+            }),
+        );
+    });
+
+    it('shows no AI control and never asks the AI', async () => {
+        await reachMapping();
+
+        expect(
+            screen.queryByRole('button', { name: 'Detect columns with AI' }),
+        ).not.toBeInTheDocument();
+        expect(screen.queryByText('Suggested by AI')).not.toBeInTheDocument();
+        expect(fetchColumnSuggestions).not.toHaveBeenCalled();
+        expect(shownMapping().transaction_date).toBe('Valutadatum');
+    });
+
+    it('treats a layout saved as the suggestion as the user’s own', async () => {
+        applyStoredImportConfig.mockResolvedValue({
+            ...guessed(),
+            mapping: {
+                ...guessed().mapping,
+                transaction_date: 'Buchungstag',
+                amount: 'Betrag',
+            },
+            aiSuggested: true,
+        });
+
+        await reachMapping();
+        await waitFor(() => expect(shownMapping().amount).toBe('Betrag'));
+
+        expect(screen.queryByText('Suggested by AI')).not.toBeInTheDocument();
+
+        await importIt();
+
+        await waitFor(() =>
+            expect(saveImportConfig).toHaveBeenCalledWith(
+                'account-1',
+                expect.objectContaining({ aiSuggested: false }),
+            ),
+        );
+        expect(fetchColumnSuggestions).not.toHaveBeenCalled();
+        expect(captureEvent).not.toHaveBeenCalledWith(
+            'import_ai_mapping_imported',
+            expect.anything(),
+        );
     });
 });
