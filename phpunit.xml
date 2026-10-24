@@ -37,7 +37,8 @@
         <env name="NIGHTWATCH_ENABLED" value="false"/>
         <env name="EMAIL_VERIFICATION_ENABLED" value="true"/>
         <!-- Open banking is optional in production, and CI copies an .env.example
-             that leaves it blank. The suite covers the configured install, so the
+             that leaves the app id and the key path blank (only the redirect URL
+             comes prefilled). The suite covers the configured install, so the
              credentials are pinned here; the tests for a bare install switch
              `services.enablebanking.enabled` off themselves.
              <server>, not <env>: an <env> entry never replaces a variable the
