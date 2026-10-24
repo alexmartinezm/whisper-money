@@ -1,4 +1,7 @@
-import { EditTransactionDialog } from '@/components/transactions/edit-transaction-dialog';
+import {
+    EditTransactionDialog,
+    type TransactionCreateOrigin,
+} from '@/components/transactions/edit-transaction-dialog';
 import { Button } from '@/components/ui/button';
 import {
     Tooltip,
@@ -16,12 +19,31 @@ import { Plus } from 'lucide-react';
 import { useRef, useState } from 'react';
 
 /**
- * Squares the button around its icon while the label is hidden. The bar it
- * sits in is the size container (see TransactionFilters' actions slot), so
- * this follows the room actually left beside the sidebar, not the viewport.
+ * What a collapsible label measures itself against. `container`: the bar above
+ * a transactions list is the size container (see TransactionFilters' actions
+ * slot), so it follows the room actually left beside the sidebar, not the
+ * viewport. `viewport`: the app header has no container, so it collapses below
+ * `sm`, where the mobile header has no room left for it.
  */
-const COLLAPSIBLE_BUTTON_CLASSES =
-    'w-9 px-0 has-[>svg]:px-0 @xs:w-auto @xs:px-4 @xs:has-[>svg]:px-3';
+type LabelCollapse = 'container' | 'viewport';
+
+/**
+ * Per collapse mode: squaring the button around its icon while the label is
+ * hidden, and hiding the label. Spelled out so Tailwind sees every class.
+ */
+const COLLAPSE_CLASSES: Record<
+    LabelCollapse,
+    { button: string; label: string }
+> = {
+    container: {
+        button: 'w-9 px-0 has-[>svg]:px-0 @xs:w-auto @xs:px-4 @xs:has-[>svg]:px-3',
+        label: 'hidden @xs:inline',
+    },
+    viewport: {
+        button: 'w-9 px-0 has-[>svg]:px-0 sm:w-auto sm:px-4 sm:has-[>svg]:px-3',
+        label: 'hidden sm:inline',
+    },
+};
 
 /**
  * "+ Transaction", the face of every add-transaction button above a
@@ -31,13 +53,19 @@ const COLLAPSIBLE_BUTTON_CLASSES =
  */
 export function AddTransactionLabel({
     collapsible = false,
+    collapse = 'container',
 }: {
     collapsible?: boolean;
+    collapse?: LabelCollapse;
 }) {
     return (
         <>
             <Plus className="h-4 w-4" />
-            <span className={collapsible ? 'hidden @xs:inline' : undefined}>
+            <span
+                className={
+                    collapsible ? COLLAPSE_CLASSES[collapse].label : undefined
+                }
+            >
                 {__('Transaction')}
             </span>
         </>
@@ -49,9 +77,10 @@ interface AddTransactionButtonProps {
     hasTransactionalAccounts: boolean;
     /**
      * How the page underneath learns about what was written, once the dialog
-     * closes. By default the page is visited again, which remounts it; a page
-     * that can refresh its rows in place passes that instead, so this button
-     * stays mounted for the rule toast's "Change category".
+     * closes. By default the page is visited again, which remounts it and
+     * this button with it, so the rule toast offers only "Undo"; a page that
+     * can refresh its rows in place passes that instead, and the button stays
+     * mounted to reopen the dialog for the toast's "Change category".
      */
     onSaved?: () => void;
     /**
@@ -60,6 +89,11 @@ interface AddTransactionButtonProps {
      * filters and pickers without a full visit.
      */
     onLabelCreated?: (label: Label) => void;
+    variant?: 'default' | 'outline';
+    /** Which surface the button sits on, for `transaction_created`. */
+    origin?: TransactionCreateOrigin;
+    collapse?: LabelCollapse;
+    testId?: string;
 }
 
 /**
@@ -69,8 +103,12 @@ interface AddTransactionButtonProps {
  */
 export function AddTransactionButton({
     hasTransactionalAccounts,
-    onSaved = refreshPageAfterWrite,
+    onSaved,
     onLabelCreated,
+    variant = 'outline',
+    origin = 'quick_add',
+    collapse = 'container',
+    testId = 'add-transaction-button',
 }: AddTransactionButtonProps) {
     const { data, loading, load } = useTransactionDialogData();
     const [open, setOpen] = useState(false);
@@ -106,7 +144,7 @@ export function AddTransactionButton({
         // only learns about the new rows once the dialog is out of the way.
         if (savedSomething.current) {
             savedSomething.current = false;
-            onSaved();
+            (onSaved ?? refreshPageAfterWrite)();
         }
     }
 
@@ -116,18 +154,21 @@ export function AddTransactionButton({
                 <Tooltip>
                     <TooltipTrigger asChild>
                         <Button
-                            variant="outline"
+                            variant={variant}
                             className={cn(
-                                COLLAPSIBLE_BUTTON_CLASSES,
+                                COLLAPSE_CLASSES[collapse].button,
                                 (isDisabled || loading) &&
                                     'cursor-not-allowed opacity-50',
                             )}
                             onClick={handleOpen}
                             aria-disabled={isDisabled || loading}
                             aria-label={__('Add transaction')}
-                            data-testid="add-transaction-button"
+                            data-testid={testId}
                         >
-                            <AddTransactionLabel collapsible />
+                            <AddTransactionLabel
+                                collapsible
+                                collapse={collapse}
+                            />
                         </Button>
                     </TooltipTrigger>
                     <TooltipContent>
@@ -152,12 +193,19 @@ export function AddTransactionButton({
                         savedSomething.current = true;
                     }}
                     mode={editing ? 'edit' : 'create'}
-                    origin="quick_add"
+                    origin={origin}
                     onLabelCreated={onLabelCreated}
-                    onRequestEdit={(created) => {
-                        setEditing(created);
-                        setOpen(true);
-                    }}
+                    // Only while this button outlives the refresh: a full
+                    // visit remounts it, and a "Change category" left on the
+                    // toast would reopen nothing.
+                    onRequestEdit={
+                        onSaved
+                            ? (created) => {
+                                  setEditing(created);
+                                  setOpen(true);
+                              }
+                            : undefined
+                    }
                 />
             )}
         </>

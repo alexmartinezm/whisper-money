@@ -1,5 +1,6 @@
 import { Breadcrumbs } from '@/components/breadcrumbs';
 import { EncryptionKeyButton } from '@/components/encryption-key-button';
+import { HeaderAddTransactionButton } from '@/components/transactions/header-add-transaction-button';
 import { ImportTransactionsButton } from '@/components/transactions/import-transactions-button';
 import { Separator } from '@/components/ui/separator';
 import { SidebarTrigger } from '@/components/ui/sidebar';
@@ -44,6 +45,7 @@ export function AppSidebarHeader({
                     <Breadcrumbs breadcrumbs={breadcrumbs} />
                 </div>
                 <div className="flex items-center gap-2">
+                    <HeaderAddTransactionButton />
                     <ImportTransactionsButton />
                     {showEncryptionButton && (
                         <>

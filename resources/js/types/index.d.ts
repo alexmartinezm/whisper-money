@@ -92,6 +92,8 @@ export interface SharedData {
     hasEncryptedAccounts: boolean;
     hasEncryptedTransactions: boolean;
     hasEncryptionSetup: boolean;
+    /** Whether the header offers its own add-transaction button. */
+    showHeaderAddTransaction: boolean;
     locale: string;
     translations: Record<string, string>;
     currencies: {

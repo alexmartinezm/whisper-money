@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Enums\AccountType;
 use App\Enums\BankingConnectionStatus;
 use App\Enums\BankingProvider;
 use App\Features\CalculateBalancesOnImport;
@@ -116,6 +117,14 @@ class HandleInertiaRequests extends Middleware
             'hasEncryptedAccounts' => $hasEncryptedAccounts,
             'hasEncryptionSetup' => $user?->encryption_salt !== null,
             'hasEncryptedTransactions' => $hasEncryptedTransactions,
+            // Resolved once and kept by the client for an hour, so the aggregate
+            // runs on a full page load rather than on every visit. Keyed by the
+            // user: the client keeps once props across a login, and the guest's
+            // `false` from the login page would otherwise hide the button for
+            // the hour that follows.
+            'showHeaderAddTransaction' => Inertia::once(fn (): bool => $this->showsHeaderAddTransaction($user))
+                ->as('showHeaderAddTransaction:'.($user->id ?? 'guest'))
+                ->until(now()->addHour()),
             'locale' => $this->formatLocaleFor($request, $user),
             // The dictionary is ~250 KB in es/fr and never changes between
             // requests. As a "once" prop it ships on the first load and is
@@ -203,6 +212,25 @@ class HandleInertiaRequests extends Middleware
                 ->orderBy('name')
                 ->get(),
         ];
+    }
+
+    /**
+     * Whether the header offers its own add-transaction button: only to the
+     * onboarded readers who add a meaningful share of their transactions by
+     * hand, and who still own an account to file one in. Everyone else reaches
+     * the dialog from the transactions list. The account check runs last, so
+     * only the readers who qualify pay for it.
+     */
+    private function showsHeaderAddTransaction(?User $user): bool
+    {
+        if ($user === null || ! $user->isOnboarded() || ! $user->addsTransactionsByHand()) {
+            return false;
+        }
+
+        return $user->accounts()
+            ->whereNull('archived_at')
+            ->whereIn('type', AccountType::withTransactionLedger())
+            ->exists();
     }
 
     /**

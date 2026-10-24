@@ -168,6 +168,44 @@ describe('AddTransactionButton', () => {
         expect(refreshPageAfterWrite).not.toHaveBeenCalled();
     });
 
+    /**
+     * Without an in-place refresh the page is visited again and this button
+     * remounts, so a "Change category" left on the toast would reopen nothing.
+     */
+    it('leaves "Change category" off the toast when the page is visited again', async () => {
+        render(<AddTransactionButton hasTransactionalAccounts />);
+
+        fireEvent.click(screen.getByTestId('add-transaction-button'));
+        fireEvent.click(await screen.findByTestId('save-ruled'));
+
+        expect(refreshPageAfterWrite).toHaveBeenCalledTimes(1);
+        expect(screen.queryByTestId('create-dialog')).not.toBeInTheDocument();
+    });
+
+    it('tags what it creates with the surface it sits on', async () => {
+        render(
+            <AddTransactionButton
+                hasTransactionalAccounts
+                origin="header"
+                collapse="viewport"
+                testId="header-add-transaction-button"
+            />,
+        );
+
+        const button = screen.getByTestId('header-add-transaction-button');
+        expect(within(button).getByText('Transaction')).toHaveClass(
+            'hidden',
+            'sm:inline',
+        );
+
+        fireEvent.click(button);
+
+        expect(await screen.findByTestId('create-dialog')).toHaveAttribute(
+            'data-origin',
+            'header',
+        );
+    });
+
     it('passes a label created in the dialog up to the page', async () => {
         const onLabelCreated = vi.fn();
         render(
