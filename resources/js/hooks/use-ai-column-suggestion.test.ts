@@ -67,6 +67,7 @@ describe('useAiColumnSuggestion', () => {
             }),
         );
 
+        expect(result.current.enabled).toBe(false);
         expect(result.current.status({ amount: null, description: null })).toBe(
             'hidden',
         );

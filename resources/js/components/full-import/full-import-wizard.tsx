@@ -346,12 +346,17 @@ export function FullImportWizard({
      * Ask the AI which column is which. Only a file of no known app gets
      * asked, and only when no layout saved for it fits; its answer leaves
      * alone the fields picked by hand unless the user pressed the button.
+     * With AI column mapping off, the file is not even described.
      */
     const suggestColumns = (
         file: ParsedImportFile,
         everything: boolean,
         token?: number,
     ) => {
+        if (!ai.enabled) {
+            return;
+        }
+
         const columns = describeColumns(
             file.headers,
             file.rows,

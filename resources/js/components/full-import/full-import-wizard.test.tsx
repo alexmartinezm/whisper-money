@@ -23,6 +23,14 @@ const api = vi.hoisted(() => ({
 const captureEvent = vi.hoisted(() => vi.fn());
 const fetchColumnSuggestions = vi.hoisted(() => vi.fn());
 const ai = vi.hoisted(() => ({ enabled: false }));
+const describeColumns = vi.hoisted(() => vi.fn());
+
+vi.mock('@/lib/column-shape', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('@/lib/column-shape')>();
+    describeColumns.mockImplementation(actual.describeColumns);
+
+    return { ...actual, describeColumns };
+});
 
 vi.mock('@/lib/ai-import-mapping', async (importOriginal) => ({
     ...(await importOriginal<typeof import('@/lib/ai-import-mapping')>()),
@@ -841,5 +849,30 @@ describe('FullImportWizard with AI column mapping off', () => {
         expect(
             screen.queryByRole('button', { name: 'Detect columns with AI' }),
         ).not.toBeInTheDocument();
+    });
+
+    it('does not even describe the columns of the file', async () => {
+        api.fetchImportContext.mockResolvedValue(context());
+        render(<FullImportWizard variant="page" onClose={vi.fn()} />);
+
+        await screen.findByText('Where are you coming from?');
+        fireEvent.change(screen.getByTestId('full-import-file-input'), {
+            target: {
+                files: [
+                    new File(
+                        [
+                            'Valutadatum;Buchungstag;Verwendungszweck;Betrag\n02.03.2026;01.03.2026;REWE Markt;-12,40\n',
+                        ],
+                        'sparkasse.csv',
+                        { type: 'text/csv' },
+                    ),
+                ],
+            },
+        });
+
+        await continueTo('Check the columns');
+
+        expect(describeColumns).not.toHaveBeenCalled();
+        expect(fetchColumnSuggestions).not.toHaveBeenCalled();
     });
 });

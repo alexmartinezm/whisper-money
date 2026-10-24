@@ -209,6 +209,11 @@ export function useAiColumnSuggestion() {
     );
 
     return {
+        /**
+         * AI column mapping is on: a caller with work to do before asking
+         * (describing every column of the file) checks it first.
+         */
+        enabled,
         begin,
         touch,
         request,
