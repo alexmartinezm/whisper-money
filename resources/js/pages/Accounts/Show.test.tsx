@@ -120,7 +120,11 @@ const transactionList = vi.fn();
 vi.mock('@/components/transactions/transaction-list', () => ({
     TransactionList: (props: Record<string, unknown>) => {
         transactionList(props);
-        return null;
+        return (
+            <div data-testid="transaction-list-actions">
+                {props.headerActions as ReactNode}
+            </div>
+        );
     },
     TransactionListSkeleton: () => null,
 }));
@@ -263,6 +267,38 @@ describe('AccountShow', () => {
         expect(screen.queryByText('Gain')).not.toBeInTheDocument();
     });
 
+    /**
+     * The button sat in the page header, above the chart, so adding a
+     * transaction meant scrolling up to press it and back down to check it.
+     */
+    it('offers adding a transaction from the bar above the transactions list', () => {
+        renderPage();
+
+        expect(
+            screen.getAllByRole('button', { name: 'Add transaction' }),
+        ).toHaveLength(1);
+        expect(
+            within(screen.getByTestId('transaction-list-actions')).getByRole(
+                'button',
+                { name: 'Add transaction' },
+            ),
+        ).toBeInTheDocument();
+    });
+
+    /**
+     * The list bar only holds this button and "Columns", so the label fits
+     * even on a 320px phone and is never collapsed to the icon.
+     */
+    it('labels the add button "Transaction" at every width', () => {
+        renderPage();
+
+        const label = within(
+            screen.getByRole('button', { name: 'Add transaction' }),
+        ).getByText('Transaction');
+
+        expect(label).not.toHaveClass('hidden');
+    });
+
     it('opens create transaction dialog for disconnected transactional accounts', () => {
         renderPage();
 
@@ -279,7 +315,7 @@ describe('AccountShow', () => {
         );
     });
 
-    it('reloads only the deferred transactions prop after a transaction is created', () => {
+    it('reloads the deferred transactions and the labels after a transaction is created', () => {
         renderPage();
 
         const { onSuccess } = editTransactionDialog.mock.calls.at(-1)![0] as {
@@ -287,7 +323,10 @@ describe('AccountShow', () => {
         };
         act(() => onSuccess());
 
-        expect(router.reload).toHaveBeenCalledWith({ only: ['transactions'] });
+        // A label created inside the dialog reaches the list and its pickers.
+        expect(router.reload).toHaveBeenCalledWith({
+            only: ['transactions', 'labels'],
+        });
     });
 
     it('opens create transaction dialog for connected transactional accounts', () => {
@@ -421,7 +460,7 @@ describe('AccountShow', () => {
             act(() => onSuccess());
 
             expect(router.reload).toHaveBeenCalledWith({
-                only: ['transactions', 'account'],
+                only: ['transactions', 'labels', 'account'],
             });
         });
 

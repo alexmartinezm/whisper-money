@@ -23,6 +23,7 @@ import { AmountTrendIndicator } from '@/components/dashboard/amount-trend-indica
 import HeadingSmall from '@/components/heading-small';
 import InputError from '@/components/input-error';
 import { MobileBackButton } from '@/components/mobile-back-button';
+import { AddTransactionLabel } from '@/components/transactions/add-transaction-button';
 import { EditTransactionDialog } from '@/components/transactions/edit-transaction-dialog';
 import {
     TransactionList,
@@ -80,13 +81,7 @@ import { type Transaction } from '@/types/transaction';
 import { formatDateMedium } from '@/utils/date';
 import { __ } from '@/utils/i18n';
 import { Deferred, Head, router } from '@inertiajs/react';
-import {
-    Archive,
-    ArchiveRestore,
-    ChevronDown,
-    Pencil,
-    Plus,
-} from 'lucide-react';
+import { Archive, ArchiveRestore, ChevronDown, Pencil } from 'lucide-react';
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { Line, LineChart, ResponsiveContainer, Tooltip } from 'recharts';
 
@@ -183,10 +178,14 @@ export default function AccountShow({
     );
 
     function handleTransactionCreated() {
-        // A credit card's statement estimate is computed on the server from
-        // the ledger, so it is refreshed along with it.
+        // The labels come along so one created inside the dialog reaches the
+        // list's filter and the edit dialog's picker. A credit card's statement
+        // estimate is computed on the server from the ledger, so it is
+        // refreshed along with it.
         router.reload({
-            only: isCreditCard ? ['transactions', 'account'] : ['transactions'],
+            only: isCreditCard
+                ? ['transactions', 'labels', 'account']
+                : ['transactions', 'labels'],
         });
         handleBalanceUpdated();
     }
@@ -219,9 +218,6 @@ export default function AccountShow({
     const loanDetail = account.loan_detail;
     const linkedLoanAccount = account.linked_loan_account;
     const hasLinkedLoan = isRealEstate && !!linkedLoanAccount;
-    // Connected accounts accept manual transactions too: a sync only inserts
-    // rows it has not seen, so they survive.
-    const canCreateTransaction = isTransactionalAccount(account);
 
     const archiveMenuItem = isArchived ? (
         <DropdownMenuItem onClick={handleUnarchive}>
@@ -235,12 +231,20 @@ export default function AccountShow({
         </DropdownMenuItem>
     );
 
-    const addTransactionButton = canCreateTransaction ? (
-        <Button variant="outline" onClick={handleAddTransaction}>
-            <Plus className="h-4 w-4" />
-            {__('Add transaction')}
+    // Rendered right above the transactions list, so what was just entered can
+    // be checked without scrolling back up past the chart. It shows wherever
+    // the list does, on transactional accounts only. Connected accounts accept
+    // manual transactions too: a sync only inserts rows it has not seen, so
+    // they survive.
+    const addTransactionButton = (
+        <Button
+            variant="outline"
+            onClick={handleAddTransaction}
+            aria-label={__('Add transaction')}
+        >
+            <AddTransactionLabel />
         </Button>
-    ) : null;
+    );
 
     const breadcrumbs: BreadcrumbItem[] = [
         {
@@ -351,7 +355,6 @@ export default function AccountShow({
                         </ButtonGroup>
                     ) : (
                         <div className="flex flex-wrap gap-2">
-                            {addTransactionButton}
                             <ButtonGroup>
                                 {!isCreditCard && (
                                     <>
@@ -500,6 +503,7 @@ export default function AccountShow({
                             showActionsMenu={false}
                             maxHeight={600}
                             hideColumns={['bank', 'account']}
+                            headerActions={addTransactionButton}
                             statementPayments={statementPayments}
                             onBalanceUpdated={() =>
                                 setChartRefreshKey((key) => key + 1)
@@ -549,6 +553,7 @@ export default function AccountShow({
                 onSuccess={handleTransactionCreated}
                 mode="create"
                 initialAccountId={account.id}
+                origin="account_page"
             />
 
             {!isCreditCard && (

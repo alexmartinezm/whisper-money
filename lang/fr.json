@@ -670,7 +670,8 @@
     "Download as CSV or Excel format": "Télécharger au format CSV ou Excel",
     "Drop your CSV or Excel file here, or click to browse": "Faites glisser votre fichier CSV ou Excel ici, ou cliquez pour rechercher",
     "Drop your file here, or click to browse": "Faites glisser votre fichier ici ou cliquez pour explorer",
-    "Duplicate": "Double",
+    "Duplicate": "Dupliquer",
+    "Duplicate (import)": "Double",
     "Duplicates": "Doublons",
     "Each code is single-use and tied to your email — please keep them private.": "Chaque code est à usage unique et lié à votre courrier électronique : gardez-le privé.",
     "Each confirmed referral moves you 10 spots forward.": "Chaque référencement confirmé vous fait progresser de 10 postes.",
@@ -2689,5 +2690,14 @@
     "General expense": "Dépense générale",
     "Block: :name": "Bloc : :name",
     "Remove the :name filter": "Retirer le filtre :name",
-    "Quick periods": "Périodes rapides"
+    "Quick periods": "Périodes rapides",
+    "Updates the balance": "Met à jour le solde",
+    "Leaves the balance alone": "Sans toucher au solde",
+    "Fewer options": "Moins d'options",
+    "Save and add another": "Enregistrer et en ajouter une autre",
+    "Transaction saved": "Transaction enregistrée",
+    "A rule categorized it as :category": "Une règle l'a catégorisée comme :category",
+    "You need an account to record transactions": "Vous avez besoin d'un compte pour enregistrer des transactions",
+    "Undo": "Annuler",
+    "Save the transaction": "Enregistrer la transaction"
 }

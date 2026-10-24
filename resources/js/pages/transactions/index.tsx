@@ -104,7 +104,11 @@ import {
 } from '@/routes/ai/consent';
 import { transactionSyncService } from '@/services/transaction-sync';
 import { type BreadcrumbItem, type SharedData } from '@/types';
-import { type Account, type Bank } from '@/types/account';
+import {
+    filterTransactionalAccounts,
+    type Account,
+    type Bank,
+} from '@/types/account';
 import { type AutomationRule } from '@/types/automation-rule';
 import {
     type AiConsentResponse,
@@ -287,6 +291,7 @@ interface TransactionRowProps {
     rowVirtualizer: Virtualizer<HTMLDivElement, Element>;
     isNew: boolean;
     onEdit: (transaction: DecryptedTransaction) => void;
+    onDuplicate: (transaction: DecryptedTransaction) => void;
     onReEvaluateRules: (transaction: DecryptedTransaction) => void;
     onAutomate: (transaction: DecryptedTransaction) => void;
     onDelete: (transaction: DecryptedTransaction) => void;
@@ -298,6 +303,7 @@ function TransactionRowComponent({
     rowVirtualizer,
     isNew,
     onEdit,
+    onDuplicate,
     onReEvaluateRules,
     onAutomate,
     onDelete,
@@ -381,6 +387,7 @@ function TransactionRowComponent({
                 {getTransactionRowActions({
                     transaction,
                     onEdit,
+                    onDuplicate,
                     onReEvaluateRules,
                     onAutomate,
                     onDelete,
@@ -535,7 +542,8 @@ export default function Transactions({
     const [rowSelection, setRowSelection] = useState({});
     const [editTransaction, setEditTransaction] =
         useState<DecryptedTransaction | null>(null);
-    const [createDialogOpen, setCreateDialogOpen] = useState(false);
+    const [duplicateTransaction, setDuplicateTransaction] =
+        useState<DecryptedTransaction | null>(null);
     const [deleteTransaction, setDeleteTransaction] =
         useState<DecryptedTransaction | null>(null);
     const [isBulkDeleteMode, setIsBulkDeleteMode] = useState(false);
@@ -1041,6 +1049,7 @@ export default function Transactions({
                 labels,
                 locale,
                 onEdit: setEditTransaction,
+                onDuplicate: setDuplicateTransaction,
                 onDelete: setDeleteTransaction,
                 onUpdate: updateTransaction,
                 onCategorized: showAutomatizeToast,
@@ -1190,6 +1199,11 @@ export default function Transactions({
 
     const selectedCount = useMemo(() => selectedIds.length, [selectedIds]);
 
+    const hasTransactionalAccounts = useMemo(
+        () => filterTransactionalAccounts(accounts).length > 0,
+        [accounts],
+    );
+
     const manualAccountIds = useBalanceOwningAccountIds(accounts);
 
     const bulkDeleteTouchesManualAccount = useMemo(
@@ -1331,6 +1345,7 @@ export default function Transactions({
                     rowVirtualizer={rowVirtualizer}
                     isNew={isNewSince(row.original, lastVisitAtMount)}
                     onEdit={setEditTransaction}
+                    onDuplicate={setDuplicateTransaction}
                     onReEvaluateRules={handleReEvaluateRules}
                     onDelete={setDeleteTransaction}
                     onAutomate={openAutomateDialog}
@@ -1361,21 +1376,16 @@ export default function Transactions({
                         actions={
                             <div className="flex w-full items-center justify-between gap-2">
                                 <TransactionActionsMenu
-                                    categories={categories}
-                                    accounts={accounts}
-                                    banks={banks}
-                                    automationRules={automationRules}
-                                    onAddTransaction={() =>
-                                        setCreateDialogOpen(true)
-                                    }
                                     transactions={allTransactions}
+                                    hasTransactionalAccounts={
+                                        hasTransactionalAccounts
+                                    }
+                                    onTransactionSaved={refreshTransactions}
+                                    onLabelCreated={handleLabelCreated}
                                     onReEvaluateComplete={() => {
                                         setRowSelection({});
                                         refreshTransactions();
                                     }}
-                                    onImportComplete={() =>
-                                        refreshTransactions()
-                                    }
                                     filters={filters}
                                 />
 
@@ -1530,11 +1540,12 @@ export default function Transactions({
                 banks={banks}
                 labels={labels}
                 automationRules={automationRules}
-                open={createDialogOpen}
-                onOpenChange={setCreateDialogOpen}
+                open={!!duplicateTransaction}
+                onOpenChange={(open) => !open && setDuplicateTransaction(null)}
                 onSuccess={() => refreshTransactions()}
                 onLabelCreated={handleLabelCreated}
                 mode="create"
+                duplicateFrom={duplicateTransaction}
             />
 
             <AutomateCategorizationDialog

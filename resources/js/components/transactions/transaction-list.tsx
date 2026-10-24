@@ -24,6 +24,7 @@ import {
     useCallback,
     useEffect,
     useMemo,
+    useRef,
     useState,
     type ReactNode,
 } from 'react';
@@ -77,6 +78,7 @@ import {
 import { getTransactionRowActions } from '@/lib/transaction-row-actions';
 import { transactionSyncService } from '@/services/transaction-sync';
 import {
+    filterTransactionalAccounts,
     type Account,
     type Bank,
     type CreditCardPayment,
@@ -133,6 +135,7 @@ interface TransactionRowProps {
     virtualRow: VirtualItem;
     rowVirtualizer: Virtualizer<HTMLDivElement, Element>;
     onEdit: (transaction: DecryptedTransaction) => void;
+    onDuplicate: (transaction: DecryptedTransaction) => void;
     onReEvaluateRules: (transaction: DecryptedTransaction) => void;
     onAutomate: (transaction: DecryptedTransaction) => void;
     onDelete: (transaction: DecryptedTransaction) => void;
@@ -143,6 +146,7 @@ function TransactionRowComponent({
     virtualRow,
     rowVirtualizer,
     onEdit,
+    onDuplicate,
     onReEvaluateRules,
     onAutomate,
     onDelete,
@@ -212,6 +216,7 @@ function TransactionRowComponent({
                 {getTransactionRowActions({
                     transaction,
                     onEdit,
+                    onDuplicate,
                     onReEvaluateRules,
                     onAutomate,
                     onDelete,
@@ -367,7 +372,11 @@ export function TransactionList({
     });
     const [editTransaction, setEditTransaction] =
         useState<DecryptedTransaction | null>(null);
-    const [createDialogOpen, setCreateDialogOpen] = useState(false);
+    const [duplicateTransaction, setDuplicateTransaction] =
+        useState<DecryptedTransaction | null>(null);
+    // A ref, not state: the dialog reports the save and closes in the same
+    // batch, so a state flag would still read false in the close handler.
+    const savedDuplicate = useRef(false);
     const [deleteTransaction, setDeleteTransaction] =
         useState<DecryptedTransaction | null>(null);
     const [isBulkDeleteMode, setIsBulkDeleteMode] = useState(false);
@@ -739,6 +748,7 @@ export function TransactionList({
             labels,
             locale,
             onEdit: setEditTransaction,
+            onDuplicate: setDuplicateTransaction,
             onDelete: setDeleteTransaction,
             onUpdate: updateTransaction,
             onCategorized: showAutomatizeToast,
@@ -980,6 +990,7 @@ export function TransactionList({
                     virtualRow={virtualRow}
                     rowVirtualizer={rowVirtualizer}
                     onEdit={setEditTransaction}
+                    onDuplicate={setDuplicateTransaction}
                     onReEvaluateRules={handleReEvaluateRules}
                     onDelete={setDeleteTransaction}
                     onAutomate={openAutomateDialog}
@@ -1000,16 +1011,15 @@ export function TransactionList({
                     accounts={accounts}
                     hideAccountFilter={hideAccountFilter}
                     actions={
-                        <div className="flex justify-end gap-2">
+                        <div className="flex flex-wrap justify-end gap-2">
                             {showActionsMenu && (
                                 <TransactionActionsMenu
-                                    categories={categories}
-                                    accounts={accounts}
-                                    banks={banks}
-                                    onAddTransaction={() =>
-                                        setCreateDialogOpen(true)
-                                    }
                                     transactions={transactions}
+                                    hasTransactionalAccounts={
+                                        filterTransactionalAccounts(accounts)
+                                            .length > 0
+                                    }
+                                    onLabelCreated={handleLabelCreated}
                                     onReEvaluateComplete={() => {
                                         setRowSelection({});
                                         setTimeout(() => {
@@ -1108,11 +1118,25 @@ export function TransactionList({
                 banks={banks}
                 labels={labels}
                 automationRules={automationRules}
-                open={createDialogOpen}
-                onOpenChange={setCreateDialogOpen}
-                onSuccess={() => {}}
+                open={!!duplicateTransaction}
+                onOpenChange={(open) => {
+                    if (open) {
+                        return;
+                    }
+                    setDuplicateTransaction(null);
+                    // Reloading on the save itself would take "Save and add
+                    // another" down with the page, so it waits for the close.
+                    if (savedDuplicate.current) {
+                        savedDuplicate.current = false;
+                        reloadPage();
+                    }
+                }}
+                onSuccess={() => {
+                    savedDuplicate.current = true;
+                }}
                 onLabelCreated={handleLabelCreated}
                 mode="create"
+                duplicateFrom={duplicateTransaction}
             />
 
             <AutomateCategorizationDialog

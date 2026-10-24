@@ -223,7 +223,7 @@ export function ImportStepPreview({
                                             </Badge>
                                         ) : transaction.isDuplicate ? (
                                             <Badge variant="secondary">
-                                                {__('Duplicate')}
+                                                {__('Duplicate (import)')}
                                             </Badge>
                                         ) : (
                                             <Badge

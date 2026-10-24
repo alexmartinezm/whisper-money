@@ -30,6 +30,7 @@ function buildColumns(
         labels: [],
         locale: 'en',
         onEdit: () => {},
+        onDuplicate: () => {},
         onDelete: () => {},
         onUpdate: () => {},
         onReEvaluateRules: () => {},

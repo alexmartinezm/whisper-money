@@ -11,9 +11,19 @@ export interface TransactionRowAction {
 interface TransactionRowActionsOptions {
     transaction: DecryptedTransaction;
     onEdit: (transaction: DecryptedTransaction) => void;
+    onDuplicate: (transaction: DecryptedTransaction) => void;
     onReEvaluateRules: (transaction: DecryptedTransaction) => void;
     onAutomate: (transaction: DecryptedTransaction) => void;
     onDelete: (transaction: DecryptedTransaction) => void;
+}
+
+/**
+ * A row still on the legacy client-side encryption holds its description and
+ * notes as ciphertext, which the duplicate would copy as an empty description
+ * or as unreadable text, so it is not offered there.
+ */
+function canBeDuplicated(transaction: DecryptedTransaction): boolean {
+    return !transaction.description_iv && !transaction.notes_iv;
 }
 
 /**
@@ -26,6 +36,7 @@ interface TransactionRowActionsOptions {
 export function getTransactionRowActions({
     transaction,
     onEdit,
+    onDuplicate,
     onReEvaluateRules,
     onAutomate,
     onDelete,
@@ -36,6 +47,15 @@ export function getTransactionRowActions({
             label: __('Edit'),
             onSelect: () => onEdit(transaction),
         },
+        ...(canBeDuplicated(transaction)
+            ? [
+                  {
+                      id: 'duplicate',
+                      label: __('Duplicate'),
+                      onSelect: () => onDuplicate(transaction),
+                  },
+              ]
+            : []),
         {
             id: 're-evaluate-rules',
             label: __('Re-evaluate rules'),

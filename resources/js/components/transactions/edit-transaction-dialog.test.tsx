@@ -1,10 +1,21 @@
+import { captureEvent } from '@/lib/posthog';
+import { evaluateRulesForNewTransaction } from '@/lib/rule-engine';
 import { transactionSyncService } from '@/services/transaction-sync';
+import type { AutomationRule } from '@/types/automation-rule';
 import type { Category } from '@/types/category';
 import type { DecryptedTransaction } from '@/types/transaction';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { todayDateString } from '@/utils/date';
+import {
+    fireEvent,
+    render,
+    screen,
+    waitFor,
+    within,
+} from '@testing-library/react';
 import type React from 'react';
 import { useLayoutEffect, useRef } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { toast } from 'sonner';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     EditTransactionDialog,
     haveSplitLinesChanged,
@@ -23,7 +34,7 @@ const inertiaProps = vi.hoisted(() => ({
 }));
 
 vi.mock('@inertiajs/react', () => ({
-    router: { delete: vi.fn() },
+    router: { delete: vi.fn(), visit: vi.fn() },
     usePage: () => ({ props: inertiaProps }),
 }));
 
@@ -32,15 +43,47 @@ vi.mock('@/components/shared/label-combobox', () => ({
 }));
 
 vi.mock('@/components/transactions/category-select', () => ({
-    CategorySelect: () => <div />,
+    // Stands in for the combobox: it reports what it holds and offers every
+    // category as a button, so a pick is one click. Like the real trigger, the
+    // element under the test id is a focusable combobox.
+    CategorySelect: ({
+        value,
+        onValueChange,
+        categories,
+        'data-testid': dataTestId,
+    }: {
+        value: string;
+        onValueChange: (value: string) => void;
+        categories: Category[];
+        'data-testid'?: string;
+    }) => (
+        <div
+            role="combobox"
+            tabIndex={0}
+            data-testid={dataTestId}
+            data-value={value}
+        >
+            {categories.map((category) => (
+                <button
+                    key={category.id}
+                    type="button"
+                    onClick={() => onValueChange(category.id)}
+                >
+                    {category.name}
+                </button>
+            ))}
+        </div>
+    ),
 }));
 
 vi.mock('@/contexts/sync-context', () => ({
     useSyncContext: () => ({ sync: vi.fn() }),
 }));
 
+const localeState = vi.hoisted(() => ({ locale: 'en-US' }));
+
 vi.mock('@/hooks/use-locale', () => ({
-    useLocale: () => 'en-US',
+    useLocale: () => localeState.locale,
 }));
 
 vi.mock('@/lib/key-storage', () => ({
@@ -52,6 +95,10 @@ vi.mock('@/lib/crypto', () => ({
     importKey: vi.fn(),
 }));
 
+vi.mock('@/lib/posthog', () => ({
+    captureEvent: vi.fn(),
+}));
+
 vi.mock('@/lib/rule-engine', () => ({
     evaluateRulesForNewTransaction: vi.fn(),
 }));
@@ -61,6 +108,7 @@ vi.mock('@/services/transaction-sync', () => ({
         create: vi.fn(),
         update: vi.fn(async () => ({})),
         getById: vi.fn(async () => null),
+        delete: vi.fn(),
     },
 }));
 
@@ -98,8 +146,8 @@ vi.mock('@/components/ui/select', () => ({
             {children}
         </div>
     ),
-    SelectTrigger: ({ children }: { children: React.ReactNode }) => (
-        <div>{children}</div>
+    SelectTrigger: ({ children, ...props }: React.ComponentProps<'div'>) => (
+        <div {...props}>{children}</div>
     ),
     SelectContent: ({ children }: { children: React.ReactNode }) => (
         <div>{children}</div>
@@ -223,6 +271,7 @@ describe('split line dirty checking', () => {
 describe('EditTransactionDialog', () => {
     beforeEach(() => {
         inertiaProps.features.transactionSplitting = true;
+        localeState.locale = 'en-US';
         vi.clearAllMocks();
         globalThis.ResizeObserver = class {
             observe() {}
@@ -298,12 +347,72 @@ describe('EditTransactionDialog', () => {
         linked_at: null,
     };
 
-    it('does not auto-select an account when no initialAccountId is given', () => {
+    function renderCreateDialog(
+        props: Partial<React.ComponentProps<typeof EditTransactionDialog>> = {},
+    ) {
+        return render(
+            <EditTransactionDialog
+                transaction={null}
+                categories={[]}
+                accounts={[checkingAccount]}
+                banks={[]}
+                labels={[]}
+                open
+                onOpenChange={vi.fn()}
+                onSuccess={vi.fn()}
+                mode="create"
+                initialAccountId="account-1"
+                {...props}
+            />,
+        );
+    }
+
+    function fillDescriptionAndAmount(description = 'Dinner', amount = '25') {
+        fireEvent.change(
+            screen.getByPlaceholderText('Transaction description'),
+            { target: { value: description } },
+        );
+        const amountInput = screen.getByPlaceholderText('25.00');
+        fireEvent.change(amountInput, { target: { value: amount } });
+        fireEvent.blur(amountInput);
+    }
+
+    async function fillAndSubmit(testId: string) {
+        fillDescriptionAndAmount();
+        fireEvent.click(screen.getByTestId(testId));
+
+        await waitFor(() => {
+            expect(transactionSyncService.create).toHaveBeenCalled();
+        });
+    }
+
+    it('falls back to the first account when nothing else names one', () => {
         render(
             <EditTransactionDialog
                 transaction={null}
                 categories={[]}
                 accounts={[checkingAccount]}
+                banks={[]}
+                labels={[]}
+                open
+                onOpenChange={vi.fn()}
+                onSuccess={vi.fn()}
+                mode="create"
+            />,
+        );
+
+        expect(screen.getByTestId('account-value')).toHaveAttribute(
+            'data-value',
+            'account-1',
+        );
+    });
+
+    it('leaves the account empty when there is none to pick', () => {
+        render(
+            <EditTransactionDialog
+                transaction={null}
+                categories={[]}
+                accounts={[]}
                 banks={[]}
                 labels={[]}
                 open
@@ -339,6 +448,41 @@ describe('EditTransactionDialog', () => {
             'data-value',
             'account-1',
         );
+    });
+
+    it('leaves the account empty on the page of an account that takes no transactions', async () => {
+        vi.mocked(localStorage.getItem).mockImplementation((key: string) =>
+            key === 'whisper_money_last_transaction_account'
+                ? 'account-1'
+                : null,
+        );
+
+        renderCreateDialog({
+            accounts: [
+                checkingAccount,
+                {
+                    ...checkingAccount,
+                    id: 'account-archived',
+                    archived_at: '2026-01-01T00:00:00Z',
+                },
+            ],
+            initialAccountId: 'account-archived',
+        });
+
+        // Neither the last-used nor the first account stands in for it: the
+        // save is refused instead of landing on another account.
+        expect(screen.getByTestId('account-value')).toHaveAttribute(
+            'data-value',
+            '',
+        );
+
+        fillDescriptionAndAmount();
+        fireEvent.click(screen.getByTestId('submit-transaction'));
+
+        await waitFor(() => {
+            expect(toast.error).toHaveBeenCalledWith('Account is required');
+        });
+        expect(transactionSyncService.create).not.toHaveBeenCalled();
     });
 
     it('sends a typed amount as an expense, and as income once toggled', async () => {
@@ -392,11 +536,13 @@ describe('EditTransactionDialog', () => {
     });
 
     it('falls back to the profile currency before an account is picked', () => {
+        // With an account to fall back on the chip would pick it, so only a
+        // user without one still opens on the profile currency.
         render(
             <EditTransactionDialog
                 transaction={null}
                 categories={[]}
-                accounts={[checkingAccount]}
+                accounts={[]}
                 banks={[]}
                 labels={[]}
                 open
@@ -462,13 +608,7 @@ describe('EditTransactionDialog', () => {
 
         fireEvent.click(screen.getByText('USD - US Dollar'));
 
-        fireEvent.change(
-            screen.getByPlaceholderText('Transaction description'),
-            { target: { value: 'Hotel' } },
-        );
-        const amountInput = screen.getByPlaceholderText('25.00');
-        fireEvent.change(amountInput, { target: { value: '40' } });
-        fireEvent.blur(amountInput);
+        fillDescriptionAndAmount('Hotel', '40');
         fireEvent.click(screen.getByTestId('submit-transaction'));
 
         await waitFor(() => {
@@ -591,21 +731,15 @@ describe('EditTransactionDialog', () => {
         vi.unstubAllGlobals();
     });
 
-    it('checks "update account balance" by default in create mode', () => {
-        render(
-            <EditTransactionDialog
-                transaction={null}
-                categories={[]}
-                accounts={[checkingAccount]}
-                banks={[]}
-                labels={[]}
-                open
-                onOpenChange={vi.fn()}
-                onSuccess={vi.fn()}
-                mode="create"
-                initialAccountId="account-1"
-            />,
+    it('offers to update the balance by default in create mode', () => {
+        renderCreateDialog();
+
+        expect(screen.getByTestId('balance-chip')).toHaveAttribute(
+            'aria-pressed',
+            'true',
         );
+
+        fireEvent.click(screen.getByTestId('toggle-more-options'));
 
         expect(screen.getByRole('checkbox')).toBeChecked();
     });
@@ -1010,6 +1144,10 @@ describe('EditTransactionDialog', () => {
             />,
         );
 
+        expect(screen.queryByTestId('balance-chip')).not.toBeInTheDocument();
+
+        fireEvent.click(screen.getByTestId('toggle-more-options'));
+
         expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
         expect(
             screen.getByText(
@@ -1038,15 +1176,12 @@ describe('EditTransactionDialog', () => {
             />,
         );
 
-        expect(screen.getByRole('checkbox')).toBeChecked();
-
-        fireEvent.change(
-            screen.getByPlaceholderText('Transaction description'),
-            { target: { value: 'Hotel' } },
+        expect(screen.getByTestId('balance-chip')).toHaveAttribute(
+            'aria-pressed',
+            'true',
         );
-        const amountInput = screen.getByPlaceholderText('25.00');
-        fireEvent.change(amountInput, { target: { value: '40' } });
-        fireEvent.blur(amountInput);
+
+        fillDescriptionAndAmount('Hotel', '40');
         fireEvent.click(screen.getByTestId('submit-transaction'));
 
         await waitFor(() => {
@@ -1112,21 +1247,6 @@ describe('EditTransactionDialog', () => {
             );
         }
 
-        async function fillAndSubmitCreate() {
-            fireEvent.change(
-                screen.getByPlaceholderText('Transaction description'),
-                { target: { value: 'Hotel' } },
-            );
-            const amountInput = screen.getByPlaceholderText('25.00');
-            fireEvent.change(amountInput, { target: { value: '40' } });
-            fireEvent.blur(amountInput);
-            fireEvent.click(screen.getByTestId('submit-transaction'));
-
-            await waitFor(() =>
-                expect(transactionSyncService.create).toHaveBeenCalledOnce(),
-            );
-        }
-
         it('offers no balance update', async () => {
             vi.mocked(transactionSyncService.create).mockResolvedValue({
                 id: 'tx-new',
@@ -1134,17 +1254,69 @@ describe('EditTransactionDialog', () => {
 
             renderCardDialog();
 
+            // Neither the collapsed form's chip nor the expanded form's
+            // checkbox: a card has no balance for a transaction to move.
+            expect(
+                screen.queryByTestId('balance-chip'),
+            ).not.toBeInTheDocument();
+            fireEvent.click(screen.getByTestId('toggle-more-options'));
             expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
             expect(
                 screen.queryByText(
                     "This account's balance comes from your bank, so it won't change.",
                 ),
             ).not.toBeInTheDocument();
+            fireEvent.click(screen.getByTestId('toggle-more-options'));
 
-            await fillAndSubmitCreate();
+            await fillAndSubmit('submit-transaction');
 
             expect(transactionSyncService.create).toHaveBeenCalledWith(
                 expect.anything(),
+                { updateBalance: false },
+            );
+        });
+
+        it('sends no balance update when adding another on a card', async () => {
+            vi.mocked(transactionSyncService.create).mockResolvedValue({
+                id: 'tx-new',
+            } as never);
+
+            renderCardDialog();
+            await fillAndSubmit('submit-and-add-another');
+
+            expect(transactionSyncService.create).toHaveBeenCalledWith(
+                expect.anything(),
+                { updateBalance: false },
+            );
+        });
+
+        it('undoes a rule-categorized card transaction without touching a balance', async () => {
+            vi.mocked(evaluateRulesForNewTransaction).mockResolvedValue({
+                categoryId: 'category-1',
+                labelIds: [],
+                labels: [],
+                note: null,
+                noteIv: null,
+                rule: { title: 'Hotels' },
+            } as never);
+            vi.mocked(transactionSyncService.create).mockResolvedValue({
+                id: 'tx-new',
+                category_id: 'category-1',
+            } as never);
+
+            renderCardDialog({
+                categories: [{ id: 'category-1', name: 'Travel' } as Category],
+                automationRules: [{ id: 'rule-1' } as AutomationRule],
+            });
+            await fillAndSubmit('submit-transaction');
+
+            const [, options] = vi.mocked(toast.success).mock.calls.at(-1)!;
+            await (
+                options!.cancel as unknown as { onClick: () => unknown }
+            ).onClick();
+
+            expect(transactionSyncService.delete).toHaveBeenCalledWith(
+                'tx-new',
                 { updateBalance: false },
             );
         });
@@ -1308,6 +1480,8 @@ describe('EditTransactionDialog', () => {
             />,
         );
 
+        fireEvent.click(screen.getByTestId('toggle-more-options'));
+
         expect(
             screen.queryByRole('button', { name: 'Split transaction' }),
         ).not.toBeInTheDocument();
@@ -1422,5 +1596,1035 @@ describe('EditTransactionDialog', () => {
         expect(
             screen.queryByRole('button', { name: 'Delete' }),
         ).not.toBeInTheDocument();
+    });
+
+    it('opens the create form collapsed, with the rest behind More options', () => {
+        renderCreateDialog();
+
+        expect(screen.queryByText('Category')).not.toBeInTheDocument();
+        expect(screen.queryByText('Labels')).not.toBeInTheDocument();
+        expect(screen.queryByLabelText('Date')).not.toBeInTheDocument();
+        expect(
+            screen.queryByRole('button', { name: /Add note/ }),
+        ).not.toBeInTheDocument();
+        expect(
+            screen.queryByRole('button', { name: 'Split transaction' }),
+        ).not.toBeInTheDocument();
+        expect(screen.getByTestId('date-chip')).toBeInTheDocument();
+        expect(screen.getByTestId('balance-chip')).toBeInTheDocument();
+
+        fireEvent.click(screen.getByTestId('toggle-more-options'));
+
+        expect(screen.getByText('Category')).toBeInTheDocument();
+        expect(screen.getByText('Labels')).toBeInTheDocument();
+        expect(screen.getByLabelText('Date')).toBeInTheDocument();
+        expect(
+            screen.getByRole('button', { name: 'Split transaction' }),
+        ).toBeInTheDocument();
+        expect(screen.queryByTestId('date-chip')).not.toBeInTheDocument();
+    });
+
+    it('leaves edit mode showing every field, with nothing to expand', () => {
+        render(
+            <EditTransactionDialog
+                transaction={manualTransaction}
+                categories={[]}
+                accounts={[checkingAccount]}
+                banks={[]}
+                labels={[]}
+                open
+                onOpenChange={vi.fn()}
+                onSuccess={vi.fn()}
+                mode="edit"
+            />,
+        );
+
+        expect(screen.getByText('Category')).toBeInTheDocument();
+        expect(screen.getByLabelText('Date')).toBeInTheDocument();
+        expect(
+            screen.queryByTestId('toggle-more-options'),
+        ).not.toBeInTheDocument();
+        expect(screen.queryByTestId('date-chip')).not.toBeInTheDocument();
+        expect(
+            screen.queryByTestId('submit-and-add-another'),
+        ).not.toBeInTheDocument();
+    });
+
+    it('opens on the account the last manual transaction went to', () => {
+        vi.mocked(localStorage.getItem).mockImplementation((key: string) =>
+            key === 'whisper_money_last_transaction_account'
+                ? 'account-2'
+                : null,
+        );
+
+        renderCreateDialog({
+            accounts: [
+                checkingAccount,
+                { ...checkingAccount, id: 'account-2' },
+            ],
+            initialAccountId: null,
+        });
+
+        expect(screen.getByTestId('account-chip')).toBeInTheDocument();
+        expect(screen.getByTestId('account-value')).toHaveAttribute(
+            'data-value',
+            'account-2',
+        );
+    });
+
+    it('reveals the date field from the date chip', () => {
+        renderCreateDialog();
+
+        expect(screen.getByTestId('date-chip')).toHaveTextContent('Today');
+
+        fireEvent.click(screen.getByTestId('date-chip'));
+
+        expect(screen.getByLabelText('Date')).toBeInTheDocument();
+    });
+
+    it('capitalizes the month on the date chip for a locale that lowercases it', () => {
+        // Hungarian writes the month first and in lowercase ("január 15.").
+        localeState.locale = 'hu';
+        const day = todayDateString().endsWith('-01-15') ? '16' : '15';
+        renderCreateDialog();
+
+        fireEvent.click(screen.getByTestId('date-chip'));
+        fireEvent.change(screen.getByLabelText('Date'), {
+            target: { value: `${new Date().getFullYear()}-01-${day}` },
+        });
+
+        expect(screen.getByTestId('date-chip')).toHaveTextContent(
+            `Január ${day}.`,
+        );
+    });
+
+    it('turns the balance off from the chip and remembers the choice', () => {
+        renderCreateDialog();
+
+        fireEvent.click(screen.getByTestId('balance-chip'));
+
+        const chip = screen.getByTestId('balance-chip');
+        expect(chip).toHaveAttribute('aria-pressed', 'false');
+        expect(chip).toHaveTextContent('Leaves the balance alone');
+        expect(localStorage.setItem).toHaveBeenCalledWith(
+            'whisper_money_update_balance_on_transaction',
+            'false',
+        );
+    });
+
+    it('keeps the dialog open and the account when adding another', async () => {
+        vi.mocked(transactionSyncService.create).mockResolvedValue({
+            id: 'tx-new',
+        } as never);
+        const onOpenChange = vi.fn();
+
+        renderCreateDialog({ onOpenChange });
+        await fillAndSubmit('submit-and-add-another');
+
+        expect(onOpenChange).not.toHaveBeenCalled();
+        expect(
+            screen.getByPlaceholderText('Transaction description'),
+        ).toHaveValue('');
+        expect(screen.getByTestId('account-value')).toHaveAttribute(
+            'data-value',
+            'account-1',
+        );
+        expect(localStorage.setItem).toHaveBeenCalledWith(
+            'whisper_money_last_transaction_account',
+            'account-1',
+        );
+        await waitFor(() => {
+            expect(screen.getByPlaceholderText('25.00')).toHaveFocus();
+        });
+    });
+
+    // getStoredKey returns null on purpose: an account off the legacy
+    // encryption has no key, and rules still have to run for it.
+    it('names the category a rule picked while the form was collapsed', async () => {
+        vi.mocked(evaluateRulesForNewTransaction).mockResolvedValue({
+            categoryId: 'category-1',
+            labelIds: [],
+            labels: [],
+            note: null,
+            noteIv: null,
+            rule: { title: 'Supermarkets' },
+        } as never);
+        vi.mocked(transactionSyncService.create).mockResolvedValue({
+            id: 'tx-new',
+            category_id: 'category-1',
+        } as never);
+        const onRequestEdit = vi.fn();
+
+        renderCreateDialog({
+            categories: [{ id: 'category-1', name: 'Groceries' } as Category],
+            automationRules: [{ id: 'rule-1' } as AutomationRule],
+            onRequestEdit,
+        });
+        await fillAndSubmit('submit-transaction');
+
+        const [message, options] = vi.mocked(toast.success).mock.calls.at(-1)!;
+        expect(message).toBe('Transaction saved');
+        expect(options!.description).toBe('A rule categorized it as Groceries');
+
+        // Sonner types both as a node or an action; the dialog passes actions.
+        type ToastAction = { onClick: () => unknown };
+        (options!.action as unknown as ToastAction).onClick();
+        expect(onRequestEdit).toHaveBeenCalled();
+
+        await (options!.cancel as unknown as ToastAction).onClick();
+        expect(transactionSyncService.delete).toHaveBeenCalledWith('tx-new', {
+            updateBalance: true,
+        });
+        expect(captureEvent).toHaveBeenCalledWith(
+            'transaction_created',
+            expect.objectContaining({ rule_applied_category: true }),
+        );
+    });
+
+    it('reports every created transaction with how it was entered', async () => {
+        vi.mocked(transactionSyncService.create).mockResolvedValue({
+            id: 'tx-new',
+        } as never);
+
+        renderCreateDialog({ origin: 'quick_add' });
+        await fillAndSubmit('submit-transaction');
+
+        expect(captureEvent).toHaveBeenCalledWith('transaction_created', {
+            source: 'manually_created',
+            origin: 'quick_add',
+            expanded: false,
+            saved_and_added_another: false,
+            account_chip_changed: false,
+            date_chip_changed: false,
+            category_chip_changed: false,
+            rule_applied_category: false,
+        });
+    });
+
+    const groceries = { id: 'category-1', name: 'Groceries' } as Category;
+
+    it('sets the category from the chip without expanding the form', async () => {
+        vi.mocked(transactionSyncService.create).mockResolvedValue({
+            id: 'tx-new',
+        } as never);
+
+        renderCreateDialog({ categories: [groceries] });
+
+        const chip = screen.getByTestId('category-chip');
+        expect(chip).toHaveAttribute('data-value', 'null');
+        expect(screen.queryByTestId('category-select')).not.toBeInTheDocument();
+
+        fireEvent.click(screen.getByText('Groceries'));
+        await fillAndSubmit('submit-transaction');
+
+        expect(transactionSyncService.create).toHaveBeenCalledWith(
+            expect.objectContaining({ category_id: 'category-1' }),
+            expect.anything(),
+        );
+        expect(captureEvent).toHaveBeenCalledWith(
+            'transaction_created',
+            expect.objectContaining({ category_chip_changed: true }),
+        );
+    });
+
+    it('keeps the category the chip holds when adding another', async () => {
+        vi.mocked(transactionSyncService.create).mockResolvedValue({
+            id: 'tx-new',
+        } as never);
+
+        renderCreateDialog({ categories: [groceries] });
+
+        fireEvent.click(screen.getByText('Groceries'));
+        await fillAndSubmit('submit-and-add-another');
+
+        expect(screen.getByTestId('category-chip')).toHaveAttribute(
+            'data-value',
+            'category-1',
+        );
+    });
+
+    it('keeps a rule from overwriting what the chip picked', async () => {
+        vi.mocked(evaluateRulesForNewTransaction).mockReturnValue({
+            categoryId: 'category-2',
+            labelIds: [],
+            labels: [],
+            note: null,
+            rule: { title: 'Supermarkets' },
+        } as never);
+        vi.mocked(transactionSyncService.create).mockResolvedValue({
+            id: 'tx-new',
+        } as never);
+
+        renderCreateDialog({
+            categories: [groceries],
+            automationRules: [{ id: 'rule-1' } as AutomationRule],
+        });
+
+        fireEvent.click(screen.getByText('Groceries'));
+        await fillAndSubmit('submit-transaction');
+
+        // The chip's pick wins: the rule only fills a category nobody chose.
+        expect(transactionSyncService.create).toHaveBeenCalledWith(
+            expect.objectContaining({ category_id: 'category-1' }),
+            expect.anything(),
+        );
+        expect(captureEvent).toHaveBeenCalledWith(
+            'transaction_created',
+            expect.objectContaining({ rule_applied_category: false }),
+        );
+    });
+
+    it('shows the category chip and the expanded field bound to the same pick', () => {
+        renderCreateDialog({ categories: [groceries] });
+
+        fireEvent.click(screen.getByText('Groceries'));
+        fireEvent.click(screen.getByTestId('toggle-more-options'));
+
+        expect(screen.queryByTestId('category-chip')).not.toBeInTheDocument();
+        expect(screen.getByTestId('category-select')).toHaveAttribute(
+            'data-value',
+            'category-1',
+        );
+    });
+
+    describe('splitting while creating', () => {
+        const splitCategories = [
+            { id: 'food', name: 'Food', type: 'expense' },
+            { id: 'home', name: 'Home', type: 'expense' },
+        ] as Category[];
+
+        function startSplit() {
+            fireEvent.click(screen.getByTestId('toggle-more-options'));
+            fireEvent.click(
+                screen.getByRole('button', { name: 'Split transaction' }),
+            );
+        }
+
+        function fillSplitLines() {
+            fireEvent.click(
+                within(screen.getByTestId('split-category-0')).getByText(
+                    'Food',
+                ),
+            );
+            fireEvent.click(
+                within(screen.getByTestId('split-category-1')).getByText(
+                    'Home',
+                ),
+            );
+            for (const [label, value] of [
+                ['Amount 1', '-15'],
+                ['Amount 2', '-10'],
+            ]) {
+                const input = screen.getByLabelText(label);
+                fireEvent.change(input, { target: { value } });
+                fireEvent.blur(input);
+            }
+        }
+
+        it('reaches the split editor behind More options and sends its lines', async () => {
+            vi.mocked(transactionSyncService.create).mockResolvedValue({
+                id: 'tx-new',
+            } as never);
+
+            renderCreateDialog({ categories: splitCategories });
+
+            fillDescriptionAndAmount();
+
+            startSplit();
+            fillSplitLines();
+            fireEvent.click(screen.getByTestId('submit-transaction'));
+
+            await waitFor(() => {
+                expect(transactionSyncService.create).toHaveBeenCalledWith(
+                    expect.objectContaining({
+                        amount: -2500,
+                        category_id: null,
+                        splits: [
+                            { category_id: 'food', amount: -1500, position: 0 },
+                            { category_id: 'home', amount: -1000, position: 1 },
+                        ],
+                    }),
+                    { updateBalance: true },
+                );
+            });
+        });
+
+        it('cannot collapse while a split is in progress', () => {
+            renderCreateDialog({ categories: splitCategories });
+
+            startSplit();
+
+            expect(
+                screen.queryByTestId('toggle-more-options'),
+            ).not.toBeInTheDocument();
+            expect(screen.queryByTestId('date-chip')).not.toBeInTheDocument();
+            expect(
+                screen.queryByTestId('category-chip'),
+            ).not.toBeInTheDocument();
+            expect(screen.getByTestId('split-category-0')).toBeInTheDocument();
+
+            const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+            fireEvent.click(
+                screen.getByRole('button', { name: 'Remove split' }),
+            );
+            confirm.mockRestore();
+
+            expect(screen.getByTestId('toggle-more-options')).toHaveTextContent(
+                'Fewer options',
+            );
+        });
+
+        it('returns to the chips once a split is removed and the form collapsed', () => {
+            renderCreateDialog({ categories: splitCategories });
+
+            startSplit();
+            const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+            fireEvent.click(
+                screen.getByRole('button', { name: 'Remove split' }),
+            );
+            confirm.mockRestore();
+            fireEvent.click(screen.getByTestId('toggle-more-options'));
+
+            expect(screen.getByTestId('date-chip')).toBeInTheDocument();
+            expect(screen.getByTestId('category-chip')).toBeInTheDocument();
+            expect(
+                screen.queryByTestId('split-category-0'),
+            ).not.toBeInTheDocument();
+        });
+
+        it('drops the split lines when adding another', async () => {
+            vi.mocked(transactionSyncService.create).mockResolvedValue({
+                id: 'tx-new',
+            } as never);
+
+            renderCreateDialog({ categories: splitCategories });
+
+            fillDescriptionAndAmount();
+
+            startSplit();
+            fillSplitLines();
+            fireEvent.click(screen.getByTestId('submit-and-add-another'));
+
+            await waitFor(() => {
+                expect(transactionSyncService.create).toHaveBeenCalledWith(
+                    expect.objectContaining({
+                        splits: expect.arrayContaining([
+                            expect.objectContaining({ category_id: 'food' }),
+                        ]),
+                    }),
+                    expect.anything(),
+                );
+            });
+            // The lines added up to the amount just saved; the next entry
+            // starts on the plain category field.
+            await waitFor(() => {
+                expect(
+                    screen.getByRole('button', { name: 'Split transaction' }),
+                ).toBeInTheDocument();
+            });
+        });
+    });
+
+    describe('duplicating', () => {
+        const savingsAccount = {
+            ...checkingAccount,
+            id: 'account-2',
+            name: 'Savings',
+        };
+
+        const splitCategories = [
+            { id: 'food', name: 'Food', type: 'expense' },
+            { id: 'home', name: 'Home', type: 'expense' },
+        ] as Category[];
+
+        const monthlyRent: DecryptedTransaction = {
+            ...manualTransaction,
+            id: 'tx-rent',
+            account_id: 'account-2',
+            description: 'Rent',
+            transaction_date: '2026-01-01',
+            amount: -85000,
+            currency_code: 'USD',
+            category_id: 'category-1',
+            label_ids: ['label-1'],
+            source: 'enablebanking',
+            decryptedDescription: 'Rent',
+            decryptedNotes: 'Flat on Main St',
+        };
+
+        // A split parent carries no category of its own; its lines do. They
+        // come out of order here to show the copy follows their positions.
+        const splitShopping: DecryptedTransaction = {
+            ...monthlyRent,
+            id: 'tx-shopping',
+            description: 'Hypermarket',
+            decryptedDescription: 'Hypermarket',
+            amount: -2500,
+            currency_code: 'EUR',
+            category_id: null,
+            is_split: true,
+            split_count: 2,
+            splits: [
+                {
+                    id: 'split-2',
+                    transaction_id: 'tx-shopping',
+                    category_id: 'home',
+                    category: null,
+                    amount: -1000,
+                    position: 1,
+                },
+                {
+                    id: 'split-1',
+                    transaction_id: 'tx-shopping',
+                    category_id: 'food',
+                    category: null,
+                    amount: -1500,
+                    position: 0,
+                },
+            ],
+        };
+
+        beforeEach(() => {
+            vi.mocked(transactionSyncService.create).mockResolvedValue({
+                id: 'tx-new',
+            } as never);
+        });
+
+        it('fills a duplicate in from the original, dated today', async () => {
+            renderCreateDialog({
+                accounts: [checkingAccount, savingsAccount],
+                categories: [groceries],
+                automationRules: [{ id: 'rule-1' } as AutomationRule],
+                duplicateFrom: monthlyRent,
+            });
+
+            expect(screen.getByTestId('account-value')).toHaveAttribute(
+                'data-value',
+                'account-2',
+            );
+
+            fireEvent.click(screen.getByTestId('submit-transaction'));
+
+            await waitFor(() => {
+                expect(transactionSyncService.create).toHaveBeenCalledWith(
+                    expect.objectContaining({
+                        account_id: 'account-2',
+                        description: 'Rent',
+                        amount: -85000,
+                        currency_code: 'USD',
+                        category_id: 'category-1',
+                        label_ids: ['label-1'],
+                        notes: 'Flat on Main St',
+                        transaction_date: todayDateString(),
+                        source: 'manually_created',
+                        splits: undefined,
+                    }),
+                    { updateBalance: true },
+                );
+            });
+            // The copy keeps what the user settled on; no rule gets a say.
+            expect(evaluateRulesForNewTransaction).not.toHaveBeenCalled();
+            expect(captureEvent).toHaveBeenCalledWith(
+                'transaction_created',
+                expect.objectContaining({
+                    origin: 'duplicate',
+                    category_chip_changed: false,
+                }),
+            );
+        });
+
+        it('falls back to the usual account when the original one is gone', () => {
+            renderCreateDialog({ duplicateFrom: monthlyRent });
+
+            expect(screen.getByTestId('account-value')).toHaveAttribute(
+                'data-value',
+                'account-1',
+            );
+        });
+
+        it('treats what comes after a duplicate as a transaction of its own', async () => {
+            renderCreateDialog({
+                accounts: [checkingAccount, savingsAccount],
+                automationRules: [{ id: 'rule-1' } as AutomationRule],
+                duplicateFrom: monthlyRent,
+            });
+
+            fireEvent.click(screen.getByTestId('submit-and-add-another'));
+            await waitFor(() => {
+                expect(captureEvent).toHaveBeenCalledTimes(1);
+            });
+            await fillAndSubmit('submit-transaction');
+            await waitFor(() => {
+                expect(captureEvent).toHaveBeenCalledTimes(2);
+            });
+
+            expect(evaluateRulesForNewTransaction).toHaveBeenCalledTimes(1);
+            expect(
+                vi.mocked(captureEvent).mock.calls.map(([, props]) => props),
+            ).toEqual([
+                expect.objectContaining({ origin: 'duplicate' }),
+                expect.objectContaining({ origin: 'full_dialog' }),
+            ]);
+        });
+
+        it('copies the split lines, in order, and opens on them', async () => {
+            renderCreateDialog({
+                accounts: [checkingAccount, savingsAccount],
+                categories: splitCategories,
+                duplicateFrom: splitShopping,
+            });
+
+            // The form cannot collapse over lines in progress.
+            expect(screen.getByTestId('split-category-0')).toBeInTheDocument();
+            expect(
+                screen.queryByTestId('toggle-more-options'),
+            ).not.toBeInTheDocument();
+            expect(
+                screen.queryByTestId('category-chip'),
+            ).not.toBeInTheDocument();
+
+            fireEvent.click(screen.getByTestId('submit-transaction'));
+
+            await waitFor(() => {
+                expect(transactionSyncService.create).toHaveBeenCalledOnce();
+            });
+            const payload = vi.mocked(transactionSyncService.create).mock
+                .calls[0][0];
+            expect(payload).toMatchObject({
+                account_id: 'account-2',
+                description: 'Hypermarket',
+                amount: -2500,
+                category_id: null,
+                label_ids: ['label-1'],
+                notes: 'Flat on Main St',
+                transaction_date: todayDateString(),
+            });
+            expect(payload.splits).toEqual([
+                { category_id: 'food', amount: -1500, position: 0 },
+                { category_id: 'home', amount: -1000, position: 1 },
+            ]);
+            expect(
+                payload.splits?.reduce((sum, line) => sum + line.amount, 0),
+            ).toBe(payload.amount);
+            expect(captureEvent).toHaveBeenCalledWith(
+                'transaction_created',
+                expect.objectContaining({
+                    origin: 'duplicate',
+                    expanded: true,
+                }),
+            );
+        });
+
+        it('drops the copied lines when adding another after it', async () => {
+            renderCreateDialog({
+                accounts: [checkingAccount, savingsAccount],
+                categories: splitCategories,
+                duplicateFrom: splitShopping,
+            });
+
+            fireEvent.click(screen.getByTestId('submit-and-add-another'));
+
+            await waitFor(() => {
+                expect(transactionSyncService.create).toHaveBeenCalledOnce();
+            });
+            expect(
+                vi.mocked(transactionSyncService.create).mock.calls[0][0]
+                    .splits,
+            ).toHaveLength(2);
+            await waitFor(() => {
+                expect(
+                    screen.getByRole('button', { name: 'Split transaction' }),
+                ).toBeInTheDocument();
+            });
+
+            await fillAndSubmit('submit-transaction');
+            await waitFor(() => {
+                expect(transactionSyncService.create).toHaveBeenCalledTimes(2);
+            });
+            expect(
+                vi.mocked(transactionSyncService.create).mock.calls[1][0]
+                    .splits,
+            ).toBeUndefined();
+        });
+
+        it('copies no lines while splitting is switched off', async () => {
+            inertiaProps.features.transactionSplitting = false;
+
+            renderCreateDialog({
+                accounts: [checkingAccount, savingsAccount],
+                categories: splitCategories,
+                duplicateFrom: splitShopping,
+            });
+
+            expect(
+                screen.getByTestId('toggle-more-options'),
+            ).toBeInTheDocument();
+            fireEvent.click(screen.getByTestId('submit-transaction'));
+
+            await waitFor(() => {
+                expect(transactionSyncService.create).toHaveBeenCalledOnce();
+            });
+            const payload = vi.mocked(transactionSyncService.create).mock
+                .calls[0][0];
+            expect(payload.splits).toBeUndefined();
+            expect(payload.category_id).toBeNull();
+        });
+
+        it('sends no balance update when the original sits on a credit card', async () => {
+            const creditCard = {
+                ...checkingAccount,
+                id: 'account-card',
+                name: 'Visa',
+                type: 'credit_card' as const,
+            };
+
+            renderCreateDialog({
+                accounts: [checkingAccount, creditCard],
+                categories: splitCategories,
+                duplicateFrom: {
+                    ...splitShopping,
+                    account_id: 'account-card',
+                },
+            });
+
+            fireEvent.click(screen.getByTestId('submit-transaction'));
+
+            await waitFor(() => {
+                expect(transactionSyncService.create).toHaveBeenCalledWith(
+                    expect.objectContaining({ account_id: 'account-card' }),
+                    { updateBalance: false },
+                );
+            });
+        });
+    });
+
+    describe('keyboard shortcuts', () => {
+        let platform: ReturnType<typeof vi.spyOn> | null = null;
+
+        function onPlatform(name: string) {
+            platform = vi
+                .spyOn(Navigator.prototype, 'platform', 'get')
+                .mockReturnValue(name);
+        }
+
+        afterEach(() => {
+            platform?.mockRestore();
+            platform = null;
+        });
+
+        function renderEditDialog(
+            transaction: DecryptedTransaction = manualTransaction,
+        ) {
+            return render(
+                <EditTransactionDialog
+                    transaction={transaction}
+                    categories={[]}
+                    accounts={[checkingAccount]}
+                    banks={[]}
+                    labels={[]}
+                    open
+                    onOpenChange={vi.fn()}
+                    onSuccess={vi.fn()}
+                    mode="edit"
+                />,
+            );
+        }
+
+        function pressSave(target: Element) {
+            fireEvent.keyDown(target, { key: 'Enter', ctrlKey: true });
+        }
+
+        it('saves with Ctrl+Enter while typing the description', async () => {
+            vi.mocked(transactionSyncService.create).mockResolvedValue({
+                id: 'tx-new',
+            } as never);
+            renderCreateDialog();
+            fillDescriptionAndAmount();
+
+            pressSave(screen.getByPlaceholderText('Transaction description'));
+
+            await waitFor(() => {
+                expect(transactionSyncService.create).toHaveBeenCalledWith(
+                    expect.objectContaining({
+                        description: 'Dinner',
+                        amount: -2500,
+                    }),
+                    expect.anything(),
+                );
+            });
+        });
+
+        it('saves with ⌘⏎ on a Mac while typing a note', async () => {
+            onPlatform('MacIntel');
+            renderEditDialog({ ...manualTransaction, decryptedNotes: 'Lunch' });
+            const notes = screen.getByPlaceholderText('Add notes...');
+
+            fireEvent.change(notes, { target: { value: 'Lunch with Ana' } });
+            fireEvent.keyDown(notes, { key: 'Enter', metaKey: true });
+
+            await waitFor(() => {
+                expect(transactionSyncService.update).toHaveBeenCalledWith(
+                    'tx-manual',
+                    expect.objectContaining({ notes: 'Lunch with Ana' }),
+                    expect.anything(),
+                );
+            });
+        });
+
+        it('saves an edit with Ctrl+Enter the way Save Changes does', async () => {
+            renderEditDialog();
+            const amountInput = screen.getByLabelText('Amount');
+            fireEvent.change(amountInput, { target: { value: '30' } });
+            fireEvent.blur(amountInput);
+
+            pressSave(amountInput);
+
+            await waitFor(() => {
+                expect(transactionSyncService.update).toHaveBeenCalledWith(
+                    'tx-manual',
+                    expect.objectContaining({ amount: -3000 }),
+                    { updateBalance: true },
+                );
+            });
+            expect(transactionSyncService.update).toHaveBeenCalledOnce();
+        });
+
+        it('does not save again while the first save is in flight', async () => {
+            let finishSaving: (value: unknown) => void = () => {};
+            vi.mocked(transactionSyncService.create).mockReturnValue(
+                new Promise((resolve) => {
+                    finishSaving = resolve;
+                }) as never,
+            );
+            renderCreateDialog();
+            fillDescriptionAndAmount();
+            const description = screen.getByPlaceholderText(
+                'Transaction description',
+            );
+
+            pressSave(description);
+            await waitFor(() => {
+                expect(screen.getByTestId('submit-transaction')).toBeDisabled();
+            });
+            // "Saving..." drops the chip, since the keys do nothing meanwhile.
+            expect(screen.getByTestId('submit-transaction')).toHaveTextContent(
+                /^Saving\.\.\.$/,
+            );
+            pressSave(description);
+
+            expect(transactionSyncService.create).toHaveBeenCalledTimes(1);
+
+            finishSaving({ id: 'tx-new' });
+            await waitFor(() => {
+                expect(
+                    screen.getByTestId('submit-transaction'),
+                ).not.toBeDisabled();
+            });
+        });
+
+        it('shows the save shortcut inside the submit button, the Mac way on a Mac', () => {
+            onPlatform('MacIntel');
+            renderCreateDialog();
+
+            const submit = screen.getByTestId('submit-transaction');
+
+            expect(submit).toHaveTextContent('Create Transaction⌘⏎');
+            expect(submit).toHaveAttribute('aria-keyshortcuts', 'Meta+Enter');
+            // The chip is not read out as part of the button's name.
+            expect(
+                screen.getByRole('button', { name: 'Create Transaction' }),
+            ).toBe(submit);
+        });
+
+        it('shows it with Ctrl on Windows and Linux', () => {
+            onPlatform('Win32');
+            renderEditDialog();
+
+            const submit = screen.getByTestId('submit-transaction');
+
+            expect(submit).toHaveTextContent('Save ChangesCtrl ⏎');
+            expect(submit).toHaveAttribute(
+                'aria-keyshortcuts',
+                'Control+Enter',
+            );
+        });
+
+        it('opens the notes with N, focused and without typing the n', () => {
+            renderEditDialog();
+            const addNote = screen.getByRole('button', { name: /Add note/ });
+
+            expect(addNote).toHaveTextContent('Add noteN');
+            expect(addNote).toHaveAttribute('aria-keyshortcuts', 'N');
+
+            const notPrevented = fireEvent.keyDown(document.body, {
+                key: 'n',
+            });
+
+            expect(notPrevented).toBe(false);
+            expect(screen.getByPlaceholderText('Add notes...')).toHaveFocus();
+            expect(
+                screen.queryByRole('button', { name: /Add note/ }),
+            ).not.toBeInTheDocument();
+        });
+
+        it('focuses notes already open with N, the caret after the text', () => {
+            renderEditDialog({ ...manualTransaction, decryptedNotes: 'Flat' });
+            const notes = screen.getByPlaceholderText(
+                'Add notes...',
+            ) as HTMLTextAreaElement;
+            // Clicked at the start earlier, then left for another field.
+            notes.setSelectionRange(0, 0);
+
+            fireEvent.keyDown(document.body, { key: 'n' });
+
+            expect(notes).toHaveFocus();
+            expect(notes.selectionStart).toBe('Flat'.length);
+        });
+
+        it('leaves an n typed into a field alone', () => {
+            renderEditDialog();
+            const description = screen.getByPlaceholderText(
+                'Transaction description',
+            );
+            description.focus();
+
+            const notPrevented = fireEvent.keyDown(description, { key: 'n' });
+
+            expect(notPrevented).toBe(true);
+            expect(
+                screen.queryByPlaceholderText('Add notes...'),
+            ).not.toBeInTheDocument();
+        });
+
+        it('has no N while the collapsed create form hides the notes', () => {
+            renderCreateDialog();
+
+            expect(fireEvent.keyDown(document.body, { key: 'n' })).toBe(true);
+
+            fireEvent.click(screen.getByTestId('toggle-more-options'));
+            expect(
+                screen.getByRole('button', { name: /Add note/ }),
+            ).toBeInTheDocument();
+            fireEvent.keyDown(document.body, { key: 'n' });
+            expect(screen.getByPlaceholderText('Add notes...')).toHaveFocus();
+        });
+
+        it('focuses the notes when Add note is clicked', () => {
+            renderEditDialog();
+
+            fireEvent.click(screen.getByRole('button', { name: /Add note/ }));
+
+            expect(screen.getByPlaceholderText('Add notes...')).toHaveFocus();
+        });
+
+        describe('with a split in progress', () => {
+            const splitCategories = [
+                { id: 'food', name: 'Food', type: 'expense' },
+                { id: 'home', name: 'Home', type: 'expense' },
+            ] as Category[];
+
+            function startSplitOnFilledForm() {
+                vi.mocked(transactionSyncService.create).mockResolvedValue({
+                    id: 'tx-new',
+                } as never);
+                renderCreateDialog({ categories: splitCategories });
+                fillDescriptionAndAmount();
+                fireEvent.click(screen.getByTestId('toggle-more-options'));
+                fireEvent.click(
+                    screen.getByRole('button', { name: 'Split transaction' }),
+                );
+            }
+
+            it('leaves an n typed into a split line alone, and opens the notes from outside it', () => {
+                startSplitOnFilledForm();
+                const lineAmount = screen.getByLabelText('Amount 1');
+                lineAmount.focus();
+
+                expect(fireEvent.keyDown(lineAmount, { key: 'n' })).toBe(true);
+                expect(
+                    screen.queryByPlaceholderText('Add notes...'),
+                ).not.toBeInTheDocument();
+                expect(lineAmount).toHaveFocus();
+
+                const lineCategory = screen.getByTestId('split-category-0');
+                lineCategory.focus();
+
+                expect(fireEvent.keyDown(lineCategory, { key: 'n' })).toBe(
+                    true,
+                );
+                expect(
+                    screen.queryByPlaceholderText('Add notes...'),
+                ).not.toBeInTheDocument();
+                expect(lineCategory).toHaveFocus();
+
+                // The same form answers N once no field holds the focus.
+                lineCategory.blur();
+                expect(fireEvent.keyDown(document.body, { key: 'n' })).toBe(
+                    false,
+                );
+                expect(
+                    screen.getByPlaceholderText('Add notes...'),
+                ).toHaveFocus();
+            });
+
+            it('refuses Ctrl+Enter on an incomplete split, as Save would', async () => {
+                startSplitOnFilledForm();
+
+                pressSave(screen.getByLabelText('Amount 2'));
+
+                await waitFor(() => {
+                    expect(toast.error).toHaveBeenCalledWith(
+                        'Complete the split before saving',
+                    );
+                });
+                expect(transactionSyncService.create).not.toHaveBeenCalled();
+            });
+
+            it('saves the split lines with Ctrl+Enter once they add up', async () => {
+                startSplitOnFilledForm();
+                fireEvent.click(
+                    within(screen.getByTestId('split-category-0')).getByText(
+                        'Food',
+                    ),
+                );
+                fireEvent.click(
+                    within(screen.getByTestId('split-category-1')).getByText(
+                        'Home',
+                    ),
+                );
+                for (const [label, value] of [
+                    ['Amount 1', '-15'],
+                    ['Amount 2', '-10'],
+                ]) {
+                    const input = screen.getByLabelText(label);
+                    fireEvent.change(input, { target: { value } });
+                    fireEvent.blur(input);
+                }
+
+                pressSave(screen.getByLabelText('Amount 2'));
+
+                await waitFor(() => {
+                    expect(transactionSyncService.create).toHaveBeenCalledWith(
+                        expect.objectContaining({
+                            amount: -2500,
+                            category_id: null,
+                            splits: [
+                                {
+                                    category_id: 'food',
+                                    amount: -1500,
+                                    position: 0,
+                                },
+                                {
+                                    category_id: 'home',
+                                    amount: -1000,
+                                    position: 1,
+                                },
+                            ],
+                        }),
+                        { updateBalance: true },
+                    );
+                });
+            });
+        });
     });
 });

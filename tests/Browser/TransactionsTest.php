@@ -26,7 +26,12 @@ it('can view transactions page', function () {
 it('can open add transaction dialog', function () {
     $user = User::factory()->onboarded()->create();
     Category::factory()->create(['user_id' => $user->id]);
-    Account::factory()->create(['user_id' => $user->id]);
+    // Pinned: the factory picks a random type, and the add button is
+    // off for a user whose only account cannot hold a transaction.
+    Account::factory()->create([
+        'user_id' => $user->id,
+        'type' => 'checking',
+    ]);
 
     actingAs($user);
 
@@ -36,6 +41,25 @@ it('can open add transaction dialog', function () {
         ->click('Transaction')
         ->wait(0.5)
         ->assertSee('Create Transaction')
+        ->assertNoJavascriptErrors();
+});
+
+it('offers adding a transaction above the list, not in the app header', function () {
+    $user = User::factory()->onboarded()->create();
+    Account::factory()->create([
+        'user_id' => $user->id,
+        'type' => 'checking',
+    ]);
+
+    actingAs($user);
+
+    visit('/dashboard')
+        ->assertNotPresent('[data-testid="add-transaction-button"]')
+        ->assertNoJavascriptErrors();
+
+    visit('/transactions')
+        ->assertPresent('[data-testid="add-transaction-button"]')
+        ->assertNotPresent('[data-testid="page-header"] [data-testid="add-transaction-button"]')
         ->assertNoJavascriptErrors();
 });
 
@@ -61,6 +85,9 @@ it('shows newly created labels in the transaction label dropdown without refresh
     $page->assertSee('Transactions')
         ->click('Transaction')
         ->waitForText('Create Transaction', 5)
+        // The account, category and label fields open behind the reveal.
+        ->click('[data-testid="toggle-more-options"]')
+        ->wait(0.5)
         ->click('[data-testid="label-combobox-trigger"]')
         ->fill('input[placeholder="Search or create labels..."]', 'Padel')
         ->waitForText('Create "Padel"', 5)
@@ -103,6 +130,9 @@ it('can create a transaction', function () {
         ->assertSee('Create Transaction')
         ->fill('description', 'Test Transaction')
         ->wait(1)
+        // The account, category and label fields open behind the reveal.
+        ->click('[data-testid="toggle-more-options"]')
+        ->wait(0.5)
         ->click('[data-testid="account-select"]')
         ->wait(2)
         ->waitForText('My Checking', 5)
@@ -237,6 +267,53 @@ it('can edit an existing transaction from the list', function () {
     expect($updatedTransaction->description)->toBe('Updated dinner transaction');
     expect($updatedTransaction->notes)->toBe('Updated note for browser test');
     expect($updatedTransaction->category_id)->toBe($replacementCategory->id);
+});
+
+it('opens the notes and saves an edit from the keyboard', function () {
+    $user = User::factory()->onboarded()->create();
+    $bank = Bank::factory()->create(['name' => 'Shortcut Bank']);
+    $category = Category::factory()->create([
+        'user_id' => $user->id,
+        'name' => 'Eating Out',
+    ]);
+    $account = Account::factory()->create([
+        'user_id' => $user->id,
+        'bank_id' => $bank->id,
+        'name' => 'Shortcut Account',
+        'currency_code' => 'USD',
+        'type' => 'checking',
+    ]);
+
+    $transaction = Transaction::factory()->plaintext()->create([
+        'user_id' => $user->id,
+        'account_id' => $account->id,
+        'category_id' => $category->id,
+        'description' => 'Keyboard lunch',
+        'amount' => -1500,
+        'notes' => null,
+        'source' => 'manually_created',
+    ]);
+
+    actingAs($user);
+
+    $page = visit('/transactions');
+
+    $page->waitForText('Keyboard lunch', 10)
+        ->click('Keyboard lunch')
+        ->wait(1)
+        ->assertSee('Edit Transaction')
+        // N reveals the notes and puts the cursor in them, without typing the n.
+        ->keys('[data-slot="dialog-content"]', 'n')
+        ->assertScript('document.activeElement.id', 'notes')
+        ->assertValue('#notes', '')
+        ->fill('#notes', 'Paid with the team card')
+        // ⌘⏎ on a Mac, Ctrl+Enter elsewhere: whichever the browser runs on.
+        ->keys('#notes', 'ControlOrMeta+Enter')
+        ->wait(3)
+        ->assertDontSee('Edit Transaction')
+        ->assertNoJavascriptErrors();
+
+    expect($transaction->fresh()->notes)->toBe('Paid with the team card');
 });
 
 it('can delete a transaction from the actions menu', function () {

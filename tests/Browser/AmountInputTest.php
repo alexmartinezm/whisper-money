@@ -9,7 +9,12 @@ use function Pest\Laravel\actingAs;
 it('formats amount on blur', function () {
     $user = User::factory()->onboarded()->create();
     $category = Category::factory()->create(['user_id' => $user->id]);
-    $account = Account::factory()->create(['user_id' => $user->id]);
+    // Pinned: the factory picks a random type, and the add button is
+    // off for a user whose only account cannot hold a transaction.
+    $account = Account::factory()->create([
+        'user_id' => $user->id,
+        'type' => 'checking',
+    ]);
 
     actingAs($user);
 
@@ -27,7 +32,12 @@ it('formats amount on blur', function () {
 it('accepts comma as decimal separator', function () {
     $user = User::factory()->onboarded()->create();
     $category = Category::factory()->create(['user_id' => $user->id]);
-    $account = Account::factory()->create(['user_id' => $user->id]);
+    // Pinned: the factory picks a random type, and the add button is
+    // off for a user whose only account cannot hold a transaction.
+    $account = Account::factory()->create([
+        'user_id' => $user->id,
+        'type' => 'checking',
+    ]);
 
     actingAs($user);
 
@@ -65,6 +75,9 @@ it('can create a transaction with amount input', function () {
         ->fill('#description', 'Test Transaction')
         ->wait(0.5)
         ->fill('#amount', '123.45')
+        ->wait(0.5)
+        // The account, category and label fields open behind the reveal.
+        ->click('[data-testid="toggle-more-options"]')
         ->wait(0.5)
         ->click('[data-testid="account-select"]')
         ->wait(2)
@@ -112,6 +125,9 @@ it('formats amount when pressing enter', function () {
         ->fill('#description', 'Test Transaction Enter')
         ->fill('#amount', '99.99')
         ->wait(0.5)
+        // The account, category and label fields open behind the reveal.
+        ->click('[data-testid="toggle-more-options"]')
+        ->wait(0.5)
         ->click('[data-testid="account-select"]')
         ->wait(2)
         ->waitForText('Test Checking', 5)
@@ -156,6 +172,9 @@ it('accepts negative amounts', function () {
         ->wait(1)
         ->fill('#description', 'Test Negative Amount')
         ->fill('#amount', '-50.00')
+        // The account, category and label fields open behind the reveal.
+        ->click('[data-testid="toggle-more-options"]')
+        ->wait(0.5)
         ->click('[data-testid="account-select"]')
         ->wait(2)
         ->waitForText('Test Checking', 5)

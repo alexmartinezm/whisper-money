@@ -36,8 +36,28 @@ vi.mock('@inertiajs/react', () => ({
     ),
 }));
 
-vi.mock('./import-transactions-drawer', () => ({
-    ImportTransactionsDrawer: () => null,
+let addButtonLabelCreated: ((label: unknown) => void) | undefined;
+
+vi.mock('./add-transaction-button', () => ({
+    AddTransactionButton: ({
+        hasTransactionalAccounts,
+        onSaved,
+        onLabelCreated,
+    }: {
+        hasTransactionalAccounts: boolean;
+        onSaved?: () => void;
+        onLabelCreated?: (label: unknown) => void;
+    }) => {
+        addButtonLabelCreated = onLabelCreated;
+
+        return (
+            <button
+                aria-label="Add transaction"
+                aria-disabled={!hasTransactionalAccounts}
+                onClick={onSaved}
+            />
+        );
+    },
 }));
 
 vi.mock('./transaction-analysis-drawer', () => ({
@@ -62,14 +82,16 @@ function renderMenu(
     filters: TransactionFilters,
     transactions: DecryptedTransaction[] = [],
     onReEvaluateComplete?: () => void,
+    hasTransactionalAccounts = true,
+    onTransactionSaved?: () => void,
+    onLabelCreated?: (label: unknown) => void,
 ) {
     return render(
         <TransactionActionsMenu
-            categories={[]}
-            accounts={[]}
-            banks={[]}
-            onAddTransaction={vi.fn()}
             transactions={transactions}
+            hasTransactionalAccounts={hasTransactionalAccounts}
+            onTransactionSaved={onTransactionSaved}
+            onLabelCreated={onLabelCreated}
             filters={filters}
             onReEvaluateComplete={onReEvaluateComplete}
         />,
@@ -144,6 +166,50 @@ describe('TransactionActionsMenu action bar layout', () => {
         ]);
     });
 
+    it('leaves importing to the app header', async () => {
+        renderMenu(emptyFilters);
+
+        const menu = await openMoreActionsMenu();
+        expect(
+            within(menu).queryByText('Import Transactions'),
+        ).not.toBeInTheDocument();
+    });
+
+    it('keeps adding off while the user owns no account to file one in', () => {
+        renderMenu(emptyFilters, [], undefined, false);
+
+        expect(
+            screen.getByRole('button', { name: 'Add transaction' }),
+        ).toHaveAttribute('aria-disabled', 'true');
+    });
+
+    it('hands the list refresh to the add button', () => {
+        const onTransactionSaved = vi.fn();
+        renderMenu(emptyFilters, [], undefined, true, onTransactionSaved);
+
+        fireEvent.click(
+            screen.getByRole('button', { name: 'Add transaction' }),
+        );
+
+        expect(onTransactionSaved).toHaveBeenCalledTimes(1);
+    });
+
+    it('hands the label hand-off to the add button', () => {
+        const onLabelCreated = vi.fn();
+        renderMenu(
+            emptyFilters,
+            [],
+            undefined,
+            true,
+            undefined,
+            onLabelCreated,
+        );
+
+        addButtonLabelCreated?.({ id: 'label-1' });
+
+        expect(onLabelCreated).toHaveBeenCalledWith({ id: 'label-1' });
+    });
+
     it('keeps add transaction in the bar and moves categorize to the dropdown on mobile', async () => {
         isMobile = true;
         const { container } = renderMenu(emptyFilters, [
@@ -162,11 +228,7 @@ describe('TransactionActionsMenu action bar layout', () => {
             [...menu.querySelectorAll('[role="menuitem"]')].map(
                 (item) => item.textContent,
             ),
-        ).toEqual([
-            'Categorize2',
-            'Import Transactions',
-            'Update categories automatically',
-        ]);
+        ).toEqual(['Categorize2', 'Update categories automatically']);
         expect(
             within(menu).getByText('Categorize').closest('a'),
         ).toHaveAttribute('href', '/transactions/categorize');
