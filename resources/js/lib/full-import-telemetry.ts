@@ -1,3 +1,4 @@
+import { valueKind } from '@/lib/column-shape';
 import {
     IGNORED_KEY,
     OWN_TRANSFER_KEY,
@@ -16,9 +17,9 @@ import { isAxiosError } from 'axios';
 
 /**
  * What the full import tells PostHog and Sentry. Everything here is counts,
- * enums, booleans and, for a file nobody recognised, its column headers:
- * never a cell of the file, a file name, or the name of an account, a
- * category or a bank.
+ * enums, booleans and, for a file nobody recognised, the names of its
+ * columns: never a cell of the file, a file name, or the name of an account,
+ * a category or a bank.
  */
 
 /** Where the wizard was opened from. */
@@ -47,28 +48,48 @@ export function fileExtension(fileName: string): string {
               .slice(0, 10);
 }
 
-/** What `full_import_file_parsed` says about a file that was read. */
+/**
+ * The headers of an unrecognised file that name a column. A file without a
+ * header row has none: the reader took its first movement for them. A
+ * header that reads as a value on its own (a date, an amount, an IBAN…) is
+ * a cell too, and is left out.
+ */
+function columnNames(file: {
+    headers: string[];
+    hasHeaderRow: boolean;
+}): string[] {
+    if (!file.hasHeaderRow) {
+        return [];
+    }
+
+    return file.headers
+        .filter((header) => valueKind(header) === null)
+        .slice(0, MAX_HEADERS)
+        .map((header) => header.slice(0, MAX_HEADER_LENGTH));
+}
+
+/**
+ * What `full_import_file_parsed` says about a file that was read: for an
+ * unrecognised one, the names of its columns too, and no `headers` at all
+ * when none is left.
+ */
 export function fileParsedProperties(
     file: { name: string },
-    headers: string[],
+    read: { headers: string[]; hasHeaderRow: boolean },
     rows: { count: number; blank: number },
     source: FullImportSource,
     recognized: boolean,
 ): Record<string, unknown> {
+    const headers = recognized ? [] : columnNames(read);
+
     return {
         recognized,
         source,
         extension: fileExtension(file.name),
         rows: rows.count,
         skipped_blank_rows: rows.blank,
-        columns_count: headers.length,
-        ...(recognized
-            ? {}
-            : {
-                  headers: headers
-                      .slice(0, MAX_HEADERS)
-                      .map((header) => header.slice(0, MAX_HEADER_LENGTH)),
-              }),
+        columns_count: read.headers.length,
+        ...(headers.length > 0 ? { headers } : {}),
     };
 }
 

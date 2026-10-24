@@ -89,7 +89,7 @@ describe('fileParsedProperties', () => {
         expect(
             fileParsedProperties(
                 { name: 'My Bank Export.CSV' },
-                ['Fecha', 'Importe'],
+                { headers: ['Fecha', 'Importe'], hasHeaderRow: true },
                 { count: 12, blank: 1 },
                 'banktrack',
                 true,
@@ -111,7 +111,7 @@ describe('fileParsedProperties', () => {
         );
         const properties = fileParsedProperties(
             { name: 'export.xlsx' },
-            headers,
+            { headers, hasHeaderRow: true },
             { count: 3, blank: 0 },
             'generic',
             false,
@@ -124,6 +124,64 @@ describe('fileParsedProperties', () => {
             ),
         ).toBe(true);
         expect(properties.columns_count).toBe(45);
+    });
+
+    it('sends no headers of a file without a header row', () => {
+        // The reader took the first movement for the headers.
+        const properties = fileParsedProperties(
+            { name: 'export.csv' },
+            {
+                headers: ['01/12/2025', 'MERCADONA VALENCIA', '-45,20'],
+                hasHeaderRow: false,
+            },
+            { count: 3, blank: 0 },
+            'generic',
+            false,
+        );
+
+        expect(properties).toEqual({
+            recognized: false,
+            source: 'generic',
+            extension: 'csv',
+            rows: 3,
+            skipped_blank_rows: 0,
+            columns_count: 3,
+        });
+    });
+
+    it('leaves out a header that reads as a value', () => {
+        const properties = fileParsedProperties(
+            { name: 'export.csv' },
+            {
+                headers: [
+                    'Fecha valor',
+                    '01/12/2025',
+                    'Importe (EUR)',
+                    '-45,20',
+                    'ES9121000418450200051332',
+                    'EUR',
+                ],
+                hasHeaderRow: true,
+            },
+            { count: 3, blank: 0 },
+            'generic',
+            false,
+        );
+
+        expect(properties.headers).toEqual(['Fecha valor', 'Importe (EUR)']);
+        expect(properties.columns_count).toBe(6);
+    });
+
+    it('sends no headers field when every header is a value', () => {
+        const properties = fileParsedProperties(
+            { name: 'export.csv' },
+            { headers: ['01/12/2025', '-45,20'], hasHeaderRow: true },
+            { count: 3, blank: 0 },
+            'generic',
+            false,
+        );
+
+        expect(properties).not.toHaveProperty('headers');
     });
 
     it('keeps the extension and nothing of the name', () => {

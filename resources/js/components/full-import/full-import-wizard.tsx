@@ -499,7 +499,7 @@ export function FullImportWizard({
             'full_import_file_parsed',
             fileParsedProperties(
                 file,
-                read.headers,
+                read,
                 {
                     count: read.rows.length,
                     blank: countBlankRows(read.rowNumbers),

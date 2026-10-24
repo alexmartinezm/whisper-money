@@ -544,6 +544,42 @@ describe('FullImportWizard', () => {
         expect(sent('full_import_opened')).toEqual([{ entry: 'onboarding' }]);
     });
 
+    it('sends no headers of a file without a header row', async () => {
+        api.fetchImportContext.mockResolvedValue(context());
+        render(<FullImportWizard variant="page" onClose={vi.fn()} />);
+
+        await screen.findByText('Where are you coming from?');
+        fireEvent.change(screen.getByTestId('full-import-file-input'), {
+            target: {
+                files: [
+                    new File(
+                        [
+                            '2026-01-01,-5.25,Secret Coffee Shop\n2026-01-02,-7.50,Hidden Bakery\n',
+                        ],
+                        'Juana Pérez export.csv',
+                        { type: 'text/csv' },
+                    ),
+                ],
+            },
+        });
+
+        await waitFor(() =>
+            expect(sent('full_import_file_parsed')).toHaveLength(1),
+        );
+
+        expect(sent('full_import_file_parsed')[0]).toEqual({
+            recognized: false,
+            source: 'generic',
+            extension: 'csv',
+            rows: 1,
+            skipped_blank_rows: 0,
+            columns_count: 3,
+        });
+        expect(JSON.stringify(captureEvent.mock.calls)).not.toMatch(
+            /Secret Coffee|Hidden Bakery|5\.25|2026-01-0|Juana/,
+        );
+    });
+
     it('reads an export split into several files as one', async () => {
         const [header, ...rows] = readFileSync(
             'resources/js/lib/__fixtures__/banktrack-sample.csv',
