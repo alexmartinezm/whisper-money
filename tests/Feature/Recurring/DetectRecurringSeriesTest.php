@@ -818,8 +818,8 @@ it('bounds the detection window with plain date comparisons the index can range 
         ->filter(fn (string $sql): bool => str_contains($sql, 'from `transactions`') && str_contains($sql, 'transaction_date'));
     DB::disableQueryLog();
 
-    // date(`transaction_date`) would keep the window off
-    // idx_transactions_budget_lookup (user_id, transaction_date, category_id).
+    // date(`transaction_date`) would keep the window off idx_transactions_budget_lookup
+    // (user_id, deleted_at, transaction_date, id, category_id).
     expect($windowed)->not->toBeEmpty()
         ->each(fn ($sql) => $sql
             ->toContain('`transaction_date` >= ?')

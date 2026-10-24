@@ -17,8 +17,8 @@ return new class extends Migration
      * the transactions list's `transaction_date desc, id desc` order, and
      * `category_id` stays last for index-only reads and category pushdown.
      *
-     * Production gets the index by hand before deploy (see the PR), so this is a
-     * no-op there; elsewhere it builds online and swaps the name in place.
+     * It builds the new shape online and swaps the name in place, and is a no-op
+     * where the index already has its final shape.
      */
     public function up(): void
     {
