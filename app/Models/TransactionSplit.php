@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BumpsDataVersion;
 use Database\Factories\TransactionSplitFactory;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -11,7 +12,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class TransactionSplit extends Model
 {
     /** @use HasFactory<TransactionSplitFactory> */
-    use HasFactory, HasUuids;
+    use BumpsDataVersion, HasFactory, HasUuids;
 
     protected $fillable = ['transaction_id', 'category_id', 'amount', 'position'];
 
@@ -30,5 +31,10 @@ class TransactionSplit extends Model
     public function category(): BelongsTo
     {
         return $this->belongsTo(Category::class);
+    }
+
+    public function dataVersionOwner(): ?Model
+    {
+        return $this->dataVersionOwnerVia('transaction');
     }
 }

@@ -19,6 +19,7 @@ use App\Models\Transaction;
 use App\Models\User;
 use App\Services\Ai\CategoryOverrideHandler;
 use App\Services\Banking\BalanceSyncService;
+use App\Services\Cache\DataVersion;
 use App\Services\ManualBalanceAdjuster;
 use App\Services\Transactions\ReplaceTransactionSplits;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
@@ -535,6 +536,7 @@ class TransactionController extends Controller
         // Silently: editing existing rows is not new spending.
         if ($result['updated_ids'] !== []) {
             ReassignTransactionsToBudgets::dispatch($result['updated_ids'], notify: false);
+            DataVersion::bumpOwnersOf($result['transactions']);
         }
 
         return response()->json([

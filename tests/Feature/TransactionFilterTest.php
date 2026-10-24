@@ -130,8 +130,10 @@ test('a date range lets transactions be read by index instead of scanning the us
     // A handful of rows makes any plan a full scan, so this checks what the
     // index can do for the query rather than which one MySQL picks. The index
     // leads with user_id, so it is on offer either way; what the date filter
-    // decides is whether the range narrows the lookup past user_id. Forcing
-    // the index makes the plan show which of its parts the lookup reaches.
+    // decides is whether the range narrows the lookup past user_id and the
+    // soft-delete scope's `deleted_at is null`, the equality columns ahead of
+    // the date. Forcing the index makes the plan show which of its parts the
+    // lookup reaches.
     Transaction::factory()->plaintext()->count(3)->create([
         'user_id' => $this->user->id,
         'account_id' => $this->account->id,
@@ -153,7 +155,7 @@ test('a date range lets transactions be read by index instead of scanning the us
 
     expect(explode(',', (string) $plan->possible_keys))->toContain('idx_transactions_budget_lookup')
         ->and($access['access_type'])->toBe('range')
-        ->and($access['used_key_parts'])->toBe(['user_id', 'transaction_date']);
+        ->and($access['used_key_parts'])->toBe(['user_id', 'deleted_at', 'transaction_date']);
 });
 
 test('a split transaction on a range boundary day is filtered by its lines', function () {

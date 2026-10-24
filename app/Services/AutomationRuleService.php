@@ -7,6 +7,7 @@ use App\Jobs\ReassignTransactionsToBudgets;
 use App\Models\AutomationRule;
 use App\Models\LabelTransaction;
 use App\Models\Transaction;
+use App\Services\Cache\DataVersion;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -137,6 +138,7 @@ class AutomationRuleService
         // A note never changes which budget counts a transaction, so it does not
         // earn a reassignment — but it does count as a change for the caller.
         $this->reassignInBatches(array_merge($categorizedIds, $labelledIds));
+        DataVersion::bumpOwnerOf($rule);
 
         return count(array_unique(array_merge($categorizedIds, $notedIds, $labelledIds)));
     }
@@ -445,6 +447,7 @@ class AutomationRuleService
 
             if ($locked->isDirty()) {
                 $locked->saveQuietly();
+                DataVersion::bumpOwnerOf($locked);
             }
 
             $labelled = $this->applyLabelActions($locked, $rule);

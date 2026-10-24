@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\TransactionSplit;
+use App\Services\Cache\DataVersion;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Validation\ValidationException;
@@ -472,6 +473,7 @@ class CategoryTree
                 'type' => $category->type,
                 'cashflow_direction' => $category->cashflow_direction,
             ]);
+        DataVersion::bumpOwnerOf($category);
     }
 
     /**
@@ -526,6 +528,7 @@ class CategoryTree
             ->where('user_id', $category->user_id)
             ->whereIn('id', $ids)
             ->delete();
+        DataVersion::bumpOwnerOf($category);
 
         return ['categories' => $deleted, 'transactions' => $uncategorized];
     }

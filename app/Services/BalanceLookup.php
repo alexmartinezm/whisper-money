@@ -4,24 +4,26 @@ namespace App\Services;
 
 use App\Models\Account;
 use App\Models\AccountBalance;
+use App\Support\DatedSeries;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
+use stdClass;
 
 class BalanceLookup
 {
     /**
-     * Sorted balance records grouped by account ID.
-     * Each account maps to a list of ['date' => string, 'balance' => int, 'invested_amount' => ?int].
+     * Each account's recorded balances by day, keyed by account ID.
      *
-     * @var array<string, list<array{date: string, balance: int, invested_amount: ?int}>>
+     * @var array<string, DatedSeries>
      */
     private array $balancesByAccount = [];
 
     /**
-     * Sorted invested-amount-only records grouped by account ID.
-     * Filters out null invested_amount entries for carry-forward lookup.
+     * Each account's non-null invested amounts by day, keyed by account ID.
+     * The null ones are left out so the newest known amount carries forward
+     * over them.
      *
-     * @var array<string, list<array{date: string, invested_amount: int}>>
+     * @var array<string, DatedSeries>
      */
     private array $investedByAccount = [];
 
@@ -69,6 +71,7 @@ class BalanceLookup
                         ->on('account_balances.balance_date', '=', 'latest.max_date');
                 }
             )
+            ->toBase()
             ->get(['account_balances.account_id', 'account_balances.balance_date', 'account_balances.balance', 'account_balances.invested_amount']);
 
         // Query 2: Get the latest non-null invested_amount before the range start for each account.
@@ -87,14 +90,21 @@ class BalanceLookup
                         ->on('account_balances.balance_date', '=', 'latest_invested.max_date');
                 }
             )
+            ->toBase()
             ->get(['account_balances.account_id', 'account_balances.balance_date', 'account_balances.invested_amount']);
 
-        // Query 2: All balance records within the range.
+        // Query 3: All balance records within the range.
         $rangeRecords = AccountBalance::query()
             ->whereIn('account_id', $accountIdList)
             ->whereBetween('balance_date', [$startDate, $endDate])
             ->orderBy('balance_date')
+            ->toBase()
             ->get(['account_id', 'balance_date', 'balance', 'invested_amount']);
+
+        // Grouped once, so building an account never scans another's rows.
+        $carryForwardRecords = self::rowsByAccount($carryForwardRecords);
+        $investedCarryForwardRecords = self::rowsByAccount($investedCarryForwardRecords);
+        $rangeRecords = self::rowsByAccount($rangeRecords);
 
         // The accounts that only count towards the user's figures as a share of
         // their balance; everything else is read at face value.
@@ -104,56 +114,73 @@ class BalanceLookup
             ->get()
             ->keyBy('id');
 
-        // Build the per-account sorted arrays
         foreach ($accountIdList as $accountId) {
-            $entries = [];
-            $investedEntries = [];
             $account = $sharedAccounts->get($accountId);
             $share = static fn (?int $amount): ?int => $amount === null || $account === null
                 ? $amount
                 : $account->shareOfAmount($amount);
 
-            // Add carry-forward seed
-            $seed = $carryForwardRecords->firstWhere('account_id', $accountId);
-            if ($seed) {
-                $entries[] = [
-                    'date' => $seed->balance_date->toDateString(),
-                    'balance' => $share($seed->balance),
-                    'invested_amount' => $share($seed->invested_amount),
-                ];
-            }
+            // The carry-forward seeds come first: both are dated before the
+            // range, and the range records arrive sorted by date.
+            $inRange = $rangeRecords[$accountId] ?? [];
+            $seed = $carryForwardRecords[$accountId][0] ?? null;
+            $investedSeed = $investedCarryForwardRecords[$accountId][0] ?? null;
 
-            // Add invested carry-forward seed
-            $investedSeed = $investedCarryForwardRecords->firstWhere('account_id', $accountId);
-            if ($investedSeed) {
-                $investedEntries[] = [
-                    'date' => $investedSeed->balance_date->toDateString(),
-                    'invested_amount' => $share($investedSeed->invested_amount),
-                ];
-            }
+            $balanceRows = $seed === null ? $inRange : [$seed, ...$inRange];
+            $investedRows = array_values(array_filter(
+                $investedSeed === null ? $inRange : [$investedSeed, ...$inRange],
+                static fn (stdClass $row): bool => $row->invested_amount !== null,
+            ));
 
-            // Add range records
-            foreach ($rangeRecords->where('account_id', $accountId) as $record) {
-                $dateStr = $record->balance_date->toDateString();
-                $entries[] = [
-                    'date' => $dateStr,
-                    'balance' => $share($record->balance),
-                    'invested_amount' => $share($record->invested_amount),
-                ];
-
-                if ($record->invested_amount !== null) {
-                    $investedEntries[] = [
-                        'date' => $dateStr,
-                        'invested_amount' => $share($record->invested_amount),
-                    ];
-                }
-            }
-
-            $instance->balancesByAccount[$accountId] = $entries;
-            $instance->investedByAccount[$accountId] = $investedEntries;
+            $instance->balancesByAccount[$accountId] = self::seriesOf($balanceRows, 'balance', $share);
+            $instance->investedByAccount[$accountId] = self::seriesOf($investedRows, 'invested_amount', $share);
         }
 
         return $instance;
+    }
+
+    /**
+     * Plain query rows grouped by account ID, each group in the order the
+     * query returned it.
+     *
+     * @param  Collection<int, stdClass>  $rows
+     * @return array<string, list<stdClass>>
+     */
+    private static function rowsByAccount(Collection $rows): array
+    {
+        $grouped = [];
+
+        foreach ($rows as $row) {
+            $grouped[$row->account_id][] = $row;
+        }
+
+        return $grouped;
+    }
+
+    /**
+     * One account's balance rows as a series of one of their columns, scaled
+     * to the owner's share. The columns are NOT NULL, or filtered to non-null
+     * rows by the caller, so the cast never turns a missing figure into 0.
+     *
+     * @param  list<stdClass>  $rows
+     * @param  callable(?int): ?int  $share
+     */
+    private static function seriesOf(array $rows, string $column, callable $share): DatedSeries
+    {
+        return new DatedSeries(
+            array_map(static fn (stdClass $row): string => self::dayOf($row->balance_date), $rows),
+            array_map(static fn (stdClass $row): int => (int) $share((int) $row->{$column}), $rows),
+        );
+    }
+
+    /**
+     * The `Y-m-d` day of a raw DATE column. Its first ten characters are the
+     * day whatever the driver appends to them, which is what the model's
+     * `date` cast used to hand back.
+     */
+    private static function dayOf(mixed $value): string
+    {
+        return substr((string) $value, 0, 10);
     }
 
     /**
@@ -162,19 +189,9 @@ class BalanceLookup
      */
     public function getBalanceAt(string $accountId, Carbon $date): int
     {
-        $dateStr = $date->toDateString();
-        $entries = $this->balancesByAccount[$accountId] ?? [];
+        $balances = $this->balancesByAccount[$accountId] ?? new DatedSeries;
 
-        $result = 0;
-        foreach ($entries as $entry) {
-            if ($entry['date'] <= $dateStr) {
-                $result = $entry['balance'];
-            } else {
-                break;
-            }
-        }
-
-        return $result;
+        return $balances->valueOnOrBefore($date->toDateString()) ?? 0;
     }
 
     /**
@@ -183,18 +200,6 @@ class BalanceLookup
      */
     public function getInvestedAmountAt(string $accountId, Carbon $date): ?int
     {
-        $dateStr = $date->toDateString();
-        $entries = $this->investedByAccount[$accountId] ?? [];
-
-        $result = null;
-        foreach ($entries as $entry) {
-            if ($entry['date'] <= $dateStr) {
-                $result = $entry['invested_amount'];
-            } else {
-                break;
-            }
-        }
-
-        return $result;
+        return ($this->investedByAccount[$accountId] ?? new DatedSeries)->valueOnOrBefore($date->toDateString());
     }
 }

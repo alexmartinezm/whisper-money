@@ -239,20 +239,24 @@ test('the translation dictionary ships on the first load', function () {
 });
 
 test('the translation dictionary is omitted once the client already has it', function () {
-    // It is ~250 KB in es/fr and never changes between requests, so resending
-    // it on every navigation dominated the payload.
+    // It is ~250 KB in es/fr, so resending it on every navigation dominated
+    // the payload. It is a once prop keyed by the locale and the lang file's
+    // modification time: the client keeps its copy until either changes.
     $user = User::factory()->onboarded()->create(['locale' => 'es']);
 
-    // The asset version is only known once a response has been rendered.
-    $version = actingAs($user)->withoutVite()->get(route('dashboard'))
-        ->viewData('page')['version'];
+    // The asset version and the dictionary's once key (locale and file mtime)
+    // are only known once a response has been rendered.
+    $page = actingAs($user)->withoutVite()->get(route('dashboard'))->viewData('page');
+    $key = collect($page['onceProps'])->search(fn (array $meta): bool => $meta['prop'] === 'translations');
+
+    expect($key)->toStartWith('translations:es:');
 
     $response = actingAs($user)
         ->withoutVite()
         ->withHeaders([
             'X-Inertia' => 'true',
-            'X-Inertia-Version' => $version,
-            'X-Inertia-Except-Once-Props' => 'translations',
+            'X-Inertia-Version' => $page['version'],
+            'X-Inertia-Except-Once-Props' => $key,
         ])
         ->get(route('dashboard'));
 
