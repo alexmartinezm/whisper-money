@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Services\Recurring\DetectRecurringSeries;
 use App\Services\Recurring\MerchantKeyBuilder;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\DB;
 
 beforeEach(function () {
     $this->detector = app(DetectRecurringSeries::class);
@@ -805,6 +806,25 @@ it('does not count a future transaction as an observed occurrence', function () 
     expect($this->detector->forUser($this->user))->toBe(1)
         ->and(RecurringSeries::query()->sole()->occurrence_count)->toBe(3)
         ->and(RecurringSeries::query()->sole()->last_occurred_on->isToday())->toBeFalse();
+});
+
+it('bounds the detection window with plain date comparisons the index can range over', function () {
+    monthlyCharges($this->user, $this->account, 'Spotify', count: 3);
+
+    DB::enableQueryLog();
+    $this->detector->forUser($this->user);
+    $windowed = collect(DB::getQueryLog())
+        ->pluck('query')
+        ->filter(fn (string $sql): bool => str_contains($sql, 'from `transactions`') && str_contains($sql, 'transaction_date'));
+    DB::disableQueryLog();
+
+    // date(`transaction_date`) would keep the window off
+    // idx_transactions_budget_lookup (user_id, transaction_date, category_id).
+    expect($windowed)->not->toBeEmpty()
+        ->each(fn ($sql) => $sql
+            ->toContain('`transaction_date` >= ?')
+            ->toContain('`transaction_date` <= ?')
+            ->not->toContain('date(`transaction_date`)'));
 });
 
 it('keeps pivots for historical charges when an account is archived', function () {
