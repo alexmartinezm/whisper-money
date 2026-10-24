@@ -239,8 +239,9 @@ test('the translation dictionary ships on the first load', function () {
 });
 
 test('the translation dictionary is omitted once the client already has it', function () {
-    // It is ~250 KB in es/fr and never changes between requests, so resending
-    // it on every navigation dominated the payload.
+    // It is ~250 KB in es/fr, so resending it on every navigation dominated
+    // the payload. It is a once prop keyed by the locale and the lang file's
+    // modification time: the client keeps its copy until either changes.
     $user = User::factory()->onboarded()->create(['locale' => 'es']);
 
     // The asset version and the dictionary's once key (locale and file mtime)
