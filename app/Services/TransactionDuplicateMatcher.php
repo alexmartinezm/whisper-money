@@ -88,21 +88,17 @@ class TransactionDuplicateMatcher
     }
 
     /**
-     * The rows that count as already on the account.
-     *
-     * A split parent is soft-deleted but its money is still on the account,
-     * spread over its parts, so the row that produced it is already imported.
-     * Rows the user deleted on purpose stay invisible here and can be
-     * re-imported - as can a parent whose parts are all gone, since it has no
-     * live parts left to hold the money.
+     * The rows that count as already on the account: the ones it still holds.
+     * A split transaction keeps its own row (its lines hang off it), so it
+     * matches like any other; rows the user deleted stay invisible here and
+     * can be re-imported.
      *
      * @return Builder<Transaction>
      */
     private function heldTransactions(Account $account, ?string $exceptImportId): Builder
     {
-        return Transaction::withTrashed()
+        return Transaction::query()
             ->where('account_id', $account->id)
-            ->where(fn (Builder $query) => $query->whereNull('deleted_at')->orWhereHas('splits'))
             ->when($exceptImportId !== null, fn (Builder $query) => $query->where(
                 fn (Builder $inner) => $inner->whereNull('import_id')->orWhere('import_id', '!=', $exceptImportId),
             ));

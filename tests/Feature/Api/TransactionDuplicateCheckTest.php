@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Account;
+use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\User;
 
@@ -123,6 +124,53 @@ it('only matches existing transactions within the incoming date range', function
     ]);
 
     $response->assertOk()->assertJson(['duplicates' => [false]]);
+});
+
+it('matches a split transaction by its own row, whatever its lines', function () {
+    $transaction = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'transaction_date' => '2026-01-15',
+        'amount' => -1000,
+        'description' => 'Supermarket',
+    ]);
+    $food = Category::factory()->create(['user_id' => $this->user->id]);
+    $home = Category::factory()->create(['user_id' => $this->user->id]);
+    $transaction->splits()->createMany([
+        ['category_id' => $food->id, 'amount' => -700, 'position' => 0],
+        ['category_id' => $home->id, 'amount' => -300, 'position' => 1],
+    ]);
+
+    $this->postJson('/api/transactions/check-duplicates', [
+        'account_id' => $this->account->id,
+        'transactions' => [
+            ['transaction_date' => '2026-01-15', 'amount' => -1000, 'description' => 'Supermarket'],
+            ['transaction_date' => '2026-01-15', 'amount' => -700, 'description' => 'Supermarket'],
+        ],
+    ])->assertOk()->assertJson(['duplicates' => [true, false]]);
+});
+
+it('lets a transaction the user deleted be imported again, split lines and all', function () {
+    $deleted = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'transaction_date' => '2026-01-15',
+        'amount' => 1234,
+        'description' => 'Coffee Shop',
+    ]);
+    $deleted->splits()->create([
+        'category_id' => Category::factory()->create(['user_id' => $this->user->id])->id,
+        'amount' => 1234,
+        'position' => 0,
+    ]);
+    $deleted->delete();
+
+    $this->postJson('/api/transactions/check-duplicates', [
+        'account_id' => $this->account->id,
+        'transactions' => [
+            ['transaction_date' => '2026-01-15', 'amount' => 1234, 'description' => 'Coffee Shop'],
+        ],
+    ])->assertOk()->assertJson(['duplicates' => [false]]);
 });
 
 it('validates the request payload', function () {
