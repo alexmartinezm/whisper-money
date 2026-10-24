@@ -186,7 +186,13 @@ describe('fileParsedProperties', () => {
 
     it('keeps the extension and nothing of the name', () => {
         expect(fileExtension('Juan García banktrack.csv')).toBe('csv');
+        expect(fileExtension('Export.XLSX')).toBe('xlsx');
         expect(fileExtension('no-extension')).toBe('none');
+    });
+
+    it('never names what follows a dot that is part of the name', () => {
+        expect(fileExtension('Cuentas.Juana')).toBe('other');
+        expect(fileExtension('movimientos.garcía 2025')).toBe('other');
     });
 });
 

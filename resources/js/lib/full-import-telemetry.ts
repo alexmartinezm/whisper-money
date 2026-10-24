@@ -36,16 +36,41 @@ export function trackImport(
     captureEvent(event, properties);
 }
 
-/** "csv", "xlsx", or "none": the extension alone, never the name before it. */
+/**
+ * The extensions an event may name. Whatever follows the last dot of a name
+ * nobody chose for a format ("Cuentas.Juana") is part of the name.
+ */
+const KNOWN_EXTENSIONS = new Set([
+    'csv',
+    'tsv',
+    'txt',
+    'xls',
+    'xlsx',
+    'ods',
+    'numbers',
+    'ofx',
+    'qfx',
+    'qif',
+    'json',
+    'xml',
+    'pdf',
+    'zip',
+]);
+
+/**
+ * "csv", "xlsx", "none" without a dot, or "other": a known extension alone,
+ * never the name before it nor a made-up one.
+ */
 export function fileExtension(fileName: string): string {
     const dot = fileName.lastIndexOf('.');
 
-    return dot === -1
-        ? 'none'
-        : fileName
-              .slice(dot + 1)
-              .toLowerCase()
-              .slice(0, 10);
+    if (dot === -1) {
+        return 'none';
+    }
+
+    const extension = fileName.slice(dot + 1).toLowerCase();
+
+    return KNOWN_EXTENSIONS.has(extension) ? extension : 'other';
 }
 
 /**
