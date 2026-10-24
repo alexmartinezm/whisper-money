@@ -95,7 +95,11 @@ export function formatFileSize(bytes: number): string {
 
 /**
  * What happened, or is happening, to the transactions a file left
- * uncategorized, in words. Null when there is nothing worth saying.
+ * uncategorized, in words. Null when there is nothing worth saying. The
+ * sentences about the AI count only the rows it was given (`ai.total`): a
+ * row left blank on purpose, such as one split in Money Pro, is never the
+ * AI's. Those that only say how many arrived without a category count them
+ * all.
  */
 export function aiOutcomeNote(
     stats: ImportStats,
@@ -103,18 +107,21 @@ export function aiOutcomeNote(
 ): string | null {
     const uncategorized = stats.uncategorized ?? 0;
     const count = formatCount(uncategorized, locale);
+    const forAi = stats.ai?.total ?? uncategorized;
+    const aiCount = formatCount(forAi, locale);
+    const leftByAi = Math.max(0, forAi - (stats.ai?.applied ?? 0));
 
     switch (stats.ai?.status) {
         case 'queued':
         case 'running':
             return countLabel(
-                uncategorized,
+                forAi,
                 __(
                     'The AI is categorizing the transaction that arrived without a category. It takes a few minutes.',
                 ),
                 __(
                     'The AI is categorizing the :count transactions that arrived without a category. It takes a few minutes.',
-                    { count },
+                    { count: aiCount },
                 ),
             );
         case 'done':
@@ -127,13 +134,13 @@ export function aiOutcomeNote(
             );
         case 'failed':
             return countLabel(
-                uncategorized,
+                leftByAi,
                 __(
                     "The AI couldn't finish: 1 transaction stayed uncategorized.",
                 ),
                 __(
                     "The AI couldn't finish: :count transactions stayed uncategorized.",
-                    { count },
+                    { count: formatCount(leftByAi, locale) },
                 ),
             );
         case 'onboarding':
@@ -149,13 +156,13 @@ export function aiOutcomeNote(
             );
         case 'unavailable':
             return countLabel(
-                uncategorized,
+                forAi,
                 __(
                     '1 transaction stayed uncategorized. With a paid plan, the AI categorizes it for you.',
                 ),
                 __(
                     ':count transactions stayed uncategorized. With a paid plan, the AI categorizes them for you.',
-                    { count },
+                    { count: aiCount },
                 ),
             );
         default:
