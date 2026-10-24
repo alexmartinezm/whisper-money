@@ -118,7 +118,7 @@ Route::middleware('auth')->group(function () {
     Route::get('settings/import', [FullImportController::class, 'index'])->name('full-import.index');
     Route::get('settings/import/new', [FullImportController::class, 'create'])->name('full-import.create');
     Route::delete('settings/import/{import}', [FullImportController::class, 'destroy'])
-        ->middleware('block-shared')
+        ->middleware('block-demo')
         ->name('full-import.destroy');
 
     Route::get('settings/two-factor', [TwoFactorAuthenticationController::class, 'show'])

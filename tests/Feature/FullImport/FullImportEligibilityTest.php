@@ -103,10 +103,10 @@ it('keeps the Settings page, and undo, past the window while an import can be un
         ->and($user->fresh()->canSeeFullImportSettings())->toBeFalse();
 });
 
-it('is blocked on the shared demo and press accounts', function (string $configKey) {
-    config([$configKey => 'shared@whisper.money']);
+it('is blocked on the demo account', function () {
+    config(['app.demo.email' => 'demo@whisper.money']);
 
-    $user = User::factory()->create(['email' => 'shared@whisper.money', 'onboarded_at' => null]);
+    $user = User::factory()->create(['email' => 'demo@whisper.money', 'onboarded_at' => null]);
 
     expect($user->canUseFullImport())->toBeFalse()
         ->and($user->canSeeFullImportSettings())->toBeFalse();
@@ -114,9 +114,9 @@ it('is blocked on the shared demo and press accounts', function (string $configK
     $this->actingAs($user)->getJson(route('api.full-imports.context'))->assertForbidden();
     $this->postJson(route('api.full-imports.store'), Fixtures::plan([Fixtures::newAccount('a0', 'Wise')]))
         ->assertForbidden()
-        ->assertJsonPath('message', 'This action is not available on a shared account.');
+        ->assertJsonPath('message', 'This action is not available on the demo account.');
     $this->get(route('full-import.index'))->assertNotFound();
-})->with(['demo' => 'app.demo.email', 'press' => 'app.press.email']);
+});
 
 it('lets nobody else read or undo an import', function () {
     $import = Import::factory()->create();

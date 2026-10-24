@@ -445,7 +445,7 @@ class User extends Authenticatable implements HasLocalePreference, MustVerifyEma
      */
     public function canUseFullImport(): bool
     {
-        if ($this->isRestrictedSharedAccount()) {
+        if ($this->isRestrictedDemoAccount()) {
             return false;
         }
 
@@ -492,7 +492,7 @@ class User extends Authenticatable implements HasLocalePreference, MustVerifyEma
      */
     public function canSeeFullImportSettings(): bool
     {
-        if ($this->isRestrictedSharedAccount()) {
+        if ($this->isRestrictedDemoAccount()) {
             return false;
         }
 
