@@ -9,6 +9,7 @@ use App\Listeners\AssignTransactionToBudget;
 use App\Mail\BudgetNotificationEmail;
 use App\Models\Account;
 use App\Models\AccountBalance;
+use App\Models\AutomationRule;
 use App\Models\Budget;
 use App\Models\BudgetPeriod;
 use App\Models\BudgetTransaction;
@@ -180,6 +181,60 @@ it('assigns imported rows through the budget service without sending budget emai
 
     Mail::assertNotQueued(BudgetNotificationEmail::class);
     Mail::assertNotSent(BudgetNotificationEmail::class);
+});
+
+it('leaves the rows a rule files to the import\'s own budget pass, without budget emails', function () {
+    Mail::fake();
+    $fileMercadonaUnderGroceries = function (User $user): Category {
+        $groceries = Fixtures::seeded($user, 'Groceries');
+        AutomationRule::factory()->create([
+            'user_id' => $user->id,
+            'priority' => 1,
+            'rules_json' => ['in' => ['mercadona', ['var' => 'description']]],
+            'action_category_id' => $groceries->id,
+        ]);
+
+        return $groceries;
+    };
+    $plan = Fixtures::plan([Fixtures::newAccount('a0', 'Wise')]);
+    $rows = [Fixtures::row('a0', now()->subDays(2)->toDateString(), -4250, 'Mercadona')];
+
+    $user = Fixtures::user();
+    $groceries = $fileMercadonaUnderGroceries($user);
+    $budget = Budget::factory()->forCategories($groceries)->create([
+        'user_id' => $user->id,
+        'notify_on_new_transaction' => true,
+        'notify_on_over_limit' => true,
+        'notify_on_close_to_limit' => true,
+    ]);
+    $period = BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => now()->subDays(10)->toDateString(),
+        'end_date' => now()->addDays(20)->toDateString(),
+        'allocated_amount' => 1000,
+    ]);
+
+    Fixtures::run($this, $user, $plan, $rows);
+
+    // The rule filed the uncategorized row before the chunk's batch ran, so
+    // the row counts against the budget, and no budget email went out.
+    $imported = Transaction::query()->where('user_id', $user->id)->sole();
+    expect($imported->category_id)->toBe($groceries->id)
+        ->and($imported->category_source)->toBe(CategorySource::Rule)
+        ->and(BudgetTransaction::query()->where('budget_period_id', $period->id)->sum('amount'))->toEqual(4250);
+
+    Mail::assertNotQueued(BudgetNotificationEmail::class);
+    Mail::assertNotSent(BudgetNotificationEmail::class);
+
+    // Only the chunk's batch is queued, without emails: no job per row from the rule.
+    $other = Fixtures::user();
+    $fileMercadonaUnderGroceries($other);
+    Queue::fake([ReassignTransactionsToBudgets::class]);
+
+    Fixtures::run($this, $other, $plan, $rows);
+
+    Queue::assertPushed(ReassignTransactionsToBudgets::class, 1);
+    Queue::assertPushed(ReassignTransactionsToBudgets::class, fn (ReassignTransactionsToBudgets $job): bool => $job->notify === false);
 });
 
 it('merges stats written from a stale copy of the import instead of overwriting them', function () {
