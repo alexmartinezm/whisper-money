@@ -8,14 +8,17 @@ import {
     connectProviderForBank,
     credentialPayload,
     isProviderComplete,
+    providerInstitution,
 } from '@/lib/connect-providers';
 import { getCsrfToken } from '@/lib/csrf';
 import { leavePage } from '@/lib/leave-page';
+import type { SharedData } from '@/types';
 import type {
     BankingConnection,
     EnableBankingInstitution,
 } from '@/types/banking';
 import { __ } from '@/utils/i18n';
+import { usePage } from '@inertiajs/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 /** Countries we can connect banks in, most-used first. */
@@ -66,6 +69,7 @@ export type ConnectStep = 'country' | 'bank' | 'confirm';
  * the components.
  */
 export function useConnectFlow(connections: BankingConnection[]) {
+    const { betaProviders } = usePage<SharedData>().props;
     const [step, setStep] = useState<ConnectStep>('country');
     const [country, setCountry] = useState('');
     const [institutions, setInstitutions] = useState<
@@ -166,7 +170,7 @@ export function useConnectFlow(connections: BankingConnection[]) {
                             connections,
                             p.providerKey,
                         ),
-                ).map((p) => p.institution);
+                ).map((p) => providerInstitution(p, betaProviders));
 
                 // A provider we integrate natively (e.g. Wise) must surface only
                 // through its own entry, never the bank-aggregator's duplicate.
@@ -191,7 +195,7 @@ export function useConnectFlow(connections: BankingConnection[]) {
                 setIsLoading(false);
             }
         },
-        [connections],
+        [connections, betaProviders],
     );
 
     const handleAuthorize = useCallback(async () => {

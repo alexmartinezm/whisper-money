@@ -36,5 +36,18 @@
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
         <env name="EMAIL_VERIFICATION_ENABLED" value="true"/>
+        <!-- Open banking is optional in production, and CI copies an .env.example
+             that leaves the app id and the key path blank (only the redirect URL
+             comes prefilled). The suite covers the configured install, so the
+             credentials are pinned here; the tests for a bare install switch
+             `services.enablebanking.enabled` off themselves.
+             <server>, not <env>: an <env> entry never replaces a variable the
+             process already carries, even an empty one (force="true" only
+             rewrites getenv() and $_ENV), and Laravel's env() reads $_SERVER
+             first. A shell or runner exporting ENABLEBANKING_APP_ID= would
+             otherwise turn open banking off for the whole suite. -->
+        <server name="ENABLEBANKING_APP_ID" value="testing-app-id"/>
+        <server name="ENABLEBANKING_PRIVATE_KEY_PATH" value="storage/keys/enablebanking.pem"/>
+        <server name="ENABLEBANKING_REDIRECT_URL" value="http://localhost/open-banking/callback"/>
     </php>
 </phpunit>

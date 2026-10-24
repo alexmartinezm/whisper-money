@@ -2,6 +2,7 @@
 
 use App\Contracts\BankingProviderInterface;
 use App\Enums\BankingConnectionStatus;
+use App\Enums\BankingProvider;
 use App\Enums\BankingSyncTrigger;
 use App\Jobs\SyncBankingConnectionJob;
 use App\Models\Account;
@@ -60,6 +61,43 @@ test('connections are badged beta from the curated list, not the stored column',
 
     expect($connections[$listed->id]['is_beta'])->toBeTrue()
         ->and($connections[$unlisted->id]['is_beta'])->toBeFalse();
+});
+
+test('a Kraken connection is badged beta as a whole provider', function () {
+    $user = User::factory()->onboarded()->create();
+    $kraken = BankingConnection::factory()->kraken()->create(['user_id' => $user->id]);
+    $binance = BankingConnection::factory()->binance()->create(['user_id' => $user->id]);
+
+    $connections = collect($this->actingAs($user)->get('/settings/connections')
+        ->assertOk()
+        ->inertiaProps('connections'))
+        ->keyBy('id');
+
+    expect($connections[$kraken->id]['is_beta'])->toBeTrue()
+        ->and($connections[$binance->id]['is_beta'])->toBeFalse();
+});
+
+test('the bank picker is told which API-key providers are beta', function () {
+    $user = User::factory()->onboarded()->create();
+
+    $this->actingAs($user)
+        ->get('/settings/connections')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->where('betaProviders', ['kraken']));
+});
+
+test('the picker list holds only API-key providers that are beta as a whole', function () {
+    config(['banking.beta_banks' => [
+        'enablebanking' => ['Trade Republic' => '*'],
+        'kraken' => '*',
+        'wise' => '*',
+    ]]);
+
+    // EnableBanking's banks are badged one by one from its catalogue, so it
+    // never joins the list the picker reads for its own providers.
+    expect(BankingProvider::betaApiKeyProviders())->toBe(['kraken', 'wise'])
+        ->and(BankingProvider::Kraken->isBetaBank('Kraken', 'ES'))->toBeTrue()
+        ->and(BankingProvider::EnableBanking->isBetaProvider())->toBeFalse();
 });
 
 test('users can disconnect a banking connection and keep accounts as manual', function () {
@@ -594,6 +632,55 @@ test('users can update bitpanda credentials with valid api key', function () {
     expect($connection->status)->toBe(BankingConnectionStatus::Active);
     expect($connection->error_message)->toBeNull();
     expect($connection->api_token)->toBe('new-valid-bitpanda-key-12345');
+});
+
+test('users can update kraken credentials and the ledger is walked again', function () {
+    Queue::fake();
+
+    $user = User::factory()->onboarded()->create();
+    $connection = BankingConnection::factory()->kraken()->error()->create([
+        'user_id' => $user->id,
+        'ledger_synced_until' => now()->subDay(),
+    ]);
+
+    Http::fake([
+        'api.kraken.com/0/private/Balance' => Http::response(['error' => [], 'result' => []]),
+        'api.kraken.com/0/private/Ledgers' => Http::response(['error' => [], 'result' => ['ledger' => [], 'count' => 0]]),
+    ]);
+
+    $this->actingAs($user)->patch("/settings/connections/{$connection->id}/credentials", [
+        'api_key' => 'new-valid-kraken-key-12345',
+        'api_secret' => base64_encode('new-valid-kraken-secret'),
+    ])->assertRedirect()->assertSessionHas('success');
+
+    $connection->refresh();
+    expect($connection->status)->toBe(BankingConnectionStatus::Active)
+        ->and($connection->api_token)->toBe('new-valid-kraken-key-12345')
+        ->and($connection->ledger_synced_until)->toBeNull();
+    Http::assertSentCount(2);
+});
+
+test('updating kraken credentials without the ledger permission names it', function () {
+    Queue::fake();
+
+    $user = User::factory()->onboarded()->create();
+    $connection = BankingConnection::factory()->kraken()->error()->create(['user_id' => $user->id]);
+    $originalToken = $connection->api_token;
+
+    Http::fake([
+        'api.kraken.com/0/private/Balance' => Http::response(['error' => [], 'result' => []]),
+        'api.kraken.com/0/private/Ledgers' => Http::response(['error' => ['EGeneral:Permission denied']]),
+    ]);
+
+    $this->actingAs($user)->patch("/settings/connections/{$connection->id}/credentials", [
+        'api_key' => 'new-valid-kraken-key-12345',
+        'api_secret' => base64_encode('new-valid-kraken-secret'),
+    ])->assertSessionHasErrors([
+        'credentials' => 'Your Kraken API key is missing the "Query Ledger Entries" permission. Enable it and try again.',
+    ]);
+
+    expect($connection->refresh()->api_token)->toBe($originalToken);
+    Queue::assertNothingPushed();
 });
 
 test('users can update wise credentials with valid api token', function () {

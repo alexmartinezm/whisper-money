@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { CONNECT_PROVIDERS } from './connect-providers';
+import { CONNECT_PROVIDERS, providerInstitution } from './connect-providers';
 
 /**
  * The registry's copy reaches __() through variables, so the Spanish
@@ -25,6 +25,19 @@ const copyStrings = CONNECT_PROVIDERS.flatMap((provider) => [
         ...(field.placeholder ? [field.placeholder] : []),
     ]),
 ]);
+
+describe('providerInstitution', () => {
+    const kraken = CONNECT_PROVIDERS.find((p) => p.providerKey === 'kraken')!;
+
+    it('badges a provider on the curated beta list', () => {
+        expect(providerInstitution(kraken, ['kraken']).beta).toBe(true);
+    });
+
+    it('leaves a provider off the list unbadged', () => {
+        expect(providerInstitution(kraken, ['binance']).beta).toBeUndefined();
+        expect(providerInstitution(kraken, [])).toBe(kraken.institution);
+    });
+});
 
 describe('connect provider copy', () => {
     it('is fully translated into Spanish', () => {

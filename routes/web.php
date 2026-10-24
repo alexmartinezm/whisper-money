@@ -26,6 +26,7 @@ use App\Http\Controllers\OpenBanking\ConnectionAccountController;
 use App\Http\Controllers\OpenBanking\IndexaCapitalController;
 use App\Http\Controllers\OpenBanking\InstitutionController;
 use App\Http\Controllers\OpenBanking\InteractiveBrokersController;
+use App\Http\Controllers\OpenBanking\KrakenController;
 use App\Http\Controllers\OpenBanking\WiseController;
 use App\Http\Controllers\RealEstateDetailController;
 use App\Http\Controllers\RecurringDetectionController;
@@ -210,16 +211,24 @@ Route::middleware(['auth', 'verified', 'onboarded', 'subscribed'])->group(functi
 // redirect back to Safari where the app session does not exist. The connection is
 // resolved from the signed state token EnableBanking echoes back instead.
 Route::get('open-banking/callback', [AuthorizationController::class, 'callback'])
-    ->middleware('throttle:30,1')
+    ->middleware(['throttle:30,1', 'open-banking'])
     ->name('open-banking.callback');
 
 // Open-banking routes are accessible without the onboarded/subscribed middleware
 // so that users can connect their bank during the onboarding flow.
 Route::middleware(['auth', 'verified'])->prefix('open-banking')->group(function () {
+    // Only EnableBanking can serve these, so they are off on an install with no
+    // credentials for it. Everything outside this inner group — the mapping
+    // screens and the API-key providers below — is provider-agnostic and stays.
+    // `institutions` is deliberately not in here: it answers with an empty
+    // catalogue instead, which is what keeps the brokers listed in the picker.
+    Route::middleware('open-banking')->group(function () {
+        Route::post('authorize', [AuthorizationController::class, 'store'])->name('open-banking.authorize');
+        Route::post('connections/{connection}/reauthorize', [AuthorizationController::class, 'reauthorize'])->name('open-banking.reauthorize');
+        Route::get('connections/{connection}/reconnect', [AuthorizationController::class, 'reconnect'])->name('open-banking.reconnect');
+    });
+
     Route::get('institutions', [InstitutionController::class, 'index'])->name('open-banking.institutions');
-    Route::post('authorize', [AuthorizationController::class, 'store'])->name('open-banking.authorize');
-    Route::post('connections/{connection}/reauthorize', [AuthorizationController::class, 'reauthorize'])->name('open-banking.reauthorize');
-    Route::get('connections/{connection}/reconnect', [AuthorizationController::class, 'reconnect'])->name('open-banking.reconnect');
     Route::get('connections/{connection}/map-accounts', [AccountMappingController::class, 'show'])->name('open-banking.map-accounts');
     Route::post('connections/{connection}/map-accounts', [AccountMappingController::class, 'store'])->name('open-banking.map-accounts.store');
     Route::get('connections/{connection}/accounts', [ConnectionAccountController::class, 'index'])->name('open-banking.connection-accounts.index');
@@ -228,6 +237,7 @@ Route::middleware(['auth', 'verified'])->prefix('open-banking')->group(function 
     Route::post('indexa-capital/connect', [IndexaCapitalController::class, 'store'])->name('open-banking.indexa-capital.connect');
     Route::post('binance/connect', [BinanceController::class, 'store'])->name('open-banking.binance.connect');
     Route::post('bitpanda/connect', [BitpandaController::class, 'store'])->name('open-banking.bitpanda.connect');
+    Route::post('kraken/connect', [KrakenController::class, 'store'])->name('open-banking.kraken.connect');
     Route::post('coinbase/connect', [CoinbaseController::class, 'store'])
         ->name('open-banking.coinbase.connect');
     Route::post('wise/connect', [WiseController::class, 'store'])

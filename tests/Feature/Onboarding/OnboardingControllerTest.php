@@ -94,6 +94,17 @@ it('lands directly on the connections step when ?step=create-account is requeste
         );
 });
 
+// The counterpart of UnconfiguredOpenBankingTest: with the credentials phpunit.xml
+// pins, the install counts as configured and the accounts step offers the bank.
+it('says open banking is on for a configured install', function () {
+    $user = User::factory()->create(['onboarded_at' => null]);
+
+    $this->actingAs($user)
+        ->get('/onboarding?step=create-account')
+        ->assertSuccessful()
+        ->assertInertia(fn ($page) => $page->where('openBankingEnabled', true));
+});
+
 it('ignores an unknown step and falls back to the default flow', function () {
     $user = User::factory()->create(['onboarded_at' => null]);
 

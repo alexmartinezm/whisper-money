@@ -139,6 +139,41 @@ export const CONNECT_PROVIDERS: ConnectProvider[] = [
         },
     },
     {
+        providerKey: 'kraken',
+        institution: {
+            name: 'Kraken',
+            country: 'ALL',
+            logo: '/images/banks/logos/kraken.png',
+            maximum_consent_validity: null,
+        },
+        endpoint: '/open-banking/kraken/connect',
+        sendsCountry: true,
+        headerDescription:
+            'Enter your API Key and Private Key to connect your Kraken account.',
+        cardDescription:
+            'Connect your Kraken account using your API Key and Private Key.',
+        fields: [
+            {
+                key: 'api_key',
+                label: 'API Key',
+                type: 'password',
+                placeholder: 'Paste your Kraken API Key',
+            },
+            {
+                key: 'api_secret',
+                label: 'Private Key',
+                type: 'password',
+                placeholder: 'Paste your Kraken Private Key',
+            },
+        ],
+        help: {
+            before: 'Create an API key in Kraken under',
+            href: 'https://pro.kraken.com/app/settings/api',
+            link: 'Account → Connections & APIs',
+            after: 'Enable only "Query Funds", "Query Open Orders & Trades", "Query Closed Orders & Trades" and "Query Ledger Entries". Leave everything else off.',
+        },
+    },
+    {
         providerKey: 'coinbase',
         institution: {
             name: 'Coinbase',
@@ -238,6 +273,21 @@ export const CONNECT_PROVIDERS: ConnectProvider[] = [
         },
     },
 ];
+
+/**
+ * The provider's picker entry, badged as beta while the provider is on our
+ * curated beta list (`banking.beta_banks`, shared as `betaProviders`). The
+ * list lives on the server so the picker and the connections page, which
+ * reads `is_beta` from the same config, never disagree.
+ */
+export function providerInstitution(
+    provider: ConnectProvider,
+    betaProviders: readonly string[],
+): EnableBankingInstitution {
+    return betaProviders.includes(provider.providerKey)
+        ? { ...provider.institution, beta: true }
+        : provider.institution;
+}
 
 /** Find a provider by the selected institution name. */
 export function connectProviderForBank(

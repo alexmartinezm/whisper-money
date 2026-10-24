@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
     routerVisit: vi.fn(),
     pollStart: vi.fn(),
     pollStop: vi.fn(),
+    openBankingEnabled: true,
 }));
 
 vi.mock('@inertiajs/react', () => ({
@@ -25,6 +26,7 @@ vi.mock('@inertiajs/react', () => ({
             },
             flash: {},
             subscriptionsEnabled: false,
+            openBankingEnabled: mocks.openBankingEnabled,
             features: {
                 cashflow: true,
                 calculateBalancesOnImport: false,
@@ -105,6 +107,40 @@ function makeConnection(
 describe('ConnectionsPage', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        mocks.openBankingEnabled = true;
+    });
+
+    it('speaks of banks on an install with open banking', () => {
+        render(<ConnectionsPage connections={[]} />);
+
+        expect(screen.getByText('Bank Connections')).toBeInTheDocument();
+        expect(
+            screen.getByRole('button', { name: /Connect Bank/ }),
+        ).toBeInTheDocument();
+        expect(
+            screen.getByText(
+                'No bank connections yet. Connect a bank to automatically sync your transactions.',
+            ),
+        ).toBeInTheDocument();
+    });
+
+    // A self-hosted install with no EnableBanking credentials can only connect
+    // the API-key brokers and exchanges, so the page stops promising a bank.
+    it('names brokers and exchanges, not banks, when open banking is off', () => {
+        mocks.openBankingEnabled = false;
+
+        render(<ConnectionsPage connections={[]} />);
+
+        expect(screen.queryByText('Bank Connections')).not.toBeInTheDocument();
+        expect(screen.getByText('Connections')).toBeInTheDocument();
+        expect(
+            screen.getByRole('button', { name: /Connect account/ }),
+        ).toBeInTheDocument();
+        expect(
+            screen.getByText(
+                'No connections yet. Connect a broker or an exchange to automatically sync your balances.',
+            ),
+        ).toBeInTheDocument();
     });
 
     it('shows visible reconnect buttons for expired EnableBanking connections', () => {

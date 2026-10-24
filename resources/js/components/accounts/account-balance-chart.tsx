@@ -663,8 +663,9 @@ export function AccountBalanceChart({
         onDataLoaded,
     ]);
 
-    // Convert data for useChartViews hook
-    const { data: hookData, accounts: hookAccounts } = useMemo(() => {
+    // Convert data for useChartViews hook. Spread whole, so an option the
+    // converter adds (its net worth series options) can never be dropped here.
+    const convertedData = useMemo(() => {
         return convertSingleAccountData(
             activeChartData,
             account.id,
@@ -674,8 +675,7 @@ export function AccountBalanceChart({
     }, [activeChartData, account.id, account.type, activeCurrencyCode]);
 
     const chartViews = useChartViews({
-        data: hookData,
-        accounts: hookAccounts,
+        ...convertedData,
         initialView: 'stacked',
         hasStackedView: true,
     });

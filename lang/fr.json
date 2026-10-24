@@ -2699,5 +2699,15 @@
     "A rule categorized it as :category": "Une règle l'a catégorisée comme :category",
     "You need an account to record transactions": "Vous avez besoin d'un compte pour enregistrer des transactions",
     "Undo": "Annuler",
-    "Save the transaction": "Enregistrer la transaction"
+    "Save the transaction": "Enregistrer la transaction",
+    "Manage your connected accounts for automatic transaction syncing.": "Gérez vos comptes connectés pour synchroniser automatiquement les opérations.",
+    "Connect account": "Connecter un compte",
+    "No connections yet. Connect a broker or an exchange to automatically sync your balances.": "Il n'y a pas encore de connexions. Connectez un courtier ou une plateforme d'échange pour synchroniser automatiquement vos soldes.",
+    "Connect a broker or an exchange and sync it automatically.": "Connectez un courtier ou une plateforme d'échange et synchronisez-le automatiquement.",
+    "Connect an account": "Connecter un compte",
+    "Select the country you are in.": "Sélectionnez le pays où vous vous trouvez.",
+    "Select a provider.": "Sélectionnez un fournisseur.",
+    "Search providers...": "Rechercher des fournisseurs...",
+    "No providers found.": "Aucun fournisseur n'a été trouvé.",
+    "Select your country and provider to get started.": "Sélectionnez votre pays et votre fournisseur pour commencer."
 }

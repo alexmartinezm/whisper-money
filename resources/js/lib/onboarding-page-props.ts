@@ -7,10 +7,14 @@ import { type PricingConfig } from '@/types/pricing';
 export const pageProps: {
     locale: string;
     subscriptionsEnabled: boolean;
+    openBankingEnabled: boolean;
     pricing: PricingConfig;
 } = {
     locale: 'en',
     subscriptionsEnabled: true,
+    // Overwritten per test: a self-hosted install with no EnableBanking
+    // credentials has no bank to offer, only brokers and the manual form.
+    openBankingEnabled: true,
     pricing: {
         plans: {
             yearly: {

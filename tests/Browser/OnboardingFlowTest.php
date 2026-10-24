@@ -18,7 +18,6 @@ it('redirects new registration to email verification', function () {
         ->fill('password', 'password123456')
         ->fill('password_confirmation', 'password123456')
         ->click('@register-user-button')
-        ->wait(3)
         ->assertPathIs('/email/verify')
         ->assertNoJavascriptErrors();
 
@@ -39,7 +38,6 @@ it('syncs user currency from first onboarding account after signup', function ()
         ->fill('password', 'password123456')
         ->fill('password_confirmation', 'password123456')
         ->click('@register-user-button')
-        ->wait(3)
         ->assertPathIs('/email/verify')
         ->assertNoJavascriptErrors();
 
@@ -56,30 +54,21 @@ it('syncs user currency from first onboarding account after signup', function ()
     $page->assertPathIs('/onboarding')
         ->assertSee('Welcome to Whisper Money')
         ->click("Let's Get Started")
-        ->wait(1)
         ->assertSee('Account Types')
         ->click('Create Your First Account')
-        ->wait(1)
         ->assertSee('Create an Account')
         ->click('Manual')
-        ->wait(1)
         ->fill('#display_name', 'Euro Checking Account')
         ->click('Select bank...')
-        ->wait(1)
         ->fill('[placeholder="Search bank..."]', 'Signup')
-        ->wait(1)
         ->click('Signup Test Bank')
-        ->wait(1)
         ->click('Select account type')
-        ->wait(1)
         ->click('[role="option"]:has-text("Checking")')
-        ->wait(1)
         ->click('button[name="currency_code"]')
-        ->wait(1)
         ->click('[role="option"]:has-text("EUR")')
-        ->wait(1)
         ->click('Create Account')
-        ->wait(5)
+        // A checking account goes on to its transaction import.
+        ->assertSee('Import Your Transactions')
         ->assertNoJavascriptErrors();
 
     $user->refresh();
@@ -143,7 +132,6 @@ it('navigates from welcome to account types', function () {
 
     $page->assertSee('Welcome to Whisper Money')
         ->click("Let's Get Started")
-        ->wait(1)
         ->assertSee('Account Types')
         ->assertNoJavascriptErrors();
 });
@@ -158,7 +146,6 @@ it('shows real estate on onboarding account types by default', function () {
     $page = visit('/onboarding');
 
     $page->click("Let's Get Started")
-        ->wait(1)
         ->assertSee('Account Types')
         ->assertSee('Balance')
         ->assertNoJavascriptErrors();
@@ -186,10 +173,8 @@ it('shows existing accounts instead of create form when accounts exist', functio
     $page = visit('/onboarding');
 
     $page->click("Let's Get Started")
-        ->wait(1)
         ->assertSee('Account Types')
         ->click('Create Your First Account')
-        ->wait(1)
         // Should show existing accounts, not the create form
         ->assertSee('Your Accounts')
         ->assertSee('Test Bank')
@@ -215,15 +200,12 @@ it('allows continuing with existing accounts', function () {
     $page = visit('/onboarding');
 
     $page->click("Let's Get Started")
-        ->wait(1)
         ->assertSee('Account Types')
         ->click('Create Your First Account')
-        ->wait(1)
         ->assertSee('Your Accounts')
         ->assertSee('Existing Bank')
         // Click Continue to proceed
         ->click('Continue')
-        ->wait(2)
         // Should go to category types (existing accounts no longer trigger import)
         ->assertSee('Understanding Categories')
         ->assertNoJavascriptErrors();
@@ -254,8 +236,7 @@ it('returns to the accounts step when bank authorization fails during onboarding
     // the callback cannot resolve deletes nothing.
     $page = visit('/open-banking/callback?error=access_denied&error_description=Authentication+failed&state=onboarding-failure-token');
 
-    $page->wait(1)
-        ->assertPathIs('/onboarding')
+    $page->assertPathIs('/onboarding')
         ->assertQueryStringHas('step', 'create-account')
         ->assertSee('Your Accounts')
         ->assertSee('Connected Bank')
@@ -275,7 +256,7 @@ it('deep links straight to the connections step via ?step=create-account', funct
 
     $page = visit('/onboarding?step=create-account');
 
-    $page->wait(1)
+    $page
         // Lands on the connections step, skipping the welcome step entirely.
         ->assertSee('Create an Account')
         ->assertSee('Manual')
@@ -292,8 +273,7 @@ it('polls and shows a connection finalized in another browser', function () {
 
     // User sits on the connections step with no accounts yet.
     $page = visit('/onboarding?step=create-account');
-    $page->wait(1)
-        ->assertSee('Create an Account')
+    $page->assertSee('Create an Account')
         ->assertDontSee('Polled Bank');
 
     // The bank flow is finalized elsewhere (iOS PWA -> Safari): an account is
@@ -311,8 +291,7 @@ it('polls and shows a connection finalized in another browser', function () {
     ]);
 
     // The 4s poll picks it up and the connection appears without a manual refresh.
-    $page->wait(6)
-        ->assertSee('Your Accounts')
+    $page->assertSee('Your Accounts')
         ->assertSee('Polled Bank')
         ->assertNoJavascriptErrors();
 });
@@ -339,11 +318,8 @@ it('shows import transactions step after account creation', function () {
     $page = visit('/onboarding');
 
     $page->click("Let's Get Started")
-        ->wait(1)
         ->click('Create Your First Account')
-        ->wait(1)
         ->click('Continue')
-        ->wait(2)
         // Should go to category types (existing accounts no longer trigger import)
         ->assertSee('Understanding Categories')
         ->assertNoJavascriptErrors();
@@ -367,9 +343,7 @@ it('shows add another account form without first account restriction', function 
     $page = visit('/onboarding');
 
     $page->click("Let's Get Started")
-        ->wait(1)
         ->click('Create Your First Account')
-        ->wait(1)
         // At this point, the "Your Accounts" view shows existing accounts
         ->assertSee('Your Accounts')
         ->assertSee('Primary Bank')
@@ -390,16 +364,12 @@ it('hides the connected plan warning after connected setup is selected once', fu
     $page = visit('/onboarding');
 
     $page->click("Let's Get Started")
-        ->wait(1)
         ->click('Create Your First Account')
-        ->wait(1)
         ->assertSee($warning)
         ->assertSee('/month')
         ->click('Connected')
-        ->wait(1)
         ->assertSee('Connect Your Bank')
         ->click('Back')
-        ->wait(1)
         ->assertSee('How would you like to set up this account?')
         ->assertDontSee($warning)
         ->assertDontSee('/month')
@@ -416,27 +386,19 @@ it('creates a real estate account during onboarding by default', function () {
     $page = visit('/onboarding');
 
     $page->click("Let's Get Started")
-        ->wait(1)
         ->click('Create Your First Account')
-        ->wait(1)
         ->assertSee('Create an Account')
         ->click('Manual')
-        ->wait(1)
         ->fill('#display_name', 'My Apartment')
         ->click('Select account type')
-        ->wait(1)
         ->click('[role="option"]:has-text("Real Estate")')
-        ->wait(1)
         ->click('button[name="currency_code"]')
-        ->wait(1)
         ->click('[role="option"]:has-text("EUR")')
-        ->wait(1)
         ->click('Select property type')
-        ->wait(1)
         ->click('[role="option"]:has-text("Residential")')
-        ->wait(1)
         ->click('Create Account')
-        ->wait(5)
+        // A property has no transactions to import, so it asks for a balance.
+        ->assertSee('Set Account Balance')
         ->assertNoJavascriptErrors();
 
     $user->refresh();
@@ -475,96 +437,74 @@ it('completes entire onboarding flow with account creation, transaction import, 
 
     // Step 1: Welcome
     $page->assertSee('Welcome to Whisper Money')
-        ->click("Let's Get Started")
-        ->wait(1);
+        ->click("Let's Get Started");
 
     // Step 2: Account Types
     $page->assertSee('Account Types')
-        ->click('Create Your First Account')
-        ->wait(1);
+        ->click('Create Your First Account');
 
     // Step 3: Create Account - connected mode is preselected, switch to manual and fill the form
     $page->assertSee('Create an Account')
         ->assertSee('Manual')
         ->click('Manual')
-        ->wait(1)
         ->fill('#display_name', 'My Checking Account')
         ->click('Select bank...')
-        ->wait(1)
         ->fill('[placeholder="Search bank..."]', 'Chase')
-        ->wait(2)
         ->click('Chase Bank')
-        ->wait(1)
         ->click('Select account type')
-        ->wait(1)
         ->click('[role="option"]:has-text("Checking")')
-        ->wait(1)
         ->click('button[name="currency_code"]')
-        ->wait(1)
         ->click('[role="option"]:has-text("EUR")')
-        ->wait(1)
-        ->click('Create Account')
-        ->wait(5);
+        ->click('Create Account');
 
     // Step 4: Import Transactions - open the import drawer
     $page->assertSee('Import Your Transactions')
-        ->click('Import Transactions')
-        ->wait(3);
+        ->click('Import Transactions');
 
     // The drawer auto-selects the only account and moves to Upload File step
     // Upload the test CSV file
     $csvPath = __DIR__.'/assets/test-transactions.csv';
     $page->attach('input[type="file"]', $csvPath)
-        ->wait(2)
-        ->click('Next')
-        ->wait(2);
+        ->click('Next');
 
     // Column Mapping step (auto-detected: Date, Description, Amount)
     $page->assertSee('Map Columns')
-        ->click('Preview Transactions')
-        ->wait(3);
+        ->click('Preview Transactions');
 
     // Preview step - import all 5 transactions from the CSV
     $page->assertSee('Preview Transactions')
-        ->click('Import 5 Transactions')
-        ->wait(15);
+        ->click('Import 5 Transactions');
 
     // After import completes, back to create-account step in list mode
-    $page->assertSee('My Checking Account')
-        ->click('Continue')
-        ->wait(1);
+    $page->waitForText('Your Accounts', 30)
+        ->assertSee('My Checking Account')
+        ->click('Continue');
 
     // Category Types
     $page->assertSee('Understanding Categories')
-        ->click('Continue')
-        ->wait(1);
+        ->click('Continue');
 
     // Smart Rules
     $page->assertSee('Smart Automation Rules')
-        ->click('Continue')
-        ->wait(3); // syncing step reloads transactions — allow time for axios + router.reload
+        ->click('Continue');
 
     // AI Suggestions - decline the consent prompt to continue without generating
     $page->assertSee('Let AI organize your money')
-        ->click('No thanks')
-        ->wait(2);
+        ->click('No thanks');
 
     // Categorize Transactions - 5 CSV transactions are loaded after the syncing step reloads
     $page->assertSee('Categorize Your Transactions')
         ->click("Let's start")
-        ->wait(1)
-        ->click('button:has-text("Skip")')->wait(1)
-        ->click('button:has-text("Skip")')->wait(1)
-        ->click('button:has-text("Skip")')->wait(1)
-        ->click('button:has-text("Skip")')->wait(1)
-        ->click('button:has-text("Skip")')->wait(1)
-        ->click('Continue')
-        ->wait(1);
+        ->click('button:has-text("Skip")')
+        ->click('button:has-text("Skip")')
+        ->click('button:has-text("Skip")')
+        ->click('button:has-text("Skip")')
+        ->click('button:has-text("Skip")')
+        ->click('Continue');
 
     // Complete step
     $page->assertSee("You're All Set!")
-        ->click('Go to Dashboard')
-        ->wait(5);
+        ->click('Go to Dashboard');
 
     // Since SUBSCRIPTIONS_ENABLED is true, user should end on /subscribe
     $page->assertPathIs('/subscribe')
@@ -619,10 +559,9 @@ it('activates AI directly without a consent prompt when a bank is connected', fu
     // A linked bank already commits the user to a paid plan, so the consent
     // prompt is skipped and AI is turned on for them. With no transactions yet
     // the run stops at the "need more data" screen instead of calling the AI.
-    $page->wait(3)
+    $page->assertSee('AI suggestions need more data')
         ->assertDontSee('Let AI organize your money')
         ->assertDontSee('Suggest my rules with AI')
-        ->assertSee('AI suggestions need more data')
         ->assertNoJavascriptErrors();
 
     expect($user->refresh()->hasActiveAiConsent())->toBeTrue();
@@ -640,8 +579,7 @@ it('asks for consent before activating AI when no bank is connected', function (
     $page = visit('/onboarding?step=ai-suggestions');
 
     // Free users must opt in, and are told AI commits them to picking a plan.
-    $page->wait(2)
-        ->assertSee('Let AI organize your money')
+    $page->assertSee('Let AI organize your money')
         ->assertSee("AI suggestions are a paid feature. Enable them and you'll choose a plan at the end of the onboarding.")
         ->assertSee('Suggest my rules with AI')
         ->assertNoJavascriptErrors();
@@ -650,7 +588,7 @@ it('asks for consent before activating AI when no bank is connected', function (
     expect($user->refresh()->hasActiveAiConsent())->toBeFalse();
 
     $page->click('Suggest my rules with AI')
-        ->wait(3)
+        ->assertSee('AI suggestions need more data')
         ->assertNoJavascriptErrors();
 
     expect($user->refresh()->hasActiveAiConsent())->toBeTrue();

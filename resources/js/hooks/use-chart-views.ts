@@ -108,6 +108,16 @@ export function useChartViews({
 }
 
 /**
+ * A single account's own chart always counts that account. The loan and real
+ * estate switches belong to the net worth chart and start off for a new user,
+ * so without this a loan's or a flat's month-over-month views would be flat.
+ */
+const SINGLE_ACCOUNT_SERIES_OPTIONS: NetWorthSeriesOptions = {
+    includeLoanAccounts: true,
+    includeRealEstateAccounts: true,
+};
+
+/**
  * Convert single-account balance data to the format expected by useChartViews
  * For use in account-balance-chart
  */
@@ -119,6 +129,7 @@ export function convertSingleAccountData(
 ): {
     data: Array<Record<string, string | number>>;
     accounts: Record<string, AccountInfo>;
+    netWorthOptions: NetWorthSeriesOptions;
 } {
     const data = balanceData.map((point) => ({
         month: point.month,
@@ -134,5 +145,5 @@ export function convertSingleAccountData(
         },
     };
 
-    return { data, accounts };
+    return { data, accounts, netWorthOptions: SINGLE_ACCOUNT_SERIES_OPTIONS };
 }

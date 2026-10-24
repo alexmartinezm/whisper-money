@@ -57,6 +57,7 @@ return [
             'Banco Mediolanum' => ['ES'],
             'DKB' => ['DE'],
         ],
+        'kraken' => '*',
     ],
 
 ];

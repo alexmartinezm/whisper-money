@@ -49,6 +49,6 @@ export interface EnableBankingInstitution {
     logo: string | null;
     maximum_consent_validity: number | null;
     /** Whether the bank is on our curated beta list (`banking.beta_banks`).
-     *  Our native integrations carry their own `betaUntil` instead. */
+     *  Our native integrations get it from the shared `betaProviders`. */
     beta?: boolean;
 }
