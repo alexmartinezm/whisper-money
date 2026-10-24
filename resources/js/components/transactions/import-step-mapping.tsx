@@ -101,7 +101,7 @@ export function ColumnSelect({
             <SelectTrigger id={id}>
                 <SelectValue placeholder={placeholder} />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="ph-no-capture">
                 {optional && <SelectItem value={NONE}>{__('None')}</SelectItem>}
                 {extraOptions.map((option) => (
                     <SelectItem key={option.value} value={option.value}>
@@ -388,7 +388,7 @@ export function ImportStepMapping({
                                 placeholder={__('Select date column')}
                             />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="ph-no-capture">
                             {columnOptions.map((option, index) => (
                                 <SelectItem
                                     key={`date-${option.value}-${index}`}
@@ -422,7 +422,7 @@ export function ImportStepMapping({
                                     )}
                                 />
                             </SelectTrigger>
-                            <SelectContent>
+                            <SelectContent className="ph-no-capture">
                                 {columnOptions.map((option, index) => (
                                     <SelectItem
                                         key={`desc-0-${option.value}-${index}`}
@@ -462,7 +462,7 @@ export function ImportStepMapping({
                                                 }
                                             />
                                         </SelectTrigger>
-                                        <SelectContent>
+                                        <SelectContent className="ph-no-capture">
                                             {columnIndex > 0 && (
                                                 <SelectItem value="__none__">
                                                     {__('None (Remove)')}

@@ -29,6 +29,8 @@ interface BankComboboxProps {
     defaultBank?: Bank;
     onCreateCustomBank?: (searchQuery: string) => void;
     disabled?: boolean;
+    /** Classes for the open dropdown, which renders in a portal under <body>. */
+    contentClassName?: string;
 }
 
 const bankCache = new Map<string, Bank[]>();
@@ -40,6 +42,7 @@ export function BankCombobox({
     defaultBank,
     onCreateCustomBank,
     disabled = false,
+    contentClassName,
 }: BankComboboxProps) {
     const [open, setOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
@@ -139,7 +142,10 @@ export function BankCombobox({
                 </Button>
             </PopoverTrigger>
             <PopoverContent
-                className="w-[var(--radix-popover-trigger-width)] p-0"
+                className={cn(
+                    'w-[var(--radix-popover-trigger-width)] p-0',
+                    contentClassName,
+                )}
                 align="start"
             >
                 <Command filter={() => 1}>

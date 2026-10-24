@@ -86,6 +86,7 @@ function TransferPicker({
             categories={categories}
             emptyOptionLabel={__('Create «:name»', { name: slot.target.name })}
             triggerClassName="sm:w-72"
+            contentClassName="ph-no-capture"
             data-testid={label}
         />
     );
@@ -138,6 +139,7 @@ export function StepCategories({
             categories={categories}
             emptyOptionLabel={__('Create new')}
             triggerClassName="sm:w-72"
+            contentClassName="ph-no-capture"
         />
     );
 

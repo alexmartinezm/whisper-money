@@ -479,7 +479,7 @@ function AccountCard({
                         >
                             <SelectValue />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="ph-no-capture">
                             {mappable.map((target) => (
                                 <SelectItem key={target.id} value={target.id}>
                                     {target.name} · {__('manual')}
@@ -523,7 +523,7 @@ function AccountCard({
                         >
                             <SelectValue />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="ph-no-capture">
                             {mergeTargets.map((target) => (
                                 <SelectItem key={target.key} value={target.key}>
                                     {plan[target.key].action === 'create'
