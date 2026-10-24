@@ -1,5 +1,5 @@
 import { loadImportConfig } from '@/lib/import-config-storage';
-import { DateFormat } from '@/types/import';
+import { DateFormat, type ColumnMapping } from '@/types/import';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     applyStoredImportConfig,
@@ -219,6 +219,40 @@ describe('applyStoredImportConfig with a type column', () => {
 
         expect(applied?.mapping.transaction_type).toBe('');
         expect(applied?.mapping.expense_types).toEqual([]);
+    });
+
+    it('takes creditor and debtor from detection under a layout that has no such keys', async () => {
+        const parsed: ParsedImportFile = {
+            ...parsedFile(),
+            headers: [...parsedFile().headers, 'Beneficiario', 'Ordenante'],
+            mapping: {
+                ...parsedFile().mapping,
+                creditor_name: 'Beneficiario',
+                debtor_name: 'Ordenante',
+            },
+        };
+        // A layout saved without the counterparty keys at all.
+        vi.mocked(loadImportConfig).mockResolvedValue({
+            columnMapping: {
+                transaction_date: 'Fecha',
+                description: 'Descripción',
+                amount: 'Cantidad',
+                currency: null,
+                balance: null,
+                transaction_type: 'Tipo',
+                expense_types: ['Gasto'],
+            } as ColumnMapping,
+            dateFormat: DateFormat.DayMonthYear,
+        });
+
+        const applied = await applyStoredImportConfig(parsed, ACCOUNT_ID);
+
+        expect(applied?.mapping).toMatchObject({
+            transaction_date: 'Fecha',
+            amount: 'Cantidad',
+            creditor_name: 'Beneficiario',
+            debtor_name: 'Ordenante',
+        });
     });
 
     it('keeps the format question open when the dates are ambiguous', async () => {
