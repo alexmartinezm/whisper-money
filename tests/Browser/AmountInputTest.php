@@ -77,7 +77,9 @@ it('can create a transaction with amount input', function () {
         ->click('[data-testid="category-select"]')
         ->click($category->name)
         ->click('[data-testid="submit-transaction"]')
-        ->assertDontSee('Create Transaction')
+        // The button reads "Saving..." at once; the dialog title only goes
+        // once the save has answered.
+        ->assertDontSee('Add Transaction')
         ->assertPathIs('/transactions')
         ->waitForText('Test Transaction', 15)
         ->assertSee('$123.45')
@@ -116,7 +118,9 @@ it('formats amount when pressing enter', function () {
         ->click('[data-testid="category-select"]')
         ->click($category->name)
         ->click('[data-testid="submit-transaction"]')
-        ->assertDontSee('Create Transaction')
+        // The button reads "Saving..." at once; the dialog title only goes
+        // once the save has answered.
+        ->assertDontSee('Add Transaction')
         ->assertPathIs('/transactions')
         ->waitForText('Test Transaction Enter', 15)
         ->assertNoJavascriptErrors();
@@ -154,7 +158,9 @@ it('accepts negative amounts', function () {
         ->click('[data-testid="category-select"]')
         ->click($category->name)
         ->click('[data-testid="submit-transaction"]')
-        ->assertDontSee('Create Transaction')
+        // The button reads "Saving..." at once; the dialog title only goes
+        // once the save has answered.
+        ->assertDontSee('Add Transaction')
         ->assertPathIs('/transactions')
         ->waitForText('Test Negative Amount', 15)
         ->assertNoJavascriptErrors();
