@@ -719,7 +719,7 @@ describe('FullImportWizard with AI column mapping', () => {
             fields: {
                 transaction_date: {
                     column: 'Buchungstag',
-                    index: 0,
+                    index: 1,
                     confidence: 0.9,
                 },
                 description: {
@@ -767,6 +767,34 @@ describe('FullImportWizard with AI column mapping', () => {
         expect(document.getElementById('full-import-date')?.textContent).toBe(
             'Buchungstag',
         );
+    });
+
+    it('sends no header of a file without a header row', async () => {
+        api.fetchImportContext.mockResolvedValue(context());
+        render(<FullImportWizard variant="page" onClose={vi.fn()} />);
+
+        await screen.findByText('Where are you coming from?');
+        fireEvent.change(screen.getByTestId('full-import-file-input'), {
+            target: {
+                files: [
+                    new File(
+                        [
+                            '01.03.2026;REWE Markt Berlin;-12,40;EUR\n15.03.2026;Gehalt;2.400,00;EUR\n',
+                        ],
+                        'sparkasse.csv',
+                        { type: 'text/csv' },
+                    ),
+                ],
+            },
+        });
+
+        await waitFor(() => expect(fetchColumnSuggestions).toHaveBeenCalled());
+        const [, columns] = fetchColumnSuggestions.mock.calls[0];
+
+        expect(
+            columns.map((column: { header: string | null }) => column.header),
+        ).toEqual([null, null, null, null]);
+        expect(JSON.stringify(columns)).not.toMatch(/REWE|Gehalt|12,40|EUR/);
     });
 
     it('leaves a known app alone', async () => {

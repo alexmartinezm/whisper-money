@@ -1,12 +1,15 @@
+import { isDateText } from '@/lib/file-parser';
 import { type ParsedRow } from '@/types/import';
 
 /**
  * A column of an imported file as the AI sees it: its header and a short
  * description of what its values look like. Never a value itself — that is
- * the whole privacy guarantee of the column-mapping suggestions.
+ * the whole privacy guarantee of the column-mapping suggestions. A header
+ * that may be a value (one that reads as a date, an amount, an IBAN or a
+ * currency code, or any header of a file without a header row) is null.
  */
 export interface ColumnDescription {
-    header: string;
+    header: string | null;
     shape: string;
 }
 
@@ -241,16 +244,105 @@ export function columnShape(
     ).slice(0, 120);
 }
 
-/** Every column of the file, by header and shape, in file order. */
+/** What kind of value a cell holds, when it holds one rather than a word. */
+type ValueKind = 'time' | 'code' | 'iban' | 'number' | 'date';
+
+/**
+ * The kind of value a text is on its own, or null for a word: what tells a
+ * header that is really a cell (the first movement of a file without a
+ * header row) from one that names its column. "Concepto", "Fecha valor" and
+ * "Importe (EUR)" are words; "01/12/2025", "-45,20", "EUR" and an IBAN are
+ * values. A number comes before a date: "20251201" reads as both.
+ */
+export function valueKind(text: string): ValueKind | null {
+    const value = text.trim();
+
+    if (value === '') {
+        return null;
+    }
+
+    if (TIME.test(value)) {
+        return 'time';
+    }
+
+    if (CURRENCY_CODE.test(value)) {
+        return 'code';
+    }
+
+    if (IBAN.test(value.replace(/\s/g, ''))) {
+        return 'iban';
+    }
+
+    if (readNumber(value) !== null) {
+        return 'number';
+    }
+
+    return isDateText(value) ? 'date' : null;
+}
+
+/** A spreadsheet's own number (a date there is one too) or a text's kind. */
+function cellKind(cell: unknown): ValueKind | null {
+    if (typeof cell === 'number') {
+        return 'number';
+    }
+
+    return typeof cell === 'string' ? valueKind(cell) : null;
+}
+
+/**
+ * Whether the row the reader took for headers (`columns` are the file's raw
+ * columns, every row included) really is one. It is not when one of its
+ * cells is a value of the kind most of its column holds — a date over the
+ * dates, an amount over the amounts —, which is how a file that starts with
+ * its first movement looks: the merchant name next to that date is a cell
+ * too, and nothing in its shape would say so.
+ */
+export function isHeaderRow(
+    columns: unknown[][],
+    headerRowIndex: number,
+): boolean {
+    return !columns.some((column) => {
+        const kind = cellKind(column[headerRowIndex]);
+
+        if (kind === null) {
+            return false;
+        }
+
+        const below = sample(
+            column
+                .slice(headerRowIndex + 1)
+                .filter(
+                    (cell) =>
+                        cell !== null &&
+                        cell !== undefined &&
+                        String(cell).trim() !== '',
+                )
+                .map(String),
+        );
+        const alike = below.filter((cell) => cellKind(cell) === kind).length;
+
+        return below.length > 0 && alike / below.length >= 0.5;
+    });
+}
+
+/**
+ * Every column of the file, by header and shape, in file order. A header is
+ * only sent when the file has a header row (see {@link isHeaderRow}) and the
+ * header itself reads as a word, not a value (see {@link valueKind}).
+ */
 export function describeColumns(
     headers: string[],
     rows: ParsedRow[],
+    hasHeaderRow: boolean,
 ): ColumnDescription[] {
     return headers.map((header) => {
         const values = cellTexts(rows, header);
 
         return {
-            header: header.slice(0, 120),
+            header:
+                hasHeaderRow && valueKind(header) === null
+                    ? header.slice(0, 120)
+                    : null,
             shape: columnShape(sample(values), values),
         };
     });

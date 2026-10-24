@@ -2,6 +2,7 @@ import {
     changedSuggestedFields,
     fetchColumnSuggestions,
     pickFields,
+    withFileHeaders,
     type ColumnSuggestions,
     type FieldMapping,
     type SuggestionKind,
@@ -21,6 +22,11 @@ export type AiSuggestionStatus = 'hidden' | 'idle' | 'loading' | 'suggested';
 interface SuggestionRequest<M extends FieldMapping> {
     kind: SuggestionKind;
     columns: ColumnDescription[];
+    /**
+     * The file's headers, in order: the answer names its columns by them,
+     * since a header that may be a value is never sent.
+     */
+    headers: readonly string[];
     accountId?: UUID | null;
     /** The file it is asked for, from {@link begin}; the file on screen when left out. */
     token?: number;
@@ -72,6 +78,7 @@ export function useAiColumnSuggestion() {
         async <M extends FieldMapping>({
             kind,
             columns,
+            headers,
             accountId,
             token = generation.current,
             toMapping,
@@ -114,7 +121,7 @@ export function useAiColumnSuggestion() {
                 touched.current = new Set();
             }
 
-            const mapping = toMapping(result);
+            const mapping = toMapping(withFileHeaders(result, headers));
             apply(mapping, new Set(touched.current));
             setSuggested(mapping);
             setCached(result.cached);

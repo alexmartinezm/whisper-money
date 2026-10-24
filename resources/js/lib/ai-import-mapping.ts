@@ -35,8 +35,9 @@ function fieldOf(mapping: FieldMapping, field: string): unknown {
 
 /**
  * The column the AI picked for each field, or nothing when it could not
- * answer. Only each column's header and shape are sent, never a cell value,
- * and any failure is silent: the caller keeps the mapping it already had.
+ * answer. Only each column's header (null when it may be a value, see
+ * describeColumns) and shape are sent, never a cell value, and any failure
+ * is silent: the caller keeps the mapping it already had.
  */
 export async function fetchColumnSuggestions(
     kind: SuggestionKind,
@@ -61,6 +62,31 @@ export async function fetchColumnSuggestions(
     } catch {
         return null;
     }
+}
+
+/**
+ * The answer with each field's column named by the file's own header, read
+ * from the position the AI picked: a header that was never sent comes back
+ * unnamed, and every other one shortened to what the server keeps.
+ */
+export function withFileHeaders(
+    suggestions: ColumnSuggestions,
+    headers: readonly string[],
+): ColumnSuggestions {
+    const fields = Object.fromEntries(
+        Object.entries(suggestions.fields).map(([field, suggestion]) => [
+            field,
+            {
+                ...suggestion,
+                column:
+                    suggestion.index === null
+                        ? null
+                        : (headers[suggestion.index] ?? null),
+            },
+        ]),
+    );
+
+    return { ...suggestions, fields };
 }
 
 export const TRANSACTION_FIELDS = [

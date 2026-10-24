@@ -8,8 +8,10 @@ import {
     suggestedBalanceMapping,
     suggestedTransactionMapping,
     TRANSACTION_FIELDS,
+    withFileHeaders,
     type ColumnSuggestions,
 } from './ai-import-mapping';
+import { describeColumns } from './column-shape';
 
 vi.mock('axios', () => ({ default: { post: vi.fn() } }));
 
@@ -101,6 +103,82 @@ describe('fetchColumnSuggestions', () => {
     it('does not ask about a file without columns', async () => {
         expect(await fetchColumnSuggestions('transaction', [])).toBeNull();
         expect(post).not.toHaveBeenCalled();
+    });
+});
+
+describe('the request for a file without a header row', () => {
+    beforeEach(() => post.mockReset());
+
+    it('carries no header and no cell, only the shapes', async () => {
+        post.mockResolvedValue({ data: { data: null, cached: false } });
+        // The reader took the first movement for the headers.
+        const headers = [
+            '01/12/2025',
+            'MERCADONA VALENCIA',
+            'ES91 2100 0418 4502 0005 1332',
+            '-45,20',
+        ];
+        const rows = [
+            {
+                '01/12/2025': '02/12/2025',
+                'MERCADONA VALENCIA': 'NETFLIX.COM',
+                'ES91 2100 0418 4502 0005 1332':
+                    'ES91 2100 0418 4502 0005 1332',
+                '-45,20': '-12,99',
+            },
+        ];
+
+        await fetchColumnSuggestions(
+            'transaction',
+            describeColumns(headers, rows, false),
+        );
+
+        const [, body] = post.mock.calls[0];
+        const sent = JSON.stringify(body);
+
+        expect(
+            (body as { columns: { header: string | null }[] }).columns.map(
+                (column) => column.header,
+            ),
+        ).toEqual([null, null, null, null]);
+
+        for (const value of [...headers, ...Object.values(rows[0])]) {
+            expect(sent).not.toContain(value);
+        }
+    });
+});
+
+describe('withFileHeaders', () => {
+    it('names each picked column by the file header at its position', () => {
+        const answer = suggestion({
+            transaction_date: [null, 0],
+            amount: ['Bedrag (EUR)', 3],
+            balance: [null, null],
+        });
+
+        expect(
+            withFileHeaders(answer, [
+                '01/12/2025',
+                'MERCADONA',
+                'Af Bij',
+                'Bedrag (EUR)',
+            ]).fields,
+        ).toEqual({
+            transaction_date: {
+                column: '01/12/2025',
+                index: 0,
+                confidence: 0.9,
+            },
+            amount: { column: 'Bedrag (EUR)', index: 3, confidence: 0.9 },
+            balance: { column: null, index: null, confidence: 0.9 },
+        });
+    });
+
+    it('names nothing for a position the file does not have', () => {
+        expect(
+            withFileHeaders(suggestion({ amount: ['Amount', 7] }), ['Amount'])
+                .fields.amount.column,
+        ).toBeNull();
     });
 });
 

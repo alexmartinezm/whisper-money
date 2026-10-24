@@ -21,9 +21,11 @@ return [
     | Free users
     |--------------------------------------------------------------------------
     |
-    | Whether users without a pro plan get suggestions too. Only each column's
-    | header and a computed shape (e.g. "date (dd/mm/yyyy)") are sent, never a
-    | cell value, so no AI consent is required either way.
+    | Whether users without a pro plan get suggestions too. Only column
+    | headers (never a header that looks like a value, and none when the file
+    | has no header row) and a computed shape of each column's values (e.g.
+    | "date (dd/mm/yyyy)") are sent; never a cell value. So no AI consent is
+    | required either way.
     |
     */
 

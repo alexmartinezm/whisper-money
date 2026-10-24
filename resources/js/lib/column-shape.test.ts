@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { columnShape, describeColumns, isAllPositive } from './column-shape';
+import {
+    columnShape,
+    describeColumns,
+    isAllPositive,
+    isHeaderRow,
+    valueKind,
+} from './column-shape';
 
 describe('columnShape', () => {
     it.each([
@@ -79,6 +85,7 @@ describe('describeColumns', () => {
             describeColumns(
                 ['Buchungstag', 'Verwendungszweck', 'Betrag'],
                 rows,
+                true,
             ),
         ).toEqual([
             { header: 'Buchungstag', shape: 'date (dd.mm.yyyy)' },
@@ -98,6 +105,7 @@ describe('describeColumns', () => {
             describeColumns(
                 ['Buchungstag', 'Verwendungszweck', 'Betrag'],
                 rows,
+                true,
             ),
         );
 
@@ -113,9 +121,157 @@ describe('describeColumns', () => {
             Amount: String(index % 2 === 0 ? -index : index),
         }));
 
-        expect(describeColumns(['Amount'], long)[0].shape).toBe(
+        expect(describeColumns(['Amount'], long, true)[0].shape).toBe(
             'integer, mixed signs',
         );
+    });
+});
+
+describe('valueKind', () => {
+    it.each([
+        ['01/12/2025', 'date'],
+        ['2025-12-01', 'date'],
+        ['01/12', 'date'],
+        ['1 dic 2025', 'date'],
+        ['1 de diciembre de 2025', 'date'],
+        ['1 dic 2025, 0:00:00', 'date'],
+        ['Dec 1, 2025', 'date'],
+        ['-45,20', 'number'],
+        ['1.234,56 €', 'number'],
+        ['EUR 12.00', 'number'],
+        ['(12.40)', 'number'],
+        ['20251201', 'number'],
+        ['EUR', 'code'],
+        ['ES91 2100 0418 4502 0005 1332', 'iban'],
+        ['10:30', 'time'],
+    ])('reads %s as a value (%s)', (text, kind) => {
+        expect(valueKind(text)).toBe(kind);
+    });
+
+    it.each([
+        'Concepto',
+        'Fecha valor',
+        'Importe (EUR)',
+        'Saldo 2024',
+        'MERCADONA VALENCIA',
+        'Buchungstag',
+        'Eur',
+        '',
+    ])('reads %s as a word', (text) => {
+        expect(valueKind(text)).toBeNull();
+    });
+});
+
+describe('isHeaderRow', () => {
+    it('takes a row of names over the values for a header row', () => {
+        const columns = [
+            ['Fecha', '01/12/2025', '02/12/2025'],
+            ['Concepto', 'MERCADONA VALENCIA', 'NETFLIX.COM'],
+            ['Importe', '-45,20', '-12,99'],
+        ];
+
+        expect(isHeaderRow(columns, 0)).toBe(true);
+    });
+
+    it('turns down a first movement taken for headers', () => {
+        const columns = [
+            ['01/12/2025', '02/12/2025', '03/12/2025'],
+            ['MERCADONA VALENCIA', 'NETFLIX.COM', 'BAR PACO'],
+            ['-45,20', '-12,99', '-3,50'],
+        ];
+
+        expect(isHeaderRow(columns, 0)).toBe(false);
+    });
+
+    it('turns down a spreadsheet row of numbers over numbers', () => {
+        // A date and an amount in .xlsx arrive as numbers, which the reader
+        // swaps for column letters: only the raw cells tell.
+        const columns = [
+            [45992, 45993],
+            ['MERCADONA VALENCIA', 'NETFLIX.COM'],
+            [-45.2, -12.99],
+        ];
+
+        expect(isHeaderRow(columns, 0)).toBe(false);
+    });
+
+    it('reads the row the reader picked, past a title above it', () => {
+        const columns = [
+            ['Extracto', 'Fecha', '01/12/2025'],
+            [undefined, 'Importe', '-45,20'],
+        ];
+
+        expect(isHeaderRow(columns, 1)).toBe(true);
+    });
+
+    it('keeps a header row whose currency header sits over amounts', () => {
+        const columns = [
+            ['Fecha', '01/12/2025'],
+            ['EUR', '-45,20'],
+        ];
+
+        expect(isHeaderRow(columns, 0)).toBe(true);
+    });
+});
+
+describe('the headers sent', () => {
+    const headerRow = [
+        { Fecha: '01/12/2025', Concepto: 'MERCADONA', Importe: '-45,20' },
+        { Fecha: '02/12/2025', Concepto: 'NETFLIX.COM', Importe: '-12,99' },
+    ];
+
+    it('are the header row of a file that has one', () => {
+        expect(
+            describeColumns(
+                ['Fecha', 'Concepto', 'Importe'],
+                headerRow,
+                true,
+            ).map((column) => column.header),
+        ).toEqual(['Fecha', 'Concepto', 'Importe']);
+    });
+
+    it('are none at all for a file without a header row', () => {
+        const headers = ['01/12/2025', 'MERCADONA VALENCIA', '-45,20'];
+        const rows = [
+            {
+                '01/12/2025': '02/12/2025',
+                'MERCADONA VALENCIA': 'NETFLIX.COM',
+                '-45,20': '-12,99',
+            },
+        ];
+        const described = describeColumns(headers, rows, false);
+
+        expect(described).toEqual([
+            { header: null, shape: 'date (dd/mm or mm/dd/yyyy)' },
+            {
+                header: null,
+                shape: 'text, avg 11 chars, same value repeated',
+            },
+            {
+                header: null,
+                shape: 'number, 2 decimals with ",", all negative',
+            },
+        ]);
+        expect(JSON.stringify(described)).not.toContain('MERCADONA');
+    });
+
+    it('leave out a header that reads as a value, keeping the words', () => {
+        const rows = [
+            {
+                '01/12/2025': '02/12/2025',
+                'Importe (EUR)': '-12,99',
+                EUR: 'EUR',
+                'ES91 2100 0418 4502 0005 1332': 'x',
+                '-45,20': 'y',
+                'Fecha valor': '03/12/2025',
+            },
+        ];
+
+        expect(
+            describeColumns(Object.keys(rows[0]), rows, true).map(
+                (column) => column.header,
+            ),
+        ).toEqual([null, 'Importe (EUR)', null, null, null, 'Fecha valor']);
     });
 });
 
@@ -124,7 +280,7 @@ describe('the sign of a long column', () => {
         const amounts = Array.from({ length: 1000 }, (_, index) => ({
             Amount: index === 501 ? '-5.00' : '12.00',
         }));
-        const [column] = describeColumns(['Amount'], amounts);
+        const [column] = describeColumns(['Amount'], amounts, true);
 
         expect(column.shape).toBe('number, 2 decimals with ".", mixed signs');
         expect(isAllPositive(column.shape)).toBe(false);

@@ -118,6 +118,7 @@ export function mergeImportFiles(
         rows,
         rowNumbers: files.flatMap((file) => file.rowNumbers),
         rowFiles: files.flatMap((file) => file.rows.map(() => file.file.name)),
+        hasHeaderRow: files.every((file) => file.hasHeaderRow),
         dateFormat: detected?.format ?? first.dateFormat,
         dateFormatDetected: detected ? !detected.ambiguous : false,
         dateFormatAmbiguous: detected?.ambiguous ?? false,

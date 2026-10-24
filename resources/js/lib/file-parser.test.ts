@@ -18,6 +18,7 @@ import {
     detectExpenseTypes,
     getLatestTransactionDate,
     getLocaleDateFormat,
+    isDateText,
     parseAmount,
     parseCurrencyCode,
     parseDate,
@@ -1272,5 +1273,34 @@ describe('parseDate with a month name', () => {
                 'en-US',
             ),
         ).toEqual({ format: DateFormat.MonthDayYear, ambiguous: false });
+    });
+});
+
+describe('isDateText', () => {
+    it.each([
+        '01/12/2025',
+        '2025-12-01',
+        '01.12.25',
+        '01/12',
+        '20251201',
+        '01/12/2025 10:30',
+        '1 dic 2025, 0:00:00',
+        '1 de diciembre de 2025',
+        'Dec 1, 2025',
+    ])('reads %s as a date', (value) => {
+        expect(isDateText(value)).toBe(true);
+    });
+
+    it.each([
+        'Fecha',
+        'Fecha valor',
+        'Saldo 2024',
+        'Cuenta 1-2',
+        '-45,20',
+        '1.234,56',
+        '31/02/2025',
+        '1 foo 2025',
+    ])('does not read %s as one', (value) => {
+        expect(isDateText(value)).toBe(false);
     });
 });

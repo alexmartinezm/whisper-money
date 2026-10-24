@@ -13,8 +13,10 @@ use Throwable;
 /**
  * Asks TypeSafe AI's Jev which column of an imported file holds each field.
  * One request per file, one `choice` question per field, whose options are the
- * file's columns plus "none". Jev only ever sees each column's header and its
- * computed shape, never a cell value.
+ * file's columns plus "none". Jev only ever sees column headers (never a
+ * header that looks like a value, and none when the file has no header row:
+ * the client sends those as null, labelled here by their shape) and a
+ * computed shape of each column's values; never a cell value.
  *
  * Answers are cached per user, account, kind and column layout, so asking
  * again for the same file never reaches Jev. A failed answer is not cached.

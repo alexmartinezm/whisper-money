@@ -1,3 +1,4 @@
+import { parseFile } from '@/lib/file-parser';
 import type { Account } from '@/types/account';
 import type { BalanceColumnMapping } from '@/types/balance-import';
 import { DateFormat } from '@/types/import';
@@ -34,9 +35,10 @@ vi.mock('@/lib/file-parser', async (importOriginal) => ({
         headers,
         data: rows,
         rowNumbers: [2, 3],
-        columns: headers.map((header) =>
-            rows.map((row) => row[header as keyof (typeof rows)[0]]),
-        ),
+        columns: headers.map((header) => [
+            header,
+            ...rows.map((row) => row[header as keyof (typeof rows)[0]]),
+        ]),
         headerRowIndex: 0,
     })),
 }));
@@ -185,6 +187,44 @@ describe('ImportBalancesDrawer with AI column mapping', () => {
             balance_date: 'Datum',
             balance: 'Depotwert',
             invested_amount: 'Einstand',
+        });
+    });
+
+    it('sends no header of a file without a header row, and maps by position', async () => {
+        // The reader took the first balance for the headers.
+        const firstRow = ['31.01.2025', '10.200,00', '9.000,00'];
+        const next = { '31.01.2025': '28.02.2025', '10.200,00': '10.650,00' };
+        vi.mocked(parseFile).mockResolvedValueOnce({
+            headers: firstRow,
+            data: [{ ...next, '9.000,00': '9.500,00' }],
+            rowNumbers: [2],
+            columns: [
+                ['31.01.2025', '28.02.2025'],
+                ['10.200,00', '10.650,00'],
+                ['9.000,00', '9.500,00'],
+            ],
+            headerRowIndex: 0,
+        });
+        fetchColumnSuggestions.mockResolvedValue({
+            cached: false,
+            fields: {
+                balance_date: { column: null, index: 0, confidence: 0.9 },
+                balance: { column: null, index: 1, confidence: 0.9 },
+                invested_amount: { column: null, index: 2, confidence: 0.9 },
+            },
+        });
+
+        await reachMapping();
+        await screen.findByText('Suggested by AI');
+
+        const [, columns] = fetchColumnSuggestions.mock.calls[0];
+        expect(
+            columns.map((column: { header: string | null }) => column.header),
+        ).toEqual([null, null, null]);
+        expect(shownMapping()).toEqual({
+            balance_date: '31.01.2025',
+            balance: '10.200,00',
+            invested_amount: '9.000,00',
         });
     });
 

@@ -68,6 +68,8 @@ export interface ImportState {
     file: File | null;
     parsedData: ParsedRow[];
     columnHeaders: string[];
+    /** The file has a real header row: its headers may be sent to the AI. */
+    hasHeaderRow: boolean;
     columnOptions: ColumnOption[];
     columnMapping: ColumnMapping;
     dateFormat: DateFormat;

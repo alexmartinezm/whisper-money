@@ -104,6 +104,22 @@ describe('parseImportFile', () => {
         expect(parsed.mapping.expense_types).toEqual(['Gasto']);
     });
 
+    it('says whether the file has a header row', async () => {
+        const withHeaders = await parseImportFile(
+            csvFile(['Fecha,Concepto,Importe', '01/12/2025,Internet,-10.50']),
+        );
+        const headerless = await parseImportFile(
+            csvFile([
+                '01/12/2025,MERCADONA VALENCIA,-45.20',
+                '02/12/2025,NETFLIX.COM,-12.99',
+            ]),
+        );
+
+        expect(withHeaders.hasHeaderRow).toBe(true);
+        expect(headerless.headers).toContain('MERCADONA VALENCIA');
+        expect(headerless.hasHeaderRow).toBe(false);
+    });
+
     it('reads accented headers of a UTF-8 CSV without a byte order mark', async () => {
         const parsed = await parseImportFile(
             csvFile([
@@ -129,6 +145,7 @@ function parsedFile(): ParsedImportFile {
         rows: [],
         rowNumbers: [],
         headers: ['Fecha', 'Descripción', 'Cantidad', 'Tipo'],
+        hasHeaderRow: true,
         columnOptions: [],
         mapping: {
             transaction_date: 'Fecha',

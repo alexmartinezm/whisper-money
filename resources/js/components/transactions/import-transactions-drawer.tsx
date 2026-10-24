@@ -123,6 +123,7 @@ export function ImportTransactionsDrawer({
         file: null,
         parsedData: [],
         columnHeaders: [],
+        hasHeaderRow: false,
         columnOptions: [],
         columnMapping: {
             transaction_date: null,
@@ -163,6 +164,7 @@ export function ImportTransactionsDrawer({
                 file: null,
                 parsedData: [],
                 columnHeaders: [],
+                hasHeaderRow: false,
                 columnOptions: [],
                 columnMapping: {
                     transaction_date: null,
@@ -211,15 +213,17 @@ export function ImportTransactionsDrawer({
         file: File,
         headers: string[],
         rows: ParsedRow[],
+        hasHeaderRow: boolean,
         description: ColumnMapping['description'],
         everything: boolean,
         token?: number,
     ) => {
-        const columns = describeColumns(headers, rows);
+        const columns = describeColumns(headers, rows, hasHeaderRow);
 
         void ai.request<ColumnMapping>({
             kind: 'transaction',
             columns,
+            headers,
             accountId: state.selectedAccountId,
             everything,
             token,
@@ -280,6 +284,7 @@ export function ImportTransactionsDrawer({
             const {
                 headers,
                 rows: data,
+                hasHeaderRow,
                 columnOptions,
                 mapping: autoMapping,
                 dateFormat: detectedFormat,
@@ -294,6 +299,7 @@ export function ImportTransactionsDrawer({
                 file,
                 parsedData: data,
                 columnHeaders: headers,
+                hasHeaderRow,
                 columnOptions,
                 columnMapping: withoutCurrencyColumn(autoMapping),
                 dateFormat: detectedFormat,
@@ -310,6 +316,7 @@ export function ImportTransactionsDrawer({
                     file,
                     parsed.headers,
                     parsed.rows,
+                    parsed.hasHeaderRow,
                     parsed.mapping.description,
                     false,
                     token,
@@ -957,6 +964,7 @@ export function ImportTransactionsDrawer({
                                         state.file,
                                         state.columnHeaders,
                                         state.parsedData,
+                                        state.hasHeaderRow,
                                         state.columnMapping.description,
                                         true,
                                     )

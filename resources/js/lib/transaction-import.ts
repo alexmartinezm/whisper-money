@@ -2,6 +2,7 @@ import {
     applySuggestion,
     counterpartiesInDescription,
 } from '@/lib/ai-import-mapping';
+import { isHeaderRow } from '@/lib/column-shape';
 import {
     autoDetectColumns,
     detectDateFormat,
@@ -76,6 +77,12 @@ export interface ParsedImportFile {
      */
     rowFiles?: string[];
     headers: string[];
+    /**
+     * The row the headers were read from really is one. False for a file that
+     * starts with its first movement: its "headers" are that row's cells, and
+     * none of them may leave the browser (see describeColumns).
+     */
+    hasHeaderRow: boolean;
     columnOptions: ColumnOption[];
     mapping: ColumnMapping;
     dateFormat: DateFormat;
@@ -163,6 +170,7 @@ export async function parseImportFile(
         rows: data,
         rowNumbers,
         headers,
+        hasHeaderRow: isHeaderRow(columns, headerRowIndex),
         columnOptions: buildColumnOptions(headers, columns, headerRowIndex),
         mapping,
         dateFormat,

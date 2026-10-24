@@ -856,6 +856,39 @@ export function parseDate(
     return calendarDate(year, month, day);
 }
 
+// "01/12/2025", "2025-12-01", "01.12.25", "01/12": nothing but digits and
+// the separators a date is written with.
+const DIGIT_DATE = /^\d{1,4}[./-]\d{1,2}(?:[./-]\d{1,4})?$/;
+const COMPACT_DIGIT_DATE = /^(?:19|20)\d{6}$/;
+const DIGIT_DATE_FORMATS = [
+    DateFormat.YearMonthDay,
+    DateFormat.DayMonthYear,
+    DateFormat.MonthDayYear,
+];
+
+/**
+ * Whether a text is, all on its own, a date this parser reads in some
+ * format: in digits ("01/12/2025", "20251201", "01/12") or with its month by
+ * name ("1 dic 2025", "1 de diciembre de 2025", "Dec 1, 2025"), with or
+ * without a time of day. A word with a number in it ("Saldo 2024") is not.
+ */
+export function isDateText(value: string): boolean {
+    const text = stripTimeOfDay(value.trim());
+
+    if (readNamedMonthDate(text)?.date) {
+        return true;
+    }
+
+    if (COMPACT_DIGIT_DATE.test(text)) {
+        return parseDate(text, DateFormat.YearMonthDayCompact) !== null;
+    }
+
+    return (
+        DIGIT_DATE.test(text) &&
+        DIGIT_DATE_FORMATS.some((format) => parseDate(text, format) !== null)
+    );
+}
+
 /**
  * The day a year, month and day name, or null when they name none the server
  * stores. A missing year is this year's; a two-digit one is 1950–2049.

@@ -1,4 +1,7 @@
-import type { ParsedImportFile } from '@/lib/transaction-import';
+import {
+    parseImportFile,
+    type ParsedImportFile,
+} from '@/lib/transaction-import';
 import type { Account } from '@/types/account';
 import { DateFormat, type ColumnMapping } from '@/types/import';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -49,6 +52,7 @@ function guessed(): ParsedImportFile {
         rows,
         rowNumbers: [2, 3],
         headers,
+        hasHeaderRow: true,
         columnOptions: headers.map((header) => ({
             value: header,
             label: header,
@@ -274,6 +278,52 @@ describe('ImportTransactionsDrawer with AI column mapping', () => {
         expect(shownMapping()).toMatchObject({
             transaction_date: 'Buchungstag',
             amount: 'Betrag',
+        });
+    });
+
+    it('sends no header of a file without a header row, and maps by position', async () => {
+        // The reader took the first movement for the headers.
+        const firstRow = ['01.03.2025', 'REWE Markt Berlin', '-12,40'];
+        vi.mocked(parseImportFile).mockResolvedValueOnce({
+            ...guessed(),
+            headers: firstRow,
+            hasHeaderRow: false,
+            rows: [
+                {
+                    '01.03.2025': '15.03.2025',
+                    'REWE Markt Berlin': 'Gehalt',
+                    '-12,40': '2.400,00',
+                },
+            ],
+            columnOptions: firstRow.map((header) => ({
+                value: header,
+                label: header,
+                examples: [],
+            })),
+            mapping: { ...guessed().mapping, transaction_date: null },
+        });
+        fetchColumnSuggestions.mockResolvedValue({
+            cached: false,
+            fields: {
+                ...suggestion.fields,
+                transaction_date: { column: null, index: 0, confidence: 0.9 },
+                description: { column: null, index: 1, confidence: 0.9 },
+                amount: { column: null, index: 2, confidence: 0.9 },
+            },
+        });
+
+        await reachMapping();
+        await screen.findByText('Suggested by AI');
+
+        const [, columns] = fetchColumnSuggestions.mock.calls[0];
+        expect(
+            columns.map((column: { header: string | null }) => column.header),
+        ).toEqual([null, null, null]);
+        expect(JSON.stringify(columns)).not.toMatch(/REWE|12,40|01\.03/);
+        expect(shownMapping()).toMatchObject({
+            transaction_date: '01.03.2025',
+            description: 'REWE Markt Berlin',
+            amount: '-12,40',
         });
     });
 

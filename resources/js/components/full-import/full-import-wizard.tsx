@@ -352,11 +352,16 @@ export function FullImportWizard({
         everything: boolean,
         token?: number,
     ) => {
-        const columns = describeColumns(file.headers, file.rows);
+        const columns = describeColumns(
+            file.headers,
+            file.rows,
+            file.hasHeaderRow,
+        );
 
         void ai.request<FullImportMapping>({
             kind: 'transaction',
             columns,
+            headers: file.headers,
             everything,
             token,
             toMapping: (suggestions) =>

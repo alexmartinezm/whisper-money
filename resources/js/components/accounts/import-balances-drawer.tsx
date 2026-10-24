@@ -16,7 +16,7 @@ import {
     BALANCE_FIELDS,
     suggestedBalanceMapping,
 } from '@/lib/ai-import-mapping';
-import { describeColumns } from '@/lib/column-shape';
+import { describeColumns, isHeaderRow } from '@/lib/column-shape';
 import { getCsrfToken } from '@/lib/csrf';
 import {
     detectDateFormat,
@@ -97,6 +97,7 @@ export function ImportBalancesDrawer({
         file: null,
         parsedData: [],
         columnHeaders: [],
+        hasHeaderRow: false,
         columnOptions: [],
         columnMapping: {
             balance_date: null,
@@ -131,6 +132,7 @@ export function ImportBalancesDrawer({
                 file: null,
                 parsedData: [],
                 columnHeaders: [],
+                hasHeaderRow: false,
                 columnOptions: [],
                 columnMapping: {
                     balance_date: null,
@@ -245,12 +247,14 @@ export function ImportBalancesDrawer({
         file: File,
         headers: string[],
         rows: ParsedRow[],
+        hasHeaderRow: boolean,
         everything: boolean,
         token?: number,
     ) => {
         void ai.request<BalanceColumnMapping>({
             kind: 'balance',
-            columns: describeColumns(headers, rows),
+            columns: describeColumns(headers, rows, hasHeaderRow),
+            headers,
             accountId: state.selectedAccountId,
             everything,
             token,
@@ -292,6 +296,7 @@ export function ImportBalancesDrawer({
         try {
             const { headers, data, columns, headerRowIndex } =
                 await parseFile(file);
+            const hasHeaderRow = isHeaderRow(columns, headerRowIndex);
             const autoMapping = autoDetectBalanceColumns(headers);
 
             const columnOptions = headers.map((header, index) => {
@@ -342,6 +347,7 @@ export function ImportBalancesDrawer({
                 file,
                 parsedData: data,
                 columnHeaders: headers,
+                hasHeaderRow,
                 columnOptions,
                 columnMapping: autoMapping,
                 dateFormat: detectedFormat,
@@ -365,7 +371,15 @@ export function ImportBalancesDrawer({
                       }
                     : null,
                 BALANCE_FIELDS,
-                () => requestSuggestion(file, headers, data, false, token),
+                () =>
+                    requestSuggestion(
+                        file,
+                        headers,
+                        data,
+                        hasHeaderRow,
+                        false,
+                        token,
+                    ),
             );
 
             if (savedConfig && fits) {
@@ -736,6 +750,7 @@ export function ImportBalancesDrawer({
                                         state.file,
                                         state.columnHeaders,
                                         state.parsedData,
+                                        state.hasHeaderRow,
                                         true,
                                     )
                                 }

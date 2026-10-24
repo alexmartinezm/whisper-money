@@ -13,9 +13,11 @@ use Illuminate\Validation\Validator;
 
 /**
  * The layout of a file being imported, as sent to the AI for column-mapping
- * suggestions. Only each column's header and computed shape are accepted, never
- * a cell value: anything else in the payload is refused, which is what keeps
- * the user's data out of the request. The account being imported into is
+ * suggestions. Only column headers (never a header that looks like a value,
+ * and none when the file has no header row: the client sends those as null)
+ * and a computed shape of each column's values are accepted; never a cell
+ * value: anything else in the payload is refused, which is what keeps the
+ * user's data out of the request. The account being imported into is
  * optional (onboarding and the full import may not have one yet) and only
  * scopes the cached suggestion.
  */

@@ -61,6 +61,7 @@ describe('useAiColumnSuggestion', () => {
             result.current.request<Mapping>({
                 kind: 'transaction',
                 columns: [],
+                headers: [],
                 toMapping,
                 apply,
             }),
@@ -87,6 +88,7 @@ describe('useAiColumnSuggestion', () => {
             request = result.current.request<Mapping>({
                 kind: 'transaction',
                 columns: [],
+                headers: [],
                 toMapping,
                 apply,
             });
@@ -120,6 +122,7 @@ describe('useAiColumnSuggestion', () => {
             result.current.request<Mapping>({
                 kind: 'transaction',
                 columns: [],
+                headers: [],
                 toMapping,
                 apply,
             }),
@@ -141,6 +144,7 @@ describe('useAiColumnSuggestion', () => {
             result.current.request<Mapping>({
                 kind: 'transaction',
                 columns: [],
+                headers: [],
                 toMapping,
                 apply,
                 everything: true,
@@ -148,6 +152,58 @@ describe('useAiColumnSuggestion', () => {
         );
 
         expect(apply).toHaveBeenCalledWith(toMapping(), new Set());
+    });
+
+    it('sends the columns as described and reads the answer by the file headers', async () => {
+        // A file without a header row: its "headers" are its first movement,
+        // so none is sent and the answer only says where each field is.
+        const headers = ['01/12/2025', 'MERCADONA VALENCIA', '-45,20'];
+        const columns = [
+            { header: null, shape: 'date (dd/mm/yyyy)' },
+            {
+                header: null,
+                shape: 'text, avg 11 chars, mostly distinct values',
+            },
+            { header: null, shape: 'number, 2 decimals with ",", mixed signs' },
+        ];
+        fetchColumnSuggestions.mockResolvedValue({
+            cached: false,
+            fields: {
+                amount: { column: null, index: 2, confidence: 0.9 },
+                description: { column: null, index: 1, confidence: 0.9 },
+            },
+        });
+        const toMapping = vi.fn(
+            (suggestions: {
+                fields: Record<string, { column: string | null }>;
+            }) => ({
+                amount: suggestions.fields.amount.column,
+                description: suggestions.fields.description.column,
+            }),
+        );
+        const apply = vi.fn();
+        const { result } = renderHook(() => useAiColumnSuggestion());
+
+        await act(() =>
+            result.current.request<Mapping>({
+                kind: 'transaction',
+                columns,
+                headers,
+                accountId: 'account-1',
+                toMapping,
+                apply,
+            }),
+        );
+
+        expect(fetchColumnSuggestions).toHaveBeenCalledWith(
+            'transaction',
+            columns,
+            'account-1',
+        );
+        expect(apply).toHaveBeenCalledWith(
+            { amount: '-45,20', description: 'MERCADONA VALENCIA' },
+            new Set(),
+        );
     });
 
     it('drops an answer for a file no longer on screen', async () => {
@@ -161,6 +217,7 @@ describe('useAiColumnSuggestion', () => {
             request = result.current.request<Mapping>({
                 kind: 'transaction',
                 columns: [],
+                headers: [],
                 toMapping,
                 apply,
             });
@@ -187,6 +244,7 @@ describe('useAiColumnSuggestion', () => {
             result.current.request<Mapping>({
                 kind: 'transaction',
                 columns: [],
+                headers: [],
                 toMapping,
                 apply,
             }),
@@ -294,6 +352,7 @@ describe('useAiColumnSuggestion', () => {
             result.current.request<Mapping>({
                 kind: 'transaction',
                 columns: [],
+                headers: [],
                 toMapping,
                 apply,
                 token: first,
@@ -313,6 +372,7 @@ describe('useAiColumnSuggestion', () => {
             result.current.request<Mapping>({
                 kind: 'transaction',
                 columns: [],
+                headers: [],
                 toMapping,
                 apply: vi.fn(),
                 everything: true,
@@ -330,6 +390,7 @@ describe('useAiColumnSuggestion', () => {
             result.current.request<Mapping>({
                 kind: 'transaction',
                 columns: [],
+                headers: [],
                 toMapping,
                 apply: vi.fn(),
             }),
