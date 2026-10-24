@@ -92,9 +92,7 @@ class CashflowBlockQuery
      */
     public function apply(Builder $query, CashflowBlock $block, string $userId, PeriodComparator $period): Builder
     {
-        $rows = Transaction::query()
-            ->where('transactions.user_id', $userId)
-            ->whereBetween('transactions.transaction_date', [$period->from, $period->to])
+        $rows = $this->ownedInPeriod(Transaction::query(), $userId, $period)
             ->countingTowardsTotals()
             ->select('transactions.id');
 
@@ -111,8 +109,11 @@ class CashflowBlockQuery
         };
 
         // Wrapped in a derived table, which MySQL materializes, so a bulk
-        // update can filter on the same table it writes to.
-        return $query->whereIn('transactions.id', DB::query()->fromSub($rows, 'cashflow_block_rows')->select('id'));
+        // update can filter on the same table it writes to. MySQL then probes
+        // that set once per outer row, so the outer query repeats the owner and
+        // range to read only those rows by index instead of the whole table.
+        return $this->ownedInPeriod($query, $userId, $period)
+            ->whereIn('transactions.id', DB::query()->fromSub($rows, 'cashflow_block_rows')->select('id'));
     }
 
     /**
@@ -192,6 +193,20 @@ class CashflowBlockQuery
                     ->all()),
             $flags,
         ));
+    }
+
+    /**
+     * The user's rows dated in the period: the leading columns of
+     * `idx_transactions_budget_lookup`.
+     *
+     * @param  Builder<Transaction>  $query
+     * @return Builder<Transaction>
+     */
+    private function ownedInPeriod(Builder $query, string $userId, PeriodComparator $period): Builder
+    {
+        return $query
+            ->where('transactions.user_id', $userId)
+            ->whereBetween('transactions.transaction_date', [$period->from, $period->to]);
     }
 
     /**
