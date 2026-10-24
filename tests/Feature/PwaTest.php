@@ -61,8 +61,14 @@ test('the colour scheme is declared before any stylesheet', function () {
     // light whatever the app theme.
     $html = $this->withUnencryptedCookie('appearance', 'dark')->get('/')->getContent();
 
+    // Every stylesheet, the self-hosted fonts included, comes in through
+    // @vite, which the suite renders empty (withoutVite), so the order is
+    // checked in the template itself.
+    $template = file_get_contents(resource_path('views/app.blade.php'));
+
     expect($html)->toContain('<meta name="color-scheme" content="dark">')
-        ->and(strpos($html, 'name="color-scheme"'))->toBeLessThan(strpos($html, 'rel="stylesheet"'));
+        ->and($html)->not->toContain('rel="stylesheet"')
+        ->and(strpos($template, 'name="color-scheme"'))->toBeLessThan(strpos($template, '@vite('));
 
     // "system" leaves the choice to the phone, which is correct only there.
     expect($this->withUnencryptedCookie('appearance', 'system')->get('/')->getContent())
