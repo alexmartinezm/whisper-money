@@ -133,3 +133,21 @@ it('lets nobody else read or undo an import', function () {
 
     expect($import->fresh()->undone_at)->toBeNull();
 });
+
+it('refuses rows for someone else\'s import before reading them against its plan', function () {
+    $import = Import::factory()->draft()->create([
+        'plan' => ['accounts' => [['key' => 'a0']], 'categories' => [], 'expected' => ['transactions' => 1, 'balances' => 0]],
+    ]);
+    $intruder = fullImportUserOnboarded(1);
+    $route = route('api.full-imports.chunks.store', $import);
+
+    // Rows the plan would refuse, and rows it would take: both are forbidden.
+    $this->actingAs($intruder)->postJson($route, ['kind' => 'transactions', 'position' => 0, 'rows' => [
+        ['account_key' => 'not-in-the-plan', 'date' => '2026-09-01', 'amount' => -100, 'description' => 'Coffee'],
+    ]])->assertForbidden();
+    $this->postJson($route, ['kind' => 'transactions', 'position' => 0, 'rows' => [
+        ['account_key' => 'a0', 'date' => '2026-09-01', 'amount' => -100, 'description' => 'Coffee'],
+    ]])->assertForbidden();
+
+    expect($import->chunks()->count())->toBe(0);
+});

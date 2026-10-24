@@ -26,11 +26,16 @@ class StoreFullImportChunkRequest extends FormRequest
     private const BIGINT_MAX = '9223372036854775807';
 
     /**
-     * Ownership is checked by the controller through the ImportPolicy.
+     * Only the import's owner may add rows to it, checked before the rows are
+     * validated against its plan, so someone else's import answers 403 rather
+     * than describing what its plan expects. The controller still checks the
+     * import is a draft the user may run.
      */
     public function authorize(): bool
     {
-        return true;
+        $import = $this->route('import');
+
+        return $import instanceof Import && $this->user()?->can('update', $import) === true;
     }
 
     /**
