@@ -109,6 +109,20 @@ class CategoryTree
     }
 
     /**
+     * A category's id together with every ancestor id, walking up to the root.
+     *
+     * The walk runs over a {@see self::parentMap()}. Resolving many categories
+     * of one user, pass the map in so it is loaded once rather than per call.
+     *
+     * @param  array<string, ?string>|null  $parentMap
+     * @return array<int, string>
+     */
+    public function ancestorAndSelfIds(string $userId, string $categoryId, ?array $parentMap = null): array
+    {
+        return array_reverse($this->chainFromRoot($categoryId, $parentMap ?? $this->parentMap($userId)));
+    }
+
+    /**
      * Collect the descendant ids of a single category (excluding itself).
      *
      * @return array<int, string>

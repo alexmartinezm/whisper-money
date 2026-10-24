@@ -3,9 +3,16 @@ import {
     type ColumnMapping,
     type ParsedRow,
     type ParsedTransaction,
+    type TypeValueCount,
 } from '@/types/import';
 import { formatLocalDate } from '@/utils/date';
 import * as XLSX from 'xlsx';
+
+/**
+ * What the reader rejects with when the browser cannot read the file at all, so
+ * a caller can tell "not readable" apart from a file that parsed to nothing.
+ */
+export const UNREADABLE_FILE_MESSAGE = 'Failed to read file';
 
 function detectHeaderRow(columns: unknown[][]): number {
     if (!columns || columns.length === 0) {
@@ -46,12 +53,62 @@ function detectHeaderRow(columns: unknown[][]): number {
     return 0;
 }
 
+const UTF8_BOM = new Uint8Array([0xef, 0xbb, 0xbf]);
+
+function readBytes(file: File): Promise<Uint8Array<ArrayBuffer>> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () =>
+            resolve(new Uint8Array(reader.result as ArrayBuffer));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsArrayBuffer(file);
+    });
+}
+
+/**
+ * The spreadsheet reader takes a CSV without a byte order mark for Latin-1,
+ * so a UTF-8 export from a Spanish app arrives as "CategorÃ­as" and every
+ * accented description with it. A CSV that is valid UTF-8 and has anything
+ * past ASCII in it gets the mark it was missing; anything else is left alone.
+ */
+async function withUtf8ByteOrderMark(file: File): Promise<File> {
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+        return file;
+    }
+
+    const bytes = await readBytes(file);
+    const hasBom = UTF8_BOM.every((byte, index) => bytes[index] === byte);
+
+    if (hasBom || !bytes.some((byte) => byte > 0x7f)) {
+        return file;
+    }
+
+    try {
+        new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    } catch {
+        return file;
+    }
+
+    return new File([UTF8_BOM, bytes], file.name, { type: file.type });
+}
+
 export async function parseFile(file: File): Promise<{
     headers: string[];
     data: ParsedRow[];
+    rowNumbers: number[];
     columns: unknown[][];
     headerRowIndex: number;
 }> {
+    let fileToRead: File;
+
+    try {
+        fileToRead = await withUtf8ByteOrderMark(file);
+    } catch {
+        // Reading the bytes fails the same way the reader below would: a
+        // folder named like a CSV is the usual case.
+        throw new Error(UNREADABLE_FILE_MESSAGE);
+    }
+
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
 
@@ -59,7 +116,7 @@ export async function parseFile(file: File): Promise<{
             try {
                 const data = e.target?.result;
                 if (!data) {
-                    reject(new Error('Failed to read file'));
+                    reject(new Error(UNREADABLE_FILE_MESSAGE));
                     return;
                 }
 
@@ -146,42 +203,58 @@ export async function parseFile(file: File): Promise<{
                     headerRowIndex + 1,
                 ) as unknown[][];
 
-                const parsedData: ParsedRow[] = dataRows
-                    .filter(
-                        (row) =>
-                            Array.isArray(row) &&
-                            row.some(
-                                (cell) =>
-                                    cell !== null &&
-                                    cell !== undefined &&
-                                    cell !== '',
-                            ),
-                    )
-                    .map((row) => {
-                        const obj: ParsedRow = {};
-                        headers.forEach((header, index) => {
-                            if (header) {
-                                const value = row[index];
-                                obj[header] =
-                                    value === null || value === undefined
-                                        ? null
-                                        : (value as string | number);
-                            }
-                        });
-                        return obj;
+                const parsedData: ParsedRow[] = [];
+                const rowNumbers: number[] = [];
+
+                dataRows.forEach((row, index) => {
+                    const hasValue =
+                        Array.isArray(row) &&
+                        row.some(
+                            (cell) =>
+                                cell !== null &&
+                                cell !== undefined &&
+                                cell !== '',
+                        );
+
+                    if (!hasValue) {
+                        return;
+                    }
+
+                    const obj: ParsedRow = {};
+                    headers.forEach((header, columnIndex) => {
+                        if (header) {
+                            const value = row[columnIndex];
+                            obj[header] =
+                                value === null || value === undefined
+                                    ? null
+                                    : (value as string | number);
+                        }
                     });
 
-                resolve({ headers, data: parsedData, columns, headerRowIndex });
+                    parsedData.push(obj);
+                    // Empty rows are dropped, so the index no longer matches the
+                    // file. Keep the row's own number for anything the user has
+                    // to go and find in their spreadsheet.
+                    rowNumbers.push(headerRowIndex + index + 2);
+                });
+
+                resolve({
+                    headers,
+                    data: parsedData,
+                    rowNumbers,
+                    columns,
+                    headerRowIndex,
+                });
             } catch {
                 reject(new Error('Failed to parse file'));
             }
         };
 
         reader.onerror = () => {
-            reject(new Error('Failed to read file'));
+            reject(new Error(UNREADABLE_FILE_MESSAGE));
         };
 
-        reader.readAsBinaryString(file);
+        reader.readAsBinaryString(fileToRead);
     });
 }
 
@@ -255,6 +328,21 @@ export function detectDateFormat(
         .map((row) => row[dateColumnName])
         .filter(Boolean);
 
+    // Dates that name their month read the same in every format: "1 dic 2025"
+    // is no guess, only the order the format picker shows changes.
+    const named = sampledValues.map((value) =>
+        readNamedMonthDate(stripTimeOfDay(String(value).trim())),
+    );
+
+    if (named.length > 0 && named.every((one) => one?.date)) {
+        return {
+            format: named.every((one) => one?.monthFirst)
+                ? DateFormat.MonthDayYear
+                : DateFormat.DayMonthYear,
+            ambiguous: false,
+        };
+    }
+
     for (const dateValue of sampledValues) {
         for (const format of formats) {
             const parsedDate = parseDate(dateValue as string | number, format);
@@ -306,9 +394,12 @@ export function autoDetectColumns(headers: string[]): ColumnMapping {
         transaction_date: null,
         description: null,
         amount: null,
+        currency: null,
         balance: null,
         creditor_name: null,
         debtor_name: null,
+        transaction_type: null,
+        expense_types: [],
     };
 
     if (!headers || headers.length === 0) {
@@ -352,6 +443,13 @@ export function autoDetectColumns(headers: string[]): ColumnMapping {
         'quantity',
         'cantidad',
     ];
+    const currencyPatterns = [
+        'currency',
+        'currency_code',
+        'moneda',
+        'divisa',
+        'ccy',
+    ];
     const balancePatterns = [
         'balance',
         'saldo',
@@ -380,6 +478,18 @@ export function autoDetectColumns(headers: string[]): ColumnMapping {
         'contraparte deudora',
         'deudor',
     ];
+    const transactionTypePatterns = [
+        'type',
+        'transaction type',
+        'movement type',
+        'tipo',
+        'tipo de transacción',
+        'tipo de movimiento',
+        'tipo de operación',
+        'debit/credit',
+        'credit/debit',
+        'dr/cr',
+    ];
 
     // Each header is claimed by a single field: the one whose longest pattern
     // matches it, and on a tie the field listed first below. Amount is last
@@ -389,9 +499,11 @@ export function autoDetectColumns(headers: string[]): ColumnMapping {
     const fieldPatterns = [
         ['transaction_date', datePatterns],
         ['description', descriptionPatterns],
+        ['currency', currencyPatterns],
         ['balance', balancePatterns],
         ['creditor_name', creditorPatterns],
         ['debtor_name', debtorPatterns],
+        ['transaction_type', transactionTypePatterns],
         ['amount', amountPatterns],
     ] as const;
 
@@ -413,7 +525,15 @@ export function autoDetectColumns(headers: string[]): ColumnMapping {
         let claimedField: { field: string; length: number } | null = null;
 
         for (const [field, patterns] of fieldPatterns) {
-            const length = longestMatch(patterns, header);
+            // A type column turns amounts negative, so it is only claimed by a
+            // header that is one of its patterns: "type" alone would also take
+            // "Card type", and "tipo" would take "Tipo de cambio".
+            const length =
+                field === 'transaction_type'
+                    ? patterns.includes(header.trim())
+                        ? header.trim().length
+                        : 0
+                    : longestMatch(patterns, header);
 
             if (
                 length > 0 &&
@@ -440,21 +560,229 @@ export function autoDetectColumns(headers: string[]): ColumnMapping {
     mapping.transaction_date = claims.transaction_date?.header ?? null;
     mapping.description = claims.description?.header ?? null;
     mapping.amount = claims.amount?.header ?? null;
+    mapping.currency = claims.currency?.header ?? null;
     mapping.balance = claims.balance?.header ?? null;
     mapping.creditor_name = claims.creditor_name?.header ?? null;
     mapping.debtor_name = claims.debtor_name?.header ?? null;
+    mapping.transaction_type = claims.transaction_type?.header ?? null;
 
     return mapping;
 }
 
+/**
+ * Type values that plainly mean money going out, compared once trimmed and
+ * lowercased. A plural ("gastos", "debits") counts too.
+ */
+const EXPENSE_TYPE_VALUES = [
+    'gasto',
+    'expense',
+    'debit',
+    'débito',
+    'debito',
+    'cargo',
+    'withdrawal',
+    'dépense',
+    'out',
+    'dr',
+    // Dutch (ING's "Af Bij") and German direction columns.
+    'af',
+    'soll',
+];
+
+function normalizeTypeValue(value: string): string {
+    return value.trim().toLowerCase();
+}
+
+/** Whether two type values are the same once trimmed and lowercased. */
+export function isSameTypeValue(a: string, b: string): boolean {
+    return normalizeTypeValue(a) === normalizeTypeValue(b);
+}
+
+/** A cell as text, trimmed; blank for a missing column or an empty cell. */
+function rawCell(row: ParsedRow, column: string | null): string {
+    if (!column) {
+        return '';
+    }
+
+    const value = row[column];
+
+    return value === null || value === undefined ? '' : String(value).trim();
+}
+
+/**
+ * The distinct values of the type column, most common first, each as first
+ * written in the file and with how many rows carry it. Blank cells are left out.
+ */
+export function collectTypeValues(
+    rows: ParsedRow[],
+    column: string | null | undefined,
+): TypeValueCount[] {
+    if (!column) {
+        return [];
+    }
+
+    const values = new Map<string, TypeValueCount>();
+
+    for (const row of rows) {
+        const value = rawCell(row, column);
+
+        if (value === '') {
+            continue;
+        }
+
+        const key = normalizeTypeValue(value);
+        const entry = values.get(key);
+
+        if (entry) {
+            entry.count++;
+        } else {
+            values.set(key, { value, count: 1 });
+        }
+    }
+
+    return [...values.values()].sort((a, b) => b.count - a.count);
+}
+
+/** The values of the type column worth ticking as expenses before the user looks. */
+export function detectExpenseTypes(
+    rows: ParsedRow[],
+    column: string | null | undefined,
+): string[] {
+    return collectTypeValues(rows, column)
+        .map(({ value }) => value)
+        .filter((value) => {
+            const normalized = normalizeTypeValue(value);
+
+            return EXPENSE_TYPE_VALUES.some(
+                (expense) =>
+                    normalized === expense || normalized === `${expense}s`,
+            );
+        });
+}
+
+/**
+ * What gives each row's amount the sign the type column says: an expense row
+ * is always negative, whatever sign the file wrote; any other row keeps its
+ * own. Without a type column, or with no value ticked as an expense, amounts
+ * are untouched.
+ */
+export function typeSigner(
+    mapping: ColumnMapping,
+): (amount: number, row: ParsedRow) => number {
+    const column = mapping.transaction_type;
+    const expenseTypes = new Set(
+        (mapping.expense_types ?? []).map(normalizeTypeValue),
+    );
+
+    if (!column || expenseTypes.size === 0) {
+        return (amount) => amount;
+    }
+
+    return (amount, row) =>
+        expenseTypes.has(normalizeTypeValue(rawCell(row, column)))
+            ? -Math.abs(amount)
+            : amount;
+}
+
 // A time of day trailing the date: "25/10/17, 1:47", "2026-10-01T12:30:00Z",
-// "01/10/2026 1:47:05.123 p. m. +02:00". Only the calendar day is imported,
-// so the time and any offset are dropped as written, without converting.
+// "01/10/2026 1:47:05.123 p. m. +02:00", "10/08/26 20:04h", "10/08/26 20:04 CEST".
+// Only the calendar day is imported, so the time and any offset are dropped
+// as written, without converting.
 const TRAILING_TIME_OF_DAY =
-    /(?:,\s*|\s+|T)\d{1,2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?(?:\s*[ap]\.?\s?m\.?)?(?:\s*(?:Z|[+-]\d{2}(?::?\d{2})?))?$/i;
+    /(?:,\s*|\s+|T)\d{1,2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?(?:\s*[ap]\.?\s?m\.?)?(?:\s*h)?(?:\s*(?:Z|[+-]\d{2}(?::?\d{2})?|[a-z]{2,5}))?$/i;
 
 function stripTimeOfDay(dateStr: string): string {
     return dateStr.replace(TRAILING_TIME_OF_DAY, '').trim();
+}
+
+// The years the server stores (App\Rules\StorableDate). A year outside them is
+// not one someone wrote: a time the strip above misses loses its separators
+// with everything else and glues onto the year ("10/08/26 20:04h" read as year
+// 262004 before the strip knew the "h"). Returning null leaves the row out like
+// any unreadable date instead of posting it for the server to refuse
+// (PHP-LARAVEL-7D).
+const MIN_STORABLE_YEAR = 1900;
+const MAX_STORABLE_YEAR = 9999;
+
+function isStorableYear(year: number): boolean {
+    return year >= MIN_STORABLE_YEAR && year <= MAX_STORABLE_YEAR;
+}
+
+// Month names as Spanish and English exports write them, abbreviated or in
+// full ("1 dic 2025, 0:00:00" from Money Pro in Spanish, "Dec 1, 2025").
+// Keys are lower case without accents.
+const MONTH_NUMBERS: Record<string, number> = {
+    ...monthNames(
+        ['ene', 'feb', 'mar', 'abr', 'may', 'jun'],
+        ['jul', 'ago', 'sep', 'oct', 'nov', 'dic'],
+    ),
+    ...monthNames(
+        ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio'],
+        ['julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'],
+    ),
+    ...monthNames(
+        ['jan', 'feb', 'mar', 'apr', 'may', 'jun'],
+        ['jul', 'aug', 'sep', 'oct', 'nov', 'dec'],
+    ),
+    ...monthNames(
+        ['january', 'february', 'march', 'april', 'may', 'june'],
+        ['july', 'august', 'september', 'october', 'november', 'december'],
+    ),
+    sept: 9,
+    setiembre: 9,
+};
+
+function monthNames(
+    firstHalf: string[],
+    secondHalf: string[],
+): Record<string, number> {
+    return Object.fromEntries(
+        [...firstHalf, ...secondHalf].map((name, index) => [name, index + 1]),
+    );
+}
+
+// "1 dic 2025", "01-dic-25", "1 de diciembre de 2025", "1 Dec. 2025".
+const DAY_MONTH_NAME_YEAR =
+    /^(\d{1,2})(?:\s+de\s+|\s*[-./\s]\s*)(\p{L}+)\.?(?:\s+de\s+|\s*[-./,\s]\s*)(\d{4}|\d{2})$/u;
+
+// "Dec 1, 2025", "December 1 2025".
+const MONTH_NAME_DAY_YEAR = /^(\p{L}+)\.?\s+(\d{1,2}),?\s+(\d{4})$/u;
+
+interface NamedMonthDate {
+    date: Date | null;
+    monthFirst: boolean;
+}
+
+function monthNumber(name: string): number | undefined {
+    return MONTH_NUMBERS[
+        name.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+    ];
+}
+
+/**
+ * A date that writes its month by name, read the same whatever numeric
+ * format was picked. Null when the text is not shaped like one, so a date
+ * written in digits never reads here.
+ */
+function readNamedMonthDate(value: string): NamedMonthDate | null {
+    const dayFirst = DAY_MONTH_NAME_YEAR.exec(value);
+    const monthFirst = dayFirst ? null : MONTH_NAME_DAY_YEAR.exec(value);
+    const [, day, name, year] = dayFirst ?? [];
+    const [, monthFirstName, monthFirstDay, monthFirstYear] = monthFirst ?? [];
+    const month = monthNumber(name ?? monthFirstName ?? '');
+
+    if (month === undefined) {
+        return null;
+    }
+
+    return {
+        date: calendarDate(
+            Number(year ?? monthFirstYear),
+            month,
+            Number(day ?? monthFirstDay),
+        ),
+        monthFirst: monthFirst !== null,
+    };
 }
 
 export function parseDate(
@@ -473,6 +801,12 @@ export function parseDate(
     }
 
     let str = stripTimeOfDay(String(dateStr).trim());
+    const named = readNamedMonthDate(str);
+
+    if (named) {
+        return named.date;
+    }
+
     str = str
         .replace(/\//g, '-')
         .replace(/\./g, '-')
@@ -519,6 +853,51 @@ export function parseDate(
         }
     }
 
+    return calendarDate(year, month, day);
+}
+
+// "01/12/2025", "2025-12-01", "01.12.25", "01/12": nothing but digits and
+// the separators a date is written with.
+const DIGIT_DATE = /^\d{1,4}[./-]\d{1,2}(?:[./-]\d{1,4})?$/;
+const COMPACT_DIGIT_DATE = /^(?:19|20)\d{6}$/;
+const DIGIT_DATE_FORMATS = [
+    DateFormat.YearMonthDay,
+    DateFormat.DayMonthYear,
+    DateFormat.MonthDayYear,
+];
+
+/**
+ * Whether a text is, all on its own, a date this parser reads in some
+ * format: in digits ("01/12/2025", "20251201", "01/12") or with its month by
+ * name ("1 dic 2025", "1 de diciembre de 2025", "Dec 1, 2025"), with or
+ * without a time of day. A word with a number in it ("Saldo 2024") is not.
+ */
+export function isDateText(value: string): boolean {
+    const text = stripTimeOfDay(value.trim());
+
+    if (readNamedMonthDate(text)?.date) {
+        return true;
+    }
+
+    if (COMPACT_DIGIT_DATE.test(text)) {
+        return parseDate(text, DateFormat.YearMonthDayCompact) !== null;
+    }
+
+    return (
+        DIGIT_DATE.test(text) &&
+        DIGIT_DATE_FORMATS.some((format) => parseDate(text, format) !== null)
+    );
+}
+
+/**
+ * The day a year, month and day name, or null when they name none the server
+ * stores. A missing year is this year's; a two-digit one is 1950–2049.
+ */
+function calendarDate(
+    year: number | undefined,
+    month: number | undefined,
+    day: number | undefined,
+): Date | null {
     if (year === undefined) {
         year = new Date().getFullYear();
     }
@@ -527,7 +906,7 @@ export function parseDate(
         year += year < 50 ? 2000 : 1900;
     }
 
-    if (year === undefined || month === undefined || day === undefined) {
+    if (month === undefined || day === undefined) {
         return null;
     }
 
@@ -535,6 +914,7 @@ export function parseDate(
 
     if (
         isNaN(date.getTime()) ||
+        !isStorableYear(year) ||
         date.getFullYear() !== year ||
         date.getMonth() !== month - 1 ||
         date.getDate() !== day
@@ -590,6 +970,30 @@ export function parseAmount(amountStr: string | number): number | null {
     }
 
     return isNegative ? -Math.abs(amount) : amount;
+}
+
+/**
+ * Normalise a currency cell to an ISO 4217 code. Returns null when the value is
+ * not a three-letter code, or when `supportedCurrencies` is given and does not
+ * contain it, so the caller falls back to the account currency.
+ */
+export function parseCurrencyCode(
+    value: string | number | null | undefined,
+    supportedCurrencies?: readonly string[],
+): string | null {
+    const code = String(value ?? '')
+        .trim()
+        .toUpperCase();
+
+    if (!/^[A-Z]{3}$/.test(code)) {
+        return null;
+    }
+
+    if (supportedCurrencies && !supportedCurrencies.includes(code)) {
+        return null;
+    }
+
+    return code;
 }
 
 function getDescriptionFromRow(row: ParsedRow, mapping: ColumnMapping): string {
@@ -673,6 +1077,7 @@ export function convertRowsToTransactions(
     dateFormat: DateFormat,
 ): ParsedTransaction[] {
     const results: ParsedTransaction[] = [];
+    const signAmount = typeSigner(mapping);
 
     for (const row of rows) {
         const validation = validateTransaction(row, mapping, dateFormat);
@@ -693,6 +1098,7 @@ export function convertRowsToTransactions(
         }
 
         const formattedDate = formatLocalDate(date);
+        const signedAmount = signAmount(amount, row);
         const creditorName = getOptionalTextFromRow(row, mapping.creditor_name);
         const debtorName = getOptionalTextFromRow(row, mapping.debtor_name);
 
@@ -716,7 +1122,7 @@ export function convertRowsToTransactions(
         results.push({
             transaction_date: formattedDate,
             description,
-            amount: Math.round(amount * 100),
+            amount: Math.round(signedAmount * 100),
             balance,
             creditor_name: creditorName,
             debtor_name: debtorName,

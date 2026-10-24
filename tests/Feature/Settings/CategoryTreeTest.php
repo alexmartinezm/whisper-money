@@ -266,3 +266,15 @@ test('the tree service parent map leaves trashed categories out, so an expansion
         ->and($tree->expand($user->id, [$root->id], parentMap: $tree->parentMap($user->id)))->toBe([$root->id])
         ->and($tree->expand($user->id, [$root->id]))->toBe([$root->id]);
 });
+
+test('a category resolves to itself and every ancestor, nearest first', function () {
+    $user = User::factory()->create();
+    $root = Category::factory()->create(['user_id' => $user->id, 'type' => CategoryType::Expense]);
+    $child = Category::factory()->create(['user_id' => $user->id, 'parent_id' => $root->id, 'type' => CategoryType::Expense]);
+    $grandchild = Category::factory()->create(['user_id' => $user->id, 'parent_id' => $child->id, 'type' => CategoryType::Expense]);
+
+    $tree = app(CategoryTree::class);
+
+    expect($tree->ancestorAndSelfIds($user->id, $grandchild->id))->toBe([$grandchild->id, $child->id, $root->id])
+        ->and($tree->ancestorAndSelfIds($user->id, $root->id, $tree->parentMap($user->id)))->toBe([$root->id]);
+});

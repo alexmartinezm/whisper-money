@@ -19,6 +19,11 @@ class ApplyAutomationRules
      * fire here overwrote that choice (and force-synced the rule's labels onto
      * it). Re-evaluation is a different path — there the user asked for the
      * rules to run — and is deliberately left alone.
+     *
+     * A row a full import writes is left to the import's own budget pass: the
+     * chunk is reassigned in one batch, without budget emails, once the rules
+     * have filed every row in it. Reassigning it here as well would queue a
+     * job per row that emails about limits crossed long ago.
      */
     public function handle(TransactionCreated $event): void
     {
@@ -26,6 +31,9 @@ class ApplyAutomationRules
             return;
         }
 
-        $this->automationRuleService->applyRules($event->transaction);
+        $this->automationRuleService->applyRules(
+            $event->transaction,
+            reassignBudgets: $event->transaction->import_id === null,
+        );
     }
 }

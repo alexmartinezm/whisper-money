@@ -4,6 +4,7 @@ namespace App\Http\Requests;
 
 use App\Enums\TransactionSource;
 use App\Http\Requests\Concerns\ValidatesUserOwnedResources;
+use App\Rules\StorableDate;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -24,7 +25,7 @@ class StoreTransactionRequest extends FormRequest
             'category_id' => ['nullable', $this->userOwned('categories')],
             'description' => ['required', 'string'],
             'description_iv' => ['nullable', 'string', 'size:16'],
-            'transaction_date' => ['required', 'date'],
+            'transaction_date' => ['required', 'date', new StorableDate],
             'amount' => ['required', 'integer'],
             'currency_code' => ['required', 'string', 'size:3'],
             'notes' => ['nullable', 'string'],

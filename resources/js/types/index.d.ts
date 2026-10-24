@@ -48,6 +48,10 @@ export interface Features {
     recurringTransactions: boolean;
     /** Cashflow shows the Available card and the savings/investments split. */
     cashflowAvailableFree: boolean;
+    /** May start a full import from another app (onboarding window or flag). */
+    fullImport: boolean;
+    /** Settings shows the import page: eligible, or an import can still be undone. */
+    fullImportSettings: boolean;
 }
 
 export interface ExpiredBankingConnectionNotification {
@@ -88,6 +92,8 @@ export interface SharedData {
     /** API-key providers on our curated beta list (`banking.beta_banks`). */
     betaProviders: string[];
     aiCategorizationUpsellRate: number;
+    /** Whether the import wizards may ask the AI which column holds each field. */
+    aiImportMappingEnabled: boolean;
     subscriptionPaymentIssue: SubscriptionPaymentIssueNotification | null;
     pricing: PricingConfig;
     sidebarOpen: boolean;

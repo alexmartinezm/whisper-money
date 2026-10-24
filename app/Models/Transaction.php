@@ -43,6 +43,7 @@ use LogicException;
  * @property ?string $ai_suggested_category_id
  * @property ?Carbon $ai_suggested_category_at
  * @property ?string $ai_model
+ * @property ?string $import_id
  */
 class Transaction extends Model
 {
@@ -84,6 +85,7 @@ class Transaction extends Model
         'raw_data',
         'creditor_name',
         'debtor_name',
+        'import_id',
     ];
 
     /**
@@ -101,6 +103,7 @@ class Transaction extends Model
         'categorized_by_rule_id',
         'ai_model',
         'deleted_at',
+        'import_id',
     ];
 
     protected function casts(): array
@@ -406,6 +409,24 @@ class Transaction extends Model
         return $query->whereNull('category_id')
             ->whereNull('description_iv')
             ->whereDoesntHave('splits');
+    }
+
+    /**
+     * The uncategorized rows of a full import its single AI pass may file:
+     * all but the ones it left blank on purpose and marked as categorized by
+     * hand, the rows split in Money Pro the user is to split here. Only the
+     * import narrows by this: elsewhere a blank row marked manual can be one
+     * whose category the user deleted, which the AI may file again.
+     *
+     * @param  Builder<Transaction>  $query
+     * @return Builder<Transaction>
+     */
+    public function scopeOpenToImportAi(Builder $query): Builder
+    {
+        return $query->whereNull('category_id')
+            ->where(fn (Builder $query): Builder => $query
+                ->whereNull('category_source')
+                ->orWhere('category_source', '!=', CategorySource::Manual->value));
     }
 
     /**

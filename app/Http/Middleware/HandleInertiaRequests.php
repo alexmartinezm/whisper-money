@@ -7,11 +7,13 @@ use App\Enums\BankingConnectionStatus;
 use App\Enums\BankingProvider;
 use App\Features\CalculateBalancesOnImport;
 use App\Features\CashflowAvailableFree;
+use App\Features\FullImport;
 use App\Features\RecurringTransactions;
 use App\Features\TransactionSplitting;
 use App\Jobs\PurgeResidualEncryptionArtifactsJob;
 use App\Models\BankingConnection;
 use App\Models\User;
+use App\Services\Ai\AiImportMappingGate;
 use App\Services\CurrencyOptions;
 use App\Services\FormatLocaleOptions;
 use App\Services\Subscriptions\PriceExperiment;
@@ -27,6 +29,7 @@ class HandleInertiaRequests extends Middleware
     public function __construct(
         private CurrencyOptions $currencyOptions,
         private FormatLocaleOptions $formatLocales,
+        private AiImportMappingGate $aiImportMappingGate,
     ) {}
 
     /**
@@ -103,6 +106,7 @@ class HandleInertiaRequests extends Middleware
             'demoCredentials' => $this->demoCredentials($request, $user),
             'subscriptionsEnabled' => config('subscriptions.enabled', false),
             'aiCategorizationUpsellRate' => (int) config('ai_categorization.upsell_sample_rate'),
+            'aiImportMappingEnabled' => $user !== null && $this->aiImportMappingGate->allows($user),
             'pricing' => [
                 'plans' => PriceExperiment::plansFor($user, $request->cookie(PriceExperiment::COOKIE)),
                 'defaultPlan' => config('subscriptions.default_plan', 'monthly'),
@@ -291,14 +295,18 @@ class HandleInertiaRequests extends Middleware
                 'transactionSplitting' => true,
                 'recurringTransactions' => false,
                 'cashflowAvailableFree' => false,
+                'fullImport' => false,
+                'fullImportSettings' => false,
             ];
         }
 
+        // One query for every flag, however many of them get read below.
         $features = Feature::for($user)->values([
             CalculateBalancesOnImport::class,
             TransactionSplitting::class,
             RecurringTransactions::class,
             CashflowAvailableFree::class,
+            FullImport::class,
         ]);
 
         return [
@@ -307,6 +315,13 @@ class HandleInertiaRequests extends Middleware
             'transactionSplitting' => $features[TransactionSplitting::class] !== false,
             'recurringTransactions' => $features[RecurringTransactions::class] !== false,
             'cashflowAvailableFree' => $features[CashflowAvailableFree::class] !== false,
+            // Two answers, because Settings keeps the page past the window for
+            // as long as an import can still be undone, while starting one is
+            // only offered inside it. The second costs a query once the window
+            // is closed, and only the Settings menu reads it, so only Settings
+            // pages pay for it.
+            'fullImport' => $user->canUseFullImport(),
+            'fullImportSettings' => request()->is('settings', 'settings/*') && $user->canSeeFullImportSettings(),
         ];
     }
 

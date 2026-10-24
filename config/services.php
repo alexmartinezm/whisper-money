@@ -52,6 +52,20 @@ return [
             && filled(env('ENABLEBANKING_REDIRECT_URL')),
     ],
 
+    'typesafe' => [
+        /**
+         * TypeSafe AI's Jev, used only by the AI column-mapping suggestions on
+         * imports (config/ai_import_mapping.php). Only column headers (never
+         * a header that looks like a value, and none when the file has no
+         * header row) and a computed shape of each column's values are sent;
+         * never a cell value. Without a key the suggestions stay off and no
+         * request is made.
+         */
+        'key' => env('TYPESAFE_API_KEY'),
+        'model' => env('TYPESAFE_MODEL', 'jev-latest'),
+        'enabled' => filled(env('TYPESAFE_API_KEY')),
+    ],
+
     'openai' => [
         /**
          * Domain-ownership token for the ChatGPT app directory submission,

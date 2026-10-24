@@ -105,6 +105,8 @@ test('shared feature flags do not include coinbase flag', function () {
         'transactionSplitting' => true,
         'recurringTransactions' => false,
         'cashflowAvailableFree' => false,
+        'fullImport' => false,
+        'fullImportSettings' => false,
     ]);
 });
 
@@ -257,4 +259,28 @@ test('the translation dictionary is omitted once the client already has it', fun
     $response->assertOk();
 
     expect($response->json('props'))->not->toHaveKey('translations');
+});
+
+test('shares whether AI import mapping is enabled for the user', function (bool $enabled) {
+    config()->set('ai_import_mapping.enabled', $enabled);
+    config()->set('services.typesafe.enabled', true);
+
+    $response = actingAs(User::factory()->onboarded()->create())->withoutVite()->get(route('dashboard'));
+
+    $response->assertInertia(fn (Assert $page) => $page->where('aiImportMappingEnabled', $enabled));
+})->with([true, false]);
+
+test('AI import mapping is off for every user with the shipped defaults', function () {
+    config()->set('ai_import_mapping', require config_path('ai_import_mapping.php'));
+    config()->set('services.typesafe', (require config_path('services.php'))['typesafe']);
+
+    $response = actingAs(User::factory()->onboarded()->create())->withoutVite()->get(route('dashboard'));
+
+    $response->assertInertia(fn (Assert $page) => $page->where('aiImportMappingEnabled', false));
+});
+
+test('guests never get AI import mapping', function () {
+    $response = $this->withoutVite()->get(route('home'));
+
+    $response->assertInertia(fn (Assert $page) => $page->where('aiImportMappingEnabled', false));
 });

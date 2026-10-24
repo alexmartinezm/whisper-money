@@ -523,6 +523,18 @@ class CreateDefaultCategories
     }
 
     /**
+     * The name a default category is seeded under for the given locale, from
+     * its canonical English name, so code that looks a seeded category up by
+     * name finds it in an English and a Spanish account alike.
+     */
+    public static function localizedCategoryName(string $name, string $locale): string
+    {
+        return $locale === 'es'
+            ? (self::getSpanishTranslations()[$name] ?? $name)
+            : $name;
+    }
+
+    /**
      * Get the Spanish translations for category names.
      *
      * @return array<string, string>

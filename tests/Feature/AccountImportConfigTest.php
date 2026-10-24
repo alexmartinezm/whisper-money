@@ -54,6 +54,22 @@ test('saves and returns an import config for an account', function () use ($tran
         ->assertJsonPath('data.dateFormat', 'DD-MM-YYYY');
 });
 
+test('keeps the type column and its expense values in the saved mapping', function () use ($transactionConfig) {
+    $config = $transactionConfig;
+    $config['columnMapping']['transaction_type'] = 'Tipo de transacción';
+    $config['columnMapping']['expense_types'] = ['Gasto', 'Ajuste de saldo'];
+
+    $this->putJson("/api/accounts/{$this->account->id}/import-config", [
+        'type' => 'transaction',
+        'config' => $config,
+    ])->assertOk();
+
+    $this->getJson("/api/accounts/{$this->account->id}/import-config?type=transaction")
+        ->assertOk()
+        ->assertJsonPath('data.columnMapping.transaction_type', 'Tipo de transacción')
+        ->assertJsonPath('data.columnMapping.expense_types', ['Gasto', 'Ajuste de saldo']);
+});
+
 test('upserts the config instead of creating duplicates', function () use ($transactionConfig) {
     $url = "/api/accounts/{$this->account->id}/import-config";
 
@@ -111,4 +127,29 @@ test('rejects a config without a column mapping', function () {
         'type' => 'transaction',
         'config' => ['dateFormat' => 'YYYY-MM-DD'],
     ])->assertJsonValidationErrors('config.columnMapping');
+});
+
+test('keeps whether the saved mapping is the AI suggestion', function (bool $aiSuggested) use ($transactionConfig) {
+    $this->putJson("/api/accounts/{$this->account->id}/import-config", [
+        'type' => 'transaction',
+        'config' => [...$transactionConfig, 'aiSuggested' => $aiSuggested],
+    ])->assertOk();
+
+    $this->getJson("/api/accounts/{$this->account->id}/import-config?type=transaction")
+        ->assertOk()
+        ->assertJsonPath('data.aiSuggested', $aiSuggested);
+})->with([true, false]);
+
+test('saves a config without the AI suggestion flag', function () use ($transactionConfig) {
+    $this->putJson("/api/accounts/{$this->account->id}/import-config", [
+        'type' => 'transaction',
+        'config' => $transactionConfig,
+    ])->assertOk()->assertJsonMissingPath('data.aiSuggested');
+});
+
+test('rejects a non-boolean AI suggestion flag', function () use ($transactionConfig) {
+    $this->putJson("/api/accounts/{$this->account->id}/import-config", [
+        'type' => 'transaction',
+        'config' => [...$transactionConfig, 'aiSuggested' => 'maybe'],
+    ])->assertUnprocessable()->assertJsonValidationErrors('config.aiSuggested');
 });

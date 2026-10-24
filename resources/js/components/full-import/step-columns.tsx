@@ -1,0 +1,605 @@
+import { WizardScreen } from '@/components/full-import/full-import-layout';
+import { UnreadableRows } from '@/components/full-import/unreadable-rows';
+import {
+    ColumnSelect,
+    DateFormatSelect,
+} from '@/components/transactions/import-step-mapping';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
+import {
+    countLabel,
+    formatCount,
+    sourceLabel,
+    transactionCount,
+} from '@/lib/full-import-format';
+import { type CurrencySymbolUse } from '@/lib/full-import-money-pro';
+import { movementRows } from '@/lib/full-import-plan';
+import { splitCategoryPath, unmappedHeaders } from '@/lib/full-import-profiles';
+import { type CurrencyOption } from '@/types/account';
+import {
+    SINGLE_ACCOUNT_COLUMN,
+    type FullImportMapping,
+    type FullImportSource,
+    type MappedColumn,
+    type NormalizedFile,
+} from '@/types/full-import';
+import { type ColumnOption } from '@/types/import';
+import { formatCurrency, toMinorUnits } from '@/utils/currency';
+import { formatDateMedium } from '@/utils/date';
+import { __ } from '@/utils/i18n';
+import { type ReactNode } from 'react';
+
+interface FieldSpec {
+    field: MappedColumn;
+    label: string;
+    hint?: string;
+}
+
+const REQUIRED_FIELDS: FieldSpec[] = [
+    { field: 'date', label: 'Date' },
+    {
+        field: 'amount',
+        label: 'Amount',
+        hint: 'Signed as in the file: a negative amount is an expense.',
+    },
+    { field: 'description', label: 'Description' },
+];
+
+const OPTIONAL_FIELDS: FieldSpec[] = [
+    { field: 'notes', label: 'Notes' },
+    { field: 'currency', label: 'Currency' },
+    {
+        field: 'iban',
+        label: 'IBAN',
+        hint: 'Saved on the account.',
+    },
+    {
+        field: 'externalId',
+        label: 'Transaction ID',
+        hint: 'Upload the same file again and nothing is duplicated.',
+    },
+    {
+        field: 'ignored',
+        label: 'Ignored',
+        hint: 'Rows marked TRUE are imported with a transfer category.',
+    },
+];
+
+const PREVIEW_ROWS = 5;
+
+interface StepColumnsProps {
+    eyebrow: string;
+    source: FullImportSource;
+    onSourceChange: (source: FullImportSource) => void;
+    headers: string[];
+    columnOptions: ColumnOption[];
+    mapping: FullImportMapping;
+    onMappingChange: (mapping: FullImportMapping) => void;
+    normalized: NormalizedFile;
+    /** The currency symbols a Money Pro file writes, to confirm; empty otherwise. */
+    currencySymbols: CurrencySymbolUse[];
+    currencies: CurrencyOption[];
+    fallbackCurrency: string;
+    locale: string;
+    footer: ReactNode;
+    /** The AI badge or button, shown beside the format. */
+    aiDetection?: ReactNode;
+}
+
+function sampleOf(columnOptions: ColumnOption[], column: string | null) {
+    return (
+        columnOptions.find((option) => option.value === column)?.examples[0] ??
+        null
+    );
+}
+
+/** One mapping row: what it is, which column feeds it, and what that looks like. */
+function FieldRow({
+    label,
+    sample,
+    hint,
+    control,
+    children,
+}: {
+    label: string;
+    sample: string | number | null;
+    hint?: ReactNode;
+    control: ReactNode;
+    children?: ReactNode;
+}) {
+    return (
+        <div className="grid grid-cols-1 gap-2 px-4 py-3.5 sm:px-5 md:grid-cols-[9rem_minmax(0,1fr)_minmax(0,1fr)] md:items-start md:gap-4">
+            <div className="font-medium md:pt-2">{label}</div>
+            <div className="flex flex-col gap-3">
+                {control}
+                {children}
+            </div>
+            <div className="flex flex-col gap-1 text-[13px] text-muted-foreground md:pt-2">
+                {sample !== null && sample !== '' && (
+                    <code className="w-fit max-w-full truncate rounded bg-muted px-1.5 py-0.5 text-foreground">
+                        {String(sample)}
+                    </code>
+                )}
+                {hint && <span>{hint}</span>}
+            </div>
+        </div>
+    );
+}
+
+function GroupLabel({ children }: { children: ReactNode }) {
+    return (
+        <div className="bg-muted/50 px-4 py-2 text-xs font-medium tracking-wider text-muted-foreground uppercase sm:px-5">
+            {children}
+        </div>
+    );
+}
+
+export function StepColumns({
+    eyebrow,
+    source,
+    onSourceChange,
+    headers,
+    columnOptions,
+    mapping,
+    onMappingChange,
+    normalized,
+    currencySymbols,
+    currencies,
+    fallbackCurrency,
+    locale,
+    footer,
+    aiDetection,
+}: StepColumnsProps) {
+    const set = (patch: Partial<FullImportMapping>) =>
+        onMappingChange({ ...mapping, ...patch });
+
+    const select = (field: MappedColumn, optional: boolean) => (
+        <ColumnSelect
+            id={`full-import-${field}`}
+            value={mapping[field]}
+            placeholder={__('Select column')}
+            optional={optional}
+            columnOptions={columnOptions}
+            onChange={(column) => set({ [field]: column || null })}
+        />
+    );
+
+    const accounts = new Set(normalized.rows.map((row) => row.accountKey)).size;
+    const balanceRows = normalized.rows.filter(
+        (row) => row.balance !== null,
+    ).length;
+    const categorySample = String(
+        sampleOf(columnOptions, mapping.category) ?? '',
+    );
+    const categoryPreview = splitCategoryPath(
+        categorySample,
+        mapping.categorySeparator,
+    ).join(' › ');
+    const notImported = unmappedHeaders(mapping, headers);
+
+    return (
+        <WizardScreen
+            eyebrow={eyebrow}
+            title={__('Check the columns')}
+            description={
+                source !== 'generic'
+                    ? __(
+                          'Every piece of Whisper Money comes from a column of your file. It is already filled in for :source: change only what does not fit.',
+                          { source: sourceLabel(source) },
+                      )
+                    : __(
+                          'Every piece of Whisper Money comes from a column of your file. Tell us which one is which; we remember it next time.',
+                      )
+            }
+            footer={footer}
+        >
+            <div className="flex flex-wrap items-center gap-3">
+                <Label htmlFor="full-import-format" className="font-medium">
+                    {__('Format')}
+                </Label>
+                <Select
+                    value={source}
+                    onValueChange={(value) =>
+                        onSourceChange(value as FullImportSource)
+                    }
+                >
+                    <SelectTrigger id="full-import-format" className="w-56">
+                        <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="banktrack">Banktrack</SelectItem>
+                        <SelectItem value="money_pro">Money Pro</SelectItem>
+                        <SelectItem value="generic">
+                            {__('Another app or spreadsheet')}
+                        </SelectItem>
+                    </SelectContent>
+                </Select>
+                <span className="text-[13px] text-muted-foreground">
+                    {__('If you change something, we remember it next time.')}
+                </span>
+                {aiDetection}
+            </div>
+
+            <div className="flex flex-col divide-y overflow-hidden rounded-xl border bg-card">
+                <GroupLabel>{__('Required')}</GroupLabel>
+                {REQUIRED_FIELDS.map((spec) => (
+                    <FieldRow
+                        key={spec.field}
+                        label={__(spec.label)}
+                        sample={sampleOf(columnOptions, mapping[spec.field])}
+                        hint={
+                            spec.field === 'amount' && source === 'money_pro'
+                                ? __(
+                                      'Money Pro writes it without a sign: the transaction type gives it, and a transfer goes out of one account and into the other.',
+                                  )
+                                : spec.hint && __(spec.hint)
+                        }
+                        control={select(spec.field, false)}
+                    >
+                        {spec.field === 'date' && (
+                            <DateFormatSelect
+                                ariaLabel={__('Date format')}
+                                value={mapping.dateFormat}
+                                onChange={(dateFormat) => set({ dateFormat })}
+                            />
+                        )}
+                    </FieldRow>
+                ))}
+
+                <FieldRow
+                    label={__('Account')}
+                    sample={sampleOf(columnOptions, mapping.account)}
+                    hint={
+                        mapping.account
+                            ? countLabel(
+                                  accounts,
+                                  __(
+                                      'Every different value is an account: there is 1.',
+                                  ),
+                                  __(
+                                      'Every different value is an account: there are :count.',
+                                      { count: accounts },
+                                  ),
+                              )
+                            : undefined
+                    }
+                    control={
+                        <ColumnSelect
+                            id="full-import-account"
+                            value={mapping.account}
+                            placeholder={__('Select column')}
+                            columnOptions={columnOptions}
+                            extraOptions={[
+                                {
+                                    value: SINGLE_ACCOUNT_COLUMN,
+                                    label: __('All rows are one account'),
+                                },
+                            ]}
+                            onChange={(column) =>
+                                set({ account: column || null })
+                            }
+                        />
+                    }
+                >
+                    {/* Money Pro names every account itself: nothing to split by. */}
+                    {source !== 'money_pro' &&
+                        mapping.account &&
+                        mapping.account !== SINGLE_ACCOUNT_COLUMN && (
+                            <label className="flex items-start gap-2.5 text-sm">
+                                <Checkbox
+                                    checked={mapping.splitByAccountDetail}
+                                    onCheckedChange={(checked) =>
+                                        set({
+                                            splitByAccountDetail:
+                                                checked === true,
+                                        })
+                                    }
+                                    className="mt-0.5"
+                                />
+                                <span className="flex flex-col gap-0.5">
+                                    <span className="font-medium">
+                                        {mapping.accountDetail
+                                            ? __('Also split by «:column»', {
+                                                  column: mapping.accountDetail,
+                                              })
+                                            : __(
+                                                  'Also split by another column',
+                                              )}
+                                    </span>
+                                    <span className="text-[13px] text-muted-foreground">
+                                        {__(
+                                            "Banktrack doesn't always fill it in, so one account could show up twice. Turn it on only if you have several accounts at the same bank.",
+                                        )}
+                                    </span>
+                                </span>
+                            </label>
+                        )}
+                    {mapping.splitByAccountDetail &&
+                        source === 'generic' &&
+                        select('accountDetail', true)}
+                </FieldRow>
+
+                <GroupLabel>{__('Optional')}</GroupLabel>
+
+                <FieldRow
+                    label={__('Category')}
+                    sample={categorySample || null}
+                    control={select('category', true)}
+                >
+                    {mapping.category && (
+                        <div className="flex flex-wrap items-center gap-2.5">
+                            <Label
+                                htmlFor="full-import-separator"
+                                className="text-[13px] text-muted-foreground"
+                            >
+                                {__('Subcategory separator')}
+                            </Label>
+                            <Input
+                                id="full-import-separator"
+                                value={mapping.categorySeparator}
+                                maxLength={5}
+                                className="h-8 w-16 text-center"
+                                onChange={(event) =>
+                                    set({
+                                        categorySeparator: event.target.value,
+                                    })
+                                }
+                            />
+                            {categoryPreview && (
+                                <span className="text-[13px] font-medium">
+                                    {categoryPreview}
+                                </span>
+                            )}
+                        </div>
+                    )}
+                </FieldRow>
+
+                <FieldRow
+                    label={__('Balance')}
+                    sample={sampleOf(columnOptions, mapping.balance)}
+                    hint={
+                        mapping.balance
+                            ? countLabel(
+                                  balanceRows,
+                                  __(
+                                      'Only in 1 row: we import the balance of the accounts that have it.',
+                                  ),
+                                  __(
+                                      'Only in :count rows: we import the balance of the accounts that have it.',
+                                      {
+                                          count: formatCount(
+                                              balanceRows,
+                                              locale,
+                                          ),
+                                      },
+                                  ),
+                              )
+                            : __('No column, no balances imported.')
+                    }
+                    control={select('balance', true)}
+                />
+
+                <CurrencySymbolRows
+                    uses={currencySymbols}
+                    currencies={currencies}
+                    locale={locale}
+                    onChange={(symbol, code) =>
+                        set({
+                            currencySymbols: {
+                                ...mapping.currencySymbols,
+                                [symbol]: code,
+                            },
+                        })
+                    }
+                />
+
+                {OPTIONAL_FIELDS.map((spec) => (
+                    <FieldRow
+                        key={spec.field}
+                        label={__(spec.label)}
+                        sample={sampleOf(columnOptions, mapping[spec.field])}
+                        hint={spec.hint && __(spec.hint)}
+                        control={select(spec.field, true)}
+                    />
+                ))}
+
+                {notImported.length > 0 && (
+                    <div className="px-4 py-3.5 text-[13px] text-muted-foreground sm:px-5">
+                        {__('Not imported: :columns.', {
+                            columns: notImported.join(', '),
+                        })}
+                    </div>
+                )}
+            </div>
+
+            <ColumnsPreview
+                normalized={normalized}
+                fallbackCurrency={fallbackCurrency}
+                locale={locale}
+            />
+        </WizardScreen>
+    );
+}
+
+/**
+ * What each currency symbol of the file is read as. Money Pro writes "$" for
+ * US dollars and Colombian pesos alike, so the user confirms it.
+ */
+function CurrencySymbolRows({
+    uses,
+    currencies,
+    locale,
+    onChange,
+}: {
+    uses: CurrencySymbolUse[];
+    currencies: CurrencyOption[];
+    locale: string;
+    onChange: (symbol: string, code: string) => void;
+}) {
+    if (uses.length === 0) {
+        return null;
+    }
+
+    return (
+        <>
+            <GroupLabel>{__('Currencies')}</GroupLabel>
+            <div className="px-4 py-3.5 text-[13px] text-muted-foreground sm:px-5">
+                {__(
+                    'Your file writes each amount with its currency symbol, and one symbol can mean several currencies ($ is the dollar and also the peso). Check which one each is: every account takes the currency of its amounts.',
+                )}
+            </div>
+            {uses.map((use) => (
+                <FieldRow
+                    key={use.symbol}
+                    label={__('Amounts in :symbol', { symbol: use.symbol })}
+                    sample={null}
+                    hint={
+                        <>
+                            {countLabel(
+                                use.count,
+                                __('In 1 amount'),
+                                __('In :count amounts', {
+                                    count: formatCount(use.count, locale),
+                                }),
+                            )}
+                            {use.ambiguous && (
+                                <span className="font-medium text-amber-700 dark:text-amber-300">
+                                    {' '}
+                                    {__(
+                                        'Several currencies write it this way: check it is the right one.',
+                                    )}
+                                </span>
+                            )}
+                        </>
+                    }
+                    control={
+                        <Select
+                            value={use.code ?? ''}
+                            onValueChange={(code) => onChange(use.symbol, code)}
+                        >
+                            <SelectTrigger
+                                aria-label={__('Currency of :symbol', {
+                                    symbol: use.symbol,
+                                })}
+                            >
+                                <SelectValue
+                                    placeholder={__('Choose a currency')}
+                                />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {currencies.map((currency) => (
+                                    <SelectItem
+                                        key={currency.code}
+                                        value={currency.code}
+                                    >
+                                        {currency.code} · {currency.name}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    }
+                />
+            ))}
+        </>
+    );
+}
+
+function ColumnsPreview({
+    normalized,
+    fallbackCurrency,
+    locale,
+}: {
+    normalized: NormalizedFile;
+    fallbackCurrency: string;
+    locale: string;
+}) {
+    // Row numbers start over in each file of an export split in several, so
+    // the preview tells its rows apart by position.
+    const movements = movementRows(normalized.rows);
+    const preview = movements.slice(0, PREVIEW_ROWS);
+    const summary = [
+        transactionCount(movements.length, locale),
+        normalized.blankRows > 0 &&
+            countLabel(
+                normalized.blankRows,
+                __('1 blank row skipped'),
+                __(':count blank rows skipped', {
+                    count: formatCount(normalized.blankRows, locale),
+                }),
+            ),
+    ].filter(Boolean);
+
+    return (
+        <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="text-base font-semibold">
+                    {__('How they will look')}
+                </h2>
+                <span className="text-[13px] text-muted-foreground">
+                    {summary.join(' · ')}
+                </span>
+            </div>
+            <UnreadableRows rows={normalized.unreadable} locale={locale} />
+            <div className="overflow-x-auto rounded-xl border">
+                <table className="w-full min-w-[36rem] text-sm">
+                    <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
+                        <tr>
+                            <th className="px-3 py-2 font-medium">
+                                {__('Date')}
+                            </th>
+                            <th className="px-3 py-2 font-medium">
+                                {__('Account')}
+                            </th>
+                            <th className="px-3 py-2 font-medium">
+                                {__('Description')}
+                            </th>
+                            <th className="px-3 py-2 font-medium">
+                                {__('Category')}
+                            </th>
+                            <th className="px-3 py-2 text-right font-medium">
+                                {__('Amount')}
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                        {preview.map((row, index) => {
+                            const currency = row.currency ?? fallbackCurrency;
+
+                            return (
+                                <tr key={index}>
+                                    <td className="px-3 py-2 whitespace-nowrap">
+                                        {formatDateMedium(row.date, locale)}
+                                    </td>
+                                    <td className="px-3 py-2">
+                                        {row.accountName}
+                                    </td>
+                                    <td className="max-w-56 truncate px-3 py-2">
+                                        {row.description}
+                                    </td>
+                                    <td className="px-3 py-2 text-muted-foreground">
+                                        {row.categoryPath.join(' › ') || '—'}
+                                    </td>
+                                    <td className="px-3 py-2 text-right whitespace-nowrap tabular-nums">
+                                        {formatCurrency(
+                                            toMinorUnits(row.amount, currency),
+                                            currency,
+                                            locale,
+                                        )}
+                                    </td>
+                                </tr>
+                            );
+                        })}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+}

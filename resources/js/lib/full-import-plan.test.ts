@@ -1,0 +1,894 @@
+import {
+    bankLookupName,
+    buildImport,
+    categoryNodeId,
+    defaultAccountPlan,
+    detectAccounts,
+    detectCategories,
+    existingTargets,
+    guessAccountType,
+    IGNORED_KEY,
+    inactiveNewAccountKeys,
+    isInactiveAccount,
+    isOwnTransferNode,
+    latestBalances,
+    matchCategory,
+    OWN_TRANSFER_KEY,
+    resolveAccountPlan,
+    resolveCategoryPlan,
+    type AccountPlanContext,
+    type BuildImportInput,
+} from '@/lib/full-import-plan';
+import { type Category } from '@/types/category';
+import {
+    type AccountPlanEntry,
+    type ContextAccount,
+    type FullImportMapping,
+    type NormalizedRow,
+    type TransferTarget,
+} from '@/types/full-import';
+import { DateFormat } from '@/types/import';
+import { describe, expect, it } from 'vitest';
+
+function row(overrides: Partial<NormalizedRow>): NormalizedRow {
+    return {
+        rowNumber: 2,
+        kind: 'movement',
+        date: '2026-09-01',
+        amount: -10,
+        description: 'Movement',
+        notes: null,
+        accountKey: 'wise',
+        accountName: 'Wise',
+        accountBank: 'Wise',
+        categoryPath: [],
+        currency: 'EUR',
+        balance: null,
+        iban: null,
+        externalId: null,
+        ignored: false,
+        ...overrides,
+    };
+}
+
+function category(
+    id: string,
+    name: string,
+    overrides: Partial<Category> = {},
+): Category {
+    return {
+        id,
+        name,
+        icon: 'Wallet',
+        color: 'blue',
+        type: 'expense',
+        cashflow_direction: 'hidden',
+        parent_id: null,
+        ...overrides,
+    };
+}
+
+function account(overrides: Partial<ContextAccount>): ContextAccount {
+    return {
+        id: 'acc-1',
+        name: 'Account',
+        type: 'checking',
+        currency_code: 'EUR',
+        connected: false,
+        archived: false,
+        transactions_count: 0,
+        bank: null,
+        ...overrides,
+    };
+}
+
+const defaultNames = [
+    { en: 'Insurance', es: 'Seguros' },
+    { en: 'Groceries', es: 'Supermercado' },
+];
+
+describe('matchCategory', () => {
+    const categories = [
+        category('food', 'Alimentación'),
+        category('groceries', 'Supermercado', { parent_id: 'food' }),
+        category('insurance', 'Insurance'),
+        category('home', 'Artículos del hogar'),
+        category('fees', 'Servicios financieros y comisiones'),
+    ];
+
+    it('matches the same name, case and accents aside', () => {
+        expect(
+            matchCategory('alimentacion', categories, defaultNames),
+        ).toMatchObject({ category: { id: 'food' }, kind: 'exact' });
+    });
+
+    it('matches a seeded category through its other language', () => {
+        expect(
+            matchCategory('Seguros', categories, defaultNames),
+        ).toMatchObject({ category: { id: 'insurance' }, kind: 'exact' });
+    });
+
+    it('matches a plural to its singular', () => {
+        expect(
+            matchCategory('Supermercados', categories, defaultNames),
+        ).toMatchObject({ category: { id: 'groceries' }, kind: 'exact' });
+    });
+
+    it('flags a category whose words contain the other as similar', () => {
+        expect(matchCategory('Hogar', categories, defaultNames)).toMatchObject({
+            category: { id: 'home' },
+            kind: 'similar',
+        });
+        expect(
+            matchCategory('Comisiones', categories, defaultNames),
+        ).toMatchObject({ category: { id: 'fees' }, kind: 'similar' });
+    });
+
+    it('finds nothing for an unrelated name', () => {
+        expect(matchCategory('Empresa', categories, defaultNames)).toBeNull();
+    });
+});
+
+describe('detectCategories and resolveCategoryPlan', () => {
+    const rows = [
+        row({ categoryPath: ['Empresa', 'Gastos Empresa'], amount: -20 }),
+        row({ categoryPath: ['Empresa', 'Gastos Empresa'], amount: -5 }),
+        row({ categoryPath: ['Alimentación', 'Restaurantes'], amount: -12 }),
+        row({ categoryPath: ['Ingresos alquiler'], amount: 900 }),
+        row({ categoryPath: ['Traspasos Propios'], amount: 50 }),
+    ];
+    const categories = [category('food', 'Alimentación')];
+    const nodes = detectCategories(rows);
+    const plan = resolveCategoryPlan(nodes, {}, { categories, defaultNames });
+
+    it('builds the tree with parents before their children', () => {
+        expect(nodes.map((node) => node.id)).toEqual([
+            'empresa',
+            'empresa>gastos empresa',
+            'alimentacion',
+            'alimentacion>restaurantes',
+            'ingresos alquiler',
+            'traspasos propios',
+        ]);
+        expect(nodes.find((node) => node.id === 'empresa')?.count).toBe(0);
+    });
+
+    it('creates unknown categories with the type their money suggests', () => {
+        expect(plan['empresa']).toMatchObject({
+            action: 'create',
+            type: 'expense',
+        });
+        expect(plan['empresa>gastos empresa']).toMatchObject({
+            action: 'create',
+            type: 'expense',
+        });
+        expect(plan['ingresos alquiler']).toMatchObject({
+            action: 'create',
+            type: 'income',
+        });
+    });
+
+    it('matches a parent and creates its unknown child under it', () => {
+        expect(plan['alimentacion']).toMatchObject({
+            action: 'match',
+            categoryId: 'food',
+        });
+        expect(plan['alimentacion>restaurantes']).toMatchObject({
+            action: 'create',
+            type: 'expense',
+        });
+    });
+
+    it('gives a new child its parent type even when the user changed it', () => {
+        const changed = resolveCategoryPlan(
+            nodes,
+            {
+                empresa: { type: 'income' },
+                'empresa>gastos empresa': { type: 'expense' },
+            },
+            { categories, defaultNames },
+        );
+
+        expect(changed['empresa>gastos empresa'].type).toBe('income');
+    });
+
+    it('recognises own transfers', () => {
+        const own = nodes.find((node) => node.id === 'traspasos propios');
+
+        expect(own && isOwnTransferNode(own, nodes)).toBe(true);
+        expect(isOwnTransferNode(nodes[0], nodes)).toBe(false);
+    });
+});
+
+describe('existingTargets', () => {
+    it('points mapped accounts, and the ones merged into them, at the user account', () => {
+        const accounts = detectAccounts([
+            row({ accountKey: 'bbva', accountName: 'BBVA' }),
+            row({ accountKey: 'bbva', accountName: 'BBVA' }),
+            row({ accountKey: 'cash', accountName: 'Cash' }),
+            row({ accountKey: 'wise', accountName: 'Wise' }),
+        ]);
+        const entry = (
+            overrides: Partial<AccountPlanEntry>,
+        ): AccountPlanEntry => ({
+            action: 'create',
+            name: 'Account',
+            type: 'checking',
+            currencyCode: 'EUR',
+            bank: null,
+            newBankName: null,
+            targetAccountId: null,
+            mergeIntoKey: null,
+            archive: false,
+            ...overrides,
+        });
+
+        expect(
+            existingTargets(accounts, {
+                bbva: entry({ action: 'map', targetAccountId: 'own-bbva' }),
+                cash: entry({ action: 'merge', mergeIntoKey: 'bbva' }),
+                wise: entry({}),
+            }),
+        ).toEqual({ a0: 'own-bbva', a1: 'own-bbva' });
+    });
+});
+
+describe('latestBalances', () => {
+    it('takes the first row of a day in a newest-first export', () => {
+        const balances = latestBalances([
+            row({ date: '2026-09-22', balance: 100 }),
+            row({ date: '2026-09-22', balance: 90 }),
+            row({ date: '2026-09-20', balance: 50 }),
+        ]);
+
+        expect(Object.fromEntries(balances)).toEqual({
+            '2026-09-22': 100,
+            '2026-09-20': 50,
+        });
+    });
+
+    it('takes the last row of a day in a date-ordered export', () => {
+        const balances = latestBalances([
+            row({ date: '2026-09-20', balance: 50 }),
+            row({ date: '2026-09-22', balance: 90 }),
+            row({ date: '2026-09-22', balance: 100 }),
+            row({ date: '2026-09-23', balance: null }),
+        ]);
+
+        expect(Object.fromEntries(balances)).toEqual({
+            '2026-09-20': 50,
+            '2026-09-22': 100,
+        });
+    });
+});
+
+describe('accounts', () => {
+    const context: AccountPlanContext = {
+        mode: 'add',
+        today: '2026-10-21',
+        accounts: [
+            account({ id: 'manual', name: 'BBVA Conjunta' }),
+            account({ id: 'connected', name: 'Revolut', connected: true }),
+            account({ id: 'loan', name: 'Hipoteca', type: 'loan' }),
+        ],
+        mappableAccountIds: ['manual'],
+        userCurrency: 'EUR',
+        supportedCurrencies: ['EUR', 'USD'],
+        sourceLabel: 'Banktrack',
+        banks: { Wise: { id: 'bank-wise', name: 'Wise', logo: null } },
+    };
+    const fileAccounts = detectAccounts([
+        row({ accountKey: 'bbva conjunta', accountName: 'BBVA Conjunta' }),
+        row({ accountKey: 'revolut', accountName: 'Revolut' }),
+        row({ accountKey: 'revolut', accountName: 'Revolut' }),
+        row({ accountKey: 'wise', accountName: 'Wise', currency: 'USD' }),
+        row({ accountKey: 'hipoteca', accountName: 'Hipoteca' }),
+        row({ accountKey: 'cash', accountName: 'Cash' }),
+    ]);
+    const byKey = (key: string) => fileAccounts.find((one) => one.key === key)!;
+
+    it('maps onto a manual account of the same name', () => {
+        expect(
+            defaultAccountPlan(byKey('bbva conjunta'), context),
+        ).toMatchObject({
+            action: 'map',
+            targetAccountId: 'manual',
+        });
+    });
+
+    it('never targets a connected account: a new one named after the source instead', () => {
+        expect(defaultAccountPlan(byKey('revolut'), context)).toMatchObject({
+            action: 'create',
+            name: 'Revolut (Banktrack)',
+            targetAccountId: null,
+        });
+    });
+
+    it('goes back into the separate account an earlier import made for a connected namesake', () => {
+        const again: AccountPlanContext = {
+            ...context,
+            accounts: [
+                ...context.accounts,
+                account({ id: 'separate', name: 'Revolut (Banktrack)' }),
+            ],
+            mappableAccountIds: ['manual', 'separate'],
+        };
+
+        expect(defaultAccountPlan(byKey('revolut'), again)).toMatchObject({
+            action: 'map',
+            targetAccountId: 'separate',
+        });
+    });
+
+    it('never targets an account that keeps no ledger', () => {
+        expect(defaultAccountPlan(byKey('hipoteca'), context).action).toBe(
+            'create',
+        );
+    });
+
+    it('takes the bank, currency and a type guess for a new account', () => {
+        expect(defaultAccountPlan(byKey('wise'), context)).toMatchObject({
+            action: 'create',
+            currencyCode: 'USD',
+            bank: { id: 'bank-wise' },
+            type: 'checking',
+        });
+        expect(defaultAccountPlan(byKey('cash'), context)).toMatchObject({
+            type: 'others',
+            bank: null,
+        });
+        expect(guessAccountType('Wise Ahorro')).toBe('savings');
+        expect(guessAccountType('Tarjeta Amex')).toBe('credit_card');
+    });
+
+    describe('banks', () => {
+        const bankAccounts = detectAccounts([
+            row({
+                accountKey: 'myinvestor|cuenta',
+                accountName: 'MyInvestor · Cuenta',
+                accountBank: 'MyInvestor',
+            }),
+            row({
+                accountKey: 'wise',
+                accountName: 'Wise',
+                accountBank: 'Wise',
+            }),
+            row({
+                accountKey: 'cash',
+                accountName: 'Cash',
+                accountBank: 'Cash',
+            }),
+        ]);
+        const answered: AccountPlanContext = {
+            ...context,
+            banks: {
+                MyInvestor: null,
+                Wise: { id: 'bank-wise', name: 'Wise', logo: null },
+                Cash: null,
+            },
+        };
+        const bankFor = (key: string, planContext = answered) =>
+            defaultAccountPlan(
+                bankAccounts.find((one) => one.key === key)!,
+                planContext,
+            );
+
+        it('proposes a new bank named after the account column when none matches', () => {
+            expect(bankFor('myinvestor|cuenta')).toMatchObject({
+                bank: null,
+                newBankName: 'MyInvestor',
+            });
+        });
+
+        it('takes a known bank when one matches, and no new one', () => {
+            expect(bankFor('wise')).toMatchObject({
+                bank: { id: 'bank-wise' },
+                newBankName: null,
+            });
+        });
+
+        it('gives cash no bank at all', () => {
+            expect(bankFor('cash')).toMatchObject({
+                type: 'others',
+                bank: null,
+                newBankName: null,
+            });
+        });
+
+        it('proposes nothing until the lookup has answered', () => {
+            expect(
+                bankFor('myinvestor|cuenta', { ...context, banks: {} }),
+            ).toMatchObject({ bank: null, newBankName: null });
+        });
+
+        it('looks the bank up by the account column, not the display name', () => {
+            expect(
+                bankLookupName(
+                    bankAccounts.find(
+                        (one) => one.key === 'myinvestor|cuenta',
+                    )!,
+                ),
+            ).toBe('MyInvestor');
+        });
+    });
+
+    it('turns a mapping it cannot honour back into a new account', () => {
+        const plan = resolveAccountPlan(
+            fileAccounts,
+            {
+                revolut: {
+                    ...defaultAccountPlan(byKey('revolut'), context),
+                    action: 'map',
+                    targetAccountId: 'connected',
+                },
+                cash: {
+                    ...defaultAccountPlan(byKey('cash'), context),
+                    action: 'merge',
+                    mergeIntoKey: 'revolut',
+                },
+            },
+            context,
+        );
+
+        expect(plan['revolut'].action).toBe('create');
+        expect(plan['cash'].action).toBe('merge');
+        expect(
+            resolveAccountPlan(fileAccounts, {}, { ...context, mode: 'wipe' })[
+                'bbva conjunta'
+            ].action,
+        ).toBe('create');
+    });
+});
+
+describe('inactive accounts', () => {
+    const today = '2026-10-21';
+    const accountOf = (rows: Partial<NormalizedRow>[]) =>
+        detectAccounts(rows.map((one) => row(one)))[0];
+
+    it('flags an account the file leaves at a zero balance', () => {
+        expect(
+            isInactiveAccount(
+                accountOf([
+                    { date: '2026-09-01', amount: 50, balance: 50 },
+                    { date: '2026-09-02', amount: -50, balance: 0 },
+                ]),
+                today,
+            ),
+        ).toBe(true);
+    });
+
+    it('adds the movements up when the file has no balances', () => {
+        expect(
+            isInactiveAccount(
+                accountOf([
+                    { date: '2026-09-01', amount: 10.1 },
+                    { date: '2026-09-02', amount: -10.1 },
+                ]),
+                today,
+            ),
+        ).toBe(true);
+        expect(
+            isInactiveAccount(
+                accountOf([{ date: '2026-09-01', amount: -10 }]),
+                today,
+            ),
+        ).toBe(false);
+    });
+
+    it('flags an account with no movements for over a year', () => {
+        expect(
+            isInactiveAccount(
+                accountOf([{ date: '2025-10-20', amount: -10, balance: 90 }]),
+                today,
+            ),
+        ).toBe(true);
+        expect(
+            isInactiveAccount(
+                accountOf([{ date: '2025-10-21', amount: -10, balance: 90 }]),
+                today,
+            ),
+        ).toBe(false);
+    });
+
+    it('flags an account that is both', () => {
+        expect(
+            isInactiveAccount(
+                accountOf([{ date: '2024-01-05', amount: -10, balance: 0 }]),
+                today,
+            ),
+        ).toBe(true);
+    });
+
+    it('leaves a recent account with money in it alone', () => {
+        expect(
+            isInactiveAccount(
+                accountOf([{ date: '2026-10-01', amount: -10, balance: 90 }]),
+                today,
+            ),
+        ).toBe(false);
+    });
+
+    it('pre-ticks archiving for an inactive account only', () => {
+        const context: AccountPlanContext = {
+            mode: 'add',
+            today,
+            accounts: [],
+            mappableAccountIds: [],
+            userCurrency: 'EUR',
+            supportedCurrencies: ['EUR'],
+            sourceLabel: 'Banktrack',
+            banks: {},
+        };
+
+        expect(
+            defaultAccountPlan(
+                accountOf([{ date: '2023-05-01', balance: 20 }]),
+                context,
+            ).archive,
+        ).toBe(true);
+        expect(
+            defaultAccountPlan(
+                accountOf([{ date: '2026-10-01', balance: 20 }]),
+                context,
+            ).archive,
+        ).toBe(false);
+    });
+
+    it('looks at movements, not at rows only carrying a balance', () => {
+        expect(
+            isInactiveAccount(
+                accountOf([
+                    { date: '2024-05-01', amount: -10, balance: 90 },
+                    { kind: 'balance', date: '2026-10-01', balance: 90 },
+                ]),
+                today,
+            ),
+        ).toBe(true);
+    });
+
+    it('only suggests the accounts the import creates', () => {
+        const accounts = detectAccounts([
+            row({ accountKey: 'old', date: '2023-05-01', balance: 20 }),
+            row({ accountKey: 'mapped', date: '2023-05-01', balance: 20 }),
+            row({ accountKey: 'skipped', date: '2023-05-01', balance: 0 }),
+            row({ accountKey: 'live', date: '2026-10-01', balance: 20 }),
+        ]);
+        const entry = (
+            action: AccountPlanEntry['action'],
+        ): AccountPlanEntry => ({
+            action,
+            name: 'Account',
+            type: 'checking',
+            currencyCode: 'EUR',
+            bank: null,
+            newBankName: null,
+            targetAccountId: action === 'map' ? 'own' : null,
+            mergeIntoKey: null,
+            archive: true,
+        });
+
+        expect([
+            ...inactiveNewAccountKeys(
+                accounts,
+                {
+                    old: entry('create'),
+                    mapped: entry('map'),
+                    skipped: entry('skip'),
+                    live: entry('create'),
+                },
+                today,
+            ),
+        ]).toEqual(['old']);
+        // An active account merged into it keeps it in use.
+        expect(
+            inactiveNewAccountKeys(
+                accounts,
+                {
+                    old: entry('create'),
+                    mapped: entry('map'),
+                    skipped: entry('skip'),
+                    live: { ...entry('merge'), mergeIntoKey: 'old' },
+                },
+                today,
+            ).size,
+        ).toBe(0);
+    });
+});
+
+describe('buildImport', () => {
+    const mapping: FullImportMapping = {
+        date: 'Fecha',
+        amount: 'Importe',
+        description: 'Concepto',
+        account: 'Banco',
+        accountDetail: null,
+        splitByAccountDetail: false,
+        notes: null,
+        category: 'Categorías',
+        categorySeparator: ',',
+        currencySymbols: {},
+        currency: 'Moneda',
+        balance: 'Balance',
+        iban: null,
+        externalId: 'ID',
+        ignored: 'Ignorada',
+        dateFormat: DateFormat.DayMonthYear,
+    };
+    const target = (name: string): TransferTarget => ({
+        category_id: null,
+        name,
+        icon: 'Split',
+        color: 'stone',
+    });
+    const rows = [
+        row({
+            accountKey: 'wise',
+            date: '2026-09-02',
+            amount: -158.68,
+            balance: 1000,
+            categoryPath: ['Empresa', 'Gastos Empresa'],
+            externalId: 'bt-1',
+        }),
+        row({
+            accountKey: 'wise',
+            date: '2026-09-01',
+            amount: 10.04,
+            categoryPath: ['Traspasos Propios'],
+            externalId: 'bt-2',
+        }),
+        row({
+            accountKey: 'cash',
+            accountName: 'Cash',
+            date: '2026-09-01',
+            amount: -0.9,
+            balance: 30,
+            categoryPath: ['Otros'],
+            ignored: true,
+        }),
+        row({ accountKey: 'old', accountName: 'Old', amount: -1 }),
+    ];
+    const fileAccounts = detectAccounts(rows);
+    const nodes = detectCategories(
+        rows.filter((one) => !one.ignored && one.accountKey !== 'old'),
+    );
+
+    function input(
+        overrides: Partial<BuildImportInput> = {},
+    ): BuildImportInput {
+        return {
+            source: 'banktrack',
+            fileName: 'export.csv',
+            mode: 'add',
+            mapping,
+            rows,
+            fileAccounts,
+            accountPlan: {
+                wise: {
+                    action: 'create',
+                    name: 'Wise',
+                    type: 'checking',
+                    currencyCode: 'EUR',
+                    bank: null,
+                    newBankName: null,
+                    targetAccountId: null,
+                    mergeIntoKey: null,
+                    archive: false,
+                },
+                cash: {
+                    action: 'merge',
+                    name: 'Cash',
+                    type: 'others',
+                    currencyCode: 'EUR',
+                    bank: null,
+                    newBankName: null,
+                    targetAccountId: null,
+                    mergeIntoKey: 'wise',
+                    archive: false,
+                },
+                old: {
+                    action: 'skip',
+                    name: 'Old',
+                    type: 'checking',
+                    currencyCode: 'EUR',
+                    bank: null,
+                    newBankName: null,
+                    targetAccountId: null,
+                    mergeIntoKey: null,
+                    archive: false,
+                },
+            },
+            inactiveAccountKeys: new Set(),
+            contextAccounts: [],
+            nodes,
+            categoryPlan: resolveCategoryPlan(
+                nodes,
+                {},
+                {
+                    categories: [],
+                    defaultNames,
+                },
+            ),
+            categories: [],
+            transfers: {
+                own: { categoryId: 'own-id', target: target('Own account') },
+                ignored: {
+                    categoryId: null,
+                    target: target('Other transfers'),
+                },
+            },
+            ...overrides,
+        };
+    }
+
+    it('sends the rows of imported accounts only, in minor units', () => {
+        const built = buildImport(input());
+
+        expect(built.transactions.map((one) => one.amount)).toEqual([
+            -15868, 1004, -90,
+        ]);
+        expect(built.payload.expected_transactions).toBe(3);
+        expect(built.payload.accounts).toEqual([
+            expect.objectContaining({ key: 'a0', action: 'create' }),
+            { key: 'a1', action: 'merge', merge_into_key: 'a0' },
+            { key: 'a2', action: 'skip' },
+        ]);
+    });
+
+    it('asks to archive a new account only', () => {
+        const plan = input().accountPlan;
+        const ticked = {
+            wise: { ...plan.wise, archive: true },
+            cash: { ...plan.cash, archive: true },
+            old: { ...plan.old, archive: true },
+        };
+        const built = buildImport(
+            input({
+                accountPlan: ticked,
+                inactiveAccountKeys: new Set(['wise', 'cash', 'old']),
+            }),
+        );
+
+        expect(built.payload.accounts[0]).toMatchObject({ archive: true });
+        // Ticked, but no longer one the import offers to archive.
+        expect(
+            buildImport(input({ accountPlan: ticked })).payload.accounts[0],
+        ).not.toHaveProperty('archive');
+        expect(built.payload.accounts.slice(1)).toEqual([
+            { key: 'a1', action: 'merge', merge_into_key: 'a0' },
+            { key: 'a2', action: 'skip' },
+        ]);
+        expect(buildImport(input()).payload.accounts[0]).not.toHaveProperty(
+            'archive',
+        );
+    });
+
+    it('files own transfers and ignored rows under their transfer keys', () => {
+        const built = buildImport(input());
+        const keys = built.transactions.map((one) => one.category_key);
+
+        expect(keys[1]).toBe(OWN_TRANSFER_KEY);
+        expect(keys[2]).toBe(IGNORED_KEY);
+        expect(built.payload.categories).toContainEqual({
+            key: OWN_TRANSFER_KEY,
+            action: 'match',
+            category_id: 'own-id',
+        });
+        expect(built.payload.categories).toContainEqual(
+            expect.objectContaining({
+                key: IGNORED_KEY,
+                action: 'create',
+                name: 'Other transfers',
+                type: 'transfer',
+            }),
+        );
+    });
+
+    it('creates the hierarchy parents first', () => {
+        const created = buildImport(input()).payload.categories.filter(
+            (entry) =>
+                entry.key !== OWN_TRANSFER_KEY && entry.key !== IGNORED_KEY,
+        );
+        const parent = created.find((entry) => entry.name === 'Empresa');
+        const child = created.find((entry) => entry.name === 'Gastos Empresa');
+
+        expect(parent).toMatchObject({ action: 'create', parent_key: null });
+        expect(child).toMatchObject({
+            action: 'create',
+            parent_key: parent?.key,
+            color: parent?.color,
+        });
+        expect(categoryNodeId(['Empresa', 'Gastos Empresa'])).toBe(
+            'empresa>gastos empresa',
+        );
+    });
+
+    it("only sends the balances of accounts that own them, the day's last one", () => {
+        const built = buildImport(input());
+
+        expect(built.balances).toEqual([
+            { account_key: 'a0', date: '2026-09-02', balance: 100000 },
+        ]);
+        expect(
+            buildImport(input({ mapping: { ...mapping, balance: null } }))
+                .balances,
+        ).toEqual([]);
+    });
+
+    it('sends no balances for a credit card, created or mapped onto', () => {
+        const wise = input().accountPlan.wise;
+        const balancesWith = (entry: Partial<AccountPlanEntry>) =>
+            buildImport(
+                input({
+                    accountPlan: {
+                        ...input().accountPlan,
+                        wise: { ...wise, ...entry },
+                    },
+                    contextAccounts: [
+                        account({ id: 'card-id', type: 'credit_card' }),
+                    ],
+                }),
+            ).balances;
+
+        expect(balancesWith({ type: 'credit_card' })).toEqual([]);
+        expect(
+            balancesWith({ action: 'map', targetAccountId: 'card-id' }),
+        ).toEqual([]);
+    });
+
+    it('cuts a long description or note without splitting an emoji', () => {
+        // The limit falls between the two halves of the emoji: a lone half
+        // would make the server turn the whole chunk down.
+        const built = buildImport(
+            input({
+                rows: [
+                    {
+                        ...rows[0],
+                        description: `${'a'.repeat(1999)}😀 tail`,
+                        notes: `${'n'.repeat(4999)}😀 tail`,
+                    },
+                    ...rows.slice(1),
+                ],
+            }),
+        );
+        const [first] = built.transactions;
+
+        expect(first.description).toBe('a'.repeat(1999));
+        expect(first.notes).toBe('n'.repeat(4999));
+        expect(() =>
+            encodeURIComponent(`${first.description}${first.notes}`),
+        ).not.toThrow();
+    });
+
+    it('sends a new bank name only when no known bank was picked', () => {
+        const created = (entry: Partial<AccountPlanEntry>) =>
+            buildImport(
+                input({
+                    accountPlan: {
+                        ...input().accountPlan,
+                        wise: { ...input().accountPlan.wise, ...entry },
+                    },
+                }),
+            ).payload.accounts[0];
+
+        expect(created({ newBankName: '  Wise  ' })).toMatchObject({
+            bank_id: null,
+            new_bank_name: 'Wise',
+        });
+        expect(
+            created({
+                bank: { id: 'bank-wise', name: 'Wise', logo: null },
+                newBankName: 'Wise',
+            }),
+        ).not.toHaveProperty('new_bank_name');
+        expect(created({ newBankName: null })).not.toHaveProperty(
+            'new_bank_name',
+        );
+    });
+
+    it('asks for the wipe to be confirmed in wipe mode only', () => {
+        expect(buildImport(input()).payload.confirm_wipe).toBeUndefined();
+        expect(buildImport(input({ mode: 'wipe' })).payload.confirm_wipe).toBe(
+            true,
+        );
+    });
+});

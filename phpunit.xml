@@ -49,5 +49,17 @@
         <server name="ENABLEBANKING_APP_ID" value="testing-app-id"/>
         <server name="ENABLEBANKING_PRIVATE_KEY_PATH" value="storage/keys/enablebanking.pem"/>
         <server name="ENABLEBANKING_REDIRECT_URL" value="http://localhost/open-banking/callback"/>
+        <!-- AI column suggestions are off by default in this fork, and the
+             suite tests those shipped defaults: the tests that turn the
+             feature on set the config themselves. Pinned so a developer's
+             .env or shell (a switch turned on, a real TypeSafe key) never
+             flips them. <env force="true"> beats an .env file and an
+             already-set variable, even an empty one, for getenv() and $_ENV;
+             <server> beats an exported variable for env(), which reads
+             $_SERVER first. -->
+        <env name="AI_IMPORT_MAPPING_ENABLED" value="false" force="true"/>
+        <env name="TYPESAFE_API_KEY" value="" force="true"/>
+        <server name="AI_IMPORT_MAPPING_ENABLED" value="false"/>
+        <server name="TYPESAFE_API_KEY" value=""/>
     </php>
 </phpunit>

@@ -1,19 +1,29 @@
-import type { ColumnMapping, ParsedTransaction } from '@/types/import';
+import type {
+    ColumnMapping,
+    ParsedRow,
+    ParsedTransaction,
+} from '@/types/import';
 import { DateFormat } from '@/types/import';
 import { formatLocalDate } from '@/utils/date';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as XLSX from 'xlsx';
 import {
     autoDetectColumns,
     autoDetectDateFormat,
     calculateBalancesFromTransactions,
     collectBalancesToImport,
+    collectTypeValues,
     convertRowsToTransactions,
     detectDateFormat,
+    detectExpenseTypes,
     getLatestTransactionDate,
     getLocaleDateFormat,
+    isDateText,
     parseAmount,
+    parseCurrencyCode,
     parseDate,
     parseFile,
+    UNREADABLE_FILE_MESSAGE,
 } from './file-parser';
 
 describe('getLocaleDateFormat', () => {
@@ -78,6 +88,7 @@ describe('convertRowsToTransactions', () => {
                     transaction_date: 'date',
                     description: 'description',
                     amount: 'amount',
+                    currency: null,
                     balance: null,
                     creditor_name: null,
                     debtor_name: null,
@@ -105,6 +116,7 @@ describe('convertRowsToTransactions', () => {
                 transaction_date: 'date',
                 description: 'description',
                 amount: 'amount',
+                currency: null,
                 balance: null,
                 creditor_name: null,
                 debtor_name: null,
@@ -129,6 +141,7 @@ describe('convertRowsToTransactions', () => {
                 transaction_date: 'date',
                 description: 'description',
                 amount: 'amount',
+                currency: null,
                 balance: null,
                 creditor_name: null,
                 debtor_name: null,
@@ -145,6 +158,7 @@ describe('convertRowsToTransactions balance column', () => {
         transaction_date: 'date',
         description: 'description',
         amount: 'amount',
+        currency: null,
         balance: 'balance',
         creditor_name: null,
         debtor_name: null,
@@ -368,6 +382,7 @@ describe('convertRowsToTransactions counterparty fields', () => {
                 transaction_date: 'date',
                 description: 'description',
                 amount: 'amount',
+                currency: null,
                 balance: null,
                 creditor_name: 'creditor',
                 debtor_name: 'debtor',
@@ -476,6 +491,41 @@ describe('autoDetectDateFormat', () => {
     });
 });
 
+describe('parseDate with an out-of-range year', () => {
+    // A time the strip missed glued onto the year as 262004, which the
+    // server refuses (PHP-LARAVEL-7D).
+    it('reads the day of a time with an h suffix or a time zone name', () => {
+        for (const value of ['10/08/26 20:04h', '10/08/26 20:04 CEST']) {
+            expect(
+                formatLocalDate(parseDate(value, DateFormat.DayMonthYear)!),
+            ).toBe('2026-08-10');
+        }
+    });
+
+    it('rejects a time still glued onto the year', () => {
+        expect(
+            parseDate('10/08/26 20:04 (CEST)', DateFormat.DayMonthYear),
+        ).toBeNull();
+    });
+
+    it('rejects a six-digit year written as text', () => {
+        expect(parseDate('262004-08-10', DateFormat.YearMonthDay)).toBeNull();
+    });
+
+    it('rejects an Excel serial past 9999-12-31', () => {
+        expect(parseDate(95_000_000, DateFormat.DayMonthYear)).toBeNull();
+    });
+
+    it('keeps the years the server stores', () => {
+        expect(
+            formatLocalDate(parseDate('1900-01-01', DateFormat.YearMonthDay)!),
+        ).toBe('1900-01-01');
+        expect(
+            formatLocalDate(parseDate('9999-12-31', DateFormat.YearMonthDay)!),
+        ).toBe('9999-12-31');
+    });
+});
+
 describe('parseDate with a time part', () => {
     // Expectations are calendar days, not Date objects: a Date built while the
     // cases are collected would carry whatever TZ another test left behind.
@@ -539,6 +589,7 @@ describe('parseDate with a time part', () => {
                     transaction_date: 'date',
                     description: 'description',
                     amount: 'amount',
+                    currency: null,
                     balance: null,
                     creditor_name: null,
                     debtor_name: null,
@@ -621,6 +672,7 @@ describe('getLatestTransactionDate', () => {
         transaction_date: 'date',
         description: 'desc',
         amount: 'amount',
+        currency: null,
         balance: null,
         creditor_name: null,
         debtor_name: null,
@@ -773,8 +825,10 @@ describe('parseFile', () => {
         ].join('\n');
         const file = new File([csv], 'transactions.csv', { type: 'text/csv' });
 
-        const { data } = await parseFile(file);
+        const { data, rowNumbers } = await parseFile(file);
 
+        // Row 1 is the header, so the first data row is row 2 of the file.
+        expect(rowNumbers).toEqual([2, 3]);
         expect(data[0].Fecha).toBe('02/06/2026');
         expect(typeof data[0].Fecha).toBe('string');
 
@@ -791,5 +845,462 @@ describe('parseFile', () => {
 
         expect(asDmy?.getMonth()).toBe(5);
         expect(asMdy?.getMonth()).toBe(1);
+    });
+
+    it('keeps each row its own number in the file when blank rows are dropped', async () => {
+        const csv = [
+            'Fecha,Concepto,Importe',
+            '02/06/2026,Internet,-10',
+            ',,',
+            '03/06/2026,Groceries,-25',
+        ].join('\n');
+        const file = new File([csv], 'transactions.csv', { type: 'text/csv' });
+
+        const { data, rowNumbers } = await parseFile(file);
+
+        expect(data).toHaveLength(2);
+        expect(rowNumbers).toEqual([2, 4]);
+    });
+
+    it('rejects with the unreadable message when the browser cannot read the file', async () => {
+        const original = FileReader.prototype.readAsBinaryString;
+        FileReader.prototype.readAsBinaryString = function (this: FileReader) {
+            this.onerror?.(
+                new ProgressEvent('error') as ProgressEvent<FileReader>,
+            );
+        };
+
+        try {
+            await expect(
+                parseFile(new File(['x'], 'folder.csv')),
+            ).rejects.toThrow(UNREADABLE_FILE_MESSAGE);
+        } finally {
+            FileReader.prototype.readAsBinaryString = original;
+        }
+    });
+});
+
+describe('currency column', () => {
+    const SUPPORTED = ['EUR', 'USD', 'PEN'];
+
+    it('normalises the code found in the mapped column', () => {
+        expect(parseCurrencyCode(' pen ', SUPPORTED)).toBe('PEN');
+    });
+
+    it('rejects values that are not a three-letter code', () => {
+        expect(parseCurrencyCode('S/.', SUPPORTED)).toBeNull();
+        expect(parseCurrencyCode('', SUPPORTED)).toBeNull();
+        expect(parseCurrencyCode(null, SUPPORTED)).toBeNull();
+    });
+
+    it('rejects codes the app does not support', () => {
+        expect(parseCurrencyCode('XAU', SUPPORTED)).toBeNull();
+        expect(parseCurrencyCode('XAU')).toBe('XAU');
+    });
+
+    it('detects a currency column by header name', () => {
+        expect(
+            autoDetectColumns(['Date', 'Amount', 'Currency', 'Note']).currency,
+        ).toBe('Currency');
+        expect(autoDetectColumns(['Fecha', 'Importe', 'Moneda']).currency).toBe(
+            'Moneda',
+        );
+    });
+
+    it('does not invent a currency column when there is none', () => {
+        expect(
+            autoDetectColumns(['Date', 'Amount', 'Note']).currency,
+        ).toBeNull();
+    });
+});
+
+describe('parseFile text encodings', () => {
+    function csvFile(bytes: number[] | string, name = 'export.csv'): File {
+        return new File(
+            [typeof bytes === 'string' ? bytes : new Uint8Array(bytes)],
+            name,
+            { type: 'text/csv' },
+        );
+    }
+
+    const utf8Csv = 'Tipo de transacción,Descripción\nGasto,Panadería\n';
+
+    it('reads a UTF-8 CSV without a byte order mark as UTF-8', async () => {
+        const file = csvFile([...new TextEncoder().encode(utf8Csv)]);
+
+        const { headers, data } = await parseFile(file);
+
+        expect(headers).toEqual(['Tipo de transacción', 'Descripción']);
+        expect(data[0]['Descripción']).toBe('Panadería');
+        expect(autoDetectColumns(headers).transaction_type).toBe(
+            'Tipo de transacción',
+        );
+    });
+
+    it('reads a UTF-8 CSV that already has a byte order mark', async () => {
+        const file = csvFile([
+            0xef,
+            0xbb,
+            0xbf,
+            ...new TextEncoder().encode(utf8Csv),
+        ]);
+
+        const { headers, data } = await parseFile(file);
+
+        expect(headers).toEqual(['Tipo de transacción', 'Descripción']);
+        expect(data[0]['Descripción']).toBe('Panadería');
+    });
+
+    it('keeps reading a Latin-1 CSV as Latin-1', async () => {
+        // "Descripción\nPanadería\n" in ISO-8859-1: í and ó are single bytes.
+        const latin1 = [...'Descripci\xf3n\nPanader\xeda\n'].map((char) =>
+            char.charCodeAt(0),
+        );
+
+        const { headers, data } = await parseFile(csvFile(latin1));
+
+        expect(headers).toEqual(['Descripción']);
+        expect(data[0]['Descripción']).toBe('Panadería');
+    });
+
+    it('reads a plain ASCII CSV unchanged', async () => {
+        const { headers, data } = await parseFile(
+            csvFile('Date,Description\n2026-01-02,Rent\n'),
+        );
+
+        expect(headers).toEqual(['Date', 'Description']);
+        expect(data[0].Description).toBe('Rent');
+    });
+
+    it('leaves spreadsheet formats alone', async () => {
+        const book = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(
+            book,
+            XLSX.utils.aoa_to_sheet([
+                ['Category', 'Amount'],
+                ['Panadería', 4.5],
+            ]),
+            'Sheet1',
+        );
+        const workbook = XLSX.write(book, { type: 'array', bookType: 'xlsx' });
+        const readBytes = vi.spyOn(FileReader.prototype, 'readAsArrayBuffer');
+
+        const { headers } = await parseFile(
+            new File([workbook], 'budget.xlsx'),
+        );
+
+        expect(headers).toContain('Category');
+        expect(readBytes).not.toHaveBeenCalled();
+    });
+
+    it('reports a CSV it cannot read as unreadable', async () => {
+        vi.spyOn(FileReader.prototype, 'readAsArrayBuffer').mockImplementation(
+            function (this: FileReader) {
+                this.onerror?.(
+                    new ProgressEvent('error') as ProgressEvent<FileReader>,
+                );
+            },
+        );
+
+        await expect(parseFile(csvFile('a,b\n'))).rejects.toThrow(
+            UNREADABLE_FILE_MESSAGE,
+        );
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+});
+
+describe('amount sign from a type column', () => {
+    const mapping: ColumnMapping = {
+        transaction_date: 'Fecha',
+        description: 'Descripción',
+        amount: 'Cantidad',
+        currency: null,
+        balance: null,
+        creditor_name: null,
+        debtor_name: null,
+        transaction_type: 'Tipo de transacción',
+        expense_types: ['Gasto'],
+    };
+
+    function row(type: string, amount: string): ParsedRow {
+        return {
+            Fecha: '2017-10-25',
+            Descripción: 'Compra',
+            Cantidad: amount,
+            'Tipo de transacción': type,
+        };
+    }
+
+    function amounts(rows: ParsedRow[], columnMapping = mapping): number[] {
+        return convertRowsToTransactions(
+            rows,
+            columnMapping,
+            DateFormat.YearMonthDay,
+        ).map((transaction) => transaction.amount);
+    }
+
+    it('makes expense rows negative and leaves the rest as parsed', () => {
+        expect(
+            amounts([
+                row('Gasto', '8.400,00 $'),
+                row('Ingreso', '1.200,50 $'),
+                row('Ajuste de saldo', '-30,00 $'),
+            ]),
+        ).toEqual([-840000, 120050, -3000]);
+    });
+
+    it('keeps an expense negative when the file already wrote it so', () => {
+        expect(amounts([row('Gasto', '-12,00 $')])).toEqual([-1200]);
+    });
+
+    it('compares the type trimmed and case-insensitively', () => {
+        expect(
+            amounts([row('  GASTO ', '5,00 $')], {
+                ...mapping,
+                expense_types: [' gasto'],
+            }),
+        ).toEqual([-500]);
+    });
+
+    it('changes nothing without a type column', () => {
+        expect(
+            amounts([row('Gasto', '5,00 $')], {
+                ...mapping,
+                transaction_type: null,
+            }),
+        ).toEqual([500]);
+    });
+
+    it('changes nothing when no value is ticked as an expense', () => {
+        expect(
+            amounts([row('Gasto', '5,00 $')], {
+                ...mapping,
+                expense_types: [],
+            }),
+        ).toEqual([500]);
+    });
+
+    it('changes nothing for a layout saved before the type column existed', () => {
+        const legacy: ColumnMapping = { ...mapping };
+        delete legacy.transaction_type;
+        delete legacy.expense_types;
+
+        expect(amounts([row('Gasto', '5,00 $')], legacy)).toEqual([500]);
+    });
+});
+
+describe('type column detection', () => {
+    it.each([
+        'Type',
+        'Transaction Type',
+        'Tipo',
+        'Tipo de transacción',
+        'Debit/Credit',
+        'DR/CR',
+        'Movement type',
+    ])('detects "%s" as the type column', (header) => {
+        const mapping = autoDetectColumns(['Fecha', 'Concepto', header]);
+
+        expect(mapping.transaction_type).toBe(header);
+    });
+
+    it.each(['Card type', 'Account Type', 'Tipo de cambio', 'Subtype'])(
+        'does not take "%s" for the type column',
+        (header) => {
+            const mapping = autoDetectColumns(['Fecha', 'Concepto', header]);
+
+            expect(mapping.transaction_type).toBeNull();
+        },
+    );
+
+    it('leaves a Money Pro header set mapped as expected', () => {
+        const mapping = autoDetectColumns([
+            'Fecha',
+            'Cantidad',
+            'Cuenta',
+            'Categoría',
+            'Descripción',
+            'Tipo de transacción',
+        ]);
+
+        expect(mapping.amount).toBe('Cantidad');
+        expect(mapping.description).toBe('Descripción');
+        expect(mapping.transaction_type).toBe('Tipo de transacción');
+    });
+
+    it('maps no type column when the file has none', () => {
+        const mapping = autoDetectColumns(['Date', 'Description', 'Amount']);
+
+        expect(mapping.transaction_type).toBeNull();
+        expect(mapping.expense_types).toEqual([]);
+    });
+
+    it('collects the distinct values, most common first', () => {
+        const rows = [
+            { Tipo: 'Ingreso' },
+            { Tipo: 'Gasto' },
+            { Tipo: ' gasto ' },
+            { Tipo: '' },
+        ];
+
+        expect(collectTypeValues(rows, 'Tipo')).toEqual([
+            { value: 'Gasto', count: 2 },
+            { value: 'Ingreso', count: 1 },
+        ]);
+        expect(collectTypeValues(rows, null)).toEqual([]);
+    });
+
+    it('pre-ticks only the values that plainly mean an expense', () => {
+        const rows = [
+            'Gasto',
+            'Ingreso',
+            'Ajuste de saldo',
+            'Saldo de apertura',
+            'Expenses',
+            'DEBIT',
+            'Credit',
+            'Débito',
+            'Cargo',
+            'Withdrawal',
+            'Dépense',
+            'Out',
+            'Payout',
+            'DR',
+            'CR',
+        ].map((type) => ({ Type: type }));
+
+        expect(detectExpenseTypes(rows, 'Type')).toEqual([
+            'Gasto',
+            'Expenses',
+            'DEBIT',
+            'Débito',
+            'Cargo',
+            'Withdrawal',
+            'Dépense',
+            'Out',
+            'DR',
+        ]);
+        expect(detectExpenseTypes(rows, null)).toEqual([]);
+    });
+
+    it('ticks the Dutch and German values for money going out', () => {
+        const rows = ['Af', 'Bij', 'Soll', 'Haben'].map((type) => ({
+            Type: type,
+        }));
+
+        expect(detectExpenseTypes(rows, 'Type')).toEqual(['Af', 'Soll']);
+    });
+});
+
+describe('parseDate with a month name', () => {
+    const parsedDay = (value: string, format: DateFormat): string | null => {
+        const date = parseDate(value, format);
+
+        return date ? formatLocalDate(date) : null;
+    };
+
+    it.each([
+        ['1 dic 2025, 0:00:00', '2025-12-01'],
+        ['3 dic 2025, 17:02:00', '2025-12-03'],
+        ['5 dic 2025, 14:00:00', '2025-12-05'],
+        ['1 dic 2025', '2025-12-01'],
+        ['1 dic. 2025', '2025-12-01'],
+        ['01-dic-25', '2025-12-01'],
+        ['7 ENE 2026, 9:15', '2026-01-07'],
+        ['12 sept 2025', '2025-09-12'],
+        ['1 de diciembre de 2025', '2025-12-01'],
+        ['28 Febrero 2026', '2026-02-28'],
+        ['3 Ágo 2025', '2025-08-03'],
+        ['1 Dec 2025', '2025-12-01'],
+        ['1 December 2025, 5:00 PM', '2025-12-01'],
+        ['Dec 1, 2025', '2025-12-01'],
+        ['Dec. 1, 2025, 17:02:00', '2025-12-01'],
+        ['August 3 2025', '2025-08-03'],
+    ])('reads %s as %s in every format', (value, expected) => {
+        for (const format of Object.values(DateFormat)) {
+            expect(parsedDay(value, format)).toBe(expected);
+        }
+    });
+
+    it('turns down a day the month does not have or a word that is no month', () => {
+        expect(parsedDay('31 feb 2026', DateFormat.DayMonthYear)).toBeNull();
+        expect(parsedDay('1 foo 2025', DateFormat.DayMonthYear)).toBeNull();
+        expect(parsedDay('Foo 1, 2025', DateFormat.MonthDayYear)).toBeNull();
+    });
+
+    it('reads numeric dates exactly as before', () => {
+        expect(parsedDay('01/12/2025', DateFormat.DayMonthYear)).toBe(
+            '2025-12-01',
+        );
+        expect(parsedDay('01/12/2025', DateFormat.MonthDayYear)).toBe(
+            '2025-01-12',
+        );
+        expect(parsedDay('2025-12-01', DateFormat.YearMonthDay)).toBe(
+            '2025-12-01',
+        );
+        expect(parsedDay('2025-12-01', DateFormat.DayMonthYear)).toBeNull();
+        expect(parsedDay('1.12.25', DateFormat.DayMonthYear)).toBe(
+            '2025-12-01',
+        );
+        expect(parsedDay('20251201', DateFormat.YearMonthDayCompact)).toBe(
+            '2025-12-01',
+        );
+        expect(parsedDay('Fecha: 01/12/2025', DateFormat.DayMonthYear)).toBe(
+            '2025-12-01',
+        );
+        expect(parsedDay('13/01/2025', DateFormat.MonthDayYear)).toBeNull();
+    });
+
+    it('detects a column of month-name dates without asking', () => {
+        expect(
+            detectDateFormat(
+                [
+                    { date: '1 dic 2025, 0:00:00' },
+                    { date: '3 dic 2025, 17:02:00' },
+                    { date: '5 dic 2025, 14:00:00' },
+                ],
+                'date',
+                'es',
+            ),
+        ).toEqual({ format: DateFormat.DayMonthYear, ambiguous: false });
+        expect(
+            detectDateFormat(
+                [{ date: 'Dec 1, 2025' }, { date: 'Dec 3, 2025' }],
+                'date',
+                'en-US',
+            ),
+        ).toEqual({ format: DateFormat.MonthDayYear, ambiguous: false });
+    });
+});
+
+describe('isDateText', () => {
+    it.each([
+        '01/12/2025',
+        '2025-12-01',
+        '01.12.25',
+        '01/12',
+        '20251201',
+        '01/12/2025 10:30',
+        '1 dic 2025, 0:00:00',
+        '1 de diciembre de 2025',
+        'Dec 1, 2025',
+    ])('reads %s as a date', (value) => {
+        expect(isDateText(value)).toBe(true);
+    });
+
+    it.each([
+        'Fecha',
+        'Fecha valor',
+        'Saldo 2024',
+        'Cuenta 1-2',
+        '-45,20',
+        '1.234,56',
+        '31/02/2025',
+        '1 foo 2025',
+    ])('does not read %s as one', (value) => {
+        expect(isDateText(value)).toBe(false);
     });
 });
