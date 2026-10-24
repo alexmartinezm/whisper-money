@@ -1,8 +1,15 @@
 import { index as monthlySummary } from '@/actions/App/Http/Controllers/MonthlySummaryController';
+import { AvailableCard } from '@/components/cashflow/available-card';
 import { BreakdownCard } from '@/components/cashflow/breakdown-card';
+import { type CashflowBlockHrefs } from '@/components/cashflow/cashflow-blocks';
+import { CashflowDetailsDrawer } from '@/components/cashflow/cashflow-details-drawer';
+import { ExpensesCard } from '@/components/cashflow/expenses-card';
 import { MonthlySavingsCashflowCard } from '@/components/cashflow/monthly-savings-cashflow-card';
 import { NetCashflowCard } from '@/components/cashflow/net-cashflow-card';
-import { PeriodNavigation } from '@/components/cashflow/period-navigation';
+import {
+    formatPeriodLabel,
+    PeriodNavigation,
+} from '@/components/cashflow/period-navigation';
 import { SavedInvestedCard } from '@/components/cashflow/saved-invested-card';
 import { CashflowTrendChart, SankeyChart } from '@/components/charts';
 import HeadingSmall from '@/components/heading-small';
@@ -10,10 +17,16 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { CashflowPeriodType, useCashflowData } from '@/hooks/use-cashflow-data';
+import { useLocale } from '@/hooks/use-locale';
 import { usePeriodUrlSync } from '@/hooks/use-period-url-sync';
 import AppSidebarLayout from '@/layouts/app/app-sidebar-layout';
+import {
+    CASHFLOW_BLOCKS,
+    cashflowBlockTransactionsUrl,
+} from '@/lib/cashflow-block';
+import { cn } from '@/lib/utils';
 import { cashflow } from '@/routes';
-import { BreadcrumbItem } from '@/types';
+import { BreadcrumbItem, Features } from '@/types';
 import { __ } from '@/utils/i18n';
 import { Head, Link, usePage } from '@inertiajs/react';
 import {
@@ -96,13 +109,31 @@ function getPeriodRange(
     };
 }
 
+/**
+ * Each block's transactions over the range the summary covers, so the list a
+ * link opens adds up to the figure next to it.
+ */
+function blockTransactionsHrefs(period: {
+    from: Date;
+    to: Date;
+}): CashflowBlockHrefs {
+    return Object.fromEntries(
+        CASHFLOW_BLOCKS.map((block) => [
+            block,
+            cashflowBlockTransactionsUrl(block, period.from, period.to),
+        ]),
+    );
+}
+
 export default function CashflowPage() {
     const {
         auth,
         period: initialPeriod,
         periodType: initialPeriodType,
+        features,
     } = usePage<{
         auth: { user: { currency_code: string } };
+        features: Features;
         period: string | null;
         periodType: CashflowPeriodType;
     }>().props;
@@ -140,6 +171,10 @@ export default function CashflowPage() {
     // the banner explains why. Showing them would be answering a question about
     // someone's money with a number we do not have.
     const showPlaceholders = isLoading || hasError;
+    const showAvailable = features.cashflowAvailableFree;
+    const [detailsOpen, setDetailsOpen] = useState(false);
+    const locale = useLocale();
+    const blockHrefs = useMemo(() => blockTransactionsHrefs(period), [period]);
 
     usePeriodUrlSync(currentDate, periodType, initialPeriod, initialPeriodType);
 
@@ -194,7 +229,12 @@ export default function CashflowPage() {
                 )}
 
                 {/* Summary Cards */}
-                <div className="grid gap-6 md:grid-cols-2">
+                <div
+                    className={cn(
+                        'grid gap-6 md:grid-cols-2',
+                        showAvailable && 'xl:grid-cols-4',
+                    )}
+                >
                     <NetCashflowCard
                         current={summary.current}
                         previous={summary.previous}
@@ -207,8 +247,46 @@ export default function CashflowPage() {
                         previous={summary.previous}
                         loading={showPlaceholders}
                         currency={auth.user.currency_code}
+                        showContributionSplit={showAvailable}
                     />
+
+                    {showAvailable && (
+                        <>
+                            <AvailableCard
+                                current={summary.current}
+                                previous={summary.previous}
+                                loading={showPlaceholders}
+                                currency={auth.user.currency_code}
+                            />
+                            <ExpensesCard
+                                current={summary.current}
+                                loading={showPlaceholders}
+                                currency={auth.user.currency_code}
+                                hrefs={blockHrefs}
+                                onViewDetails={() => setDetailsOpen(true)}
+                            />
+                        </>
+                    )}
                 </div>
+
+                {showAvailable && (
+                    <CashflowDetailsDrawer
+                        // Closed while the figures load or fail: it would
+                        // otherwise answer with the zeros in their place.
+                        open={detailsOpen && !showPlaceholders}
+                        onOpenChange={setDetailsOpen}
+                        current={summary.current}
+                        previous={summary.previous}
+                        currency={auth.user.currency_code}
+                        periodType={periodType}
+                        hrefs={blockHrefs}
+                        periodLabel={formatPeriodLabel(
+                            currentDate,
+                            periodType,
+                            locale,
+                        )}
+                    />
+                )}
 
                 {/* Only a month lines up with a monthly goal's target. */}
                 {periodType === 'month' && (
@@ -243,6 +321,9 @@ export default function CashflowPage() {
                                 height={400}
                                 currency={auth.user.currency_code}
                                 period={period}
+                                centerLabel={
+                                    showAvailable ? __('Available') : undefined
+                                }
                             />
                         )}
                     </CardContent>

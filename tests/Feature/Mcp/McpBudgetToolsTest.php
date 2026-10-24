@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\BudgetExpenseType;
 use App\Enums\BudgetPeriodType;
 use App\Enums\RolloverType;
 use App\Jobs\AssignHistoricalTransactionsToBudget;
@@ -330,4 +331,115 @@ it('rejects attempts to update a budget outside the selected space', function ()
     ])->assertHasErrors();
 
     expect($budget->fresh()->name)->not->toBe('No access');
+});
+
+/**
+ * @param  array<string, mixed>  $overrides
+ * @return array<string, mixed>
+ */
+function mcpBudgetArguments(Category $category, array $overrides = []): array
+{
+    return [
+        'name' => 'Rent',
+        'period_type' => BudgetPeriodType::Monthly->value,
+        'period_start_day' => 1,
+        'category_ids' => [$category->id],
+        'rollover_type' => RolloverType::Reset->value,
+        'allocated_amount' => 100000,
+        ...$overrides,
+    ];
+}
+
+it('creates a budget with the expense type the agent sends, variable by default', function () {
+    Queue::fake();
+    $user = User::factory()->create();
+    $category = Category::factory()->create(['user_id' => $user->id, 'space_id' => $user->personalSpace->id]);
+
+    callBudgetWriteTool($user, CreateBudget::class, mcpBudgetArguments($category, ['expense_type' => 'fixed']))
+        ->assertOk()
+        ->assertSee('"expense_type":"fixed"', false);
+    callBudgetWriteTool($user, CreateBudget::class, mcpBudgetArguments($category, ['name' => 'Groceries']))
+        ->assertOk()
+        ->assertSee('"expense_type":"variable"', false);
+
+    expect(Budget::query()->where('name', 'Rent')->sole()->expense_type)->toBe(BudgetExpenseType::Fixed)
+        ->and(Budget::query()->where('name', 'Groceries')->sole()->expense_type)->toBe(BudgetExpenseType::Variable);
+});
+
+it('keeps a catch-all budget variable whatever expense type the agent sends', function () {
+    Queue::fake();
+    $user = User::factory()->create();
+    $category = Category::factory()->create(['user_id' => $user->id, 'space_id' => $user->personalSpace->id]);
+
+    callBudgetWriteTool($user, CreateBudget::class, mcpBudgetArguments($category, [
+        'name' => 'Everything else',
+        'category_ids' => [],
+        'is_catch_all' => true,
+        'expense_type' => 'fixed',
+    ]))->assertOk();
+    $catchAll = Budget::query()->where('name', 'Everything else')->sole();
+
+    callBudgetWriteTool($user, UpdateBudget::class, ['budget_id' => $catchAll->id, 'expense_type' => 'fixed'])
+        ->assertOk()
+        ->assertSee('"expense_type":"variable"', false);
+
+    expect($catchAll->fresh()->expense_type)->toBe(BudgetExpenseType::Variable);
+});
+
+it('changes only the expense type through MCP', function () {
+    $user = User::factory()->create();
+    $budget = Budget::factory()->monthly()->create([
+        'user_id' => $user->id,
+        'space_id' => $user->personalSpace->id,
+        'name' => 'Rent',
+    ]);
+
+    callBudgetWriteTool($user, UpdateBudget::class, ['budget_id' => $budget->id, 'expense_type' => 'fixed'])
+        ->assertOk()
+        ->assertSee('"expense_type":"fixed"', false);
+
+    expect($budget->fresh())
+        ->expense_type->toBe(BudgetExpenseType::Fixed)
+        ->name->toBe('Rent');
+});
+
+it('keeps the expense type through MCP tracking and allocation changes', function () {
+    Queue::fake();
+    $user = User::factory()->create();
+    $space = $user->personalSpace;
+    $category = Category::factory()->create(['user_id' => $user->id, 'space_id' => $space->id]);
+    $label = Label::factory()->create(['user_id' => $user->id, 'space_id' => $space->id]);
+
+    callBudgetWriteTool($user, CreateBudget::class, mcpBudgetArguments($category, ['expense_type' => 'fixed']))->assertOk();
+    $budget = Budget::query()->where('name', 'Rent')->sole();
+
+    callBudgetWriteTool($user, UpdateBudget::class, ['budget_id' => $budget->id, 'label_ids' => [$label->id]])->assertOk();
+    callBudgetWriteTool($user, UpdateBudget::class, ['budget_id' => $budget->id, 'allocated_amount' => 120000])->assertOk();
+    callBudgetWriteTool($user, UpdateBudgetPeriod::class, [
+        'budget_id' => $budget->id,
+        'date' => today()->toDateString(),
+        'allocated_amount' => 150000,
+    ])->assertOk()->assertSee('"expense_type":"fixed"', false);
+
+    expect($budget->fresh()->expense_type)->toBe(BudgetExpenseType::Fixed);
+});
+
+it('rejects an unknown expense type through MCP', function () {
+    $user = User::factory()->create();
+    $budget = Budget::factory()->monthly()->create(['user_id' => $user->id, 'space_id' => $user->personalSpace->id]);
+
+    callBudgetWriteTool($user, UpdateBudget::class, ['budget_id' => $budget->id, 'expense_type' => 'occasional'])
+        ->assertHasErrors();
+
+    expect($budget->fresh()->expense_type)->toBe(BudgetExpenseType::Variable);
+});
+
+it('lists each budget with its expense type', function () {
+    $user = User::factory()->create();
+    Budget::factory()->monthly()->fixed()->create(['user_id' => $user->id, 'space_id' => $user->personalSpace->id]);
+
+    WhisperMoneyServer::actingAs($user)
+        ->tool(ListBudgets::class)
+        ->assertOk()
+        ->assertSee('"expense_type":"fixed"', false);
 });

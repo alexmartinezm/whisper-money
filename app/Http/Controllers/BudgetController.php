@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\AccountType;
+use App\Enums\BudgetExpenseType;
 use App\Enums\BudgetPeriodType;
 use App\Http\Requests\ReorderPlanningItemsRequest;
 use App\Http\Requests\StoreBudgetRequest;
@@ -414,6 +415,7 @@ class BudgetController extends Controller
                 'period_type' => $request->period_type,
                 'period_start_day' => $request->period_start_day,
                 'rollover_type' => $request->rollover_type,
+                'expense_type' => $request->enum('expense_type', BudgetExpenseType::class) ?? BudgetExpenseType::Variable,
                 'is_catch_all' => $request->boolean('is_catch_all'),
                 'allocated_amount' => $request->integer('allocated_amount'),
             ],
@@ -432,7 +434,7 @@ class BudgetController extends Controller
             $request->user(),
             $budget->space,
             $budget->id,
-            $request->only(['name', 'allocated_amount', 'category_ids', 'label_ids']),
+            $request->only(['name', 'allocated_amount', 'category_ids', 'label_ids', 'expense_type']),
             CarbonImmutable::today(),
         );
 

@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Enums\AccountType;
+use App\Enums\CashflowBlock;
 use App\Enums\CategorySource;
 use App\Enums\CategoryType;
 use App\Enums\RuleOrigin;
@@ -10,8 +12,11 @@ use App\Events\TransactionCreated;
 use App\Events\TransactionDeleted;
 use App\Events\TransactionUpdated;
 use App\Models\Concerns\BelongsToSpace;
+use App\Services\CashflowBlockQuery;
 use App\Services\CategoryTree;
+use App\Services\PeriodComparator;
 use Carbon\Carbon;
+use Closure;
 use Database\Factories\TransactionFactory;
 use Illuminate\Contracts\Database\Query\Expression;
 use Illuminate\Database\Eloquent\Builder;
@@ -24,6 +29,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\DB;
+use LogicException;
 
 /**
  * @property Carbon $transaction_date
@@ -254,6 +260,91 @@ class Transaction extends Model
             && $this->account?->type?->isSetAside() === true;
     }
 
+    /**
+     * Rows with at least one posting {@see self::isExpenseSide()} accepts: the
+     * SQL twin of that check, read per posting the way
+     * `effectiveTransactions()` expands a row. An unsplit row is its own
+     * posting (an expense category, or an uncategorized outflow); a split row
+     * has one per line, each in its own category, so it matches when any line
+     * is in an expense category. Both must keep agreeing: the cashflow summary
+     * adds up with one and the transactions list filters with the other.
+     *
+     * $postingCategory narrows the posting further by its category: it gets
+     * the query the posting is read from (the row's, or a split line's) and
+     * the column holding the posting's category.
+     *
+     * @param  Builder<Transaction>  $query
+     * @param  (Closure(Builder<covariant Model>, string): mixed)|null  $postingCategory
+     * @return Builder<Transaction>
+     */
+    public function scopeExpenseSide(Builder $query, ?Closure $postingCategory = null): Builder
+    {
+        return $query->whereHasPosting(function (Builder $posting, string $categoryColumn) use ($postingCategory): void {
+            $posting->where(fn (Builder $side) => $side
+                ->whereHas('category', fn (Builder $category) => $category->where('type', CategoryType::Expense))
+                // Only ever true for an unsplit row: a split line always has a category.
+                ->orWhere(fn (Builder $uncategorized) => $uncategorized
+                    ->whereNull($categoryColumn)
+                    ->where('transactions.amount', '<', 0)));
+
+            if ($postingCategory !== null) {
+                $postingCategory($posting, $categoryColumn);
+            }
+        });
+    }
+
+    /**
+     * Rows with a posting booked to a $type category, minus the legs
+     * {@see self::isSetAsideAccountLeg()} skips: the SQL twin of what the
+     * cashflow summary adds up as savings or investments, read per posting
+     * (an unsplit row, or any line of a split one). The account is the row's,
+     * so a leg skips every line of it, as the summary does.
+     *
+     * Only valid on queries that ran {@see self::scopeJoinOwningAccount()}. The
+     * join ignores the account's soft-delete scope while the `account` relation
+     * does not, so a trashed account's row is not skipped here either.
+     *
+     * @param  Builder<Transaction>  $query
+     * @return Builder<Transaction>
+     */
+    public function scopeSetAsideInto(Builder $query, CategoryType $type): Builder
+    {
+        $setAsideAccountTypes = array_values(array_filter(
+            AccountType::cases(),
+            fn (AccountType $accountType): bool => $accountType->isSetAside(),
+        ));
+
+        return $query
+            ->whereHasPosting(fn (Builder $posting) => $posting
+                ->whereHas('category', fn (Builder $category) => $category->where('type', $type)))
+            ->whereNot(fn (Builder $leg) => $leg
+                ->whereNull('accounts.deleted_at')
+                ->whereIn('accounts.type', $setAsideAccountTypes));
+    }
+
+    /**
+     * Rows with at least one posting $posting accepts, a posting being what
+     * `effectiveTransactions()` turns a row into: an unsplit row is its own,
+     * a split row has one per line. $posting runs against the row (when it
+     * has no splits) or against its split lines, and gets the column holding
+     * the posting's category. Labels stay on the row, so a label condition
+     * goes outside, on the row itself.
+     *
+     * @param  Builder<Transaction>  $query
+     * @param  Closure(Builder<covariant Model>, string): mixed  $posting
+     * @return Builder<Transaction>
+     */
+    public function scopeWhereHasPosting(Builder $query, Closure $posting): Builder
+    {
+        return $query->where(fn (Builder $any) => $any
+            ->where(function (Builder $unsplit) use ($posting): void {
+                $posting($unsplit->whereDoesntHave('splits'), 'transactions.category_id');
+            })
+            ->orWhereHas('splits', function (Builder $line) use ($posting): void {
+                $posting($line, 'transaction_splits.category_id');
+            }));
+    }
+
     /** @return BelongsTo<AutomationRule, $this> */
     public function categorizedByRule(): BelongsTo
     {
@@ -442,8 +533,35 @@ class Transaction extends Model
             ));
 
         $this->applyCategoryAndLabelFilters($query, $filters);
+        $this->applyCashflowBlockFilter($query, $filters);
 
         return $query;
+    }
+
+    /**
+     * A cashflow block is only defined over a period, so the filter needs both
+     * dates (the requests require them alongside it) and the owner whose
+     * budgets decide the expense blocks.
+     *
+     * @param  Builder<Transaction>  $query
+     * @param  array<string, mixed>  $filters
+     */
+    private function applyCashflowBlockFilter(Builder $query, array $filters): void
+    {
+        if (empty($filters['cashflow_block'])) {
+            return;
+        }
+
+        if (! isset($filters['user_id'], $filters['date_from'], $filters['date_to'])) {
+            throw new LogicException('The cashflow block filter needs user_id, date_from and date_to.');
+        }
+
+        app(CashflowBlockQuery::class)->apply(
+            $query,
+            CashflowBlock::from($filters['cashflow_block']),
+            $filters['user_id'],
+            PeriodComparator::fromRequest(['from' => $filters['date_from'], 'to' => $filters['date_to']]),
+        );
     }
 
     /**

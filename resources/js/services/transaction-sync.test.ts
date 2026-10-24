@@ -31,6 +31,25 @@ vi.mock('@/lib/dexie-db', async (importOriginal) => {
 
 vi.mock('axios', () => ({ default: axiosMock }));
 
+function bulkFilters(
+    overrides: Partial<TransactionFilters> = {},
+): TransactionFilters {
+    return {
+        dateFrom: null,
+        dateTo: null,
+        amountMin: null,
+        amountMax: null,
+        categoryIds: [],
+        accountIds: [],
+        labelIds: [],
+        creditorName: '',
+        debtorName: '',
+        searchText: '',
+        aiCategorizedOnly: false,
+        ...overrides,
+    };
+}
+
 describe('transactionSyncService.update', () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -170,7 +189,7 @@ describe('transactionSyncService bulk updates', () => {
             const dateTo = new Date(2026, 6, 31);
 
             await transactionSyncService.updateByFilters(
-                { dateFrom, dateTo },
+                bulkFilters({ dateFrom, dateTo }),
                 { category_id: 'category-1' },
             );
 
@@ -195,7 +214,7 @@ describe('transactionSyncService bulk updates', () => {
     it('returns updated and skipped split counts for filters', async () => {
         await expect(
             transactionSyncService.updateByFilters(
-                { dateFrom: new Date('2026-07-01T00:00:00Z') },
+                bulkFilters({ dateFrom: new Date('2026-07-01T00:00:00Z') }),
                 { category_id: 'category-1' },
             ),
         ).resolves.toMatchObject({
@@ -203,6 +222,49 @@ describe('transactionSyncService bulk updates', () => {
             skipped_split_count: 1,
         });
     });
+
+    it('narrows a select-all edit to the cashflow block the list shows', async () => {
+        await transactionSyncService.updateByFilters(
+            bulkFilters({
+                dateFrom: toLocalDate('2026-10-01'),
+                dateTo: toLocalDate('2026-10-31'),
+                cashflowBlock: 'fixed',
+                aiCategorizedOnly: true,
+            }),
+            { category_id: 'category-1' },
+        );
+
+        expect(axiosMock.patch).toHaveBeenLastCalledWith(
+            '/transactions/bulk',
+            expect.objectContaining({
+                filters: {
+                    date_from: '2026-10-01',
+                    date_to: '2026-10-31',
+                    cashflow_block: 'fixed',
+                    category_source: 'ai',
+                },
+            }),
+        );
+    });
+
+    it.each([
+        ['the start date', { dateTo: toLocalDate('2026-10-31') }],
+        ['the end date', { dateFrom: toLocalDate('2026-10-01') }],
+    ])(
+        'drops the cashflow block without %s, as the list does',
+        async (_missing, dates) => {
+            await transactionSyncService.updateByFilters(
+                bulkFilters({ ...dates, cashflowBlock: 'fixed' }),
+                { category_id: 'category-1' },
+            );
+
+            const [, body] = axiosMock.patch.mock.lastCall as unknown as [
+                string,
+                { filters: Record<string, unknown> },
+            ];
+            expect(body.filters).not.toHaveProperty('cashflow_block');
+        },
+    );
 });
 
 describe('transaction sync transformation', () => {
@@ -267,19 +329,7 @@ describe.each([
 
     it('sends the calendar day the user picked, not its UTC day', async () => {
         const picked = toLocalDate('2026-09-09');
-        const filters = {
-            dateFrom: picked,
-            dateTo: picked,
-            amountMin: null,
-            amountMax: null,
-            categoryIds: [],
-            accountIds: [],
-            labelIds: [],
-            creditorName: '',
-            debtorName: '',
-            searchText: '',
-            aiCategorizedOnly: false,
-        } satisfies TransactionFilters;
+        const filters = bulkFilters({ dateFrom: picked, dateTo: picked });
 
         await transactionSyncService.updateByFilters(filters, {
             category_id: 'cat-1',

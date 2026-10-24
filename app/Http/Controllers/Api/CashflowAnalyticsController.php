@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\MonthlySavingsTotalsRequest;
 use App\Models\Category;
 use App\Models\Transaction;
+use App\Services\CashflowBudgetReserveService;
 use App\Services\CashflowSummaryService;
 use App\Services\CategoryTree;
 use App\Services\Concerns\ConvertsTransactionCurrency;
@@ -15,6 +16,7 @@ use App\Services\ExchangeRateService;
 use App\Services\PeriodComparator;
 use App\Services\SavingsGoals\MonthlySavingsGoalTotals;
 use Carbon\Carbon;
+use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -32,6 +34,7 @@ class CashflowAnalyticsController extends Controller
         private ExchangeRateService $exchangeRateService,
         private CategoryTree $tree,
         private CashflowSummaryService $summaries,
+        private CashflowBudgetReserveService $budgetReserve,
         private MonthlySavingsGoalTotals $monthlySavings,
     ) {}
 
@@ -46,9 +49,13 @@ class CashflowAnalyticsController extends Controller
         $previousPeriod = $period->previous();
         $user = $request->user();
 
-        return $this->cashflowJson(
-            $this->summaries->forComparedPeriods($user->id, $user->currency_code, $period, $previousPeriod)
-        );
+        return $this->cashflowJson($this->summaries->forComparedPeriods(
+            $user->id,
+            $user->currency_code,
+            $period,
+            $previousPeriod,
+            fn (array $postings, Closure $sum): array => $this->budgetReserve->forComparedPeriods($user->id, $period, $previousPeriod, $postings, $sum),
+        ));
     }
 
     public function sankey(Request $request): JsonResponse

@@ -9,6 +9,8 @@ import { BankLogo } from '@/components/bank-logo';
 import { LabelIcon } from '@/components/shared/label-icon';
 import { SavedFilters } from '@/components/transactions/saved-filters';
 import { AmountFilterFields } from '@/components/transactions/transaction-filters-amount';
+import { CashflowBlockChip } from '@/components/transactions/transaction-filters-cashflow-block-chip';
+import { QuickPeriodButtons } from '@/components/transactions/transaction-filters-quick-periods';
 import { AiSparkleIcon } from '@/components/ui/ai-sparkle-icon';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -206,6 +208,7 @@ export function TransactionFilters({
             debtorName: '',
             searchText: '',
             aiCategorizedOnly: false,
+            cashflowBlock: null,
         });
     }
 
@@ -219,6 +222,7 @@ export function TransactionFilters({
         (filters.creditorName ? 1 : 0) +
         (filters.debtorName ? 1 : 0) +
         (filters.aiCategorizedOnly ? 1 : 0) +
+        (filters.cashflowBlock ? 1 : 0) +
         (hideAccountFilter ? 0 : filters.accountIds.length);
 
     return (
@@ -266,7 +270,20 @@ export function TransactionFilters({
                                 </div>
 
                                 <div className="space-y-2">
-                                    <FormLabel>{__('Date')}</FormLabel>
+                                    <div className="flex items-center justify-between gap-2">
+                                        <FormLabel>{__('Date')}</FormLabel>
+                                        <QuickPeriodButtons
+                                            dateFrom={filters.dateFrom}
+                                            dateTo={filters.dateTo}
+                                            onChange={({ from, to }) =>
+                                                onFiltersChange({
+                                                    ...filters,
+                                                    dateFrom: from,
+                                                    dateTo: to,
+                                                })
+                                            }
+                                        />
+                                    </div>
                                     <div className="grid grid-cols-2 gap-2 pt-2">
                                         <Input
                                             type="date"
@@ -470,9 +487,6 @@ export function TransactionFilters({
                                                                                 <CategoryIcon
                                                                                     category={
                                                                                         category
-                                                                                    }
-                                                                                    size={
-                                                                                        4
                                                                                     }
                                                                                 />
                                                                             </div>
@@ -791,6 +805,20 @@ export function TransactionFilters({
                         )}
                     </div>
                 </div>
+
+                {filters.cashflowBlock ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                        <CashflowBlockChip
+                            block={filters.cashflowBlock}
+                            onRemove={() =>
+                                onFiltersChange({
+                                    ...filters,
+                                    cashflowBlock: null,
+                                })
+                            }
+                        />
+                    </div>
+                ) : null}
 
                 {actions ? <div className="w-full">{actions}</div> : null}
             </div>

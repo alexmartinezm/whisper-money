@@ -3,13 +3,18 @@ import type { Category } from '@/types/category';
 import type { Label } from '@/types/label';
 import { router } from '@inertiajs/react';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditBudgetDialog } from './edit-budget-dialog';
+
+const pageProps = vi.hoisted(() => ({
+    current: { features: { cashflowAvailableFree: false } },
+}));
 
 vi.mock('@inertiajs/react', () => ({
     router: {
         patch: vi.fn(),
     },
+    usePage: () => ({ props: pageProps.current }),
 }));
 
 vi.mock('@/actions/App/Http/Controllers/BudgetController', () => ({
@@ -48,7 +53,7 @@ const categories = [
 ] as Category[];
 const labels = [{ id: 'label-1', name: 'Holiday', color: 'purple' }] as Label[];
 
-function makeBudget(): Budget {
+function makeBudget(overrides: Partial<Budget> = {}): Budget {
     return {
         id: 'budget-1',
         user_id: 'user-1',
@@ -58,27 +63,39 @@ function makeBudget(): Budget {
         categories: [categories[0]],
         labels: [],
         rollover_type: 'carry_over',
+        expense_type: 'fixed',
         notify_on_new_transaction: false,
         notify_on_close_to_limit: false,
         notify_on_over_limit: false,
         is_catch_all: false,
+        position: null,
+        archived_at: null,
         created_at: '2026-05-26T00:00:00.000000Z',
         updated_at: '2026-05-26T00:00:00.000000Z',
         deleted_at: null,
+        ...overrides,
     };
 }
 
+function renderDialog(budget: Budget = makeBudget()) {
+    render(
+        <EditBudgetDialog
+            budget={budget}
+            categories={categories}
+            labels={labels}
+            open={true}
+            onOpenChange={vi.fn()}
+        />,
+    );
+}
+
 describe('EditBudgetDialog', () => {
+    beforeEach(() => {
+        pageProps.current = { features: { cashflowAvailableFree: false } };
+    });
+
     it('explains locked budget period and carry-over fields', () => {
-        render(
-            <EditBudgetDialog
-                budget={makeBudget()}
-                categories={categories}
-                labels={labels}
-                open={true}
-                onOpenChange={vi.fn()}
-            />,
-        );
+        renderDialog();
 
         expect(
             screen.getByText(
@@ -91,15 +108,7 @@ describe('EditBudgetDialog', () => {
     });
 
     it('submits replacement category and label tracking', () => {
-        render(
-            <EditBudgetDialog
-                budget={makeBudget()}
-                categories={categories}
-                labels={labels}
-                open={true}
-                onOpenChange={vi.fn()}
-            />,
-        );
+        renderDialog();
 
         fireEvent.click(screen.getByLabelText('categories'));
         fireEvent.click(screen.getByLabelText('labels'));
@@ -111,7 +120,45 @@ describe('EditBudgetDialog', () => {
                 name: 'Monthly budget',
                 category_ids: ['category-2'],
                 label_ids: ['label-1'],
+                expense_type: 'fixed',
             },
+            expect.any(Object),
+        );
+    });
+
+    it('hides the expense type while cashflow is not available', () => {
+        renderDialog();
+
+        expect(screen.queryByLabelText('Expense Type')).not.toBeInTheDocument();
+    });
+
+    it('shows the budget expense type when cashflow is available', () => {
+        pageProps.current = { features: { cashflowAvailableFree: true } };
+
+        renderDialog();
+
+        expect(screen.getByLabelText('Expense Type')).toHaveTextContent(
+            'Fixed expense',
+        );
+    });
+
+    it('does not offer an expense type for a catch-all budget', () => {
+        pageProps.current = { features: { cashflowAvailableFree: true } };
+
+        renderDialog(makeBudget({ is_catch_all: true }));
+
+        expect(screen.queryByLabelText('Expense Type')).not.toBeInTheDocument();
+    });
+
+    it('does not send an expense type for a catch-all budget', () => {
+        pageProps.current = { features: { cashflowAvailableFree: true } };
+
+        renderDialog(makeBudget({ is_catch_all: true, categories: [] }));
+        fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+        expect(router.patch).toHaveBeenLastCalledWith(
+            '/budgets/budget-1',
+            { name: 'Monthly budget' },
             expect.any(Object),
         );
     });

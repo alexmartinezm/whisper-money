@@ -8,14 +8,15 @@ import {
 } from '@/actions/App/Http/Controllers/TransactionController';
 import { db, withDb } from '@/lib/dexie-db';
 import { TransactionSyncManager } from '@/lib/sync-manager';
+import { serializeFilters } from '@/lib/transaction-filter-serialization';
 import type { LearnedRuleNotice } from '@/types/automation-rule';
 import type {
     ServerTransaction,
     SplitLineInput,
     Transaction,
+    TransactionFilters,
 } from '@/types/transaction';
 import type { UUID } from '@/types/uuid';
-import { formatLocalDate } from '@/utils/date';
 import axios from 'axios';
 
 /** A transaction update plus any rule the correction just taught the system. */
@@ -44,20 +45,6 @@ export interface BulkUpdateResult {
     updated_ids: string[];
     skipped_split_ids: string[];
     transactions: ServerTransaction[];
-}
-
-interface TransactionFilters {
-    dateFrom?: Date | null;
-    dateTo?: Date | null;
-    amountMin?: number | null;
-    amountMax?: number | null;
-    categoryIds?: UUID[];
-    accountIds?: string[];
-    labelIds?: string[];
-    creditorName?: string;
-    debtorName?: string;
-    searchText?: string;
-    aiCategorizedOnly?: boolean;
 }
 
 export function transformTransactionFromServer(
@@ -197,40 +184,13 @@ class TransactionSyncService {
     ): Promise<BulkUpdateResult> {
         const { label_ids, ...transactionData } = data;
 
-        const requestFilters: Record<string, unknown> = {};
-        if (filters.dateFrom) {
-            requestFilters.date_from = formatLocalDate(filters.dateFrom);
-        }
-        if (filters.dateTo) {
-            requestFilters.date_to = formatLocalDate(filters.dateTo);
-        }
-        if (filters.amountMin !== null && filters.amountMin !== undefined) {
-            requestFilters.amount_min = filters.amountMin;
-        }
-        if (filters.amountMax !== null && filters.amountMax !== undefined) {
-            requestFilters.amount_max = filters.amountMax;
-        }
-        if (filters.categoryIds && filters.categoryIds.length > 0) {
-            requestFilters.category_ids = filters.categoryIds;
-        }
-        if (filters.accountIds && filters.accountIds.length > 0) {
-            requestFilters.account_ids = filters.accountIds;
-        }
-        if (filters.labelIds && filters.labelIds.length > 0) {
-            requestFilters.label_ids = filters.labelIds;
-        }
-        if (filters.creditorName) {
-            requestFilters.creditor_name = filters.creditorName;
-        }
-        if (filters.debtorName) {
-            requestFilters.debtor_name = filters.debtorName;
-        }
-        if (filters.searchText) {
-            requestFilters.search = filters.searchText;
-        }
-        if (filters.aiCategorizedOnly) {
-            requestFilters.category_source = 'ai';
-        }
+        // The serializer saved filters and the analysis drawer use, so a
+        // select-all edit targets the rows the list shows: the cashflow block
+        // included, sent only when both dates are set.
+        const requestFilters = {
+            ...serializeFilters(filters),
+            ...(filters.aiCategorizedOnly ? { category_source: 'ai' } : {}),
+        };
 
         const response = await axios.patch(bulkUpdateRoute.url(), {
             filters: requestFilters,

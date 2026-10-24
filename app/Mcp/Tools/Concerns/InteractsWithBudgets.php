@@ -2,17 +2,31 @@
 
 namespace App\Mcp\Tools\Concerns;
 
+use App\Enums\BudgetExpenseType;
 use App\Models\Budget;
 use App\Models\BudgetPeriod;
 use App\Models\Category;
 use App\Models\Label;
 use App\Models\Space;
 use App\Models\User;
+use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\JsonSchema\Types\StringType;
 use Illuminate\Validation\ValidationException;
 
 trait InteractsWithBudgets
 {
+    /**
+     * The `expense_type` argument of create_budget and update_budget, with
+     * $note appended to its description.
+     */
+    protected function expenseTypeSchema(JsonSchema $schema, string $note = ''): StringType
+    {
+        return $schema->string()
+            ->enum(array_column(BudgetExpenseType::cases(), 'value'))
+            ->description(trim('Fixed spending repeats at the same amount every period (rent, subscriptions); variable spending can be adjusted (groceries, restaurants). Only the cashflow expense split reads it. A catch-all budget is always variable, whatever is sent. '.$note));
+    }
+
     protected function budgetFor(User $user, Space $space, string $budgetId): Budget
     {
         $budget = Budget::query()
@@ -94,6 +108,7 @@ trait InteractsWithBudgets
             'period_type' => $budget->period_type->value,
             'period_start_day' => $budget->period_start_day,
             'rollover_type' => $budget->rollover_type->value,
+            'expense_type' => $budget->expense_type->value,
             'is_catch_all' => (bool) $budget->is_catch_all,
             'categories' => $budget->categories
                 ->sortBy(fn (Category $category): string => $category->name.'|'.$category->id)

@@ -5,6 +5,7 @@ namespace App\Http\Middleware;
 use App\Enums\BankingConnectionStatus;
 use App\Enums\BankingProvider;
 use App\Features\CalculateBalancesOnImport;
+use App\Features\CashflowAvailableFree;
 use App\Features\RecurringTransactions;
 use App\Features\TransactionSplitting;
 use App\Jobs\PurgeResidualEncryptionArtifactsJob;
@@ -259,6 +260,7 @@ class HandleInertiaRequests extends Middleware
                 'calculateBalancesOnImport' => false,
                 'transactionSplitting' => true,
                 'recurringTransactions' => false,
+                'cashflowAvailableFree' => false,
             ];
         }
 
@@ -266,6 +268,7 @@ class HandleInertiaRequests extends Middleware
             CalculateBalancesOnImport::class,
             TransactionSplitting::class,
             RecurringTransactions::class,
+            CashflowAvailableFree::class,
         ]);
 
         return [
@@ -273,6 +276,7 @@ class HandleInertiaRequests extends Middleware
             'calculateBalancesOnImport' => $features[CalculateBalancesOnImport::class] !== false,
             'transactionSplitting' => $features[TransactionSplitting::class] !== false,
             'recurringTransactions' => $features[RecurringTransactions::class] !== false,
+            'cashflowAvailableFree' => $features[CashflowAvailableFree::class] !== false,
         ];
     }
 

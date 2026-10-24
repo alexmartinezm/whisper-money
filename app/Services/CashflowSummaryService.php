@@ -6,6 +6,7 @@ use App\Enums\CategoryType;
 use App\Models\Transaction;
 use App\Services\Concerns\ConvertsTransactionCurrency;
 use Carbon\Carbon;
+use Closure;
 use Illuminate\Support\Collection;
 use InvalidArgumentException;
 
@@ -37,9 +38,17 @@ class CashflowSummaryService
      * currency. The dashboard widget and the cashflow screen both read this, so
      * the same month cannot come out two different ways.
      *
+     * Whatever else a caller reads off the same postings goes through
+     * $extend, so it neither loads them again nor converts them any other
+     * way. It gets each period's postings (an unsplit transaction, or one
+     * split line) and a function adding up postings in the user's currency
+     * exactly as `expense` is added up, and returns the fields to append to
+     * each period's summary.
+     *
+     * @param  (Closure(array{current: Collection<int, Transaction>, previous: Collection<int, Transaction>}, Closure(Collection<int, Transaction>): int): array{current: array<string, mixed>, previous: array<string, mixed>})|null  $extend
      * @return array{current: array<string, mixed>, previous: array<string, mixed>}
      */
-    public function forComparedPeriods(string $userId, string $userCurrency, PeriodComparator $period, PeriodComparator $previousPeriod): array
+    public function forComparedPeriods(string $userId, string $userCurrency, PeriodComparator $period, PeriodComparator $previousPeriod, ?Closure $extend = null): array
     {
         $transactions = Transaction::query()
             ->where('transactions.user_id', $userId)
@@ -54,15 +63,17 @@ class CashflowSummaryService
         // the same way the cashflow screen has always read it.
         $transactions = $this->effectiveTransactions($transactions, $userCurrency);
 
+        $postings = [
+            'current' => $this->transactionsForPeriod($transactions, $period->from, $period->to),
+            'previous' => $this->transactionsForPeriod($transactions, $previousPeriod->from, $previousPeriod->to),
+        ];
+        $extra = $extend === null
+            ? ['current' => [], 'previous' => []]
+            : $extend($postings, fn (Collection $periodPostings): int => $this->sumConvertedAmounts($periodPostings, $userCurrency));
+
         return [
-            'current' => $this->forTransactions(
-                $this->transactionsForPeriod($transactions, $period->from, $period->to),
-                $userCurrency,
-            ),
-            'previous' => $this->forTransactions(
-                $this->transactionsForPeriod($transactions, $previousPeriod->from, $previousPeriod->to),
-                $userCurrency,
-            ),
+            'current' => [...$this->forTransactions($postings['current'], $userCurrency), ...$extra['current']],
+            'previous' => [...$this->forTransactions($postings['previous'], $userCurrency), ...$extra['previous']],
         ];
     }
 
