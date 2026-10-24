@@ -304,3 +304,15 @@ it('moves the token when a historical assignment with nothing to assign releases
         ->and($period->budgetTransactions()->count())->toBe(0)
         ->and(DataVersion::current($this->user->id))->not->toBe($before);
 });
+
+it('moves the token when the split reconciliation sweep reassigns a split transaction', function () {
+    app(ReplaceTransactionSplits::class)->replace($this->purchase, [
+        ['category_id' => $this->groceries->id, 'amount' => -6000],
+        ['category_id' => $this->household->id, 'amount' => -4000],
+    ]);
+
+    $before = DataVersion::current($this->user->id);
+    $this->artisan('transactions:reconcile-splits', ['--execute' => true, '--chunk' => 1])->assertSuccessful();
+
+    expect(DataVersion::current($this->user->id))->not->toBe($before);
+});

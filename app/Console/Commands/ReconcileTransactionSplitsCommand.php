@@ -40,21 +40,22 @@ class ReconcileTransactionSplitsCommand extends Command
         $chunk = max(1, (int) $this->option('chunk'));
 
         if ($execute) {
-            // A sweep over every user: one data-version bump per user at the
-            // end, not one per row it writes.
-            DataVersion::deferBumps(function () use ($chunk, &$reconciled, &$errors): void {
-                Transaction::query()->whereHas('splits')->chunkById($chunk, function ($transactions) use (&$reconciled, &$errors): void {
+            Transaction::query()->whereHas('splits')->chunkById($chunk, function ($transactions) use (&$reconciled, &$errors): void {
+                // A sweep over every user: the bumps of a chunk are collected
+                // and flushed when it ends, so each user's invalidation waits
+                // for one chunk instead of the whole sweep.
+                DataVersion::deferBumps(function () use ($transactions, &$reconciled, &$errors): void {
                     foreach ($transactions as $transaction) {
                         try {
                             DB::transaction(function () use ($transaction): void {
                                 $locked = Transaction::query()->whereKey($transaction->id)->lockForUpdate()->firstOrFail();
+                                // Bumps the transaction's owner, which also covers the cursor write below.
                                 $this->budgets->assignTransaction($locked);
                                 $nextTimestamp = now();
                                 if ($locked->updated_at === null || $nextTimestamp->gt($locked->updated_at)) {
                                     DB::table('transactions')
                                         ->where('id', $locked->id)
                                         ->update(['updated_at' => $nextTimestamp->format('Y-m-d H:i:s.u')]);
-                                    DataVersion::bumpOwnerOf($locked);
                                 }
                             }, attempts: 5);
                             $reconciled++;

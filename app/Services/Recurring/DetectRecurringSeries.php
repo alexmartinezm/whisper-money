@@ -11,7 +11,6 @@ use App\Models\RecurringSeriesTransaction;
 use App\Models\Space;
 use App\Models\Transaction;
 use App\Models\User;
-use App\Services\Cache\DataVersion;
 use App\Services\Transactions\EffectiveTransactionPostings;
 use App\Support\Statistics;
 use Carbon\CarbonImmutable;
@@ -520,8 +519,9 @@ class DetectRecurringSeries
                 RecurringSeriesTransaction::query()
                     ->whereIn('transaction_id', $appliedTransactionIds)
                     ->delete();
-                DataVersion::bumpOwner($user->id, $space->id);
 
+                // Every id deleted above is attached again below, and the
+                // attach fires the pivot's model events, which bump the owner.
                 foreach ($rows as $item) {
                     $item['row']->transactions()->attach(array_values(array_unique($item['transaction_ids'])));
                 }
