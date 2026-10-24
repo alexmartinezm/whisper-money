@@ -699,15 +699,13 @@ export function ImportTransactionsDrawer({
                             ? result.reason.message
                             : __('Unknown error');
 
-                    console.error(`Transaction ${rowNumber} failed:`, {
-                        transaction,
-                        error: result.reason,
+                    // Console output lands in Sentry breadcrumbs: the row and
+                    // the raw error (an axios error carries the request body)
+                    // hold the user's description and amount, so neither goes.
+                    console.error(
+                        `Transaction ${rowNumber} failed:`,
                         errorMessage,
-                        stack:
-                            result.reason instanceof Error
-                                ? result.reason.stack
-                                : undefined,
-                    });
+                    );
 
                     errors.push({
                         rowNumber,

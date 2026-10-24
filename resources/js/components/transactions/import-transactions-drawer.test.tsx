@@ -269,6 +269,40 @@ describe('ImportTransactionsDrawer', () => {
         });
     });
 
+    // Console output ends up in Sentry breadcrumbs: a failed row is logged by
+    // its number and message only, never with its description or amount, nor
+    // with the raw error, whose request config carries the row it sent.
+    it('logs a failed row without the transaction or the request it sent', async () => {
+        const consoleError = vi
+            .spyOn(console, 'error')
+            .mockImplementation(() => {});
+        create.mockImplementation(
+            async (transaction: { description: string; amount: number }) =>
+                transaction.description === 'Rent'
+                    ? Promise.reject(
+                          Object.assign(new Error('Server said no'), {
+                              config: { data: JSON.stringify(transaction) },
+                          }),
+                      )
+                    : { id: transaction.description },
+        );
+
+        await reachPreview();
+        fireEvent.click(screen.getByText('Import 3 Transactions'));
+
+        await screen.findByText('Import 1 Transaction');
+
+        expect(consoleError).toHaveBeenCalledWith(
+            'Transaction 2 failed:',
+            'Server said no',
+        );
+        const logged = JSON.stringify(consoleError.mock.calls);
+        expect(logged).not.toContain('Rent');
+        expect(logged).not.toContain('90000');
+
+        consoleError.mockRestore();
+    });
+
     it('marks the rows that made it in and locks them out of the selection', async () => {
         create.mockImplementation(
             async (transaction: { description: string }) =>
