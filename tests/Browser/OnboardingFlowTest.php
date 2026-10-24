@@ -476,7 +476,7 @@ it('completes entire onboarding flow with account creation, transaction import, 
         ->click('Import 5 Transactions');
 
     // After import completes, back to create-account step in list mode
-    $page->assertSee('Your Accounts')
+    $page->waitForText('Your Accounts', 30)
         ->assertSee('My Checking Account')
         ->click('Continue');
 
