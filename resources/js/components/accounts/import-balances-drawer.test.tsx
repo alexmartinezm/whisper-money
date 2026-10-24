@@ -335,4 +335,12 @@ describe('ImportBalancesDrawer with AI column mapping off', () => {
         expect(screen.queryByText('Suggested by AI')).not.toBeInTheDocument();
         expect(fetchColumnSuggestions).not.toHaveBeenCalled();
     });
+
+    // The drawer is portalled out of the page, so only a class on its own
+    // content keeps PostHog autocapture off the balances inside.
+    it('keeps PostHog autocapture off the whole drawer', async () => {
+        await reachMapping();
+
+        expect(screen.getByRole('dialog')).toHaveClass('ph-no-capture');
+    });
 });

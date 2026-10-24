@@ -231,6 +231,14 @@ describe('ImportTransactionsDrawer', () => {
         );
     });
 
+    // The drawer is portalled out of the page, so only a class on its own
+    // content keeps PostHog autocapture off the names and amounts inside.
+    it('keeps PostHog autocapture off the whole drawer', async () => {
+        await reachMapping();
+
+        expect(screen.getByRole('dialog')).toHaveClass('ph-no-capture');
+    });
+
     // The drawer stays open on a partial import so the failures can be retried.
     // Retrying used to resend every row, creating the ones that were already in
     // a second time.
