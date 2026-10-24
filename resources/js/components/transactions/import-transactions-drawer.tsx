@@ -48,6 +48,16 @@ import { ImportStepMapping } from './import-step-mapping';
 import { ImportStepPreview } from './import-step-preview';
 import { ImportStepUpload } from './import-step-upload';
 
+/**
+ * This drawer imports into one account, in that account's currency, so it
+ * never reads a currency column. The shared parser still spots one (the full
+ * import uses it); left in, it would be saved with the account's layout and
+ * make the next file without that column skip the saved layout.
+ */
+function withoutCurrencyColumn(mapping: ColumnMapping): ColumnMapping {
+    return { ...mapping, currency: null };
+}
+
 interface ImportTransactionsDrawerProps {
     accounts?: Account[];
     categories?: Category[];
@@ -206,7 +216,7 @@ export function ImportTransactionsDrawer({
                 parsedData: data,
                 columnHeaders: headers,
                 columnOptions,
-                columnMapping: autoMapping,
+                columnMapping: withoutCurrencyColumn(autoMapping),
                 dateFormat: detectedFormat,
                 dateFormatDetected: formatDetected,
             }));
@@ -225,7 +235,9 @@ export function ImportTransactionsDrawer({
                         prev.file === file
                             ? {
                                   ...prev,
-                                  columnMapping: stored.mapping,
+                                  columnMapping: withoutCurrencyColumn(
+                                      stored.mapping,
+                                  ),
                                   dateFormat: stored.dateFormat,
                                   dateFormatDetected: stored.dateFormatDetected,
                               }

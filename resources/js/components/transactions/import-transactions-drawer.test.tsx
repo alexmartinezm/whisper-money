@@ -12,6 +12,8 @@ const {
     mappingProps,
     parseFile,
     loadImportConfig,
+    saveImportConfig,
+    autoDetectColumns,
 } = vi.hoisted(() => ({
     create: vi.fn(),
     checkDuplicates: vi.fn(),
@@ -20,6 +22,8 @@ const {
     mappingProps: vi.fn(),
     parseFile: vi.fn(),
     loadImportConfig: vi.fn(async () => null),
+    saveImportConfig: vi.fn(),
+    autoDetectColumns: vi.fn(() => ({})),
 }));
 
 vi.mock('@/services/transaction-sync', () => ({
@@ -30,7 +34,7 @@ vi.mock('@/services/transaction-sync', () => ({
 // are handed straight to the preview.
 vi.mock('@/lib/file-parser', () => ({
     parseFile,
-    autoDetectColumns: vi.fn(() => ({})),
+    autoDetectColumns,
     detectDateFormat: vi.fn(() => null),
     detectExpenseTypes: vi.fn(() => []),
     convertRowsToTransactions,
@@ -41,7 +45,7 @@ vi.mock('@/lib/file-parser', () => ({
 
 vi.mock('@/lib/import-config-storage', () => ({
     loadImportConfig,
-    saveImportConfig: vi.fn(),
+    saveImportConfig,
 }));
 
 // The two steps between the account and the preview only have to be walked
@@ -325,6 +329,62 @@ describe('ImportTransactionsDrawer', () => {
 
         await waitFor(() =>
             expect(lastMappingProps().columnMapping).toEqual(stored),
+        );
+    });
+
+    // The parser spots a currency column for the full import; this drawer
+    // imports in the account's currency, and saving that column with the
+    // account's layout made the next file without it skip the saved layout.
+    it('neither maps nor saves a currency column', async () => {
+        autoDetectColumns.mockReturnValueOnce({
+            transaction_date: 'Fecha',
+            description: 'Concepto',
+            amount: 'Importe',
+            currency: 'Divisa',
+            balance: null,
+            creditor_name: null,
+            debtor_name: null,
+            transaction_type: null,
+            expense_types: [],
+        });
+        parseFile.mockResolvedValue({
+            headers: ['Fecha', 'Concepto', 'Importe', 'Divisa'],
+            data: [],
+            rowNumbers: [],
+            columns: [],
+            headerRowIndex: 0,
+        });
+
+        render(
+            <ImportTransactionsDrawer
+                open
+                onOpenChange={vi.fn()}
+                accounts={[account]}
+                autoSelectSingleAccount
+            />,
+        );
+
+        fireEvent.click(await screen.findByText('pick file'));
+        await waitFor(() => expect(loadImportConfig).toHaveBeenCalled());
+        fireEvent.click(screen.getByText('leave upload'));
+        await screen.findByText('leave mapping');
+
+        expect(lastMappingProps().columnMapping).toMatchObject({
+            amount: 'Importe',
+            currency: null,
+        });
+
+        fireEvent.click(screen.getByText('leave mapping'));
+        await screen.findByText('Import 3 Transactions');
+
+        expect(saveImportConfig).toHaveBeenCalledWith(
+            'account-1',
+            expect.objectContaining({
+                columnMapping: expect.objectContaining({
+                    amount: 'Importe',
+                    currency: null,
+                }),
+            }),
         );
     });
 
