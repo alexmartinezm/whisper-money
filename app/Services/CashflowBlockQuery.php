@@ -52,8 +52,9 @@ class CashflowBlockQuery
 
     /**
      * The block $posting falls in, or null when it is in none (income, a
-     * transfer, a set-aside account leg). Needs the posting's `category`,
-     * `account` and `labels` loaded; a split line shares its parent's labels.
+     * transfer, a set-aside account leg). Needs the posting's `category` and
+     * `account` loaded, and its `labels` only when the tracked ids include any
+     * label; a split line shares its parent's labels.
      *
      * @param  array<string, TrackedIds>  $trackedByType  as {@see self::trackedIds()} returns it
      */

@@ -543,14 +543,18 @@ test('the previous period reads a split transaction line by line', function () {
 
     splitTransactionOn($this, [[$rent, -60000], [$food, -9000], [$shopping, -2500]], date: '2026-09-05');
 
-    $previous = $this->getJson('/api/cashflow/summary?'.http_build_query(['from' => '2026-10-01', 'to' => '2026-10-31']))
-        ->assertOk()
-        ->json('previous');
+    // Budgets tracking only categories never need the transactions' labels.
+    $queries = countQueries(function () use (&$previous): void {
+        $previous = $this->getJson('/api/cashflow/summary?'.http_build_query(['from' => '2026-10-01', 'to' => '2026-10-31']))
+            ->assertOk()
+            ->json('previous');
+    })['queries'];
 
     expect($previous['fixed_expense'])->toBe(60000)
         ->and($previous['variable_expense'])->toBe(9000)
         ->and($previous['general_expense'])->toBe(2500)
-        ->and($previous['expense'])->toBe(71500);
+        ->and($previous['expense'])->toBe(71500)
+        ->and(collect($queries)->filter(fn (string $sql): bool => str_contains($sql, 'pivot_transaction_id'))->count())->toBe(0);
 });
 
 test('each period splits by its own budgets, from the transactions the summary already loaded', function () {
