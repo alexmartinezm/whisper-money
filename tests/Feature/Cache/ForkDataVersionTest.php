@@ -1,16 +1,24 @@
 <?php
 
+use App\Ai\Agents\TransactionCategorizationAgent;
+use App\Enums\CategorySource;
 use App\Enums\CategoryType;
 use App\Enums\RecurringSeriesUserState;
 use App\Enums\RolloverType;
+use App\Jobs\AssignHistoricalTransactionsToBudget;
 use App\Models\Account;
 use App\Models\Budget;
+use App\Models\BudgetPeriod;
 use App\Models\Category;
+use App\Models\Import;
 use App\Models\RecurringSeries;
 use App\Models\RecurringSeriesTransaction;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\Ai\CategorizeTransactions;
+use App\Services\Ai\CategoryCatalog;
 use App\Services\BudgetManagementService;
+use App\Services\BudgetTransactionService;
 use App\Services\Cache\DataVersion;
 use App\Services\Recurring\DetectRecurringSeries;
 use App\Services\Transactions\ReplaceTransactionSplits;
@@ -238,5 +246,61 @@ it('moves the token when a budget starts tracking other categories and labels', 
     );
 
     expect($budget->categories()->pluck('categories.id')->all())->toBe([$this->household->id])
+        ->and(DataVersion::current($this->user->id))->not->toBe($before);
+});
+
+it('moves the token when the model files an imported row, which is saved quietly', function () {
+    // Faked so the batch budget reassignment of imported rows cannot be what bumps.
+    Queue::fake();
+    $import = Import::factory()->create(['user_id' => $this->user->id]);
+    // Quietly, so no categorization or budget listener runs before the pass under test.
+    $imported = Transaction::factory()->plaintext()->createQuietly([
+        'user_id' => $this->user->id,
+        'space_id' => $this->account->space_id,
+        'account_id' => $this->account->id,
+        'import_id' => $import->id,
+        'category_id' => null,
+        'category_source' => null,
+        'description' => 'EXAMPLE GROCER 0042',
+        'amount' => -2350,
+        'currency_code' => 'EUR',
+    ]);
+    $catalog = CategoryCatalog::forUser($this->user);
+    $index = collect(range(0, 20))->first(fn (int $candidate): bool => $catalog->categoryIdForIndex($candidate) === $this->groceries->id);
+    TransactionCategorizationAgent::fake([
+        ['results' => [['ref' => $imported->id, 'category_index' => $index, 'confidence' => 0.97, 'merchant_unambiguous' => false]]],
+    ]);
+
+    $before = DataVersion::current($this->user->id);
+    $outcomes = app(CategorizeTransactions::class)->forTransactions($this->user, collect([$imported]));
+
+    expect($outcomes)->toHaveCount(1)
+        ->and($imported->fresh()->category_id)->toBe($this->groceries->id)
+        ->and($imported->fresh()->category_source)->toBe(CategorySource::Ai)
+        ->and(DataVersion::current($this->user->id))->not->toBe($before);
+});
+
+it('moves the token when a historical assignment with nothing to assign releases its period', function () {
+    $budget = Budget::factory()->monthly()->create([
+        'user_id' => $this->user->id,
+        'space_id' => $this->account->space_id,
+        'period_start_day' => 1,
+    ]);
+    $budget->categories()->attach($this->groceries->id);
+    // Years before any transaction, so releasing processing_historical is the only write.
+    $period = BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => '2001-03-01',
+        'end_date' => '2001-03-31',
+        'processing_historical' => true,
+        'reconciliation_token' => 'example-run',
+    ]);
+
+    $before = DataVersion::current($this->user->id);
+    (new AssignHistoricalTransactionsToBudget($budget, $period, 'example-run'))
+        ->handle(app(BudgetTransactionService::class));
+
+    expect($period->fresh()->processing_historical)->toBeFalse()
+        ->and($period->budgetTransactions()->count())->toBe(0)
         ->and(DataVersion::current($this->user->id))->not->toBe($before);
 });
