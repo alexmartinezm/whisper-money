@@ -1,5 +1,9 @@
 import { accountHasBalance } from '@/hooks/use-owns-balance-updates';
-import { normalizeText, toSavedProfile } from '@/lib/full-import-profiles';
+import {
+    MAX_NOTES_LENGTH,
+    normalizeText,
+    toSavedProfile,
+} from '@/lib/full-import-profiles';
 import {
     type Category,
     type CategoryColor,
@@ -1091,7 +1095,7 @@ export function buildImport(input: BuildImportInput): BuiltImport {
             date: row.date,
             amount: toMinorUnits(row.amount, row.currency ?? currency),
             description: row.description.slice(0, 2000),
-            notes: row.notes ? row.notes.slice(0, 5000) : null,
+            notes: row.notes ? row.notes.slice(0, MAX_NOTES_LENGTH) : null,
             category_key: categoryKeyFor(row, categories.keys, ownNodeIds),
             external_id: row.externalId,
             currency_code: row.currency,

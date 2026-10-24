@@ -634,6 +634,40 @@ describe('a Money Pro export with split transactions', () => {
         });
     });
 
+    it('cuts a long note of its own first, so the split note always fits', async () => {
+        const own = 'Pagado a medias. '.repeat(400);
+        const parsed = await parseImportFile(
+            new File(
+                [
+                    `Fecha;Cantidad;Cuenta;Monto recibido;Cuenta de destino;Saldo;Categoría;Descripción;Tipo de transacción;Nota\n1 feb 2026, 10:00:00;10,00 €;Cuenta Ficticia;;;100,00 €;Compras Salud;Compra inventada;Gasto;${own}\n`,
+                ],
+                'money-pro.csv',
+                { type: 'text/csv' },
+            ),
+            'es-ES',
+        );
+        const normalized = normalizeRows(
+            parsed,
+            { ...defaultMapping('money_pro', parsed, 'es-ES'), notes: 'Nota' },
+            { fileName: 'money-pro.csv', supportedCurrencies: SUPPORTED },
+            moneyProReader(parsed.headers, {
+                rows: parsed.rows,
+                categories: [
+                    { id: 'c1', name: 'Compras', parent_id: null },
+                    { id: 'c2', name: 'Salud', parent_id: null },
+                ],
+            }),
+        );
+        const notes = normalized.rows[0].notes ?? '';
+
+        expect(own.trim().length).toBeGreaterThan(5000);
+        expect(notes).toHaveLength(5000);
+        expect(notes.startsWith('Pagado a medias. Pagado')).toBe(true);
+        expect(notes.endsWith('\nSplit in Money Pro: Compras Salud')).toBe(
+            true,
+        );
+    });
+
     it('tells the cells apart by what the file writes alone and what the user has', () => {
         const rows = [
             'Compras',

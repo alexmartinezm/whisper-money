@@ -3,6 +3,7 @@ import {
     balanceOf,
     cellText,
     headerLookup,
+    MAX_NOTES_LENGTH,
     normalizeText,
     sameText,
     splitCategoryPath,
@@ -414,11 +415,16 @@ function cutsIntoSeveral(key: string, vocabulary: CategoryVocabulary): boolean {
     );
 }
 
-/** The note a split row carries: Money Pro's categories, after its own. */
+/**
+ * The note a split row carries: Money Pro's categories, after its own. A
+ * long note of its own is cut first, so the categories always fit in what
+ * a row may send.
+ */
 function splitNotes(notes: string | null, cell: string): string {
     const note = __('Split in Money Pro: :categories', { categories: cell });
+    const room = MAX_NOTES_LENGTH - note.length - 1;
 
-    return notes ? `${notes}\n${note}` : note;
+    return notes && room > 0 ? `${notes.slice(0, room)}\n${note}` : note;
 }
 
 /** A Money Pro account is a name the user gave it, never a bank's. */

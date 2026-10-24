@@ -51,6 +51,9 @@ export function cellText(row: ParsedRow, column: string | null): string {
     return value === null || value === undefined ? '' : String(value).trim();
 }
 
+/** The longest note a row may send (StoreFullImportChunkRequest). */
+export const MAX_NOTES_LENGTH = 5000;
+
 /** Every column the mapping can point at, in the order the Columns step lists them. */
 export const MAPPED_COLUMNS: readonly MappedColumn[] = [
     'date',
