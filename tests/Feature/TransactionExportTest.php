@@ -1,13 +1,18 @@
 <?php
 
+use App\Enums\AccountType;
+use App\Enums\CategoryType;
 use App\Http\Controllers\TransactionExportController;
 use App\Models\Account;
 use App\Models\Bank;
+use App\Models\Budget;
+use App\Models\BudgetPeriod;
 use App\Models\Category;
 use App\Models\Label;
 use App\Models\Transaction;
 use App\Models\TransactionSplit;
 use App\Models\User;
+use Illuminate\Support\Facades\Http;
 
 /**
  * The export as rows of cells, header included, without the byte order mark.
@@ -382,4 +387,104 @@ test('exporting the loaded rows narrows their split lines the same way', functio
     expect(array_map(fn (array $row): array => [$row[1], $row[2], $row[6]], array_slice($rows, 1)))
         ->toBe([['Loaded', '-7.00', 'Groceries']])
         ->and(array_column(exportedRows($user, ['ids' => [$loaded->id]]), 6))->toBe(['Category', 'Household', 'Groceries']);
+});
+
+test('the response says how many rows the file holds before the body starts', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $groceries = Category::factory()->create(['user_id' => $user->id, 'name' => 'Groceries']);
+    $household = Category::factory()->create(['user_id' => $user->id, 'name' => 'Household']);
+    $loaded = splitForExport(
+        Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'description' => 'Loaded split']),
+        [[$groceries, -700], [$household, -300]],
+    );
+    Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'category_id' => $groceries->id]);
+
+    $everything = $this->actingAs($user)->post(route('transactions.export'))->assertOk()
+        ->assertHeader(TransactionExportController::ROWS_HEADER, '3');
+    $onlyLoaded = $this->actingAs($user)->post(route('transactions.export'), ['ids' => [$loaded->id]])->assertOk()
+        ->assertHeader(TransactionExportController::ROWS_HEADER, '2');
+    $this->actingAs($user)->post(route('transactions.export'), ['category_ids' => $household->id])->assertOk()
+        ->assertHeader(TransactionExportController::ROWS_HEADER, '1');
+
+    expect(exportRowCount($user))->toBe(3)
+        ->and(exportedRows($user))->toHaveCount(3 + 1)
+        ->and(substr_count(trim($everything->streamedContent()), "\n"))->toBe(3)
+        ->and(substr_count(trim($onlyLoaded->streamedContent()), "\n"))->toBe(2);
+});
+
+test('a cashflow block filter exports only the split lines in that block, as the analysis drawer counts them', function () {
+    Http::fake();
+    $this->travelTo(now()->setDate(2026, 10, 15)->startOfDay());
+    $user = User::factory()->create(['onboarded_at' => now(), 'currency_code' => 'EUR']);
+    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR', 'type' => AccountType::Checking]);
+    $rent = Category::factory()->create(['user_id' => $user->id, 'name' => 'Rent', 'type' => CategoryType::Expense]);
+    $food = Category::factory()->create(['user_id' => $user->id, 'name' => 'Food', 'type' => CategoryType::Expense]);
+    foreach ([Budget::factory()->monthly()->fixed()->forCategories($rent), Budget::factory()->monthly()->forCategories($food)] as $budget) {
+        BudgetPeriod::factory()->create([
+            'budget_id' => $budget->create(['user_id' => $user->id])->id,
+            'start_date' => '2026-10-01',
+            'end_date' => '2026-10-31',
+            'allocated_amount' => 50000,
+        ]);
+    }
+    splitForExport(Transaction::factory()->plaintext()->create([
+        'user_id' => $user->id,
+        'account_id' => $account->id,
+        'description' => 'Rent and groceries',
+        'amount' => -100000,
+        'currency_code' => 'EUR',
+        'transaction_date' => '2026-10-10',
+    ]), [[$rent, -90000], [$food, -10000]]);
+    $period = ['date_from' => '2026-10-01', 'date_to' => '2026-10-31'];
+    $fixed = ['cashflow_block' => 'fixed', ...$period];
+
+    $rows = array_slice(exportedRows($user, $fixed), 1);
+    $drawer = $this->actingAs($user)->getJson(route('api.transactions.analysis', $fixed))->assertOk();
+
+    expect(array_map(fn (array $row): array => [$row[1], $row[2], $row[6]], $rows))->toBe([['Rent and groceries', '-900.00', 'Rent']])
+        ->and(exportRowCount($user, $fixed))->toBe(1)
+        ->and(-array_sum(array_map(fn (array $row): int => (int) round((float) $row[2] * 100), $rows)))->toBe($drawer->json('summary.expense'))
+        ->and(array_column(exportedRows($user, ['cashflow_block' => 'variable', ...$period]), 6))->toBe(['Category', 'Food'])
+        ->and(exportRowCount($user, ['cashflow_block' => 'variable', ...$period]))->toBe(1)
+        ->and(exportRowCount($user, ['cashflow_block' => 'general', ...$period]))->toBe(0)
+        ->and(exportRowCount($user, $period))->toBe(2);
+
+    $this->actingAs($user)->post(route('transactions.export'), $fixed)->assertOk()
+        ->assertHeader(TransactionExportController::ROWS_HEADER, '1');
+});
+
+test('another user\'s split transactions and a deleted split parent leave the counts and rows alone', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $groceries = Category::factory()->create(['user_id' => $user->id, 'name' => 'Groceries']);
+    $rent = Category::factory()->create(['user_id' => $user->id, 'name' => 'Rent']);
+    $encrypted = ['description' => 'ZW5jcnlwdGVk', 'description_iv' => 'EEEEEEEEEEEEEEEE', 'transaction_date' => '2026-07-10'];
+    splitForExport(Transaction::factory()->create(['user_id' => $user->id, ...$encrypted]), [[$groceries, -400], [$rent, -600]]);
+    Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'category_id' => $groceries->id, 'description' => 'Corner shop', 'transaction_date' => '2026-07-09']);
+
+    $measure = function (array $filters) use ($user): array {
+        $response = $this->actingAs($user)->post(route('transactions.export'), $filters)->assertOk();
+
+        return [
+            'count' => exportRowCount($user, $filters),
+            'rows' => $response->headers->get(TransactionExportController::ROWS_HEADER),
+            'encrypted' => $response->headers->get(TransactionExportController::ENCRYPTED_DESCRIPTIONS_HEADER),
+            'written' => exportedRows($user, $filters),
+        ];
+    };
+    $filters = ['category_ids' => $groceries->id, 'date_from' => '2026-07-01', 'date_to' => '2026-07-31'];
+    $before = $measure($filters);
+
+    $stranger = User::factory()->create();
+    splitForExport(
+        Transaction::factory()->create(['user_id' => $stranger->id, ...$encrypted]),
+        [[$groceries, -100], [$groceries, -200]],
+    );
+    $deleted = splitForExport(Transaction::factory()->create(['user_id' => $user->id, ...$encrypted]), [[$groceries, -300], [$groceries, -50]]);
+    $deleted->delete();
+
+    // The encrypted header counts the narrowed lines: only the groceries line
+    // of the encrypted split, not its rent line.
+    expect($before)->toMatchArray(['count' => 2, 'rows' => '2', 'encrypted' => '1'])
+        ->and($measure($filters))->toBe($before)
+        ->and($measure([]))->toMatchArray(['count' => 3, 'rows' => '3', 'encrypted' => '2']);
 });

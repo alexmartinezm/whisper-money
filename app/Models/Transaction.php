@@ -193,6 +193,22 @@ class Transaction extends Model
         return $this->hasMany(TransactionSplit::class)->orderBy('position');
     }
 
+    /**
+     * One split line read as a posting of its own: a copy of this transaction
+     * with the line's category and $amount, carrying everything else (date,
+     * account, labels, notes) from the transaction. Cashflow and the CSV
+     * export both expand a split transaction into these.
+     */
+    public function splitPosting(TransactionSplit $line, int $amount, ?string $currencyCode): self
+    {
+        $posting = clone $this;
+        $posting->forceFill(['amount' => $amount, 'currency_code' => $currencyCode, 'category_id' => $line->category_id]);
+        $posting->setRelation('category', $line->category);
+        $posting->setRelation('splits', collect());
+
+        return $posting;
+    }
+
     /** @return Attribute<bool, never> */
     protected function isSplit(): Attribute
     {

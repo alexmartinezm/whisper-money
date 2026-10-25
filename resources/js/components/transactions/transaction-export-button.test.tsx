@@ -222,6 +222,70 @@ describe('TransactionExportButton', () => {
         );
     });
 
+    it('measures the progress against the rows the response says the file holds', async () => {
+        mockCount(300);
+        downloadTransactionsCsv.mockImplementation(
+            ({
+                onTotal,
+                onProgress,
+            }: {
+                onTotal: (rows: number) => void;
+                onProgress: (rows: number) => void;
+            }) => {
+                // Two loaded transactions, one of them split in four lines.
+                onTotal(5);
+                onProgress(3);
+
+                return new Promise(() => {});
+            },
+        );
+        renderButton({ hasMore: true });
+        fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
+        const dialog = await screen.findByTestId('transaction-export-dialog');
+        fireEvent.click(
+            within(dialog).getByRole('radio', { name: /Only loaded/ }),
+        );
+
+        fireEvent.click(
+            within(dialog).getByRole('button', {
+                name: 'Download 2 transactions',
+            }),
+        );
+
+        expect(
+            await within(dialog).findByText('Preparing 3 of 5…'),
+        ).toBeInTheDocument();
+    });
+
+    it('speaks of one transaction in the singular', async () => {
+        mockCount(1);
+        downloadTransactionsCsv.mockResolvedValue({
+            filename: 'transactions-2026-10-25.csv',
+            rows: 1,
+            encryptedDescriptions: 0,
+        });
+        renderButton({ hasMore: true });
+        fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
+        const dialog = await screen.findByTestId('transaction-export-dialog');
+
+        expect(
+            await within(dialog).findByText(
+                '1 transaction with this search and filters',
+            ),
+        ).toBeInTheDocument();
+        fireEvent.click(
+            within(dialog).getByRole('button', {
+                name: 'Download 1 transaction',
+            }),
+        );
+
+        await waitFor(() =>
+            expect(toastSuccess).toHaveBeenCalledWith('CSV downloaded', {
+                description: '1 transaction · transactions-2026-10-25.csv',
+            }),
+        );
+    });
+
     it('shows an open-ended progress when the count could not be had', async () => {
         vi.stubGlobal(
             'fetch',

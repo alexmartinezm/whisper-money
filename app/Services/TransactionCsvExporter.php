@@ -2,9 +2,9 @@
 
 namespace App\Services;
 
-use App\Models\Category;
 use App\Models\Transaction;
 use App\Models\TransactionSplit;
+use Generator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
@@ -19,8 +19,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * A split transaction is written as one row per split line, the way a file
  * that holds each part as a transaction of its own reads: amount and category
  * from the line, everything else from the transaction. Under a category or
- * label filter only the lines that filter would match are written; the rows
- * and their count both go through {@see self::constrainLines()}.
+ * label filter only the lines that filter would match are written, in SQL
+ * through {@see self::constrainLines()}; under a cashflow block filter only
+ * the postings in the block, the way the analysis drawer narrows them. The
+ * rows and their count both go through the same narrowing.
  */
 class TransactionCsvExporter
 {
@@ -42,7 +44,10 @@ class TransactionCsvExporter
         'Debtor',
     ];
 
-    public function __construct(private readonly CategoryTree $tree) {}
+    public function __construct(
+        private readonly CategoryTree $tree,
+        private readonly CashflowBlockQuery $blocks,
+    ) {}
 
     /**
      * Eager loads what the rows read: the split lines the filters keep, and
@@ -68,11 +73,23 @@ class TransactionCsvExporter
      * How many rows the export of these transactions writes: one per
      * unsplit transaction and one per kept line of a split one.
      *
+     * A cashflow block filter narrows postings in PHP, so under it the
+     * transactions are read and expanded as the export does; the filter
+     * requires a date range, which bounds how many that reads. Every other
+     * filter is counted in SQL.
+     *
      * @param  Builder<Transaction>  $transactions  filtered, not sorted
      * @param  array<string, mixed>  $filters
      */
     public function countRows(Builder $transactions, array $filters): int
     {
+        if (! empty($filters['cashflow_block'])) {
+            return iterator_count($this->postings(
+                $this->withRowRelations(clone $transactions, $filters)->lazy(500),
+                $filters,
+            ));
+        }
+
         $unsplit = (clone $transactions)->whereDoesntHave('splits')->count();
 
         $lines = TransactionSplit::query()
@@ -83,21 +100,45 @@ class TransactionCsvExporter
     }
 
     /**
-     * The rows one transaction writes, its split lines loaded through
-     * {@see self::withRowRelations()}.
+     * The rows these transactions write, in their order, each loaded through
+     * {@see self::withRowRelations()} with the same filters.
      *
-     * @return list<list<string>>
+     * @param  iterable<Transaction>  $transactions
+     * @param  array<string, mixed>  $filters
+     * @return Generator<int, list<string>>
      */
-    public function rows(Transaction $transaction): array
+    public function rows(iterable $transactions, array $filters): Generator
     {
-        if (! $transaction->splits_exists) {
-            return [$this->row($transaction, $transaction->amount, $transaction->category)];
+        foreach ($this->postings($transactions, $filters) as $posting) {
+            yield $this->row($posting);
         }
+    }
 
-        return $transaction->splits
-            ->map(fn (TransactionSplit $line): array => $this->row($transaction, $line->amount, $line->category))
-            ->values()
-            ->all();
+    /**
+     * Each transaction as the postings it writes: itself when unsplit, else
+     * one per kept split line, built the way cashflow expands a split
+     * transaction ({@see Transaction::splitPosting()}) but at the line's own
+     * amount. Under a cashflow block filter only the postings in the block.
+     *
+     * @param  iterable<Transaction>  $transactions
+     * @param  array<string, mixed>  $filters
+     * @return Generator<int, Transaction>
+     */
+    private function postings(iterable $transactions, array $filters): Generator
+    {
+        $inBlock = $this->blocks->postingFilter($filters);
+
+        foreach ($transactions as $transaction) {
+            $postings = $transaction->splits_exists
+                ? $transaction->splits->map(fn (TransactionSplit $line): Transaction => $transaction->splitPosting($line, $line->amount, $transaction->currency_code))
+                : [$transaction];
+
+            foreach ($postings as $posting) {
+                if ($inBlock === null || $inBlock($posting)) {
+                    yield $posting;
+                }
+            }
+        }
     }
 
     /**
@@ -135,31 +176,32 @@ class TransactionCsvExporter
     }
 
     /**
+     * One posting's row: an unsplit transaction, or a split line read as one.
      * Fields still encrypted on the device (legacy client-side encryption)
      * are written empty: the server cannot read them, and ciphertext in a
      * spreadsheet is noise.
      *
      * @return list<string>
      */
-    private function row(Transaction $transaction, int $amount, ?Category $category): array
+    private function row(Transaction $posting): array
     {
-        $account = $transaction->account;
+        $account = $posting->account;
 
         return [
-            $transaction->transaction_date->format('Y-m-d'),
-            $this->text($transaction->description_iv === null ? $transaction->description : null),
+            $posting->transaction_date->format('Y-m-d'),
+            $this->text($posting->description_iv === null ? $posting->description : null),
             // A plain decimal with no symbol and no grouping, so every
             // spreadsheet locale reads it as a number. Every amount here is
             // stored in cents, whatever the currency, so two decimals it is.
-            number_format($amount / 100, 2, '.', ''),
-            $transaction->currency_code,
+            number_format($posting->amount / 100, 2, '.', ''),
+            $posting->currency_code,
             $this->text($account?->name_iv === null ? $account?->name : null),
             $this->text($account?->bank?->name),
-            $this->text($category?->name),
-            $this->text($transaction->labels->pluck('name')->join(', ')),
-            $this->text($transaction->notes_iv === null ? $transaction->notes : null),
-            $this->text($transaction->creditor_name),
-            $this->text($transaction->debtor_name),
+            $this->text($posting->category?->name),
+            $this->text($posting->labels->pluck('name')->join(', ')),
+            $this->text($posting->notes_iv === null ? $posting->notes : null),
+            $this->text($posting->creditor_name),
+            $this->text($posting->debtor_name),
         ];
     }
 

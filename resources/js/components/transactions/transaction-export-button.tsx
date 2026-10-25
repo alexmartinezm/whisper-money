@@ -211,13 +211,9 @@ function TransactionExportDialog({
                                             'Every transaction with this search and filters',
                                         )
                                     ) : (
-                                        __(
-                                            ':count transactions with this search and filters',
-                                            {
-                                                count: formatCount(
-                                                    matchingCount,
-                                                ),
-                                            },
+                                        matchingCountText(
+                                            matchingCount,
+                                            formatCount,
                                         )
                                     )
                                 }
@@ -247,9 +243,7 @@ function TransactionExportDialog({
                         >
                             <Download className="size-4" />
                             {typeof selectedCount === 'number'
-                                ? __('Download :count transactions', {
-                                      count: formatCount(selectedCount),
-                                  })
+                                ? downloadCountText(selectedCount, formatCount)
                                 : __('Download')}
                         </Button>
                     )}
@@ -298,6 +292,37 @@ function progressText(
         done: formatCount(Math.min(received, total)),
         total: formatCount(total),
     });
+}
+
+function matchingCountText(
+    count: number,
+    formatCount: (value: number) => string,
+): string {
+    return count === 1
+        ? __('1 transaction with this search and filters')
+        : __(':count transactions with this search and filters', {
+              count: formatCount(count),
+          });
+}
+
+function downloadCountText(
+    count: number,
+    formatCount: (value: number) => string,
+): string {
+    return count === 1
+        ? __('Download 1 transaction')
+        : __('Download :count transactions', { count: formatCount(count) });
+}
+
+/** The toast's line under "CSV downloaded": rows written and the file name. */
+function downloadedSummary(
+    rows: number,
+    file: string,
+    formatCount: (value: number) => string,
+): string {
+    return rows === 1
+        ? __('1 transaction · :file', { file })
+        : __(':count transactions · :file', { count: formatCount(rows), file });
 }
 
 /**
@@ -379,7 +404,10 @@ function useMatchingCount(
 interface StartOptions {
     params: TransactionExportParams;
     ids?: string[];
-    /** How many rows to expect, for the progress bar. */
+    /**
+     * How many rows to expect, for the progress bar, until the response says
+     * how many the file holds: a split transaction writes one per line.
+     */
     total: number | null;
 }
 
@@ -402,7 +430,10 @@ function useCsvDownload() {
         async ({ params, ids, total }: StartOptions): Promise<boolean> => {
             const controller = new AbortController();
             controllerRef.current = controller;
-            setProgress({ received: 0, total });
+            let received = 0;
+            let expected = total;
+            const report = () => setProgress({ received, total: expected });
+            report();
 
             try {
                 const { filename, rows, encryptedDescriptions } =
@@ -410,14 +441,17 @@ function useCsvDownload() {
                         params,
                         ids,
                         signal: controller.signal,
-                        onProgress: (received) =>
-                            setProgress({ received, total }),
+                        onTotal: (rows) => {
+                            expected = rows;
+                            report();
+                        },
+                        onProgress: (rows) => {
+                            received = rows;
+                            report();
+                        },
                     });
 
-                const summary = __(':count transactions · :file', {
-                    count: formatCount(rows),
-                    file: filename,
-                });
+                const summary = downloadedSummary(rows, filename, formatCount);
 
                 toast.success(__('CSV downloaded'), {
                     description:

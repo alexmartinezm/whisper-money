@@ -12,6 +12,12 @@ export interface TransactionCsvExportRequest {
     signal?: AbortSignal;
     /** Called as rows arrive with how many have been received so far. */
     onProgress?: (rows: number) => void;
+    /**
+     * Called once the response headers arrive with how many rows the file
+     * will hold, when the server says: one per split line of a split
+     * transaction, so it can exceed the transactions the list shows.
+     */
+    onTotal?: (rows: number) => void;
 }
 
 export interface TransactionCsvDownload {
@@ -23,6 +29,7 @@ export interface TransactionCsvDownload {
 }
 
 /** Set by the server before the body starts, counted over the same rows. */
+const ROWS_HEADER = 'X-Export-Rows';
 const ENCRYPTED_DESCRIPTIONS_HEADER = 'X-Encrypted-Descriptions';
 
 const NEWLINE = 10;
@@ -42,6 +49,7 @@ export async function downloadTransactionsCsv({
     ids,
     signal,
     onProgress,
+    onTotal,
 }: TransactionCsvExportRequest): Promise<TransactionCsvDownload> {
     const response = await fetch(TransactionExportController.url(), {
         method: 'POST',
@@ -56,6 +64,12 @@ export async function downloadTransactionsCsv({
 
     if (!response.ok || !response.body) {
         throw new Error(`Export failed with status ${response.status}`);
+    }
+
+    const expectedRows = countHeader(response, ROWS_HEADER);
+
+    if (expectedRows !== null) {
+        onTotal?.(expectedRows);
     }
 
     const reader = response.body.getReader();
@@ -81,14 +95,22 @@ export async function downloadTransactionsCsv({
     return {
         filename,
         rows,
-        encryptedDescriptions: encryptedDescriptionsOf(response),
+        encryptedDescriptions:
+            countHeader(response, ENCRYPTED_DESCRIPTIONS_HEADER) ?? 0,
     };
 }
 
-function encryptedDescriptionsOf(response: Response): number {
-    const count = Number(response.headers.get(ENCRYPTED_DESCRIPTIONS_HEADER));
+/** A row count the server sent in a header, or `null` when it sent none. */
+function countHeader(response: Response, name: string): number | null {
+    const value = response.headers.get(name)?.trim();
 
-    return Number.isInteger(count) && count > 0 ? count : 0;
+    if (!value) {
+        return null;
+    }
+
+    const count = Number(value);
+
+    return Number.isInteger(count) && count >= 0 ? count : null;
 }
 
 /**

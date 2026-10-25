@@ -2776,5 +2776,8 @@
     "Up to :value": "Jusqu'à :value",
     "Preparing :done…": "Préparation de :done…",
     "1 encrypted description was exported empty": "1 description chiffrée a été exportée vide",
-    ":count encrypted descriptions were exported empty": ":count descriptions chiffrées ont été exportées vides"
+    ":count encrypted descriptions were exported empty": ":count descriptions chiffrées ont été exportées vides",
+    "1 transaction with this search and filters": "1 transaction avec cette recherche et ces filtres",
+    "Download 1 transaction": "Télécharger 1 transaction",
+    "1 transaction · :file": "1 transaction · :file"
 }

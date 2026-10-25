@@ -3568,5 +3568,8 @@
     "Up to :value": "Hasta :value",
     "Preparing :done…": "Preparando :done…",
     "1 encrypted description was exported empty": "1 descripción cifrada se ha exportado vacía",
-    ":count encrypted descriptions were exported empty": ":count descripciones cifradas se han exportado vacías"
+    ":count encrypted descriptions were exported empty": ":count descripciones cifradas se han exportado vacías",
+    "1 transaction with this search and filters": "1 transacción con esta búsqueda y filtros",
+    "Download 1 transaction": "Descargar 1 transacción",
+    "1 transaction · :file": "1 transacción · :file"
 }

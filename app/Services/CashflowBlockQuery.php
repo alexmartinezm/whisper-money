@@ -80,6 +80,31 @@ class CashflowBlockQuery
     }
 
     /**
+     * What keeps a posting under the transactions page's cashflow block
+     * filter, or null when $filters name no block. {@see self::apply()} lists
+     * a split transaction when any one of its lines is in the block, so whoever
+     * reads that list posting by posting (the analysis drawer, the CSV export)
+     * narrows it back to the postings in the block: the ones its figure counts.
+     *
+     * @param  array<string, mixed>  $filters  as {@see Transaction::scopeApplyFilters()} takes them
+     * @return (Closure(Transaction): bool)|null
+     */
+    public function postingFilter(array $filters): ?Closure
+    {
+        if (empty($filters['cashflow_block'])) {
+            return null;
+        }
+
+        $block = CashflowBlock::from($filters['cashflow_block']);
+        $tracked = $this->trackedIds(
+            $filters['user_id'],
+            PeriodComparator::fromRequest(['from' => $filters['date_from'], 'to' => $filters['date_to']]),
+        );
+
+        return fn (Transaction $posting): bool => $this->blockOf($posting, $tracked) === $block;
+    }
+
+    /**
      * Narrow $query to the transactions with a posting in $block over $period,
      * among the rows counting towards totals: the SQL twin of
      * {@see self::blockOf()}.

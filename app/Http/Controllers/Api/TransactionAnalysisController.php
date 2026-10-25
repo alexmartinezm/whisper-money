@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Enums\CashflowBlock;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\IndexTransactionRequest;
 use App\Models\Label;
@@ -11,7 +10,6 @@ use App\Services\CashflowBlockQuery;
 use App\Services\CategoryTree;
 use App\Services\Concerns\ConvertsTransactionCurrency;
 use App\Services\ExchangeRateService;
-use App\Services\PeriodComparator;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Collection;
@@ -103,7 +101,8 @@ class TransactionAnalysisController extends Controller
     /**
      * A split transaction enters a cashflow block's list through any one of
      * its lines, so the postings are narrowed back to the ones in the block:
-     * the ones its cashflow figure counts.
+     * the ones its cashflow figure counts. The CSV export narrows its rows
+     * through the same {@see CashflowBlockQuery::postingFilter()}.
      *
      * @param  Collection<int, Transaction>  $postings
      * @param  array<string, mixed>  $filters
@@ -111,19 +110,9 @@ class TransactionAnalysisController extends Controller
      */
     private function postingsInCashflowBlock(Collection $postings, array $filters): Collection
     {
-        if (empty($filters['cashflow_block'])) {
-            return $postings;
-        }
+        $inBlock = $this->blocks->postingFilter($filters);
 
-        $block = CashflowBlock::from($filters['cashflow_block']);
-        $tracked = $this->blocks->trackedIds(
-            $filters['user_id'],
-            PeriodComparator::fromRequest(['from' => $filters['date_from'], 'to' => $filters['date_to']]),
-        );
-
-        return $postings
-            ->filter(fn (Transaction $posting): bool => $this->blocks->blockOf($posting, $tracked) === $block)
-            ->values();
+        return $inBlock === null ? $postings : $postings->filter($inBlock)->values();
     }
 
     /**

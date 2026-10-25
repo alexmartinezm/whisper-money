@@ -21,6 +21,21 @@ function streamOf(...chunks: string[]): ReadableStream<Uint8Array> {
     });
 }
 
+/** Answers the export with these headers and body, and stubs the save. */
+function stubCsvResponse(headers: HeadersInit, ...chunks: string[]): void {
+    vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+            ok: true,
+            headers: new Headers(headers),
+            body: streamOf(...chunks),
+        }),
+    );
+    URL.createObjectURL = vi.fn(() => 'blob:csv');
+    URL.revokeObjectURL = vi.fn();
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+}
+
 describe('downloadTransactionsCsv', () => {
     afterEach(() => {
         vi.unstubAllGlobals();
@@ -95,18 +110,9 @@ describe('downloadTransactionsCsv', () => {
     });
 
     it('reads how many rows had an encrypted description left empty', async () => {
-        vi.stubGlobal(
-            'fetch',
-            vi.fn().mockResolvedValue({
-                ok: true,
-                headers: new Headers({ 'X-Encrypted-Descriptions': '3' }),
-                body: streamOf('Date,Description\n2026-01-02,\n'),
-            }),
-        );
-        URL.createObjectURL = vi.fn(() => 'blob:csv');
-        URL.revokeObjectURL = vi.fn();
-        vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(
-            () => {},
+        stubCsvResponse(
+            { 'X-Encrypted-Descriptions': '3' },
+            'Date,Description\n2026-01-02,\n',
         );
 
         const { encryptedDescriptions } = await downloadTransactionsCsv({
@@ -114,6 +120,32 @@ describe('downloadTransactionsCsv', () => {
         });
 
         expect(encryptedDescriptions).toBe(3);
+    });
+
+    it('reports the rows the file holds as soon as the headers arrive', async () => {
+        stubCsvResponse(
+            { 'X-Export-Rows': '3' },
+            'Date,Amount\n2026-01-02,-70.00\n',
+            '2026-01-02,-30.00\n2026-01-01,-5.00\n',
+        );
+        const events: string[] = [];
+
+        await downloadTransactionsCsv({
+            params: {},
+            onTotal: (rows) => events.push(`total ${rows}`),
+            onProgress: (rows) => events.push(`received ${rows}`),
+        });
+
+        expect(events).toEqual(['total 3', 'received 1', 'received 3']);
+    });
+
+    it('leaves the total alone when the server does not say it', async () => {
+        stubCsvResponse({}, 'Date,Amount\n2026-01-02,-70.00\n');
+        const onTotal = vi.fn();
+
+        await downloadTransactionsCsv({ params: {}, onTotal });
+
+        expect(onTotal).not.toHaveBeenCalled();
     });
 
     it('fails when the server refuses the export', async () => {
