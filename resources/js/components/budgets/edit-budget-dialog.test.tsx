@@ -162,4 +162,15 @@ describe('EditBudgetDialog', () => {
             expect.any(Object),
         );
     });
+
+    it('hides the start day of a quarterly budget, which follows the calendar', () => {
+        renderDialog(
+            makeBudget({ period_type: 'quarterly', period_start_day: 1 }),
+        );
+
+        expect(screen.getByLabelText('Period Type')).toHaveTextContent(
+            'Quarterly',
+        );
+        expect(screen.queryByLabelText(/Start Day/)).not.toBeInTheDocument();
+    });
 });

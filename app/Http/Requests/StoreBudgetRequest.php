@@ -64,14 +64,15 @@ class StoreBudgetRequest extends FormRequest
     /**
      * Each cadence reads the start day differently: a monthly budget takes a day
      * of the month or none, a weekly or biweekly one requires a weekday, and a
-     * yearly one only ever starts on the first.
+     * quarterly or yearly one only ever starts on the first, as it follows the
+     * calendar.
      */
     private function isStartDayValid(BudgetPeriodType $periodType, mixed $startDay): bool
     {
         return match ($periodType) {
             BudgetPeriodType::Monthly => $startDay === null || ((int) $startDay >= 1 && (int) $startDay <= 31),
             BudgetPeriodType::Weekly, BudgetPeriodType::Biweekly => $startDay !== null && (int) $startDay >= 0 && (int) $startDay <= 6,
-            BudgetPeriodType::Yearly => $startDay === null || (int) $startDay === 1,
+            BudgetPeriodType::Quarterly, BudgetPeriodType::Yearly => $startDay === null || (int) $startDay === 1,
         };
     }
 

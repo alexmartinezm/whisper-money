@@ -10,7 +10,6 @@ use App\Models\Category;
 use App\Models\Label;
 use App\Models\Space;
 use App\Models\User;
-use App\Services\Cache\DataVersion;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -184,7 +183,6 @@ class BudgetManagementService
 
         $budget->categories()->sync($categories->modelKeys());
         $budget->labels()->sync($labels->modelKeys());
-        DataVersion::bumpOwnerOf($budget);
 
         return $this->claimAffectedPeriods($user, $space, $budget, $applicationDate);
     }

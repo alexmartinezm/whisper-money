@@ -10,4 +10,4 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Jobs/** | .ai/rules/jobs.md |
 | resources/js/** | .ai/rules/js.md |
 | resources/js/lib/{sentry,failed-navigation-toast,unattended-requests,leave-page}.ts | .ai/rules/lib.md |
-| app/Services/Cashflow*.php | .ai/rules/services.md |
+| app/Services/Cashflow*.php, app/Services/TransactionCsvExporter.php | .ai/rules/services.md |

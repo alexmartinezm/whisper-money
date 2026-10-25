@@ -225,4 +225,60 @@ describe('BudgetOverviewCard', () => {
         expect(screen.getByText('On track')).not.toBeNull();
         expect(screen.queryByText('Monthly over budget')).toBeNull();
     });
+
+    it('shows a quarterly remaining line next to the yearly one, outside the monthly hero', () => {
+        const quarterlyGroup: BudgetSummaryGroup = {
+            ...monthlyGroup,
+            period_type: 'quarterly',
+            budgets_count: 1,
+            total_allocated: 90_000,
+            total_carried_over: 0,
+            total_available: 90_000,
+            total_spent: 25_000,
+            total_remaining: 65_000,
+            percentage_used: 27.8,
+            close_to_limit_count: 0,
+        };
+
+        const { rerender } = render(
+            <BudgetOverviewCard
+                budgetSummary={{
+                    ...summary,
+                    groups: [monthlyGroup, yearlyGroup, quarterlyGroup],
+                }}
+                currencyCode="EUR"
+            />,
+        );
+
+        expect(
+            screen.getByTestId('budget-overview-quarterly').textContent,
+        ).toBe('Quarterly remaining amount:65000');
+        expect(screen.getByText('Yearly budget exceeded by')).not.toBeNull();
+        // The monthly hero keeps reading the monthly group only.
+        expect(screen.getByText('Consumed in monthly budgets')).not.toBeNull();
+        expect(screen.getByText('amount:120000')).not.toBeNull();
+
+        rerender(
+            <BudgetOverviewCard
+                budgetSummary={{
+                    ...summary,
+                    groups: [
+                        monthlyGroup,
+                        {
+                            ...quarterlyGroup,
+                            total_spent: 100_000,
+                            total_remaining: -10_000,
+                            status: 'over_limit',
+                        },
+                    ],
+                }}
+                currencyCode="EUR"
+            />,
+        );
+
+        expect(
+            screen.getByTestId('budget-overview-quarterly').textContent,
+        ).toBe('Quarterly budget exceeded by amount:10000');
+        expect(screen.queryByTestId('budget-overview-yearly')).toBeNull();
+    });
 });

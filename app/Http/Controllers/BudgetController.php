@@ -19,7 +19,6 @@ use App\Models\SavingsGoal;
 use App\Models\User;
 use App\Services\BudgetManagementService;
 use App\Services\BudgetPeriodService;
-use App\Services\Cache\DataVersion;
 use App\Services\SavingsGoals\MonthlySavingsGoalStats;
 use App\Services\SavingsGoals\MonthlySavingsGoalTotals;
 use Carbon\CarbonImmutable;
@@ -402,8 +401,6 @@ class BudgetController extends Controller
                 ->where('user_id', $request->user()->id)
                 ->update(['position' => $position]);
         }
-
-        DataVersion::bumpUser($request->user());
 
         return back();
     }

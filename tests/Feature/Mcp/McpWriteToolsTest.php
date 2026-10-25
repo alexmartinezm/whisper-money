@@ -812,6 +812,28 @@ it('still deletes an archived budget', function () {
     expect($user->budgets()->count())->toBe(0);
 });
 
+it('creates a quarterly budget on the calendar quarter', function () {
+    $this->travelTo('2026-11-12 09:00:00');
+
+    $user = User::factory()->create();
+    $category = Category::factory()->create(['user_id' => $user->id]);
+
+    // Upstream passes a start day of 15 and lets it be ignored; this fork's
+    // create tool, as for yearly budgets, only accepts 1 or no start day.
+    callWriteTool($user, CreateBudget::class, [
+        'name' => 'Car maintenance',
+        'allocated_amount' => 60_000,
+        'period_type' => 'quarterly',
+        'rollover_type' => 'carry_over',
+        'category_ids' => [$category->id],
+    ])->assertOk()->assertSee('Car maintenance');
+
+    $period = $user->budgets()->sole()->getCurrentPeriod();
+
+    expect($period->start_date->toDateString())->toBe('2026-10-01')
+        ->and($period->end_date->toDateString())->toBe('2026-12-31');
+});
+
 it('lets an archived catch-all budget be replaced', function () {
     $user = User::factory()->create();
     Budget::factory()->archived()->catchAll()->create(['user_id' => $user->id]);
@@ -819,7 +841,6 @@ it('lets an archived catch-all budget be replaced', function () {
     callWriteTool($user, CreateBudget::class, [
         'name' => 'Everything else',
         'period_type' => 'monthly',
-        // This fork's create tool requires a start day for a monthly cadence.
         'period_start_day' => 1,
         'rollover_type' => 'reset',
         'allocated_amount' => 50_000,

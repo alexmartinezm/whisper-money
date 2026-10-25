@@ -8,6 +8,7 @@ use App\Models\BudgetTransaction;
 use App\Models\User;
 use App\Services\BudgetPeriodService;
 use Carbon\Carbon;
+use Carbon\CarbonImmutable;
 
 afterEach(function () {
     Carbon::setTestNow();
@@ -136,6 +137,170 @@ test('generatePeriod creates current calendar year when yearly budget has no pri
 
     expect($period->start_date->toDateString())->toBe('2026-01-01');
     expect($period->end_date->toDateString())->toBe('2026-12-31');
+});
+
+test('calculatePeriodDates aligns quarterly periods to the calendar quarter', function (string $reference, string $expectedStart, string $expectedEnd) {
+    // The start day is ignored, as for yearly budgets: a stale value must not
+    // pull the window off the quarter.
+    $budget = Budget::factory()->quarterly()->make(['period_start_day' => 15]);
+
+    [$start, $end] = app(BudgetPeriodService::class)->calculatePeriodDates($budget, Carbon::parse($reference));
+
+    expect($start->toDateString())->toBe($expectedStart)
+        ->and($end->toDateString())->toBe($expectedEnd);
+})->with([
+    'first quarter' => ['2026-02-14', '2026-01-01', '2026-03-31'],
+    'first quarter, leap year' => ['2028-03-31', '2028-01-01', '2028-03-31'],
+    'second quarter' => ['2026-04-01', '2026-04-01', '2026-06-30'],
+    'third quarter' => ['2026-08-31', '2026-07-01', '2026-09-30'],
+    'fourth quarter' => ['2026-12-31', '2026-10-01', '2026-12-31'],
+]);
+
+test('calculatePeriodDates keeps a quarterly window on the quarter for an immutable reference date', function () {
+    $budget = Budget::factory()->quarterly()->make();
+
+    [$start, $end] = app(BudgetPeriodService::class)->calculatePeriodDates($budget, CarbonImmutable::parse('2026-11-12'));
+
+    expect($start->toDateString())->toBe('2026-10-01')
+        ->and($end->toDateString())->toBe('2026-12-31');
+});
+
+test('generatePeriod creates the current calendar quarter when a quarterly budget is created mid-quarter', function () {
+    Carbon::setTestNow(Carbon::parse('2026-05-15 09:00:00'));
+
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $budget = Budget::factory()->quarterly()->create(['user_id' => $user->id]);
+
+    $period = app(BudgetPeriodService::class)->generatePeriod($budget);
+
+    expect($period->start_date->toDateString())->toBe('2026-04-01')
+        ->and($period->end_date->toDateString())->toBe('2026-06-30');
+});
+
+test('generatePeriod advances quarterly periods across the year boundary', function () {
+    Carbon::setTestNow(Carbon::parse('2027-01-02 09:00:00'));
+
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $budget = Budget::factory()->quarterly()->create(['user_id' => $user->id]);
+
+    BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => '2026-10-01',
+        'end_date' => '2026-12-31',
+        'allocated_amount' => 30000,
+    ]);
+
+    $next = app(BudgetPeriodService::class)->generatePeriod($budget);
+
+    expect($next->start_date->toDateString())->toBe('2027-01-01')
+        ->and($next->end_date->toDateString())->toBe('2027-03-31')
+        ->and($next->allocated_amount)->toBe(30000);
+});
+
+test('generatePreviousPeriod chains quarterly periods back without gaps', function () {
+    Carbon::setTestNow(Carbon::parse('2026-05-15 09:00:00'));
+
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $budget = Budget::factory()->quarterly()->create(['user_id' => $user->id]);
+
+    $service = app(BudgetPeriodService::class);
+    $period = $service->generatePeriod($budget, 30000, Carbon::parse('2026-05-15'));
+    $windows = [[$period->start_date->toDateString(), $period->end_date->toDateString()]];
+
+    foreach (range(1, 3) as $step) {
+        $period = $service->generatePreviousPeriod($budget, $period);
+        $windows[] = [$period->start_date->toDateString(), $period->end_date->toDateString()];
+    }
+
+    expect($windows)->toBe([
+        ['2026-04-01', '2026-06-30'],
+        ['2026-01-01', '2026-03-31'],
+        ['2025-10-01', '2025-12-31'],
+        ['2025-07-01', '2025-09-30'],
+    ]);
+});
+
+test('closePeriod carries a quarterly leftover into the next quarter', function () {
+    Carbon::setTestNow(Carbon::parse('2026-04-02 09:00:00'));
+
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $budget = Budget::factory()->quarterly()->create([
+        'user_id' => $user->id,
+        'rollover_type' => RolloverType::CarryOver,
+    ]);
+
+    $firstQuarter = BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => '2026-01-01',
+        'end_date' => '2026-03-31',
+        'allocated_amount' => 30000,
+    ]);
+
+    BudgetTransaction::factory()->create([
+        'budget_period_id' => $firstQuarter->id,
+        'amount' => 12000,
+    ]);
+
+    app(BudgetPeriodService::class)->closePeriod($firstQuarter->fresh());
+
+    $secondQuarter = $budget->periods()->where('start_date', '2026-04-01')->sole();
+
+    expect($secondQuarter->end_date->toDateString())->toBe('2026-06-30')
+        ->and($secondQuarter->carried_over_amount)->toBe(18000);
+});
+
+test('closePeriod carries a quarterly leftover across the year boundary', function () {
+    Carbon::setTestNow(Carbon::parse('2027-01-02 09:00:00'));
+
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $budget = Budget::factory()->quarterly()->create([
+        'user_id' => $user->id,
+        'rollover_type' => RolloverType::CarryOver,
+    ]);
+
+    $fourthQuarter = BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => '2026-10-01',
+        'end_date' => '2026-12-31',
+        'allocated_amount' => 45000,
+    ]);
+
+    BudgetTransaction::factory()->create([
+        'budget_period_id' => $fourthQuarter->id,
+        'amount' => 5000,
+    ]);
+
+    app(BudgetPeriodService::class)->closePeriod($fourthQuarter->fresh());
+
+    $firstQuarter = $budget->periods()->where('start_date', '2027-01-01')->sole();
+
+    expect($firstQuarter->end_date->toDateString())->toBe('2027-03-31')
+        ->and($firstQuarter->allocated_amount)->toBe(45000)
+        ->and($firstQuarter->carried_over_amount)->toBe(40000);
+});
+
+test('closePeriod does not carry a quarterly leftover when the budget resets', function () {
+    Carbon::setTestNow(Carbon::parse('2026-07-02 09:00:00'));
+
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $budget = Budget::factory()->quarterly()->create([
+        'user_id' => $user->id,
+        'rollover_type' => RolloverType::Reset,
+    ]);
+
+    $secondQuarter = BudgetPeriod::factory()->create([
+        'budget_id' => $budget->id,
+        'start_date' => '2026-04-01',
+        'end_date' => '2026-06-30',
+        'allocated_amount' => 30000,
+    ]);
+
+    app(BudgetPeriodService::class)->closePeriod($secondQuarter->fresh());
+
+    $thirdQuarter = $budget->periods()->where('start_date', '2026-07-01')->sole();
+
+    expect($thirdQuarter->end_date->toDateString())->toBe('2026-09-30')
+        ->and($thirdQuarter->carried_over_amount)->toBe(0);
 });
 
 test('monthly day 31 clamps to the last day of short months without gaps or overlap', function () {
@@ -503,6 +668,8 @@ test('generatePreviousPeriod hands back the period immediately before', function
     'monthly across a 30-day month' => [BudgetPeriodType::Monthly, 1, '2026-05-15', '2026-04-01', '2026-04-30'],
     'monthly across a year boundary' => [BudgetPeriodType::Monthly, 1, '2026-01-15', '2025-12-01', '2025-12-31'],
     'yearly' => [BudgetPeriodType::Yearly, 1, '2026-08-20', '2025-01-01', '2025-12-31'],
+    'quarterly' => [BudgetPeriodType::Quarterly, 1, '2026-08-20', '2026-04-01', '2026-06-30'],
+    'quarterly across a year boundary' => [BudgetPeriodType::Quarterly, 1, '2026-02-10', '2025-10-01', '2025-12-31'],
 ]);
 
 test('getCurrentPeriod picks the on-grid window when two periods cover today', function () {

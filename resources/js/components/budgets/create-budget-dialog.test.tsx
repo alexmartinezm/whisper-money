@@ -46,6 +46,13 @@ function openDialog() {
     fireEvent.click(screen.getByText('Create Budget'));
 }
 
+function choosePeriodType(label: string) {
+    fireEvent.keyDown(screen.getByLabelText('Period Type'), {
+        key: 'ArrowDown',
+    });
+    fireEvent.click(screen.getByRole('option', { name: label }));
+}
+
 function enableCashflow() {
     pageProps.current = {
         ...pageProps.current,
@@ -148,4 +155,37 @@ describe('CreateBudgetDialog', () => {
             expect.any(Object),
         );
     });
+
+    it.each(['Quarterly', 'Yearly'])(
+        'drops the start day for a %s budget and sends day 1',
+        (label) => {
+            openDialog();
+            fireEvent.change(screen.getByLabelText('Start Day of Month'), {
+                target: { value: '15' },
+            });
+
+            choosePeriodType(label);
+
+            expect(
+                screen.queryByLabelText(/Start Day/),
+            ).not.toBeInTheDocument();
+
+            fireEvent.change(screen.getByLabelText('Budget Name'), {
+                target: { value: 'Car maintenance' },
+            });
+            fireEvent.click(screen.getByLabelText('Catch-all budget'));
+            fireEvent.submit(
+                screen.getByLabelText('Budget Name').closest('form')!,
+            );
+
+            expect(post).toHaveBeenCalledWith(
+                '/budgets',
+                expect.objectContaining({
+                    period_type: label.toLowerCase(),
+                    period_start_day: 1,
+                }),
+                expect.anything(),
+            );
+        },
+    );
 });

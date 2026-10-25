@@ -12,7 +12,6 @@ use App\Events\TransactionCreated;
 use App\Events\TransactionDeleted;
 use App\Events\TransactionUpdated;
 use App\Models\Concerns\BelongsToSpace;
-use App\Models\Concerns\BumpsDataVersion;
 use App\Services\CashflowBlockQuery;
 use App\Services\CategoryTree;
 use App\Services\PeriodComparator;
@@ -31,10 +30,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
 use LogicException;
 
 /**
  * @property Carbon $transaction_date
+ * @property-read ?bool $splits_exists whether it has split lines, selected by `withExists('splits')` and absent otherwise
  * @property-read ?int $ownership_percentage the owning account's share, selected by {@see self::scopeJoinOwningAccount()} and absent otherwise
  * @property ?Carbon $source_date
  * @property int|float $total_amount
@@ -50,7 +51,7 @@ use LogicException;
 class Transaction extends Model
 {
     /** @use HasFactory<TransactionFactory> */
-    use BelongsToSpace, BumpsDataVersion, HasFactory, HasUuids, SoftDeletes;
+    use BelongsToSpace, HasFactory, HasUuids, SoftDeletes;
 
     /** Preserve microsecond cursor precision for transaction delta sync. */
     protected $dateFormat = 'Y-m-d H:i:s.u';
@@ -61,6 +62,9 @@ class Transaction extends Model
         'updated' => TransactionUpdated::class,
         'deleted' => TransactionDeleted::class,
     ];
+
+    /** Columns the transactions list can sort by, ascending or with a leading `-`. */
+    public const LIST_SORT_COLUMNS = ['transaction_date', 'amount', 'description', 'creditor_name', 'debtor_name'];
 
     protected $fillable = [
         'user_id',
@@ -188,6 +192,22 @@ class Transaction extends Model
     public function splits(): HasMany
     {
         return $this->hasMany(TransactionSplit::class)->orderBy('position');
+    }
+
+    /**
+     * One split line read as a posting of its own: a copy of this transaction
+     * with the line's category and $amount, carrying everything else (date,
+     * account, labels, notes) from the transaction. Cashflow and the CSV
+     * export both expand a split transaction into these.
+     */
+    public function splitPosting(TransactionSplit $line, int $amount, ?string $currencyCode): self
+    {
+        $posting = clone $this;
+        $posting->forceFill(['amount' => $amount, 'currency_code' => $currencyCode, 'category_id' => $line->category_id]);
+        $posting->setRelation('category', $line->category);
+        $posting->setRelation('splits', collect());
+
+        return $posting;
     }
 
     /** @return Attribute<bool, never> */
@@ -604,6 +624,36 @@ class Transaction extends Model
         $this->applyCashflowBlockFilter($query, $filters);
 
         return $query;
+    }
+
+    /**
+     * The transactions list's order: the column the sort names, then `id` so
+     * rows that tie keep one stable order across pages and exports. Payee
+     * columns sort their blanks as empty strings, the way they read on screen.
+     *
+     * @param  Builder<Transaction>  $query
+     * @return Builder<Transaction>
+     */
+    public function scopeSortedForList(Builder $query, string $sort): Builder
+    {
+        $column = ltrim($sort, '-');
+        $direction = str_starts_with($sort, '-') ? 'desc' : 'asc';
+
+        // The column ends up in raw SQL below, so it is checked here rather
+        // than trusted to whichever request handed it over.
+        if (! in_array($column, self::LIST_SORT_COLUMNS, true)) {
+            throw new InvalidArgumentException("Transactions cannot be sorted by [{$column}].");
+        }
+
+        if (in_array($column, ['creditor_name', 'debtor_name'], true)) {
+            $query->select('transactions.*')
+                ->selectRaw("COALESCE({$column}, '') as {$column}_sort")
+                ->orderBy("{$column}_sort", $direction);
+        } else {
+            $query->orderBy($column, $direction);
+        }
+
+        return $query->orderBy('id', 'desc');
     }
 
     /**

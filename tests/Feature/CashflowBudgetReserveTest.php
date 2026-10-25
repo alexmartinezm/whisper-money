@@ -394,6 +394,38 @@ test('a range reads as a year once it is longer than a quarter', function (strin
     '93 days' => ['2026-07-31', '2026-10-31', true],
 ]);
 
+test('a quarterly budget is reserved in the quarter range only', function (string $from, string $to, bool $reserved) {
+    $carCare = Budget::factory()->quarterly()->create(['user_id' => $this->user->id, 'name' => 'Car care']);
+
+    budgetPeriodWithSpend($carCare, '2026-10-01', '2026-12-31', 90000, 30000);
+
+    $summary = cashflowSummary($from, $to);
+
+    expect($summary['reserved'])->toBe($reserved ? 60000 : 0)
+        ->and(collect($summary['budgets'])->pluck('budget_id')->all())->toBe($reserved ? [$carCare->id] : []);
+})->with([
+    'month' => ['2026-10-01', '2026-10-31', false],
+    'quarter' => ['2026-10-01', '2026-12-31', true],
+    'year' => ['2026-01-01', '2026-12-31', false],
+]);
+
+test('a range reads as a quarter once it is longer than a month', function (string $from, string $to, bool $readsAsQuarter) {
+    $carCare = Budget::factory()->quarterly()->create(['user_id' => $this->user->id]);
+    $groceries = Budget::factory()->monthly()->create(['user_id' => $this->user->id]);
+
+    budgetPeriodWithSpend($carCare, '2026-10-01', '2026-12-31', 90000, 0);
+    budgetPeriodWithSpend($groceries, '2026-10-01', '2026-10-31', 40000, 0);
+
+    // Monthly budgets count in both; quarterly ones only once the range is a quarter.
+    $expected = $readsAsQuarter ? [$carCare->id, $groceries->id] : [$groceries->id];
+
+    expect(collect(cashflowSummary($from, $to)['budgets'])->pluck('budget_id')->sort()->values()->all())
+        ->toBe(collect($expected)->sort()->values()->all());
+})->with([
+    '31 days' => ['2026-10-01', '2026-10-31', false],
+    '32 days' => ['2026-09-30', '2026-10-31', true],
+]);
+
 /**
  * A split transaction on the test account, with no category of its own, as
  * ReplaceTransactionSplits leaves the parent: one line per [category, amount].

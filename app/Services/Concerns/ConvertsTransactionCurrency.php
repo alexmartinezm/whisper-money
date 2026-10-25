@@ -4,6 +4,7 @@ namespace App\Services\Concerns;
 
 use App\Models\Account;
 use App\Models\Transaction;
+use App\Models\TransactionSplit;
 use App\Services\ExchangeRateService;
 use Illuminate\Support\Collection;
 
@@ -104,7 +105,7 @@ trait ConvertsTransactionCurrency
             $allocated = 0;
             $lastPosition = $transaction->splits->count() - 1;
 
-            return $transaction->splits->values()->map(function ($split, int $position) use ($transaction, $currency, $convertedParent, &$allocated, $lastPosition): Transaction {
+            return $transaction->splits->values()->map(function (TransactionSplit $split, int $position) use ($transaction, $currency, $convertedParent, &$allocated, $lastPosition): Transaction {
                 $amount = $position === $lastPosition
                     ? $convertedParent - $allocated
                     : $this->exchangeRateService->convert(
@@ -115,12 +116,7 @@ trait ConvertsTransactionCurrency
                     );
                 $allocated += $amount;
 
-                $posting = clone $transaction;
-                $posting->forceFill(['amount' => $amount, 'currency_code' => $currency, 'category_id' => $split->category_id]);
-                $posting->setRelation('category', $split->category);
-                $posting->setRelation('splits', collect());
-
-                return $posting;
+                return $transaction->splitPosting($split, $amount, $currency);
             })->all();
         })->values();
     }

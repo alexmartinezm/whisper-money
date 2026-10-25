@@ -2,11 +2,9 @@
 
 namespace App\Jobs;
 
-use App\Jobs\Concerns\DefersDataVersionBumps;
 use App\Models\Budget;
 use App\Models\BudgetPeriod;
 use App\Services\BudgetTransactionService;
-use App\Services\Cache\DataVersion;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\DB;
@@ -15,7 +13,7 @@ use Throwable;
 
 class AssignHistoricalTransactionsToBudget implements ShouldQueue
 {
-    use DefersDataVersionBumps, Queueable;
+    use Queueable;
 
     /**
      * The number of times the job may be attempted.
@@ -132,6 +130,5 @@ class AssignHistoricalTransactionsToBudget implements ShouldQueue
                 'processing_historical' => false,
                 'reconciliation_token' => null,
             ]);
-        DataVersion::bumpOwnerOf($this->budget);
     }
 }
