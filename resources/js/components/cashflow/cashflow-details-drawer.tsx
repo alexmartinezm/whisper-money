@@ -372,6 +372,26 @@ function BudgetsPanel({
     );
 }
 
+/**
+ * Where the budgets this view leaves out are reserved: each view only counts
+ * the budgets whose period fits it (CashflowBudgetReserveService).
+ */
+function reservedElsewhereHint(periodType: CashflowPeriodType): string {
+    if (periodType === 'year') {
+        return __(
+            'Weekly and monthly budgets are reserved in the Month view, quarterly ones in the Quarter view',
+        );
+    }
+
+    if (periodType === 'quarter') {
+        return __('Yearly budgets are reserved in the Year view');
+    }
+
+    return __(
+        'Quarterly budgets are reserved in the Quarter view, yearly ones in the Year view',
+    );
+}
+
 export function CashflowDetailsDrawer({
     open,
     onOpenChange,
@@ -497,13 +517,7 @@ export function CashflowDetailsDrawer({
                     </div>
 
                     <p className="text-center text-xs text-muted-foreground">
-                        {periodType === 'year'
-                            ? __(
-                                  'Weekly and monthly budgets are reserved in the Month view',
-                              )
-                            : __(
-                                  'Yearly budgets are reserved in the Year view',
-                              )}
+                        {reservedElsewhereHint(periodType)}
                     </p>
                 </div>
             </DrawerContent>

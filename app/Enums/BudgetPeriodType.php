@@ -8,6 +8,7 @@ enum BudgetPeriodType: string
     case Weekly = 'weekly';
     case Biweekly = 'biweekly';
     case Yearly = 'yearly';
+    case Quarterly = 'quarterly';
 
     public function label(): string
     {
@@ -16,6 +17,19 @@ enum BudgetPeriodType: string
             self::Weekly => 'Weekly',
             self::Biweekly => 'Bi-weekly',
             self::Yearly => 'Yearly',
+            self::Quarterly => 'Quarterly',
+        };
+    }
+
+    /**
+     * Whether the period follows the calendar - a quarter or a year starting on
+     * its first day - and so has no start day of its own; only 1 is stored.
+     */
+    public function followsCalendar(): bool
+    {
+        return match ($this) {
+            self::Quarterly, self::Yearly => true,
+            self::Monthly, self::Weekly, self::Biweekly => false,
         };
     }
 
@@ -26,8 +40,9 @@ enum BudgetPeriodType: string
      * day of the month otherwise. Accepting the union of both ranges is what let
      * three monthly budgets be stored with day 0, which `Carbon::day(0)` reads as
      * the last day of the previous month and which froze their period chains.
-     * Yearly ignores the column - `calculatePeriodDates` starts its window on 1
-     * January - so its range is the harmless one.
+     * Yearly and Quarterly ignore the column - `calculatePeriodDates` starts
+     * their windows on 1 January and on the first day of the calendar quarter -
+     * so their range is the harmless one.
      *
      * @return array<int, string>
      */
@@ -35,7 +50,7 @@ enum BudgetPeriodType: string
     {
         return match ($this) {
             self::Weekly, self::Biweekly => ['min:0', 'max:6'],
-            self::Monthly, self::Yearly => ['min:1', 'max:31'],
+            self::Monthly, self::Yearly, self::Quarterly => ['min:1', 'max:31'],
         };
     }
 }

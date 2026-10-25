@@ -443,3 +443,94 @@ it('lists each budget with its expense type', function () {
         ->assertOk()
         ->assertSee('"expense_type":"fixed"', false);
 });
+
+it('creates a quarterly budget through MCP with or without the start day', function (array $startDay) {
+    Queue::fake();
+    $this->travelTo(CarbonImmutable::parse('2026-11-12'));
+    $user = User::factory()->create();
+    $category = Category::factory()->create(['user_id' => $user->id, 'space_id' => $user->personalSpace->id]);
+    $arguments = mcpBudgetArguments($category, ['name' => 'Car maintenance', 'period_type' => BudgetPeriodType::Quarterly->value]);
+    unset($arguments['period_start_day']);
+
+    callBudgetWriteTool($user, CreateBudget::class, [...$arguments, ...$startDay])
+        ->assertOk()
+        ->assertSee('"period_type":"quarterly"', false)
+        ->assertSee('"period_start_day":1', false);
+
+    $budget = Budget::query()->where('name', 'Car maintenance')->sole();
+
+    expect($budget->period_start_day)->toBe(1)
+        ->and($budget->periods()->orderBy('start_date')->get()->map(fn ($period): array => [$period->start_date->toDateString(), $period->end_date->toDateString()])->all())
+        ->toBe([['2026-07-01', '2026-09-30'], ['2026-10-01', '2026-12-31']]);
+})->with([
+    'omitted' => [[]],
+    'the first' => [['period_start_day' => 1]],
+    'null' => [['period_start_day' => null]],
+]);
+
+it('rejects a quarterly start day other than the first through MCP', function () {
+    $user = User::factory()->create();
+    $category = Category::factory()->create(['user_id' => $user->id, 'space_id' => $user->personalSpace->id]);
+
+    callBudgetWriteTool($user, CreateBudget::class, mcpBudgetArguments($category, [
+        'period_type' => BudgetPeriodType::Quarterly->value,
+        'period_start_day' => 15,
+    ]))->assertHasErrors();
+
+    expect(Budget::query()->where('user_id', $user->id)->exists())->toBeFalse();
+});
+
+it('changes a quarterly allocation from the next quarter and keeps a one-off quarter through MCP', function () {
+    Queue::fake();
+    $this->travelTo(CarbonImmutable::parse('2026-11-12'));
+    $user = User::factory()->create();
+    $category = Category::factory()->create(['user_id' => $user->id, 'space_id' => $user->personalSpace->id]);
+
+    callBudgetWriteTool($user, CreateBudget::class, mcpBudgetArguments($category, [
+        'name' => 'Car maintenance',
+        'period_type' => BudgetPeriodType::Quarterly->value,
+        'allocated_amount' => 60000,
+    ]))->assertOk();
+    $budget = Budget::query()->where('name', 'Car maintenance')->sole();
+    $quarter = fn (string $start) => $budget->periods()->whereDate('start_date', $start)->firstOrFail();
+
+    // A one-off quarter: the period holding 2027-02-10, with the one after it
+    // left on the regular allocation.
+    callBudgetWriteTool($user, UpdateBudgetPeriod::class, [
+        'budget_id' => $budget->id,
+        'date' => '2027-02-10',
+        'allocated_amount' => 90000,
+    ])->assertOk()->assertSee('"is_one_off":true', false)->assertSee('2027-04-01');
+
+    expect($quarter('2027-01-01')->end_date->toDateString())->toBe('2027-03-31')
+        ->and($quarter('2027-01-01')->allocated_amount)->toBe(90000)
+        ->and($quarter('2027-04-01')->allocated_amount)->toBe(60000);
+
+    // Mid-quarter, a regular change leaves the quarter in progress alone and
+    // only moves the one-off quarter's regular allocation.
+    callBudgetWriteTool($user, UpdateBudget::class, [
+        'budget_id' => $budget->id,
+        'allocated_amount' => 75000,
+    ])->assertOk()->assertSee('"effective_from":"2027-01-01"', false);
+
+    expect($quarter('2026-10-01')->allocated_amount)->toBe(60000)
+        ->and($quarter('2027-01-01')->allocated_amount)->toBe(90000)
+        ->and($quarter('2027-01-01')->regularAllocatedAmount())->toBe(75000)
+        ->and($quarter('2027-04-01')->allocated_amount)->toBe(75000);
+});
+
+it('creates a yearly budget through MCP without a start day', function () {
+    Queue::fake();
+    $this->travelTo(CarbonImmutable::parse('2026-11-12'));
+    $user = User::factory()->create();
+    $category = Category::factory()->create(['user_id' => $user->id, 'space_id' => $user->personalSpace->id]);
+    $arguments = mcpBudgetArguments($category, ['name' => 'Insurance', 'period_type' => BudgetPeriodType::Yearly->value]);
+    unset($arguments['period_start_day']);
+
+    callBudgetWriteTool($user, CreateBudget::class, $arguments)->assertOk();
+
+    $budget = Budget::query()->where('name', 'Insurance')->sole();
+
+    expect($budget->period_start_day)->toBe(1)
+        ->and($budget->getCurrentPeriod()->start_date->toDateString())->toBe('2026-01-01');
+});

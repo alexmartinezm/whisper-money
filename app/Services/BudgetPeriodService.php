@@ -77,6 +77,7 @@ class BudgetPeriodService
             BudgetPeriodType::Weekly => $start->subWeek(),
             BudgetPeriodType::Biweekly => $start->subWeeks(2),
             BudgetPeriodType::Yearly => $start->subYear(),
+            BudgetPeriodType::Quarterly => $start->subQuarterNoOverflow(),
             BudgetPeriodType::Monthly => $start->subMonthNoOverflow(),
         };
     }
@@ -152,6 +153,11 @@ class BudgetPeriodService
             case BudgetPeriodType::Yearly:
                 $startDate = $startDate->startOfYear();
                 $endDate = $startDate->copy()->addYear()->subDay();
+                break;
+
+            case BudgetPeriodType::Quarterly:
+                $startDate = $startDate->startOfQuarter();
+                $endDate = $startDate->copy()->addQuarter()->subDay();
                 break;
         }
 

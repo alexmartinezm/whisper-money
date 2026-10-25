@@ -1,6 +1,10 @@
 import { AmountDisplay } from '@/components/ui/amount-display';
 import { Progress } from '@/components/ui/progress';
-import type { BudgetStatus, BudgetSummary } from '@/types/budget';
+import type {
+    BudgetStatus,
+    BudgetSummary,
+    BudgetSummaryGroup,
+} from '@/types/budget';
 import { __ } from '@/utils/i18n';
 import { CheckCircle2 } from 'lucide-react';
 
@@ -25,9 +29,52 @@ function progressIndicatorClass(status: BudgetStatus): string {
     return 'bg-green-600 dark:bg-green-400';
 }
 
+/**
+ * A one-line remaining figure for budgets on a longer period than the
+ * monthly hero, which stays out of the hero's totals.
+ */
+function LongPeriodRemainingLine({
+    summary,
+    currencyCode,
+    testId,
+    remainingLabel,
+    exceededLabel,
+}: {
+    summary: BudgetSummaryGroup;
+    currencyCode: string;
+    testId: string;
+    remainingLabel: string;
+    exceededLabel: string;
+}) {
+    const isOverLimit = summary.total_remaining < 0;
+
+    return (
+        <p
+            data-testid={testId}
+            className={`text-sm ${
+                isOverLimit
+                    ? statusClass(summary.status)
+                    : 'text-muted-foreground'
+            }`}
+        >
+            <span className="font-medium">
+                {isOverLimit ? exceededLabel : remainingLabel}
+            </span>{' '}
+            <AmountDisplay
+                amountInCents={Math.abs(summary.total_remaining)}
+                currencyCode={currencyCode}
+                weight="semibold"
+            />
+        </p>
+    );
+}
+
 export function BudgetOverviewCard({ budgetSummary, currencyCode }: Props) {
     const monthlySummary = budgetSummary.groups.find(
         (group) => group.period_type === 'monthly',
+    );
+    const quarterlySummary = budgetSummary.groups.find(
+        (group) => group.period_type === 'quarterly',
     );
     const yearlySummary = budgetSummary.groups.find(
         (group) => group.period_type === 'yearly',
@@ -42,7 +89,6 @@ export function BudgetOverviewCard({ budgetSummary, currencyCode }: Props) {
               .filter(Boolean)
               .join(' · ')
         : '';
-    const yearlyIsOverLimit = (yearlySummary?.total_remaining ?? 0) < 0;
 
     return (
         <section className="space-y-5" aria-labelledby="budget-overview-title">
@@ -162,26 +208,27 @@ export function BudgetOverviewCard({ budgetSummary, currencyCode }: Props) {
                 </div>
             )}
 
-            {yearlySummary && (
-                <p
-                    data-testid="budget-overview-yearly"
-                    className={`text-sm ${
-                        yearlyIsOverLimit
-                            ? statusClass(yearlySummary.status)
-                            : 'text-muted-foreground'
-                    }`}
-                >
-                    <span className="font-medium">
-                        {yearlyIsOverLimit
-                            ? __('Yearly budget exceeded by')
-                            : __('Yearly remaining')}
-                    </span>{' '}
-                    <AmountDisplay
-                        amountInCents={Math.abs(yearlySummary.total_remaining)}
-                        currencyCode={currencyCode}
-                        weight="semibold"
-                    />
-                </p>
+            {(quarterlySummary || yearlySummary) && (
+                <div className="flex flex-col gap-1">
+                    {quarterlySummary && (
+                        <LongPeriodRemainingLine
+                            summary={quarterlySummary}
+                            currencyCode={currencyCode}
+                            testId="budget-overview-quarterly"
+                            remainingLabel={__('Quarterly remaining')}
+                            exceededLabel={__('Quarterly budget exceeded by')}
+                        />
+                    )}
+                    {yearlySummary && (
+                        <LongPeriodRemainingLine
+                            summary={yearlySummary}
+                            currencyCode={currencyCode}
+                            testId="budget-overview-yearly"
+                            remainingLabel={__('Yearly remaining')}
+                            exceededLabel={__('Yearly budget exceeded by')}
+                        />
+                    )}
+                </div>
             )}
         </section>
     );

@@ -28,6 +28,7 @@ import {
     BudgetPeriodType,
     getBudgetPeriodTypeLabel,
     getRolloverTypeLabel,
+    periodTypeHasStartDay,
     ROLLOVER_TYPES,
     RolloverType,
 } from '@/types/budget';
@@ -275,7 +276,7 @@ export function EditBudgetDialog({
                             </div>
                         </div>
 
-                        {periodType !== 'yearly' && (
+                        {periodTypeHasStartDay(periodType) && (
                             <div className="space-y-2">
                                 <Label htmlFor="period-start-day">
                                     {periodType === 'monthly'

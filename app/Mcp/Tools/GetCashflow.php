@@ -30,7 +30,7 @@ class GetCashflow extends McpTool
     {
         return [
             'from' => $schema->string()->description('Start date, YYYY-MM-DD.')->required(),
-            'to' => $schema->string()->description('End date, YYYY-MM-DD. The summary\'s reserved and budgets count weekly, bi-weekly and monthly budgets for a range of up to 92 days, and only yearly budgets for a longer one.')->required(),
+            'to' => $schema->string()->description('End date, YYYY-MM-DD. The summary\'s reserved and budgets count weekly, bi-weekly and monthly budgets for a range of up to 92 days, quarterly budgets too for a range of 32 to 92 days, and only yearly budgets for a longer one.')->required(),
         ];
     }
 

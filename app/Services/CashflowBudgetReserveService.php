@@ -20,6 +20,12 @@ use Illuminate\Support\Collection;
 class CashflowBudgetReserveService
 {
     /**
+     * The longest a month gets; any longer range, up to a quarter, is read as
+     * a quarter.
+     */
+    private const MAX_MONTH_DAYS = 31;
+
+    /**
      * The longest a quarter gets; any longer range is read as a year.
      */
     private const MAX_QUARTER_DAYS = 92;
@@ -64,9 +70,11 @@ class CashflowBudgetReserveService
      *
      * Both only count the budgets whose period fits the range: weekly,
      * bi-weekly and monthly budgets for a range of up to a quarter (the month
-     * and quarter views), yearly ones for anything longer (the year view). A
-     * yearly budget's margin is not money held back from one month's income,
-     * and a monthly one's says little about a whole year.
+     * and quarter views), quarterly ones only for a range longer than a month
+     * and up to a quarter (the quarter view), yearly ones for anything longer
+     * (the year view). A quarterly or yearly budget's margin is not money held
+     * back from one month's income, and a monthly or quarterly one's says
+     * little about a whole year.
      *
      * Both periods get the expense split, see {@see self::expenseSplit()}.
      *
@@ -174,6 +182,12 @@ class CashflowBudgetReserveService
             return [BudgetPeriodType::Yearly];
         }
 
-        return [BudgetPeriodType::Weekly, BudgetPeriodType::Biweekly, BudgetPeriodType::Monthly];
+        $shortPeriodTypes = [BudgetPeriodType::Weekly, BudgetPeriodType::Biweekly, BudgetPeriodType::Monthly];
+
+        if ($period->days() > self::MAX_MONTH_DAYS) {
+            return [...$shortPeriodTypes, BudgetPeriodType::Quarterly];
+        }
+
+        return $shortPeriodTypes;
     }
 }
