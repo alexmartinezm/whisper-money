@@ -534,3 +534,35 @@ it('creates a yearly budget through MCP without a start day', function () {
     expect($budget->period_start_day)->toBe(1)
         ->and($budget->getCurrentPeriod()->start_date->toDateString())->toBe('2026-01-01');
 });
+
+it('creates a weekly budget through MCP starting on Sunday, given as 0 or left out', function (array $startDay, ?int $storedStartDay) {
+    Queue::fake();
+    $this->travelTo(CarbonImmutable::parse('2026-11-12'));
+    $user = User::factory()->create();
+    $category = Category::factory()->create(['user_id' => $user->id, 'space_id' => $user->personalSpace->id]);
+    $arguments = mcpBudgetArguments($category, ['name' => 'Groceries', 'period_type' => BudgetPeriodType::Weekly->value]);
+    unset($arguments['period_start_day']);
+
+    callBudgetWriteTool($user, CreateBudget::class, [...$arguments, ...$startDay])->assertOk();
+
+    $budget = Budget::query()->where('name', 'Groceries')->sole();
+
+    expect($budget->period_start_day)->toBe($storedStartDay)
+        ->and($budget->getCurrentPeriod()->start_date->toDateString())->toBe('2026-11-08');
+})->with([
+    'Sunday as 0' => [['period_start_day' => 0], 0],
+    'omitted' => [[], null],
+    'null' => [['period_start_day' => null], null],
+]);
+
+it('rejects a biweekly start day outside 0-6 through MCP', function () {
+    $user = User::factory()->create();
+    $category = Category::factory()->create(['user_id' => $user->id, 'space_id' => $user->personalSpace->id]);
+
+    callBudgetWriteTool($user, CreateBudget::class, mcpBudgetArguments($category, [
+        'period_type' => BudgetPeriodType::Biweekly->value,
+        'period_start_day' => 7,
+    ]))->assertHasErrors();
+
+    expect(Budget::query()->where('user_id', $user->id)->exists())->toBeFalse();
+});

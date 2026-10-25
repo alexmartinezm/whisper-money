@@ -18,7 +18,7 @@ export interface CashflowSummary {
     savings_rate: number;
     savings: number;
     investments: number;
-    /** Positive margins of the open budget periods overlapping the range: yearly budgets when it is longer than a quarter, shorter-period ones otherwise. */
+    /** Positive margins of the open budget periods overlapping the range: yearly budgets when it is longer than a quarter (over 92 days), quarterly ones when it is longer than a month and up to a quarter (32 to 92 days), and weekly, bi-weekly and monthly ones for any range up to a quarter. */
     reserved?: number;
     budgets?: CashflowBudgetMargin[];
     /** Present on both the current and the previous period, unlike reserved and budgets. Expenses on what budgets marked fixed track; counts a transaction also tracked by a variable budget. */
