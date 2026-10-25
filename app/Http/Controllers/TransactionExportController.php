@@ -14,6 +14,8 @@ class TransactionExportController extends Controller
      * How many exported rows had an encrypted description written empty, for
      * the page to say so once the download ends. Counted before the stream
      * starts, since headers cannot follow the body.
+     *
+     * @api Read by the export tests and named by the page's client code.
      */
     public const ENCRYPTED_DESCRIPTIONS_HEADER = 'X-Encrypted-Descriptions';
 
@@ -21,6 +23,8 @@ class TransactionExportController extends Controller
      * How many rows the file holds, header left out, counted the way the
      * count endpoint counts them, for the page's progress to measure against
      * as soon as the response starts.
+     *
+     * @api Read by the export tests and named by the page's client code.
      */
     public const ROWS_HEADER = 'X-Export-Rows';
 

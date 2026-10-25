@@ -35,6 +35,7 @@ use LogicException;
 
 /**
  * @property Carbon $transaction_date
+ * @property-read ?bool $splits_exists whether it has split lines, selected by `withExists('splits')` and absent otherwise
  * @property-read ?int $ownership_percentage the owning account's share, selected by {@see self::scopeJoinOwningAccount()} and absent otherwise
  * @property ?Carbon $source_date
  * @property int|float $total_amount

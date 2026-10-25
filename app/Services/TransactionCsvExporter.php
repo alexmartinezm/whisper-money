@@ -64,7 +64,7 @@ class TransactionCsvExporter
         return $transactions
             ->with([
                 ...self::RELATIONS,
-                'splits' => fn (HasMany $lines) => $this->constrainLines($lines->with('category'), $filters),
+                'splits' => fn ($lines) => $this->constrainLines($lines->with('category'), $filters),
             ])
             ->withExists('splits');
     }
