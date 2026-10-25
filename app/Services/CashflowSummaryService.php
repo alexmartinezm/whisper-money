@@ -4,17 +4,13 @@ namespace App\Services;
 
 use App\Enums\CategoryType;
 use App\Models\Transaction;
-use App\Services\Concerns\ConvertsTransactionCurrency;
 use Carbon\Carbon;
 use Closure;
 use Illuminate\Support\Collection;
-use InvalidArgumentException;
 
 class CashflowSummaryService
 {
-    use ConvertsTransactionCurrency;
-
-    public function __construct(private ExchangeRateService $exchangeRateService) {}
+    public function __construct(private CashflowAggregateQuery $aggregates) {}
 
     /**
      * Derive the summary from signed income and expense totals, in minor units.
@@ -38,42 +34,35 @@ class CashflowSummaryService
      * currency. The dashboard widget and the cashflow screen both read this, so
      * the same month cannot come out two different ways.
      *
-     * Whatever else a caller reads off the same postings goes through
-     * $extend, so it neither loads them again nor converts them any other
-     * way. It gets each period's postings (an unsplit transaction, or one
-     * split line) and a function adding up postings in the user's currency
-     * exactly as `expense` is added up, and returns the fields to append to
-     * each period's summary.
+     * Whatever else a caller reads off the same figures goes through $extend,
+     * so it neither loads nor converts them again. It gets each period's
+     * groups as the summary adds them up (see {@see CashflowAggregateQuery}:
+     * unsplit rows grouped in SQL, and one group per split line), each already
+     * worth its share in the user's currency, and returns the fields to append
+     * to each period's summary. Groups carry the labels in $trackedLabelIds
+     * for whoever classifies them by label.
      *
-     * @param  (Closure(array{current: Collection<int, Transaction>, previous: Collection<int, Transaction>}, Closure(Collection<int, Transaction>): int): array{current: array<string, mixed>, previous: array<string, mixed>})|null  $extend
+     * @param  (Closure(array{current: Collection<int, CashflowAggregate>, previous: Collection<int, CashflowAggregate>}): array{current: array<string, mixed>, previous: array<string, mixed>})|null  $extend
+     * @param  list<string>  $trackedLabelIds
      * @return array{current: array<string, mixed>, previous: array<string, mixed>}
      */
-    public function forComparedPeriods(string $userId, string $userCurrency, PeriodComparator $period, PeriodComparator $previousPeriod, ?Closure $extend = null): array
+    public function forComparedPeriods(string $userId, string $userCurrency, PeriodComparator $period, PeriodComparator $previousPeriod, ?Closure $extend = null, array $trackedLabelIds = []): array
     {
-        $transactions = Transaction::query()
-            ->where('transactions.user_id', $userId)
-            ->whereBetween('transactions.transaction_date', [$previousPeriod->from, $period->to])
-            ->countingTowardsTotals()
-            ->with(['account', 'category', 'splits.category'])
-            ->get();
+        $aggregates = $this->aggregates->aggregateByPeriod(
+            Transaction::query()
+                ->where('transactions.user_id', $userId)
+                ->whereBetween('transactions.transaction_date', [$previousPeriod->from, $period->to]),
+            $userCurrency,
+            ['current' => $period, 'previous' => $previousPeriod],
+            $trackedLabelIds,
+        );
 
-        $this->preloadExchangeRates($transactions, $userCurrency);
-
-        // A split transaction counts as its parts, each under its own category,
-        // the same way the cashflow screen has always read it.
-        $transactions = $this->effectiveTransactions($transactions, $userCurrency);
-
-        $postings = [
-            'current' => $this->transactionsForPeriod($transactions, $period->from, $period->to),
-            'previous' => $this->transactionsForPeriod($transactions, $previousPeriod->from, $previousPeriod->to),
-        ];
-        $extra = $extend === null
-            ? ['current' => [], 'previous' => []]
-            : $extend($postings, fn (Collection $periodPostings): int => $this->sumConvertedAmounts($periodPostings, $userCurrency));
+        $byPeriod = ['current' => $aggregates['current'], 'previous' => $aggregates['previous']];
+        $extra = $extend === null ? ['current' => [], 'previous' => []] : $extend($byPeriod);
 
         return [
-            'current' => [...$this->forTransactions($postings['current'], $userCurrency), ...$extra['current']],
-            'previous' => [...$this->forTransactions($postings['previous'], $userCurrency), ...$extra['previous']],
+            'current' => [...$this->forAggregates($byPeriod['current']), ...$extra['current']],
+            'previous' => [...$this->forAggregates($byPeriod['previous']), ...$extra['previous']],
         ];
     }
 
@@ -83,9 +72,8 @@ class CashflowSummaryService
      * monthly analysis needs a year of savings rates to draw a streak and a
      * sparkline, and twelve round trips for that would be twelve too many.
      *
-     * Splits are expanded once, before the months are cut, so a split
-     * transaction counts as its parts here exactly as it does on the cashflow
-     * screen.
+     * A split transaction counts as its parts here exactly as it does on the
+     * cashflow screen, each in the month of its transaction.
      *
      * @param  string|null  $spaceId  that space's transactions, whoever recorded
      *                                them, instead of the user's
@@ -93,36 +81,25 @@ class CashflowSummaryService
      */
     public function forMonths(string $userId, string $userCurrency, Carbon $from, Carbon $to, ?string $spaceId = null): array
     {
-        $transactions = Transaction::query()
-            ->when(
-                $spaceId === null,
-                fn ($query) => $query->where('transactions.user_id', $userId),
-                fn ($query) => $query->forSpace($spaceId),
-            )
-            ->whereBetween('transactions.transaction_date', [
-                $from->copy()->startOfMonth(),
-                $to->copy()->endOfMonth(),
-            ])
-            ->countingTowardsTotals()
-            ->with(['account', 'category', 'splits.category'])
-            ->get();
-
-        $this->preloadExchangeRates($transactions, $userCurrency);
-
-        $transactions = $this->effectiveTransactions($transactions, $userCurrency);
+        $aggregates = $this->aggregates->aggregateByMonth(
+            Transaction::query()
+                ->when(
+                    $spaceId === null,
+                    fn ($query) => $query->where('transactions.user_id', $userId),
+                    fn ($query) => $query->forSpace($spaceId),
+                )
+                ->whereBetween('transactions.transaction_date', [
+                    $from->copy()->startOfMonth(),
+                    $to->copy()->endOfMonth(),
+                ]),
+            $userCurrency,
+        );
 
         $months = [];
         $cursor = $from->copy()->startOfMonth();
 
         while ($cursor->lte($to)) {
-            $months[$cursor->format('Y-m')] = $this->forTransactions(
-                $this->transactionsForPeriod(
-                    $transactions,
-                    $cursor->copy()->startOfMonth(),
-                    $cursor->copy()->endOfMonth(),
-                ),
-                $userCurrency,
-            );
+            $months[$cursor->format('Y-m')] = $this->forAggregates($aggregates->get($cursor->format('Y-m'), collect()));
 
             $cursor->addMonth();
         }
@@ -131,36 +108,22 @@ class CashflowSummaryService
     }
 
     /**
-     * @param  Collection<int, Transaction>  $transactions
+     * @param  Collection<int, CashflowAggregate>  $aggregates
      * @return array<string, mixed>
      */
-    private function forTransactions(Collection $transactions, string $userCurrency): array
+    private function forAggregates(Collection $aggregates): array
     {
         // Deliberately unclamped: a month whose refunds outweigh its spending
         // has negative expenses, and clamping that to zero is the one place
         // money goes missing from the net.
-        $income = $this->sumTransactions($transactions, $userCurrency, CategoryType::Income);
-        $expense = -$this->sumTransactions($transactions, $userCurrency, CategoryType::Expense);
+        $income = $this->sumWhere($aggregates, fn (Transaction $transaction): bool => $transaction->isIncomeSide());
+        $expense = -$this->sumWhere($aggregates, fn (Transaction $transaction): bool => $transaction->isExpenseSide());
 
         return [
             ...self::summarize($income, $expense),
-            'savings' => $this->sumSetAside($transactions, $userCurrency, CategoryType::Savings),
-            'investments' => $this->sumSetAside($transactions, $userCurrency, CategoryType::Investment),
+            'savings' => $this->sumSetAside($aggregates, CategoryType::Savings),
+            'investments' => $this->sumSetAside($aggregates, CategoryType::Investment),
         ];
-    }
-
-    /**
-     * @param  Collection<int, Transaction>  $transactions
-     */
-    private function sumTransactions(Collection $transactions, string $userCurrency, CategoryType $type): int
-    {
-        $onSide = match ($type) {
-            CategoryType::Income => fn (Transaction $transaction): bool => $transaction->isIncomeSide(),
-            CategoryType::Expense => fn (Transaction $transaction): bool => $transaction->isExpenseSide(),
-            default => throw new InvalidArgumentException("sumTransactions only supports Income and Expense, got {$type->value}."),
-        };
-
-        return $this->sumConvertedAmounts($transactions->filter($onSide), $userCurrency);
     }
 
     /**
@@ -169,25 +132,23 @@ class CashflowSummaryService
      * savings, investment or retirement account are skipped, since the one on
      * the other account already counts that money.
      *
-     * @param  Collection<int, Transaction>  $transactions
+     * @param  Collection<int, CashflowAggregate>  $aggregates
      */
-    private function sumSetAside(Collection $transactions, string $userCurrency, CategoryType $type): int
+    private function sumSetAside(Collection $aggregates, CategoryType $type): int
     {
-        return -$this->sumConvertedAmounts(
-            $transactions->filter(fn (Transaction $transaction): bool => $transaction->categoryType() === $type
-                && ! $transaction->isSetAsideAccountLeg()),
-            $userCurrency,
+        return -$this->sumWhere(
+            $aggregates,
+            fn (Transaction $transaction): bool => $transaction->categoryType() === $type
+                && ! $transaction->isSetAsideAccountLeg(),
         );
     }
 
     /**
-     * @param  Collection<int, Transaction>  $transactions
-     * @return Collection<int, Transaction>
+     * @param  Collection<int, CashflowAggregate>  $aggregates
+     * @param  callable(Transaction): bool  $counts
      */
-    private function transactionsForPeriod(Collection $transactions, Carbon $from, Carbon $to): Collection
+    private function sumWhere(Collection $aggregates, callable $counts): int
     {
-        return $transactions->filter(
-            fn (Transaction $transaction): bool => $transaction->transaction_date->betweenIncluded($from, $to)
-        );
+        return CashflowAggregate::total($aggregates->filter(fn (CashflowAggregate $aggregate): bool => $counts($aggregate->transaction)));
     }
 }
