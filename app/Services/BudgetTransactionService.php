@@ -10,7 +10,6 @@ use App\Models\BudgetPeriod;
 use App\Models\BudgetTransaction;
 use App\Models\Transaction;
 use App\Services\Budgets\BudgetAssignmentLookups;
-use App\Services\Cache\DataVersion;
 use App\Services\Transactions\EffectiveTransactionPostings;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -99,7 +98,6 @@ class BudgetTransactionService
                 ->whereHas('budgetPeriod.budget', fn ($query) => $query->whereNull('archived_at'))
                 ->when($matchingPeriodIds !== [], fn ($query) => $query->whereNotIn('budget_period_id', $matchingPeriodIds))
                 ->delete();
-            DataVersion::bumpOwnerOf($transaction);
         }, attempts: 5);
 
         if ($notify) {
@@ -141,7 +139,6 @@ class BudgetTransactionService
                 fn (Builder $query) => $query->where('account_id', $account->id),
             )
             ->update(['close_to_limit_notified' => false, 'over_limit_notified' => false]);
-        DataVersion::bumpOwnerOf($account);
 
         ReassignTransactionsToBudgets::dispatch($transactionIds, notify: false);
 
@@ -151,7 +148,6 @@ class BudgetTransactionService
     public function unassignTransaction(Transaction $transaction): void
     {
         BudgetTransaction::query()->where('transaction_id', $transaction->id)->delete();
-        DataVersion::bumpOwnerOf($transaction);
     }
 
     public function assignHistoricalTransactionsToPeriod(BudgetPeriod $period): int
@@ -229,7 +225,6 @@ class BudgetTransactionService
         }
 
         BudgetTransaction::upsert($rows, ['transaction_id', 'budget_period_id'], ['amount']);
-        DataVersion::bumpOwnerOf($transactions->first());
 
         return $created;
     }

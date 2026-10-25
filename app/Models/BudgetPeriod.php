@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use App\Models\Concerns\BumpsDataVersion;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
@@ -18,7 +17,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class BudgetPeriod extends Model
 {
-    use BumpsDataVersion, HasFactory, HasUuids;
+    use HasFactory, HasUuids;
 
     private const CLOSE_TO_LIMIT_THRESHOLD_PERCENTAGE = 90;
 
@@ -186,10 +185,5 @@ class BudgetPeriod extends Model
     public function budgetTransactions(): HasMany
     {
         return $this->hasMany(BudgetTransaction::class);
-    }
-
-    public function dataVersionOwner(): ?Model
-    {
-        return $this->dataVersionOwnerVia('budget');
     }
 }

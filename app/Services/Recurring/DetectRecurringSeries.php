@@ -520,8 +520,6 @@ class DetectRecurringSeries
                     ->whereIn('transaction_id', $appliedTransactionIds)
                     ->delete();
 
-                // Every id deleted above is attached again below, and the
-                // attach fires the pivot's model events, which bump the owner.
                 foreach ($rows as $item) {
                     $item['row']->transactions()->attach(array_values(array_unique($item['transaction_ids'])));
                 }
