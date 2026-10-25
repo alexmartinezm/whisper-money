@@ -7,6 +7,7 @@ use App\Http\Requests\Api\BulkUpdateTransactionRequest;
 use App\Http\Requests\Api\CheckDuplicateTransactionsRequest;
 use App\Http\Requests\IndexTransactionRequest;
 use App\Models\Transaction;
+use App\Services\TransactionCsvExporter;
 use App\Services\TransactionDuplicateMatcher;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -41,15 +42,18 @@ class TransactionController extends Controller
     }
 
     /**
-     * How many transactions match the transactions page's filters, for the
-     * export dialog to say how big "all matching" is before downloading it.
+     * How many rows exporting the transactions page's filters writes (a split
+     * transaction writes one per kept line), for the export dialog to say how
+     * big "all matching" is before downloading it.
      */
-    public function count(IndexTransactionRequest $request): JsonResponse
+    public function count(IndexTransactionRequest $request, TransactionCsvExporter $exporter): JsonResponse
     {
-        $count = Transaction::query()
-            ->where('user_id', $request->user()->id)
-            ->applyFilters($request->filters())
-            ->count();
+        $filters = $request->filters();
+
+        $count = $exporter->countRows(
+            Transaction::query()->where('user_id', $request->user()->id)->applyFilters($filters),
+            $filters,
+        );
 
         return response()->json(['count' => $count]);
     }

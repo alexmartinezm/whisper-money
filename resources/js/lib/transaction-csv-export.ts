@@ -16,9 +16,14 @@ export interface TransactionCsvExportRequest {
 
 export interface TransactionCsvDownload {
     filename: string;
-    /** Transactions in the file, header left out. */
+    /** Rows in the file, header left out: one per split line of a split transaction. */
     rows: number;
+    /** Rows whose description is still encrypted on the device, written empty. */
+    encryptedDescriptions: number;
 }
+
+/** Set by the server before the body starts, counted over the same rows. */
+const ENCRYPTED_DESCRIPTIONS_HEADER = 'X-Encrypted-Descriptions';
 
 const NEWLINE = 10;
 const QUOTE = 34;
@@ -73,7 +78,17 @@ export async function downloadTransactionsCsv({
     const filename = transactionCsvFilename();
     saveBlob(new Blob(chunks, { type: 'text/csv;charset=utf-8' }), filename);
 
-    return { filename, rows };
+    return {
+        filename,
+        rows,
+        encryptedDescriptions: encryptedDescriptionsOf(response),
+    };
+}
+
+function encryptedDescriptionsOf(response: Response): number {
+    const count = Number(response.headers.get(ENCRYPTED_DESCRIPTIONS_HEADER));
+
+    return Number.isInteger(count) && count > 0 ? count : 0;
 }
 
 /**

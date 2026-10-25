@@ -300,6 +300,21 @@ function progressText(
     });
 }
 
+/**
+ * Descriptions still encrypted on the device cannot be read by the server,
+ * so the export leaves them empty and says how many.
+ */
+function encryptedDescriptionsNote(
+    count: number,
+    formatCount: (value: number) => string,
+): string {
+    return count === 1
+        ? __('1 encrypted description was exported empty')
+        : __(':count encrypted descriptions were exported empty', {
+              count: formatCount(count),
+          });
+}
+
 /** Full and pulsing when there is no total to measure against. */
 function progressPercent({ received, total }: ExportProgress): number {
     if (total === null) {
@@ -390,18 +405,35 @@ function useCsvDownload() {
             setProgress({ received: 0, total });
 
             try {
-                const { filename, rows } = await downloadTransactionsCsv({
-                    params,
-                    ids,
-                    signal: controller.signal,
-                    onProgress: (received) => setProgress({ received, total }),
+                const { filename, rows, encryptedDescriptions } =
+                    await downloadTransactionsCsv({
+                        params,
+                        ids,
+                        signal: controller.signal,
+                        onProgress: (received) =>
+                            setProgress({ received, total }),
+                    });
+
+                const summary = __(':count transactions · :file', {
+                    count: formatCount(rows),
+                    file: filename,
                 });
 
                 toast.success(__('CSV downloaded'), {
-                    description: __(':count transactions · :file', {
-                        count: formatCount(rows),
-                        file: filename,
-                    }),
+                    description:
+                        encryptedDescriptions > 0 ? (
+                            <span className="flex flex-col gap-0.5">
+                                <span>{summary}</span>
+                                <span>
+                                    {encryptedDescriptionsNote(
+                                        encryptedDescriptions,
+                                        formatCount,
+                                    )}
+                                </span>
+                            </span>
+                        ) : (
+                            summary
+                        ),
                 });
 
                 return true;

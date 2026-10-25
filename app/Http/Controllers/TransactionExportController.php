@@ -11,6 +11,13 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 class TransactionExportController extends Controller
 {
     /**
+     * How many exported rows had an encrypted description written empty, for
+     * the page to say so once the download ends. Counted before the stream
+     * starts, since headers cannot follow the body.
+     */
+    public const ENCRYPTED_DESCRIPTIONS_HEADER = 'X-Encrypted-Descriptions';
+
+    /**
      * Download the user's transactions as CSV, narrowed by the same filters and
      * in the same order as the transactions page, or only the rows it has
      * loaded when `ids` names them. Rows are streamed so the whole history
@@ -19,13 +26,17 @@ class TransactionExportController extends Controller
     public function __invoke(ExportTransactionsRequest $request, TransactionCsvExporter $exporter): StreamedResponse
     {
         $ids = $request->ids();
+        $filters = $request->filters();
 
-        $transactions = Transaction::query()
+        $selected = Transaction::query()
             ->where('user_id', $request->user()->id)
-            ->with(TransactionCsvExporter::RELATIONS)
-            ->applyFilters($request->filters())
-            ->when($ids !== null, fn (Builder $query) => $query->whereIn('id', $ids))
-            ->sortedForList($request->sort())
+            ->applyFilters($filters)
+            ->when($ids !== null, fn (Builder $query) => $query->whereIn('id', $ids));
+
+        $encryptedDescriptions = $exporter->countRows((clone $selected)->whereNotNull('description_iv'), $filters);
+
+        $transactions = $exporter
+            ->withRowRelations($selected->sortedForList($request->sort()), $filters)
             ->lazy(500);
 
         return response()->streamDownload(function () use ($transactions, $exporter): void {
@@ -36,7 +47,9 @@ class TransactionExportController extends Controller
             fputcsv($output, TransactionCsvExporter::HEADER, escape: '');
 
             foreach ($transactions as $transaction) {
-                fputcsv($output, $exporter->row($transaction), escape: '');
+                foreach ($exporter->rows($transaction) as $row) {
+                    fputcsv($output, $row, escape: '');
+                }
             }
 
             fclose($output);
@@ -45,6 +58,7 @@ class TransactionExportController extends Controller
             // The page counts rows as they arrive to show progress; a proxy
             // that buffers the whole body would hold them back until the end.
             'X-Accel-Buffering' => 'no',
+            self::ENCRYPTED_DESCRIPTIONS_HEADER => (string) $encryptedDescriptions,
         ]);
     }
 }

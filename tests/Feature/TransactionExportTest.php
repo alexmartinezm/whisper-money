@@ -1,10 +1,12 @@
 <?php
 
+use App\Http\Controllers\TransactionExportController;
 use App\Models\Account;
 use App\Models\Bank;
 use App\Models\Category;
 use App\Models\Label;
 use App\Models\Transaction;
+use App\Models\TransactionSplit;
 use App\Models\User;
 
 /**
@@ -20,6 +22,38 @@ function exportedRows(User $user, array $payload = []): array
     $lines = explode("\n", trim(ltrim($response->streamedContent(), "\u{FEFF}")));
 
     return array_map(fn (string $line): array => str_getcsv($line, escape: ''), $lines);
+}
+
+/**
+ * Splits a transaction into lines, in the order given, and leaves it without
+ * a category of its own the way splitting one does.
+ *
+ * @param  list<array{0: Category, 1: int}>  $lines  category and amount in cents
+ */
+function splitForExport(Transaction $transaction, array $lines): Transaction
+{
+    $transaction->update(['category_id' => null]);
+
+    foreach ($lines as $position => [$category, $amount]) {
+        TransactionSplit::factory()->create([
+            'transaction_id' => $transaction->id,
+            'category_id' => $category->id,
+            'amount' => $amount,
+            'position' => $position,
+        ]);
+    }
+
+    return $transaction;
+}
+
+/**
+ * What the export dialog reads as the number of rows "all matching" writes.
+ *
+ * @param  array<string, mixed>  $query
+ */
+function exportRowCount(User $user, array $query = []): int
+{
+    return test()->actingAs($user)->getJson(route('api.transactions.count', $query))->assertOk()->json('count');
 }
 
 test('a user downloads their transactions as a csv file', function () {
@@ -204,4 +238,148 @@ test('the export keeps its own rate limit, apart from the api routes', function 
     }
 
     $this->actingAs($user)->post(route('transactions.export'))->assertTooManyRequests();
+});
+
+test('a split transaction is written as one row per line, in line order, with the transaction\'s other fields', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $bank = Bank::factory()->create(['name' => 'Acme Bank']);
+    $account = Account::factory()->create(['user_id' => $user->id, 'name' => 'Checking', 'bank_id' => $bank->id]);
+    $groceries = Category::factory()->create(['user_id' => $user->id, 'name' => 'Groceries']);
+    $household = Category::factory()->create(['user_id' => $user->id, 'name' => 'Household']);
+    $transaction = Transaction::factory()->plaintext()->create([
+        'user_id' => $user->id,
+        'account_id' => $account->id,
+        'description' => 'Hypermarket',
+        'transaction_date' => '2026-04-02',
+        'amount' => -10000,
+        'currency_code' => 'EUR',
+        'notes' => 'Monthly shop',
+        'creditor_name' => 'Hypermarket SA',
+    ]);
+    $transaction->labels()->attach(Label::factory()->create(['user_id' => $user->id, 'name' => 'Home'])->id);
+    splitForExport($transaction, [[$groceries, -7000], [$household, -3000]]);
+
+    expect(array_slice(exportedRows($user), 1))->toBe([
+        ['2026-04-02', 'Hypermarket', '-70.00', 'EUR', 'Checking', 'Acme Bank', 'Groceries', 'Home', 'Monthly shop', 'Hypermarket SA', ''],
+        ['2026-04-02', 'Hypermarket', '-30.00', 'EUR', 'Checking', 'Acme Bank', 'Household', 'Home', 'Monthly shop', 'Hypermarket SA', ''],
+    ]);
+});
+
+test('a category filter keeps only the split lines in that category or below it', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $food = Category::factory()->create(['user_id' => $user->id, 'name' => 'Food']);
+    $groceries = Category::factory()->childOf($food)->create(['name' => 'Groceries']);
+    $rent = Category::factory()->create(['user_id' => $user->id, 'name' => 'Rent']);
+    splitForExport(
+        Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'description' => 'Mixed', 'transaction_date' => '2026-05-01']),
+        [[$rent, -6000], [$groceries, -4000]],
+    );
+    Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'category_id' => null, 'description' => 'Loose', 'transaction_date' => '2026-05-02']);
+
+    expect(array_column(exportedRows($user, ['category_ids' => $food->id]), 6))->toBe(['Category', 'Groceries'])
+        ->and(array_column(exportedRows($user, ['category_ids' => $rent->id]), 6))->toBe(['Category', 'Rent'])
+        ->and(array_column(exportedRows($user, ['category_ids' => "uncategorized,{$food->id}"]), 1))->toBe(['Description', 'Loose', 'Mixed'])
+        ->and(array_column(exportedRows($user, ['category_ids' => 'uncategorized']), 1))->toBe(['Description', 'Loose'])
+        ->and(array_column(exportedRows($user), 6))->toBe(['Category', '', 'Rent', 'Groceries']);
+});
+
+test('a wanted label on a split transaction keeps every one of its lines', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $rent = Category::factory()->create(['user_id' => $user->id, 'name' => 'Rent']);
+    $utilities = Category::factory()->create(['user_id' => $user->id, 'name' => 'Utilities']);
+    $shared = Label::factory()->create(['user_id' => $user->id, 'name' => 'Shared']);
+    $labelled = splitForExport(
+        Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'description' => 'Labelled', 'transaction_date' => '2026-05-02']),
+        [[$rent, -8000], [$utilities, -2000]],
+    );
+    $labelled->labels()->attach($shared->id);
+    splitForExport(
+        Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'description' => 'Unlabelled', 'transaction_date' => '2026-05-01']),
+        [[$rent, -5000], [$utilities, -1000]],
+    );
+
+    $rows = exportedRows($user, ['category_ids' => $rent->id, 'label_ids' => $shared->id]);
+
+    expect(array_map(fn (array $row): string => "{$row[1]} {$row[6]}", array_slice($rows, 1)))
+        ->toBe(['Labelled Rent', 'Labelled Utilities', 'Unlabelled Rent'])
+        ->and(array_column(exportedRows($user, ['label_ids' => $shared->id]), 6))->toBe(['Category', 'Rent', 'Utilities']);
+});
+
+test('the count is the number of rows the export writes', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $food = Category::factory()->create(['user_id' => $user->id, 'name' => 'Food']);
+    $groceries = Category::factory()->childOf($food)->create(['name' => 'Groceries']);
+    $rent = Category::factory()->create(['user_id' => $user->id, 'name' => 'Rent']);
+    Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'category_id' => $groceries->id]);
+    splitForExport(Transaction::factory()->plaintext()->create(['user_id' => $user->id]), [[$groceries, -100], [$food, -200]]);
+    splitForExport(Transaction::factory()->plaintext()->create(['user_id' => $user->id]), [[$rent, -300], [$groceries, -400], [$rent, -500]]);
+    Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'category_id' => $rent->id]);
+
+    // One unsplit, both lines of the first split, one line of the second.
+    expect(exportRowCount($user, ['category_ids' => $food->id]))->toBe(4)
+        ->and(exportedRows($user, ['category_ids' => $food->id]))->toHaveCount(4 + 1)
+        ->and(exportRowCount($user))->toBe(7)
+        ->and(exportedRows($user))->toHaveCount(7 + 1);
+});
+
+test('fields still encrypted on the device are exported empty, and the response says how many descriptions', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $category = Category::factory()->create(['user_id' => $user->id]);
+    $encryptedAccount = Account::factory()->create([
+        'user_id' => $user->id,
+        'name' => 'c2VjcmV0LWFjY291bnQ=',
+        'name_iv' => 'AAAAAAAAAAAAAAAA',
+        'encrypted' => true,
+    ]);
+    Transaction::factory()->create([
+        'user_id' => $user->id,
+        'account_id' => $encryptedAccount->id,
+        'description' => 'ZW5jcnlwdGVkLWRlc2M=',
+        'description_iv' => 'BBBBBBBBBBBBBBBB',
+        'notes' => 'ZW5jcnlwdGVkLW5vdGU=',
+        'notes_iv' => 'CCCCCCCCCCCCCCCC',
+        'transaction_date' => '2026-06-03',
+    ]);
+    splitForExport(Transaction::factory()->create([
+        'user_id' => $user->id,
+        'description' => 'c3BsaXQtZGVzYw==',
+        'description_iv' => 'DDDDDDDDDDDDDDDD',
+        'notes' => 'Readable note',
+        'notes_iv' => null,
+        'transaction_date' => '2026-06-02',
+    ]), [[$category, -100], [$category, -200]]);
+    Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'description' => 'Plain', 'transaction_date' => '2026-06-01']);
+
+    $response = $this->actingAs($user)->post(route('transactions.export'))->assertOk()
+        ->assertHeader(TransactionExportController::ENCRYPTED_DESCRIPTIONS_HEADER, '3');
+    $rows = exportedRows($user);
+
+    expect($response->streamedContent())->not->toContain('ZW5jcnlwdGVk')->not->toContain('c2VjcmV0')->not->toContain('c3BsaXQt')
+        ->and([$rows[1][1], $rows[1][4], $rows[1][8]])->toBe(['', '', ''])
+        ->and([$rows[2][1], $rows[2][8]])->toBe(['', 'Readable note'])
+        ->and([$rows[3][1], $rows[3][8]])->toBe(['', 'Readable note'])
+        ->and($rows[4][1])->toBe('Plain');
+
+    $this->actingAs($user)->post(route('transactions.export'), ['search' => 'Plain'])
+        ->assertHeader(TransactionExportController::ENCRYPTED_DESCRIPTIONS_HEADER, '0');
+});
+
+test('exporting the loaded rows narrows their split lines the same way', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $groceries = Category::factory()->create(['user_id' => $user->id, 'name' => 'Groceries']);
+    $household = Category::factory()->create(['user_id' => $user->id, 'name' => 'Household']);
+    $loaded = splitForExport(
+        Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'description' => 'Loaded']),
+        [[$household, -300], [$groceries, -700]],
+    );
+    splitForExport(
+        Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'description' => 'Not loaded']),
+        [[$groceries, -100]],
+    );
+
+    $rows = exportedRows($user, ['ids' => [$loaded->id], 'category_ids' => $groceries->id]);
+
+    expect(array_map(fn (array $row): array => [$row[1], $row[2], $row[6]], array_slice($rows, 1)))
+        ->toBe([['Loaded', '-7.00', 'Groceries']])
+        ->and(array_column(exportedRows($user, ['ids' => [$loaded->id]]), 6))->toBe(['Category', 'Household', 'Groceries']);
 });

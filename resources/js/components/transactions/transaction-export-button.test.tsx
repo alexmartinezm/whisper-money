@@ -63,6 +63,7 @@ describe('TransactionExportButton', () => {
         downloadTransactionsCsv.mockResolvedValue({
             filename: 'transactions-2026-10-25.csv',
             rows: 2,
+            encryptedDescriptions: 0,
         });
     });
 
@@ -88,6 +89,33 @@ describe('TransactionExportButton', () => {
             screen.queryByTestId('transaction-export-dialog'),
         ).not.toBeInTheDocument();
     });
+
+    it.each([
+        [1200, '1,200 encrypted descriptions were exported empty'],
+        [1, '1 encrypted description was exported empty'],
+    ])(
+        'says when %i encrypted descriptions were exported empty',
+        async (encryptedDescriptions, note) => {
+            downloadTransactionsCsv.mockResolvedValue({
+                filename: 'transactions-2026-10-25.csv',
+                rows: 1500,
+                encryptedDescriptions,
+            });
+            renderButton({ hasMore: false });
+
+            fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
+
+            await waitFor(() => expect(toastSuccess).toHaveBeenCalledOnce());
+            const [, { description }] = toastSuccess.mock.calls[0];
+            render(<>{description}</>);
+            expect(
+                screen.getByText(
+                    '1,500 transactions · transactions-2026-10-25.csv',
+                ),
+            ).toBeInTheDocument();
+            expect(screen.getByText(note)).toBeInTheDocument();
+        },
+    );
 
     it('asks first when the list has more pages, defaulting to every match', async () => {
         mockCount(1234);

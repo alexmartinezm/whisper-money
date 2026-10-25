@@ -30,6 +30,7 @@ describe('downloadTransactionsCsv', () => {
     it('posts the filters and loaded ids, reports rows as they arrive and saves the file', async () => {
         const fetchMock = vi.fn().mockResolvedValue({
             ok: true,
+            headers: new Headers(),
             body: streamOf(
                 'Date,Description\n2026-01-02,A\n',
                 '2026-01-01,B\n',
@@ -52,6 +53,7 @@ describe('downloadTransactionsCsv', () => {
         expect(download).toEqual({
             filename: transactionCsvFilename(),
             rows: 2,
+            encryptedDescriptions: 0,
         });
         expect(fetchMock).toHaveBeenCalledWith(
             '/transactions/export',
@@ -69,6 +71,7 @@ describe('downloadTransactionsCsv', () => {
             'fetch',
             vi.fn().mockResolvedValue({
                 ok: true,
+                headers: new Headers(),
                 body: streamOf(
                     'Date,Notes\n2026-01-02,"first line\nsecond ',
                     'line, ""quoted""\nthird"\n2026-01-01,plain\n',
@@ -89,6 +92,28 @@ describe('downloadTransactionsCsv', () => {
 
         expect(rows).toBe(2);
         expect(onProgress.mock.calls).toEqual([[0], [2]]);
+    });
+
+    it('reads how many rows had an encrypted description left empty', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue({
+                ok: true,
+                headers: new Headers({ 'X-Encrypted-Descriptions': '3' }),
+                body: streamOf('Date,Description\n2026-01-02,\n'),
+            }),
+        );
+        URL.createObjectURL = vi.fn(() => 'blob:csv');
+        URL.revokeObjectURL = vi.fn();
+        vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(
+            () => {},
+        );
+
+        const { encryptedDescriptions } = await downloadTransactionsCsv({
+            params: {},
+        });
+
+        expect(encryptedDescriptions).toBe(3);
     });
 
     it('fails when the server refuses the export', async () => {
