@@ -40,8 +40,7 @@ class TransactionExportController extends Controller
             ->applyFilters($filters)
             ->when($ids !== null, fn (Builder $query) => $query->whereIn('id', $ids));
 
-        $rows = $exporter->countRows($selected, $filters);
-        $encryptedDescriptions = $exporter->countRows((clone $selected)->whereNotNull('description_iv'), $filters);
+        $counts = $exporter->countRowsAndEncryptedDescriptions($selected, $filters);
 
         $transactions = $exporter
             ->withRowRelations($selected->sortedForList($request->sort()), $filters)
@@ -64,8 +63,8 @@ class TransactionExportController extends Controller
             // The page counts rows as they arrive to show progress; a proxy
             // that buffers the whole body would hold them back until the end.
             'X-Accel-Buffering' => 'no',
-            self::ROWS_HEADER => (string) $rows,
-            self::ENCRYPTED_DESCRIPTIONS_HEADER => (string) $encryptedDescriptions,
+            self::ROWS_HEADER => (string) $counts['rows'],
+            self::ENCRYPTED_DESCRIPTIONS_HEADER => (string) $counts['encrypted'],
         ]);
     }
 }

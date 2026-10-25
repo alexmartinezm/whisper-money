@@ -74,9 +74,9 @@ class TransactionCsvExporter
      * unsplit transaction and one per kept line of a split one.
      *
      * A cashflow block filter narrows postings in PHP, so under it the
-     * transactions are read and expanded as the export does; the filter
-     * requires a date range, which bounds how many that reads. Every other
-     * filter is counted in SQL.
+     * transactions are read and expanded as the export does, and the filter's
+     * date range does not limit how many that reads. Every other filter is
+     * counted in SQL.
      *
      * @param  Builder<Transaction>  $transactions  filtered, not sorted
      * @param  array<string, mixed>  $filters
@@ -84,12 +84,63 @@ class TransactionCsvExporter
     public function countRows(Builder $transactions, array $filters): int
     {
         if (! empty($filters['cashflow_block'])) {
-            return iterator_count($this->postings(
-                $this->withRowRelations(clone $transactions, $filters)->lazy(500),
-                $filters,
-            ));
+            return $this->countPostings($transactions, $filters)['rows'];
         }
 
+        return $this->countRowsInSql($transactions, $filters);
+    }
+
+    /**
+     * Both counts an export reports before streaming: its rows, and those
+     * whose description is still encrypted on the device and so is written
+     * empty. Under a cashflow block filter the postings are read and
+     * expanded once for both; otherwise two counts run in SQL.
+     *
+     * @param  Builder<Transaction>  $transactions  filtered, not sorted
+     * @param  array<string, mixed>  $filters
+     * @return array{rows: int, encrypted: int}
+     */
+    public function countRowsAndEncryptedDescriptions(Builder $transactions, array $filters): array
+    {
+        if (! empty($filters['cashflow_block'])) {
+            return $this->countPostings($transactions, $filters);
+        }
+
+        return [
+            'rows' => $this->countRowsInSql($transactions, $filters),
+            'encrypted' => $this->countRowsInSql((clone $transactions)->whereNotNull('description_iv'), $filters),
+        ];
+    }
+
+    /**
+     * Reads and expands the transactions once, counting the postings and
+     * those with an encrypted description.
+     *
+     * @param  Builder<Transaction>  $transactions
+     * @param  array<string, mixed>  $filters
+     * @return array{rows: int, encrypted: int}
+     */
+    private function countPostings(Builder $transactions, array $filters): array
+    {
+        $counts = ['rows' => 0, 'encrypted' => 0];
+
+        foreach ($this->postings($this->withRowRelations(clone $transactions, $filters)->lazy(500), $filters) as $posting) {
+            $counts['rows']++;
+
+            if ($posting->description_iv !== null) {
+                $counts['encrypted']++;
+            }
+        }
+
+        return $counts;
+    }
+
+    /**
+     * @param  Builder<Transaction>  $transactions
+     * @param  array<string, mixed>  $filters
+     */
+    private function countRowsInSql(Builder $transactions, array $filters): int
+    {
         $unsplit = (clone $transactions)->whereDoesntHave('splits')->count();
 
         $lines = TransactionSplit::query()
