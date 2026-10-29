@@ -1,5 +1,11 @@
 <?php
 
+use App\Http\ApiV1\ErrorRenderer;
+use App\Http\Middleware\ApiV1\AuthenticateApiRequest;
+use App\Http\Middleware\ApiV1\EnsureApiAccess;
+use App\Http\Middleware\ApiV1\HandleIdempotencyKey;
+use App\Http\Middleware\ApiV1\RecordApiRequest;
+use App\Http\Middleware\ApiV1\ThrottleApiRequestsByIp;
 use App\Http\Middleware\AssignPriceExperimentArm;
 use App\Http\Middleware\BlockDemoAccountActions;
 use App\Http\Middleware\EnsureOnboardingComplete;
@@ -20,6 +26,8 @@ use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets;
 use Illuminate\Http\Request;
 use Illuminate\Queue\MaxAttemptsExceededException;
+use Illuminate\Routing\Middleware\SubstituteBindings;
+use Illuminate\Support\Facades\Route;
 use Laravel\Sanctum\Http\Middleware\CheckAbilities;
 use Laravel\Sanctum\Http\Middleware\CheckForAnyAbility;
 use League\OAuth2\Server\Exception\OAuthServerException;
@@ -31,6 +39,12 @@ return Application::configure(basePath: dirname(__DIR__))
         api: __DIR__.'/../routes/api.php',
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
+        // The public API: stateless, bearer-only, outside the `web` group the
+        // internal `/api/*` routes run under.
+        then: fn () => Route::middleware('api-v1')
+            ->prefix('api/v1')
+            ->name('api.v1.')
+            ->group(base_path('routes/api-v1.php')),
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->redirectGuestsTo(fn (Request $request) => app(AuthEntryPointService::class)->guestRedirectRoute($request));
@@ -60,6 +74,21 @@ return Application::configure(basePath: dirname(__DIR__))
             BlockDemoAccountActions::class.':auto',
         ]);
 
+        // The per-IP throttle caps anonymous floods before any token lookup.
+        // Then authenticate, so every later step (metric, per-user throttle,
+        // plan gate, per-user idempotency cache) knows the caller. The per-user
+        // throttle sits ahead of the plan gate, so a refused account is capped
+        // too, and inside the metric, so its 429s are recorded.
+        $middleware->group('api-v1', [
+            ThrottleApiRequestsByIp::class,
+            AuthenticateApiRequest::class,
+            RecordApiRequest::class,
+            'throttle:api-v1',
+            EnsureApiAccess::class,
+            HandleIdempotencyKey::class,
+            SubstituteBindings::class,
+        ]);
+
         $middleware->alias([
             'admin' => EnsureUserIsAdmin::class,
             'subscribed' => EnsureUserIsSubscribed::class,
@@ -84,4 +113,12 @@ return Application::configure(basePath: dirname(__DIR__))
         // exceptions, and nothing to do about any of them. Only the poll loop is
         // covered — a connection lost inside a job, or in a request, still reports.
         $exceptions->dontReportWhen(fn (Throwable $e): bool => app(QueueWorkerLoop::class)->isLostConnectionWhilePolling($e));
+
+        // `/api/v1` always answers JSON, through a single renderer (see
+        // ErrorRenderer); validation keeps Laravel's standard 422 body.
+        $exceptions->shouldRenderJsonWhen(fn (Request $request): bool => ErrorRenderer::handles($request) || $request->expectsJson());
+
+        $exceptions->render(fn (Throwable $e, Request $request) => ErrorRenderer::handles($request)
+            ? app(ErrorRenderer::class)->render($e)
+            : null);
     })->create();

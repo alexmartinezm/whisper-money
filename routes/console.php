@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\ApiRequest;
 use App\Models\Import;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schedule;
@@ -50,6 +51,9 @@ Schedule::command('stats:subscription-funnel')->weekly()->mondays()->at('09:15')
 // A full import that never got started keeps the rows the browser staged for
 // it; a day on, nobody is coming back to finish that upload.
 Schedule::command('model:prune', ['--model' => [Import::class]])->dailyAt('04:45')->timezone('Europe/Madrid');
+// `/api/v1` usage rows past the 90 days `stats:api-usage` can usefully look
+// back over (see ApiRequest::prunable()).
+Schedule::command('model:prune', ['--model' => [ApiRequest::class]])->dailyAt('04:50')->timezone('Europe/Madrid');
 
 /**
  * Make a failed scheduled command say which one it was and why it failed.
