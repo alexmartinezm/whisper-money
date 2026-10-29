@@ -3571,5 +3571,21 @@
     ":count encrypted descriptions were exported empty": ":count descripciones cifradas se han exportado vacías",
     "1 transaction with this search and filters": "1 transacción con esta búsqueda y filtros",
     "Download 1 transaction": "Descargar 1 transacción",
-    "1 transaction · :file": "1 transacción · :file"
+    "1 transaction · :file": "1 transacción · :file",
+    "This token has expired and cannot be rotated. Create a new one instead.": "Este token ha caducado y no se puede rotar. Crea uno nuevo.",
+    "Expired": "Caducado",
+    "Create an API token": "Crear un token de API",
+    "Read-only tokens can read your data. Read & write tokens can also create, edit and delete it.": "Los tokens de solo lectura pueden leer tus datos. Los de lectura y escritura también pueden crearlos, editarlos y borrarlos.",
+    "e.g. Budget spreadsheet": "p. ej. Hoja de presupuesto",
+    "Expiration": "Caducidad",
+    "30 days": "30 días",
+    "90 days": "90 días",
+    "1 year": "1 año",
+    "No expiration": "Sin caducidad",
+    "API": "API",
+    "Use the Whisper Money API to build your own scripts and integrations on top of your data.": "Usa la API de Whisper Money para crear tus propios scripts e integraciones con tus datos.",
+    "The API is available on a paid plan. Upgrade to create or rotate tokens; you can still revoke the ones you have.": "La API está disponible en el plan de pago. Mejora tu plan para crear o rotar tokens; puedes seguir revocando los que ya tienes.",
+    "Base URL": "URL base",
+    "Send every request to this URL, with your token in the Authorization header as a Bearer token.": "Envía cada petición a esta URL, con tu token en la cabecera Authorization como token Bearer.",
+    "Personal tokens": "Tokens personales"
 }
