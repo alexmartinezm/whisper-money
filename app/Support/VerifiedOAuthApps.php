@@ -10,7 +10,7 @@ use Laravel\Passport\Client;
  * name: it is verified as an app only when every redirect URI it registered
  * can deliver the authorization code to that app's own hosts and nowhere
  * else. A spoofed registration then gains nothing, since the code still goes
- * to the real app.
+ * to the real app's hosts. Only the host is checked, not the callback path.
  */
 class VerifiedOAuthApps
 {

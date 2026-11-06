@@ -6,17 +6,23 @@ use App\Enums\OAuthScope;
 use App\Http\Controllers\OAuth\Concerns\GuardsOAuthScopes;
 use App\Models\User;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Http\Request;
 use Laravel\Passport\Client;
+use Laravel\Passport\Contracts\AuthorizationViewResponse;
 use Laravel\Passport\Http\Controllers\AuthorizationController as PassportAuthorizationController;
 use Laravel\Passport\Scope;
 use League\OAuth2\Server\RequestTypes\AuthorizationRequestInterface;
 use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\ServerRequestInterface;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Passport's `GET /oauth/authorize`, bound in its place, with two rules on
+ * Passport's `GET /oauth/authorize`, bound in its place, with three rules on
  * top:
  *
+ * - a `*` scope is treated as the default `mcp:use` before the request is
+ *   validated, so it goes through the consent check like any other request and
+ *   its token carries that scope (see OAuthScope::normalizeRequested());
  * - a request asking for both `mcp:use` and `api:use` is refused with
  *   `invalid_scope`, so no token ever opens both surfaces;
  * - a request the user may not approve (`api:use` without the API plan, or
@@ -27,6 +33,31 @@ use Symfony\Component\HttpFoundation\Response;
 class AuthorizationController extends PassportAuthorizationController
 {
     use GuardsOAuthScopes;
+
+    public function authorize(
+        ServerRequestInterface $psrRequest,
+        Request $request,
+        ResponseInterface $psrResponse,
+        AuthorizationViewResponse $viewResponse,
+    ): Response|AuthorizationViewResponse {
+        return parent::authorize($this->withNormalizedScope($psrRequest), $request, $psrResponse, $viewResponse);
+    }
+
+    /**
+     * Anything but a string is left for the server to refuse, and a missing or
+     * blank scope already gets the default from it.
+     */
+    private function withNormalizedScope(ServerRequestInterface $psrRequest): ServerRequestInterface
+    {
+        $query = $psrRequest->getQueryParams();
+        $scope = $query['scope'] ?? null;
+
+        if (! is_string($scope)) {
+            return $psrRequest;
+        }
+
+        return $psrRequest->withQueryParams(['scope' => OAuthScope::normalizeRequested($scope)] + $query);
+    }
 
     /**
      * @return Scope[]

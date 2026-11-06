@@ -18,6 +18,7 @@ use App\Services\Ai\UncategorizedTransactionMatcher;
 use App\Services\Banking\EnableBankingProvider;
 use App\Services\Banking\EnableBankingPsuContext;
 use App\Services\Discord\DiscordWebhook;
+use App\Support\OAuthScopeRepository;
 use App\Support\QueueWorkerLoop;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Auth\StatefulGuard;
@@ -33,6 +34,7 @@ use Laravel\Cashier\Cashier;
 use Laravel\Fortify\Contracts\RegisterResponse as RegisterResponseContract;
 use Laravel\Mcp\Server\Http\Controllers\OAuthRegisterController;
 use Laravel\Mcp\Server\Registrar;
+use Laravel\Passport\Bridge\ScopeRepository;
 use Laravel\Passport\Http\Controllers\ApproveAuthorizationController as PassportApproveAuthorizationController;
 use Laravel\Passport\Http\Controllers\AuthorizationController as PassportAuthorizationController;
 use Laravel\Passport\Passport;
@@ -79,6 +81,7 @@ class AppServiceProvider extends ServiceProvider
             ->give(fn () => Auth::guard(config('passport.guard')));
         $this->app->bind(PassportApproveAuthorizationController::class, ApproveAuthorizationController::class);
         $this->app->bind(OAuthRegisterController::class, RegisterController::class);
+        $this->app->bind(ScopeRepository::class, OAuthScopeRepository::class);
 
         // The device-code grant approves through Passport's own controllers,
         // which skip the scope rules above. No client uses it; keep it off.
@@ -135,6 +138,13 @@ class AppServiceProvider extends ServiceProvider
         // one NAT, still a hard cap for a script guessing tokens.
         RateLimiter::for(ThrottleApiRequestsByIp::Limiter, function (Request $request): Limit {
             return Limit::perMinute(120)->by((string) $request->ip());
+        });
+
+        // Dynamic client registration is open to anyone and writes a row. A
+        // connector registers when it is connected, so ten a minute per IP
+        // never reaches one and still caps a script filling `oauth_clients`.
+        RateLimiter::for('oauth-register', function (Request $request): Limit {
+            return Limit::perMinute(10)->by((string) $request->ip());
         });
 
         // AI column-mapping suggestions are asked once per imported file, so 20

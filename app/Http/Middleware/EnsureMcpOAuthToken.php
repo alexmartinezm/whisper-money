@@ -11,10 +11,14 @@ use Laravel\Passport\Http\Middleware\CheckToken;
  * `mcp:use`, so an `api:use` token is refused with a 403.
  *
  * The one exception to Passport's CheckToken is a token with no scopes at all.
- * Until `mcp:use` became the default scope, a connector that asked for none got
- * exactly that, and those connections (and whatever they refresh into, since a
- * refresh keeps the scopes it was given) have to keep working. New
- * authorizations can no longer produce one.
+ * Until `mcp:use` became the default scope, a connector that asked for none, or
+ * for `*`, got exactly that, and those connections (and whatever they refresh
+ * into, since a refresh keeps the scopes it was given) have to keep working.
+ * New authorizations cannot produce one: AuthorizationController gives every
+ * request an explicit scope, and OAuthScopeRepository does the same for any
+ * authorization code that gets past it. A refresh cannot either: league falls
+ * back to the original scopes on a blank `scope`, and refuses any it does not
+ * hold, `*` included.
  */
 class EnsureMcpOAuthToken extends CheckToken
 {

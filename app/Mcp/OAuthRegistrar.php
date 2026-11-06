@@ -3,6 +3,7 @@
 namespace App\Mcp;
 
 use App\Enums\OAuthScope;
+use App\Http\Controllers\OAuth\RegisterController;
 use Illuminate\Support\Facades\Route;
 use Laravel\Mcp\Server\Registrar;
 
@@ -38,8 +39,10 @@ class OAuthRegistrar extends Registrar
     }
 
     /**
-     * Registered ahead of the package's catch-all resource metadata route,
-     * which would otherwise answer for `/api/v1` too.
+     * The resource metadata route goes ahead of the package's catch-all, which
+     * would otherwise answer for `/api/v1` too. The registration route goes
+     * after the package's, which it replaces (same method and URI): the package
+     * offers no way to put a rate limit on its own.
      */
     public function oauthRoutes(string $oauthPrefix = 'oauth'): void
     {
@@ -51,5 +54,9 @@ class OAuthRegistrar extends Registrar
             ->name('mcp.oauth.protected-resource.api');
 
         parent::oauthRoutes($oauthPrefix);
+
+        Route::post($oauthPrefix.'/register', RegisterController::class)
+            ->middleware('throttle:oauth-register')
+            ->name('mcp.oauth.register');
     }
 }
