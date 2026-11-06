@@ -5,8 +5,6 @@ namespace App\Services\Transactions;
 use App\Enums\TransactionSource;
 use App\Models\Transaction;
 use App\Rules\StorableDate;
-use App\Services\CurrencyOptions;
-use Closure;
 
 /**
  * The transaction write rules, shared by the create and update transaction
@@ -159,25 +157,14 @@ class TransactionWriteRules
     private static function optionalFieldRules(): array
     {
         return [
-            'currency_code' => ['sometimes', 'bail', 'string', self::supportedCurrency()],
+            // Any code, not just the ones an account can be in: a trip paid in a
+            // currency the app holds no account for is a real transaction. With
+            // no rate for it, totals count the amount unconverted and a balance
+            // stays where it is, with `balance_updated` saying so.
+            'currency_code' => ['sometimes', 'string', 'size:3'],
             'notes' => ['sometimes', 'nullable', 'string', 'max:'.self::NotesMaxLength],
             'creditor_name' => ['sometimes', 'nullable', 'string', 'max:255'],
             'debtor_name' => ['sometimes', 'nullable', 'string', 'max:255'],
         ];
-    }
-
-    /**
-     * One of the currencies an account can be in, the list the app's picker
-     * offers. Any case passes: the writer stores it in capitals.
-     */
-    private static function supportedCurrency(): Closure
-    {
-        $supported = app(CurrencyOptions::class)->accountCodes();
-
-        return function (string $attribute, mixed $value, Closure $fail) use ($supported): void {
-            if (! in_array(mb_strtoupper((string) $value), $supported, true)) {
-                $fail('The selected :attribute is invalid.');
-            }
-        };
     }
 }

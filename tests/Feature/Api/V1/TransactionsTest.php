@@ -453,6 +453,42 @@ describe('create', function () {
         expect(Transaction::query()->sole()->getRawOriginal('currency_code'))->toBe('USD');
     });
 
+    it('takes a currency the account picker does not offer, leaving a balance it has no rate for alone', function () {
+        fakeCurrencyApi();
+        $user = User::factory()->create();
+        $account = Account::factory()->create(['user_id' => $user->id, 'type' => 'checking', 'currency_code' => 'EUR']);
+        $account->balances()->create(['balance_date' => '2026-01-15', 'balance' => 10_000]);
+
+        $response = withHeaders(transactionsWriter($user))
+            ->postJson('/api/v1/transactions', [
+                'account_id' => $account->id,
+                'description' => 'Oslo',
+                'amount' => -4000,
+                'transaction_date' => '2026-01-15',
+                'currency_code' => 'NOK',
+                'update_balance' => true,
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.currency', 'NOK')
+            ->assertJsonPath('balance_updated', false);
+
+        withHeaders(transactionsWriter($user))
+            ->patchJson('/api/v1/transactions/'.$response->json('data.id'), ['currency_code' => 'pln'])
+            ->assertOk()
+            ->assertJsonPath('data.currency', 'PLN');
+
+        expect($account->balances()->sole()->balance)->toBe(10_000);
+    });
+
+    it('stores any three-character code without overflowing the column', function () {
+        $user = User::factory()->create();
+        $account = Account::factory()->create(['user_id' => $user->id]);
+
+        withHeaders(transactionsWriter($user))
+            ->postJson('/api/v1/transactions', ['account_id' => $account->id, 'description' => 'Odd', 'amount' => -1, 'transaction_date' => '2026-01-15', 'currency_code' => 'ßab'])
+            ->assertCreated();
+    });
+
     it('stores the day of a date sent with a time, and the ids as they are stored', function () {
         $user = User::factory()->create();
         $account = Account::factory()->create(['user_id' => $user->id]);
@@ -548,7 +584,7 @@ describe('create', function () {
             ->assertJsonValidationErrors('amount');
     });
 
-    it('refuses oversized text and a currency the app does not support', function () {
+    it('refuses oversized text and a code that is not three characters', function () {
         $user = User::factory()->create();
         $account = Account::factory()->create(['user_id' => $user->id]);
 
@@ -559,7 +595,7 @@ describe('create', function () {
                 'notes' => str_repeat('a', 10001),
                 'amount' => -100,
                 'transaction_date' => '2026-01-15',
-                'currency_code' => 'XYZ',
+                'currency_code' => 'NOKK',
             ])
             ->assertUnprocessable()
             ->assertJsonValidationErrors(['description', 'notes', 'currency_code']);

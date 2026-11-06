@@ -117,6 +117,30 @@ it('creates a transaction on a connected account without touching its balances',
     expect($account->balances()->where('balance_date', '2026-01-15')->value('balance'))->toBe(10_000);
 });
 
+it('takes any three-letter currency, as it always has', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
+
+    callWriteTool($user, CreateTransaction::class, [
+        'account_id' => $account->id,
+        'description' => 'Oslo',
+        'amount' => -4000,
+        'transaction_date' => '2026-01-15',
+        'currency_code' => 'NOK',
+    ])->assertOk();
+
+    $transaction = Transaction::query()->sole();
+
+    expect($transaction->currency_code)->toBe('NOK');
+
+    callWriteTool($user, UpdateTransaction::class, [
+        'transaction_id' => $transaction->id,
+        'currency_code' => 'pln',
+    ])->assertOk();
+
+    expect($transaction->fresh()->currency_code)->toBe('PLN');
+});
+
 it('locks the account before anything reads a snapshot when it moves a balance', function (string $tool) {
     $user = User::factory()->create();
     $account = Account::factory()->create(['user_id' => $user->id, 'type' => 'checking', 'currency_code' => 'EUR']);

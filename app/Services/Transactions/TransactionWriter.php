@@ -60,7 +60,7 @@ class TransactionWriter
                 'description' => (string) $fields['description'],
                 'transaction_date' => self::day($fields['transaction_date']),
                 'amount' => (int) $fields['amount'],
-                'currency_code' => $currencyCode === null ? $account->currency_code : mb_strtoupper($currencyCode),
+                'currency_code' => $currencyCode === null ? $account->currency_code : self::currency($currencyCode),
                 'notes' => self::filledOrNull($fields['notes'] ?? null),
                 'creditor_name' => self::filledOrNull($fields['creditor_name'] ?? null),
                 'debtor_name' => self::filledOrNull($fields['debtor_name'] ?? null),
@@ -207,7 +207,7 @@ class TransactionWriter
             'description' => fn (mixed $value): string => (string) $value,
             'amount' => fn (mixed $value): int => (int) $value,
             'transaction_date' => fn (mixed $value): Carbon => Carbon::parse(self::day($value)),
-            'currency_code' => fn (mixed $value): string => mb_strtoupper((string) $value),
+            'currency_code' => self::currency(...),
             'account_id' => fn (mixed $value): string => (string) $value,
             'notes' => self::filledOrNull(...),
             'creditor_name' => self::filledOrNull(...),
@@ -265,6 +265,15 @@ class TransactionWriter
         $applied = $this->balanceAdjuster->applyCreatedTransaction($edited->load('account'));
 
         return $reversed || $applied;
+    }
+
+    /**
+     * In capitals. ASCII only: the rule counts characters, and a multibyte
+     * upper case can grow past the column (`ß` is `SS`).
+     */
+    private static function currency(mixed $value): string
+    {
+        return strtoupper((string) $value);
     }
 
     /**
