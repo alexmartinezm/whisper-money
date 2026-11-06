@@ -232,18 +232,56 @@ it('lets a read-only token list rules', function () {
         ->assertSee('Readable');
 });
 
-it('refuses conditions with more nodes than the engines should run on every transaction', function () {
+it('refuses conditions larger than the engines should run on every transaction', function (mixed $conditions, string $error) {
     $user = User::factory()->create();
     $category = Category::factory()->create(['user_id' => $user->id]);
 
     callAutomationRuleTool($user, CreateAutomationRule::class, [
         'title' => 'Refused',
         'priority' => 1,
-        'rules_json' => ['or' => array_map(fn (int $index): array => ['in' => ["shop {$index}", ['var' => 'description']]], range(1, 300))],
+        'rules_json' => $conditions,
         'action_category_id' => $category->id,
-    ])->assertHasErrors(['500 JsonLogic nodes']);
+    ])->assertHasErrors([$error]);
 
     expect(AutomationRule::query()->where('user_id', $user->id)->count())->toBe(0);
+})->with([
+    'too many conditions' => [['or' => array_map(fn (int $index): array => ['in' => ["shop {$index}", ['var' => 'description']]], range(1, 500))], '2000 JsonLogic values'],
+    'a huge list of plain values' => [['in' => [['var' => 'description'], array_fill(0, 3_000, 'x')]], '2000 JsonLogic values'],
+    'a megabyte string' => [['in' => [str_repeat('x', 1_000_000), ['var' => 'description']]], '1000 characters'],
+]);
+
+it('refuses blank conditions', function (string $blank) {
+    $user = User::factory()->create();
+    $category = Category::factory()->create(['user_id' => $user->id]);
+    $rule = AutomationRule::factory()->create(['user_id' => $user->id, 'action_category_id' => $category->id, 'rules_json' => ['in' => ['x', ['var' => 'description']]]]);
+
+    callAutomationRuleTool($user, CreateAutomationRule::class, ['title' => 'Refused', 'priority' => 1, 'rules_json' => $blank, 'action_category_id' => $category->id])
+        ->assertHasErrors(['rules_json must be a non-empty JsonLogic object.']);
+    callAutomationRuleTool($user, UpdateAutomationRule::class, ['automation_rule_id' => $rule->id, 'rules_json' => $blank])
+        ->assertHasErrors(['rules_json must be a non-empty JsonLogic object.']);
+
+    expect($rule->fresh()->rules_json)->toBe(['in' => ['x', ['var' => 'description']]]);
+})->with(['an empty string' => '', 'a blank string' => '   ', 'an encoded empty string' => '""']);
+
+it('takes action_label_ids as null or a bare id, as it always has', function () {
+    $user = User::factory()->create();
+    $category = Category::factory()->create(['user_id' => $user->id]);
+    $label = Label::factory()->create(['user_id' => $user->id]);
+    $conditions = ['in' => ['x', ['var' => 'description']]];
+
+    $withNull = callAutomationRuleTool($user, CreateAutomationRule::class, ['title' => 'Null', 'priority' => 1, 'rules_json' => $conditions, 'action_category_id' => $category->id, 'action_label_ids' => null])->assertOk();
+    $bare = callAutomationRuleTool($user, CreateAutomationRule::class, ['title' => 'Bare', 'priority' => 2, 'rules_json' => $conditions, 'action_label_ids' => $label->id])->assertOk();
+
+    expect(mcpPayload($withNull)['automation_rule']['labels'])->toBe([])
+        ->and(mcpPayload($bare)['automation_rule']['labels'])->toBe([['id' => $label->id, 'name' => $label->name]]);
+
+    $id = mcpPayload($withNull)['automation_rule']['id'];
+
+    $updated = callAutomationRuleTool($user, UpdateAutomationRule::class, ['automation_rule_id' => $id, 'action_label_ids' => $label->id])->assertOk();
+    expect(mcpPayload($updated)['automation_rule']['labels'])->toBe([['id' => $label->id, 'name' => $label->name]]);
+
+    $cleared = callAutomationRuleTool($user, UpdateAutomationRule::class, ['automation_rule_id' => $id, 'action_label_ids' => null])->assertOk();
+    expect(mcpPayload($cleared)['automation_rule']['labels'])->toBe([]);
 });
 
 it('caps the note and the labels a rule applies', function () {
@@ -254,7 +292,7 @@ it('caps the note and the labels a rule applies', function () {
     callAutomationRuleTool($user, UpdateAutomationRule::class, ['automation_rule_id' => $rule->id, 'action_note' => str_repeat('x', 10_001)])
         ->assertHasErrors(['action note']);
     callAutomationRuleTool($user, UpdateAutomationRule::class, ['automation_rule_id' => $rule->id, 'action_label_ids' => array_map(fn (int $index): string => (string) Str::uuid(), range(1, 51))])
-        ->assertHasErrors(['action label ids']);
+        ->assertHasErrors(['at most 50 labels']);
 });
 
 it('stores a new note as plain text on a rule whose note was encrypted', function () {

@@ -11,6 +11,11 @@ use App\Models\Transaction;
 use App\Models\TransactionSplit;
 use App\Models\User;
 use App\Services\AutomationRuleApplier;
+use App\Services\AutomationRules\AutomationRuleWriter;
+use App\Services\AutomationRuleService;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 
@@ -279,14 +284,96 @@ describe('create', function () {
         'an operator in a variable default' => [['in' => ['x', ['var' => ['description', ['log' => 'x']]]]], 'A variable default must be a plain value (text, a number, a boolean or null).'],
         'a supported operator in a variable default' => [['in' => ['x', ['var' => ['description', ['var' => 'notes']]]]], 'A variable default must be a plain value (text, a number, a boolean or null).'],
         'conditions nested too deep' => [deeplyNegatedConditions(25), 'The conditions nest more than 20 levels deep.'],
-        'too many conditions' => [manyConditions(200), 'The conditions have more than 500 JsonLogic nodes.'],
+        'too many conditions' => [manyConditions(500), 'The conditions have more than 2000 JsonLogic values.'],
+        'a huge list of plain values' => [['in' => [['var' => 'description'], array_fill(0, 3_000, 'x')]], 'The conditions have more than 2000 JsonLogic values.'],
+        'a huge or of plain values' => [['or' => array_fill(0, 3_000, true)], 'The conditions have more than 2000 JsonLogic values.'],
+        'a megabyte string' => [['in' => [str_repeat('x', 1_000_000), ['var' => 'description']]], 'A condition value is longer than 1000 characters.'],
+        'a long variable default' => [['in' => ['x', ['var' => ['description', str_repeat('x', 1_001)]]]], 'A condition value is longer than 1000 characters.'],
+        'an empty string' => ['', 'conditions must be a non-empty JsonLogic object.'],
+        'a blank string' => ['   ', 'conditions must be a non-empty JsonLogic object.'],
     ]);
+
+    it('refuses blank conditions on an update, keeping the stored ones', function (string $blank) {
+        $user = User::factory()->create();
+        [$rule] = groceryRuleOverExistingTransactions($user);
+
+        withHeaders(rulesWriter($user))
+            ->patchJson('/api/v1/automation-rules/'.$rule->id, ['conditions' => $blank])
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.conditions.0', 'conditions must be a non-empty JsonLogic object.');
+
+        expect($rule->fresh()->rules_json)->toBe(['in' => ['grocery', ['var' => 'description']]]);
+    })->with(['an empty string' => '', 'a blank string' => '   ']);
+
+    it('refuses an oversized label list before looking at a single id', function () {
+        $user = User::factory()->create();
+        $category = Category::factory()->create(['user_id' => $user->id]);
+        $labelIds = array_map(fn (int $index): string => (string) Str::uuid(), range(1, 2_000));
+        $lookups = 0;
+        DB::listen(function (QueryExecuted $query) use (&$lookups): void {
+            $lookups += str_contains($query->sql, 'from `labels`') ? 1 : 0;
+        });
+
+        withHeaders(rulesWriter($user))
+            ->postJson('/api/v1/automation-rules', [
+                'title' => 'Groceries',
+                'priority' => 1,
+                'conditions' => groceryConditions(),
+                'action_category_id' => $category->id,
+                'action_label_ids' => $labelIds,
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('action_label_ids');
+
+        expect($lookups)->toBe(0);
+    });
+
+    it('stores the ids as they are, whatever case they were sent in', function () {
+        $user = User::factory()->create();
+        $category = Category::factory()->create(['user_id' => $user->id]);
+        $label = Label::factory()->create(['user_id' => $user->id]);
+
+        $id = withHeaders(rulesWriter($user))
+            ->postJson('/api/v1/automation-rules', [
+                'title' => 'Groceries',
+                'priority' => 1,
+                'conditions' => groceryConditions(),
+                'action_category_id' => strtoupper($category->id),
+                'action_label_ids' => [strtoupper($label->id)],
+            ])
+            ->assertCreated()
+            ->json('data.id');
+
+        expect(AutomationRule::query()->findOrFail($id)->action_category_id)->toBe($category->id)
+            ->and(DB::table('automation_rule_labels')->where('automation_rule_id', $id)->value('label_id'))->toBe($label->id);
+
+        withHeaders(rulesWriter($user))
+            ->patchJson('/api/v1/automation-rules/'.$id, ['action_category_id' => strtoupper($category->id), 'action_label_ids' => [strtoupper($label->id)]])
+            ->assertOk();
+
+        expect(AutomationRule::query()->findOrFail($id)->action_category_id)->toBe($category->id)
+            ->and(DB::table('automation_rule_labels')->where('automation_rule_id', $id)->value('label_id'))->toBe($label->id);
+    });
+
+    it('leaves no half rule behind when its labels cannot be attached', function () {
+        $user = User::factory()->create();
+        $category = Category::factory()->create(['user_id' => $user->id]);
+
+        expect(fn () => app(AutomationRuleWriter::class)->create($user, $user->personalSpace, [
+            'title' => 'Groceries',
+            'priority' => 1,
+            'rules_json' => groceryConditions(),
+            'action_category_id' => $category->id,
+        ], [(string) Str::uuid()]))->toThrow(QueryException::class);
+
+        expect($user->automationRules()->count())->toBe(0);
+    });
 
     it('accepts a variable with a plain default and a rule as large as the builder makes', function () {
         $user = User::factory()->create();
         $category = Category::factory()->create(['user_id' => $user->id]);
 
-        foreach ([['==' => [['var' => ['creditor_name', null]], null]], ['in' => ['x', ['var' => ['description', '']]]], deeplyNegatedConditions(15), manyConditions(100)] as $priority => $conditions) {
+        foreach ([['==' => [['var' => ['creditor_name', null]], null]], ['in' => ['x', ['var' => ['description', '']]]], deeplyNegatedConditions(15), manyConditions(300), ['in' => [str_repeat('x', 1_000), ['var' => 'description']]]] as $priority => $conditions) {
             withHeaders(rulesWriter($user))
                 ->postJson('/api/v1/automation-rules', [
                     'title' => 'Groceries',
@@ -824,6 +911,76 @@ describe('the fork\'s model', function () {
             ->assertAccepted();
 
         Queue::assertPushed(ApplySingleAutomationRuleJob::class, fn (ApplySingleAutomationRuleJob $job): bool => collect($job->transactionIds)->sort()->values()->all() === $inSpace->pluck('id')->sort()->values()->all());
+    });
+
+    it('leaves a note still encrypted on the device alone, and applies the rest of the rule', function () {
+        $user = User::factory()->create();
+        [$rule, $category] = groceryRuleOverExistingTransactions($user);
+        $rule->update(['action_note' => 'Weekly shop']);
+        $encrypted = Transaction::query()->where('user_id', $user->id)->where('description', 'Grocery Store')->firstOrFail();
+        $encrypted->update(['notes' => 'bm90ZXMtY2lwaGVy', 'notes_iv' => 'abcdefghijklmnop']);
+
+        withHeaders(rulesWriter($user))
+            ->postJson('/api/v1/automation-rules/'.$rule->id.'/apply', ['dry_run' => false])
+            ->assertOk();
+
+        expect($encrypted->fresh())
+            ->notes->toBe('bm90ZXMtY2lwaGVy')
+            ->notes_iv->toBe('abcdefghijklmnop')
+            ->category_id->toBe($category->id);
+    });
+
+    it('leaves a note still encrypted on the device alone when a new transaction meets a rule', function () {
+        $user = User::factory()->create();
+        [$rule, $category] = groceryRuleOverExistingTransactions($user);
+        $rule->update(['action_note' => 'Weekly shop']);
+        $encrypted = Transaction::query()->where('user_id', $user->id)->where('description', 'Grocery Store')->firstOrFail();
+        $encrypted->update(['notes' => 'bm90ZXMtY2lwaGVy', 'notes_iv' => 'abcdefghijklmnop']);
+
+        app(AutomationRuleService::class)->applyRules($encrypted->fresh());
+
+        expect($encrypted->fresh())
+            ->notes->toBe('bm90ZXMtY2lwaGVy')
+            ->category_id->toBe($category->id);
+    });
+
+    it('does not reuse a preview when the conditions change within the same second', function () {
+        $this->freezeTime();
+        $user = User::factory()->create();
+        [$rule, $category] = groceryRuleOverExistingTransactions($user);
+        $headers = rulesWriter($user);
+
+        withHeaders($headers)
+            ->postJson('/api/v1/automation-rules/'.$rule->id.'/apply', ['only_uncategorized' => false])
+            ->assertJsonPath('data.total', 2);
+
+        withHeaders($headers)
+            ->patchJson('/api/v1/automation-rules/'.$rule->id, ['conditions' => ['in' => ['coffee', ['var' => 'description']]]])
+            ->assertOk();
+
+        withHeaders($headers)
+            ->postJson('/api/v1/automation-rules/'.$rule->id.'/apply', ['dry_run' => false, 'only_uncategorized' => false])
+            ->assertOk()
+            ->assertJsonPath('data.total', 1);
+
+        expect(Transaction::query()->where('description', 'Coffee Shop')->value('category_id'))->toBe($category->id)
+            ->and(Transaction::query()->where('description', 'Grocery Store')->value('category_id'))->toBeNull();
+    });
+
+    it('does not reuse a preview when the labels change within the same second', function () {
+        $this->freezeTime();
+        $user = User::factory()->create();
+        [$rule, , $label] = groceryRuleOverExistingTransactions($user);
+        $rule->update(['action_category_id' => null]);
+        $other = Label::factory()->create(['user_id' => $user->id]);
+        Transaction::query()->where('user_id', $user->id)->get()->each(fn (Transaction $transaction) => $transaction->labels()->attach($other->id));
+        $headers = rulesWriter($user);
+
+        withHeaders($headers)->postJson('/api/v1/automation-rules/'.$rule->id.'/apply')->assertJsonPath('data.total', 2);
+
+        withHeaders($headers)->patchJson('/api/v1/automation-rules/'.$rule->id, ['action_label_ids' => [$other->id]])->assertOk();
+
+        withHeaders($headers)->postJson('/api/v1/automation-rules/'.$rule->id.'/apply')->assertJsonPath('data.total', 0);
     });
 
     it('does not apply twice when an apply is retried with its idempotency key', function () {

@@ -4,8 +4,8 @@ namespace App\Http\Requests\Api\V1\Concerns;
 
 use App\Models\Category;
 use App\Models\Label;
-use App\Services\AutomationRules\RuleConditions;
-use Closure;
+use App\Rules\ValidRuleConditions;
+use App\Services\AutomationRules\AutomationRuleWriter;
 
 /**
  * What the automation rule create and update requests share: the
@@ -28,17 +28,36 @@ trait ValidatesAutomationRuleWrites
         return [
             'title' => $rules['title'],
             'priority' => $rules['priority'],
-            'conditions' => ['bail', $presence, $this->validConditions(...)],
+            'conditions' => ['bail', $presence, new ValidRuleConditions],
             'action_category_id' => ['sometimes', 'nullable', 'string', $this->inSpace(Category::class, 'a category')],
             'action_label_ids' => $rules['action_label_ids'],
-            'action_label_ids.*' => ['string', 'distinct:ignore_case', $this->inSpace(Label::class, 'a label')],
+            ...$this->labelIdFields(),
             'action_note' => $rules['action_note'],
         ];
     }
 
     /**
+     * The rules for each label id. An oversized list gets none: Laravel expands
+     * them per item before the cap on the list is ever read, so a huge list
+     * would cost its `distinct` and its lookup just to be refused.
+     *
+     * @return array<string, array<mixed>>
+     */
+    private function labelIdFields(): array
+    {
+        $labelIds = $this->input('action_label_ids');
+
+        if (is_array($labelIds) && count($labelIds) > AutomationRuleWriter::MaxLabels) {
+            return [];
+        }
+
+        return ['action_label_ids.*' => ['string', 'distinct:ignore_case', $this->inSpace(Label::class, 'a label')]];
+    }
+
+    /**
      * The validated fields as AutomationRuleWriter takes them: only the ones
-     * sent, the conditions under `rules_json`, and without the labels.
+     * sent, the conditions under `rules_json`, the category as stored, and
+     * without the labels.
      *
      * @return array<string, mixed>
      */
@@ -50,17 +69,28 @@ trait ValidatesAutomationRuleWrites
             $validated['rules_json'] = $this->validated('conditions');
         }
 
+        if (isset($validated['action_category_id'])) {
+            $validated['action_category_id'] = $this->idInSpace(Category::class, 'action_category_id', $validated['action_category_id']);
+        }
+
         return $validated;
     }
 
     /**
-     * The labels sent, or null when the request leaves them alone.
+     * The labels sent, as stored, or null when the request leaves them alone.
      *
      * @return list<string>|null
      */
     public function labelIds(): ?array
     {
-        return $this->has('action_label_ids') ? array_values($this->validated('action_label_ids')) : null;
+        if (! $this->has('action_label_ids')) {
+            return null;
+        }
+
+        return array_map(
+            fn (string $id): string => $this->idInSpace(Label::class, 'action_label_ids.*', $id),
+            array_values($this->validated('action_label_ids')),
+        );
     }
 
     /**
@@ -75,15 +105,6 @@ trait ValidatesAutomationRuleWrites
 
         if (is_array($sent) && array_key_exists('conditions', $sent)) {
             $this->merge(['conditions' => $sent['conditions']]);
-        }
-    }
-
-    private function validConditions(string $attribute, mixed $value, Closure $fail): void
-    {
-        $error = RuleConditions::error($value, $attribute);
-
-        if ($error !== null) {
-            $fail($error);
         }
     }
 }

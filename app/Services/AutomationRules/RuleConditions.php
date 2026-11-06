@@ -36,10 +36,17 @@ class RuleConditions
     private const int MaxDepth = 20;
 
     /**
-     * How many objects and lists a condition may hold in all, a few hundred
-     * conditions: every rule is evaluated against every new transaction.
+     * How many values a condition may hold in all, objects, lists and plain
+     * values alike: about 400 "contains" conditions. Every rule is evaluated
+     * against every new transaction, so a long list of plain values costs as
+     * much as a long list of conditions.
      */
-    private const int MaxNodes = 500;
+    private const int MaxValues = 2000;
+
+    /**
+     * The longest text a condition compares against, far past any merchant.
+     */
+    private const int MaxStringLength = 1000;
 
     /**
      * The format, for the MCP schema, so an agent reads the same text whichever
@@ -87,9 +94,9 @@ class RuleConditions
             return "{$key} must be a non-empty JsonLogic object.";
         }
 
-        $nodes = 0;
+        $values = 0;
 
-        return self::nodeError($conditions, 1, $nodes);
+        return self::nodeError($conditions, 1, $values);
     }
 
     /**
@@ -112,31 +119,18 @@ class RuleConditions
 
     /**
      * @param  int  $depth  how deep $node sits, the top-level object being 1
-     * @param  int  $nodes  the objects and lists seen so far, shared across the walk
+     * @param  int  $values  the values seen so far, shared across the walk
      */
-    private static function nodeError(mixed $node, int $depth, int &$nodes): ?string
+    private static function nodeError(mixed $node, int $depth, int &$values): ?string
     {
-        if (! is_array($node)) {
-            return null;
-        }
+        $error = self::sizeError($node, $depth, $values);
 
-        $nodes++;
-
-        if ($depth > self::MaxDepth) {
-            return 'The conditions nest more than '.self::MaxDepth.' levels deep.';
-        }
-
-        if ($nodes > self::MaxNodes) {
-            return 'The conditions have more than '.self::MaxNodes.' JsonLogic nodes.';
+        if ($error !== null || ! is_array($node)) {
+            return $error;
         }
 
         foreach ($node as $operator => $value) {
-            $error = match (true) {
-                is_int($operator) => self::nodeError($value, $depth + 1, $nodes),
-                ! in_array($operator, self::SupportedOperators, true) => "Unsupported JsonLogic operator \"{$operator}\". Supported operators: ".implode(', ', self::SupportedOperators).'.',
-                $operator === 'var' => self::variableError($value),
-                default => self::nodeError($value, $depth + 1, $nodes),
-            };
+            $error = self::entryError($operator, $value, $depth, $values);
 
             if ($error !== null) {
                 return $error;
@@ -144,6 +138,33 @@ class RuleConditions
         }
 
         return null;
+    }
+
+    private static function sizeError(mixed $node, int $depth, int &$values): ?string
+    {
+        $values++;
+
+        if ($values > self::MaxValues) {
+            return 'The conditions have more than '.self::MaxValues.' JsonLogic values.';
+        }
+
+        if (is_string($node) && mb_strlen($node) > self::MaxStringLength) {
+            return 'A condition value is longer than '.self::MaxStringLength.' characters.';
+        }
+
+        return is_array($node) && $depth > self::MaxDepth
+            ? 'The conditions nest more than '.self::MaxDepth.' levels deep.'
+            : null;
+    }
+
+    private static function entryError(int|string $operator, mixed $value, int $depth, int &$values): ?string
+    {
+        return match (true) {
+            is_int($operator) => self::nodeError($value, $depth + 1, $values),
+            ! in_array($operator, self::SupportedOperators, true) => "Unsupported JsonLogic operator \"{$operator}\". Supported operators: ".implode(', ', self::SupportedOperators).'.',
+            $operator === 'var' => self::variableError($value) ?? self::nodeError($value, $depth + 1, $values),
+            default => self::nodeError($value, $depth + 1, $values),
+        };
     }
 
     /**

@@ -242,6 +242,22 @@ class AutomationRuleApplier
         $stamp = $rule->updated_at?->getTimestamp() ?? 0;
         $scope = $space === null ? '' : ":space:{$space->id}";
 
-        return "automation_rule_matches:{$rule->user_id}:{$rule->id}:{$flag}:{$stamp}{$scope}";
+        return "automation_rule_matches:{$rule->user_id}:{$rule->id}:{$flag}:{$stamp}:{$this->matchedBy($rule)}{$scope}";
+    }
+
+    /**
+     * What decides the matches. `updated_at` only has whole seconds, so an edit
+     * right after a preview would otherwise find that preview's matches, and an
+     * apply would overwrite the wrong rows.
+     */
+    private function matchedBy(AutomationRule $rule): string
+    {
+        $rule->loadMissing('labels');
+
+        return hash('sha256', (string) json_encode([
+            $rule->rules_json,
+            $rule->action_category_id,
+            $rule->labels->pluck('id')->sort()->values()->all(),
+        ]));
     }
 }

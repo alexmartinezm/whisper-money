@@ -22,14 +22,15 @@ use Throwable;
  *
  * Only successful responses are kept: a retry after a validation error or a
  * 5xx runs again, so the client can fix the body without minting a new key.
+ * The middleware cannot tell a 5xx that rolled back from one raised after the
+ * write committed, so a failure of the second kind can run the write again.
  *
  * The key is claimed atomically with `Cache::add()` before the request runs,
  * and the entry stays in place until the request ends. Nothing about the write
  * can expire the claim short of it running for the whole TtlSeconds, so a slow
  * write cannot run twice. A claim that is never finished (the worker died, the
  * response could not be stored) keeps refusing the key with a 409 until it
- * expires: a write that may have committed is never run a second time, and a
- * failed store does not touch the answer the client gets.
+ * expires, and a failed store does not touch the answer the client gets.
  *
  * What is kept is the status, the two headers a replay needs and the body,
  * encrypted with the app key since it can hold financial data. The request

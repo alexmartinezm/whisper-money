@@ -43,7 +43,7 @@ class UpdateAutomationRule extends WriteTool
 
     protected function write(Request $request, User $user): Response
     {
-        $request->validate(AutomationRuleWriter::updateRules());
+        $request->validate($this->plainFieldRules(AutomationRuleWriter::updateRules()));
 
         $space = $this->resolveSpace($request, $user);
         $rule = $this->ruleInSpace($request, $space);
@@ -59,7 +59,7 @@ class UpdateAutomationRule extends WriteTool
         ]);
 
         $labelIds = $request->has('action_label_ids')
-            ? $this->labelsInSpace($request, $space, 'action_label_ids')->pluck('id')->all()
+            ? $this->ruleLabels($request, $space)->pluck('id')->all()
             : null;
 
         $rule = app(AutomationRuleWriter::class)->update($rule, $changes, $labelIds);

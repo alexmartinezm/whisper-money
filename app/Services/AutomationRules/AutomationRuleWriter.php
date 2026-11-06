@@ -7,6 +7,7 @@ use App\Models\AutomationRule;
 use App\Models\Space;
 use App\Models\User;
 use App\Services\Concerns\DerivesUpdateRules;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -37,7 +38,7 @@ class AutomationRuleWriter
     /**
      * The most labels one rule applies.
      */
-    private const int MaxLabels = 50;
+    public const int MaxLabels = 50;
 
     /**
      * @return array<string, array<mixed>>
@@ -74,20 +75,24 @@ class AutomationRuleWriter
             ]);
         }
 
-        $rule = new AutomationRule([
-            ...$attributes,
-            'user_id' => $user->id,
-            'space_id' => $space->id,
-            'origin' => RuleOrigin::User->value,
-        ]);
-        $rule->save();
+        // Together: a rule that lost its labels on the way would run with less
+        // than it was asked to do.
+        return DB::transaction(function () use ($user, $space, $attributes, $labelIds): AutomationRule {
+            $rule = new AutomationRule([
+                ...$attributes,
+                'user_id' => $user->id,
+                'space_id' => $space->id,
+                'origin' => RuleOrigin::User->value,
+            ]);
+            $rule->save();
 
-        if ($labelIds !== []) {
-            $rule->labels()->sync($labelIds);
-            $rule->touch();
-        }
+            if ($labelIds !== []) {
+                $rule->labels()->sync($labelIds);
+                $rule->touch();
+            }
 
-        return $rule;
+            return $rule;
+        });
     }
 
     /**

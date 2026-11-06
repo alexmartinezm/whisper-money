@@ -33,12 +33,12 @@ class CreateAutomationRule extends WriteTool
 
     protected function write(Request $request, User $user): Response
     {
-        $request->validate(AutomationRuleWriter::createRules());
+        $request->validate($this->plainFieldRules(AutomationRuleWriter::createRules()));
 
         $space = $this->resolveSpace($request, $user);
 
         $rulesJson = $this->rulesJson($request);
-        $labels = $this->labelsInSpace($request, $space, 'action_label_ids');
+        $labels = $this->ruleLabels($request, $space);
         $categoryId = $request->filled('action_category_id')
             ? $this->categoryInSpace($request, $space, 'action_category_id')->id
             : null;
