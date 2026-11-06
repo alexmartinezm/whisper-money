@@ -27,6 +27,7 @@ use App\Mcp\Tools\UpdateCategory;
 use App\Mcp\Tools\UpdateLabel;
 use App\Mcp\Tools\UpdateTransaction;
 use App\Models\Account;
+use App\Models\AccountBalance;
 use App\Models\AutomationRule;
 use App\Models\Bank;
 use App\Models\Budget;
@@ -392,6 +393,40 @@ it('records a balance on a manual account', function () {
     ])->assertOk();
 
     expect($account->balances()->whereDate('balance_date', '2026-01-31')->value('balance'))->toBe(250000);
+});
+
+it('takes over a derived snapshot when recording a balance for its day', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->withBalance()->create(['user_id' => $user->id]);
+    AccountBalance::factory()->derived()->create(['account_id' => $account->id, 'balance_date' => '2026-01-31']);
+
+    callWriteTool($user, CreateBalance::class, [
+        'account_id' => $account->id,
+        'balance' => 250000,
+        'balance_date' => '2026-01-31',
+    ])->assertOk();
+
+    expect($account->balances()->sole())->balance->toBe(250000)->derived->toBeFalse();
+});
+
+it('keeps an encrypted name marked as ciphertext when an edit leaves it alone', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id, 'name' => 'c2lwaGVydGV4dA==', 'name_iv' => 'abcdefghijklmnop', 'encrypted' => true]);
+
+    callWriteTool($user, UpdateAccount::class, ['account_id' => $account->id, 'ownership_percentage' => 50])->assertOk();
+
+    expect($account->fresh())->name_iv->toBe('abcdefghijklmnop')->encrypted->toBeTrue();
+});
+
+it('refuses the private bank of another user on an account', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id]);
+    $private = Bank::factory()->create(['user_id' => User::factory()->create()->id]);
+
+    callWriteTool($user, UpdateAccount::class, ['account_id' => $account->id, 'bank_id' => $private->id])
+        ->assertHasErrors(['bank']);
+
+    expect($account->fresh()->bank_id)->not->toBe($private->id);
 });
 
 it('refuses to record a balance on a connected account', function () {
