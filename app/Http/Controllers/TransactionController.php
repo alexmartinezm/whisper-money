@@ -20,6 +20,7 @@ use App\Models\User;
 use App\Services\Ai\CategoryOverrideHandler;
 use App\Services\Banking\BalanceSyncService;
 use App\Services\ManualBalanceAdjuster;
+use App\Services\TransactionDayTotals;
 use App\Services\Transactions\ReplaceTransactionSplits;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
@@ -36,7 +37,7 @@ class TransactionController extends Controller
 {
     use AuthorizesRequests;
 
-    public function index(IndexTransactionRequest $request): Response
+    public function index(IndexTransactionRequest $request, TransactionDayTotals $dayTotals): Response
     {
         $user = $request->user();
         $validated = $request->validated();
@@ -46,13 +47,15 @@ class TransactionController extends Controller
         $perPage = (int) ($validated['per_page'] ?? 50);
         $sortParam = $request->sort();
 
-        $query = Transaction::query()
-            ->where('user_id', $user->id)
-            ->with(['account.bank', 'category', 'labels', 'categorizedByRule:id,origin', 'splits.category'])
-            ->applyFilters($request->filters())
-            ->sortedForList($sortParam);
+        $filters = $request->filters();
 
-        $transactions = $query
+        $filtered = Transaction::query()
+            ->where('user_id', $user->id)
+            ->applyFilters($filters);
+
+        $transactions = (clone $filtered)
+            ->with(['account.bank', 'category', 'labels', 'categorizedByRule:id,origin', 'splits.category'])
+            ->sortedForList($sortParam)
             ->cursorPaginate($perPage)
             ->withQueryString();
 
@@ -112,6 +115,16 @@ class TransactionController extends Controller
 
         return Inertia::render('transactions/index', [
             'transactions' => $transactions,
+            // Only a list sorted by date draws day headers. Asked for beside
+            // `transactions` on every page load, it covers the days that page touches.
+            'dayTotals' => fn (): array => $request->isSortedByDate()
+                ? $dayTotals->forDays(
+                    $filtered,
+                    $transactions->getCollection()->map(fn (Transaction $transaction): string => $transaction->transaction_date->toDateString()),
+                    $user->currency_code,
+                    $filters,
+                )
+                : [],
             'appliedFilters' => $appliedFilters,
             'categories' => $categories,
             'accounts' => $accounts,

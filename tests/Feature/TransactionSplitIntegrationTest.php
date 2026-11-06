@@ -213,6 +213,8 @@ it('rejects non-list split payloads at the HTTP boundary', function () {
 });
 
 it('filters split parents once and excludes them from uncategorized and bulk category updates', function () {
+    fakeCurrencyApi();
+
     [$user, , $transaction, $food, $home] = splitIntegrationFixture();
     makeIntegrationSplit($transaction, $food, $home);
 

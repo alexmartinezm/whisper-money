@@ -32,6 +32,8 @@ it('filters transactions to only AI-categorized ones', function () {
 });
 
 it('applies and echoes the AI filter through the index route', function () {
+    fakeCurrencyApi();
+
     $user = User::factory()->onboarded()->create();
     Transaction::factory()->plaintext()->create([
         'user_id' => $user->id,
