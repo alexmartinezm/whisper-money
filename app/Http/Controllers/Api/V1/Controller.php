@@ -3,9 +3,15 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller as BaseController;
+use App\Models\Account;
+use App\Models\AutomationRule;
+use App\Models\Category;
+use App\Models\Label;
 use App\Models\Space;
 use App\Models\User;
 use App\Services\SpaceResolver;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 
 /**
@@ -26,10 +32,44 @@ abstract class Controller extends BaseController
      */
     protected function space(Request $request): Space
     {
-        return app(SpaceResolver::class)->resolve(
-            $this->user($request),
-            $request->string('space')->toString(),
-            'List the valid ids with GET /api/v1/spaces.',
-        );
+        return app(SpaceResolver::class)->forApiRequest($request);
+    }
+
+    /**
+     * Narrows $query to the caller's own rows in the request's space: as in the
+     * app, another member's rows are never listed, read or changed.
+     *
+     * @template TModel of Model
+     *
+     * @param  Builder<TModel>  $query
+     * @return Builder<TModel>
+     */
+    protected function owned(Request $request, Builder $query): Builder
+    {
+        return app(SpaceResolver::class)->ownedForApiRequest($request, $query);
+    }
+
+    /**
+     * The route's account, looked up among the caller's own in the request's
+     * space: one in another space, or another member's, is a 404 like one
+     * that does not exist.
+     */
+    protected function account(Request $request, string $id): Account
+    {
+        return $this->owned($request, Account::query())->findOrFail($id);
+    }
+
+    /**
+     * The route's category, label or automation rule, looked up among the
+     * caller's own in the request's space like account().
+     *
+     * @template TModel of AutomationRule|Category|Label
+     *
+     * @param  class-string<TModel>  $model
+     * @return TModel
+     */
+    protected function inSpace(Request $request, string $model, string $id): AutomationRule|Category|Label
+    {
+        return app(SpaceResolver::class)->ownedInSpaceOrFail($model, $this->user($request), $this->space($request), $id);
     }
 }

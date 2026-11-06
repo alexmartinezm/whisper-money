@@ -77,7 +77,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         // The per-IP throttle caps anonymous floods before any token lookup.
         // Then authenticate, so every later step (metric, per-user throttle,
-        // plan gate, per-user idempotency cache) knows the caller. The per-user
+        // plan gate, per-credential idempotency cache) knows the caller. The per-user
         // throttle sits ahead of the plan gate, so a refused account is capped
         // too, and inside the metric, so its 429s are recorded.
         $middleware->group('api-v1', [

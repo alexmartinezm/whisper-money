@@ -3,14 +3,10 @@
 namespace App\Mcp\Tools;
 
 use App\Enums\CategoryDeletionStrategy;
-use App\Models\Category;
 use App\Models\User;
-use App\Services\CategoryTree;
+use App\Services\Categories\CategoryWriter;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
-use Illuminate\Database\UniqueConstraintViolationException;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
-use Illuminate\Validation\ValidationException;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
@@ -35,58 +31,29 @@ class DeleteCategory extends WriteTool
 
     protected function write(Request $request, User $user): Response
     {
-        return DB::transaction(function () use ($request, $user): Response {
-            $request->validate([
-                'strategy' => ['sometimes', Rule::enum(CategoryDeletionStrategy::class)],
-            ]);
+        $request->validate([
+            'strategy' => ['sometimes', Rule::enum(CategoryDeletionStrategy::class)],
+        ]);
 
-            $strategy = $request->enum('strategy', CategoryDeletionStrategy::class) ?? CategoryDeletionStrategy::Reparent;
+        $strategy = $request->enum('strategy', CategoryDeletionStrategy::class) ?? CategoryDeletionStrategy::Reparent;
 
-            // Refused before anything is resolved or locked, so an unconfirmed
-            // cascade cannot leave a trace of having been attempted.
-            if ($strategy === CategoryDeletionStrategy::Cascade && ! $request->boolean('confirm_cascade')) {
-                return Response::error('Deleting with strategy "cascade" removes the category, every category below it, and the category of every transaction in that subtree. Call list_categories to see what would go, then pass confirm_cascade: true to proceed. Nothing has been deleted.');
-            }
-
-            $space = $this->resolveSpace($request, $user);
-            $category = $this->categoryInSpace($request, $space);
-            $tree = new CategoryTree;
-            $category = $tree->lockSubtreeForMutation($category);
-
-            $affected = match ($strategy) {
-                CategoryDeletionStrategy::Cascade => $tree->deleteSubtree($category),
-                CategoryDeletionStrategy::Promote => $this->detachChildrenAndDelete($tree, $category, null),
-                CategoryDeletionStrategy::Reparent => $this->detachChildrenAndDelete($tree, $category, $category->parent_id),
-            };
-
-            return $this->json([
-                'deleted' => true,
-                'id' => $category->id,
-                'strategy' => $strategy->value,
-                'categories_deleted' => $affected['categories'],
-                'transactions_uncategorized' => $affected['transactions'],
-            ]);
-        }, attempts: 5);
-    }
-
-    /**
-     * Move the category's direct children to a new parent, then delete it.
-     *
-     * The delete goes through the tree so the category's own transactions are
-     * uncategorized, exactly as the cascade does: a transaction left pointing at
-     * a soft-deleted category is counted by the dashboard widget and dropped by
-     * the cashflow screen, and the same month then reads two different ways.
-     *
-     * @return array{categories: int, transactions: int}
-     */
-    private function detachChildrenAndDelete(CategoryTree $tree, Category $category, ?string $newParentId): array
-    {
-        try {
-            return $tree->detachChildrenAndDelete($category, $newParentId);
-        } catch (UniqueConstraintViolationException) {
-            throw ValidationException::withMessages([
-                'strategy' => 'A category with the same name already exists at the destination level. Rename it first.',
-            ]);
+        // Refused before anything is resolved or locked, so an unconfirmed
+        // cascade cannot leave a trace of having been attempted.
+        if ($strategy === CategoryDeletionStrategy::Cascade && ! $request->boolean('confirm_cascade')) {
+            return Response::error('Deleting with strategy "cascade" removes the category, every category below it, and the category of every transaction in that subtree. Call list_categories to see what would go, then pass confirm_cascade: true to proceed. Nothing has been deleted.');
         }
+
+        $space = $this->resolveSpace($request, $user);
+        $category = $this->categoryInSpace($request, $space);
+
+        $affected = app(CategoryWriter::class)->delete($category, $strategy);
+
+        return $this->json([
+            'deleted' => true,
+            'id' => $category->id,
+            'strategy' => $strategy->value,
+            'categories_deleted' => $affected['categories'],
+            'transactions_uncategorized' => $affected['transactions'],
+        ]);
     }
 }

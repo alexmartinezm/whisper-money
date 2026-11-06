@@ -2,8 +2,14 @@
 
 namespace App\Services;
 
+use App\Models\AutomationRule;
+use App\Models\Category;
+use App\Models\Label;
 use App\Models\Space;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -11,10 +17,12 @@ use Illuminate\Validation\ValidationException;
  * `space` argument (validated against the spaces the user can access) or the
  * user's personal space.
  *
- * Scoping is by `space_id` only, gated by membership (`accessibleSpaces`): a
- * space is a shared tenant, so a member is meant to see every row in it. The
- * security boundary is the membership check here, not a per-row `user_id`
- * filter.
+ * The MCP tools scope by `space_id` only, gated by membership
+ * (`accessibleSpaces`): a space is a shared tenant, so a member's agent sees
+ * every row in it. `/api/v1` goes no further than the web app, which only ever
+ * shows a user their own rows: membership picks the space, and every row read,
+ * written or referenced inside it must also be the caller's (`user_id`), so
+ * its lookups go through ownedInSpace() or ownedForApiRequest().
  */
 class SpaceResolver
 {
@@ -36,5 +44,68 @@ class SpaceResolver
         }
 
         return $space;
+    }
+
+    /**
+     * The space a `/api/v1` request operates on, for its controllers and form
+     * requests alike.
+     */
+    public function forApiRequest(Request $request): Space
+    {
+        /** @var User $user */
+        $user = $request->user();
+        $space = $request->input('space');
+
+        // A list or an object names no space, so it is refused like an unknown id.
+        return $this->resolve($user, is_array($space) ? 'in this format' : (string) $space, 'List the valid ids with GET /api/v1/spaces.');
+    }
+
+    /**
+     * Narrows $query to the caller's own rows in $space. Another member's row
+     * is left out like one that does not exist, so a `findOrFail()` on it is
+     * a 404.
+     *
+     * @template TModel of Model
+     *
+     * @param  Builder<TModel>  $query
+     * @return Builder<TModel>
+     */
+    public function ownedInSpace(Builder $query, User $user, Space $space): Builder
+    {
+        return $query
+            ->where($query->qualifyColumn('space_id'), $space->id)
+            ->where($query->qualifyColumn('user_id'), $user->id);
+    }
+
+    /**
+     * Narrows $query to the caller's own rows in the space a `/api/v1`
+     * request operates on, the same way as ownedInSpace().
+     *
+     * @template TModel of Model
+     *
+     * @param  Builder<TModel>  $query
+     * @return Builder<TModel>
+     */
+    public function ownedForApiRequest(Request $request, Builder $query): Builder
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        return $this->ownedInSpace($query, $user, $this->forApiRequest($request));
+    }
+
+    /**
+     * One of the caller's own categories, labels or automation rules in $space,
+     * the same way as ownedInSpace(): another member's is a
+     * ModelNotFoundException like one that does not exist.
+     *
+     * @template TModel of AutomationRule|Category|Label
+     *
+     * @param  class-string<TModel>  $model
+     * @return TModel
+     */
+    public function ownedInSpaceOrFail(string $model, User $user, Space $space, string $id): AutomationRule|Category|Label
+    {
+        return $model::query()->forSpace($space)->where('user_id', $user->id)->findOrFail($id);
     }
 }

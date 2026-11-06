@@ -97,6 +97,44 @@ describe('Automation rules settings page', () => {
         expect(renderedTitles()).toEqual(['Alpha', 'Mike', 'Zulu']);
     });
 
+    it.each(['', '   ', 'not json', '"text"'])(
+        'keeps the page up and marks a rule whose stored conditions are %j',
+        (stored) => {
+            page.automationRules = [
+                {
+                    ...makeRule('Broken', 10),
+                    rules_json: stored as unknown as Record<string, unknown>,
+                },
+                makeRule('Fine', 20),
+            ];
+
+            render(<AutomationRulesPage />);
+
+            expect(screen.getByText('Fine')).toBeInTheDocument();
+            expect(screen.getAllByText('Invalid conditions')).toHaveLength(1);
+        },
+    );
+
+    it('still reads conditions stored as a JSON string', () => {
+        page.automationRules = [
+            {
+                ...makeRule('Encoded', 10),
+                rules_json:
+                    '{"in":["x",{"var":"description"}]}' as unknown as Record<
+                        string,
+                        unknown
+                    >,
+            },
+        ];
+
+        render(<AutomationRulesPage />);
+
+        expect(screen.getByText('Encoded')).toBeInTheDocument();
+        expect(
+            screen.queryByText('Invalid conditions'),
+        ).not.toBeInTheDocument();
+    });
+
     it('reverses the order when the priority header is clicked', () => {
         page.automationRules = [
             makeRule('Last', 30),

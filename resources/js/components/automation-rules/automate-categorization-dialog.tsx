@@ -12,6 +12,7 @@ import {
     addDescriptionMatchToRuleStructure,
     createDescriptionCondition,
     parseJsonLogic,
+    parseStoredRule,
     type RuleStructure,
 } from '@/lib/rule-builder-utils';
 import type { AutomationRule } from '@/types/automation-rule';
@@ -63,17 +64,7 @@ export function AutomateCategorizationDialog({
         automationRules: AutomationRule[];
         labels: Label[];
     }>().props;
-    const rules = useMemo(
-        () =>
-            rawRules.map((rule) => ({
-                ...rule,
-                rules_json:
-                    typeof rule.rules_json === 'string'
-                        ? JSON.parse(rule.rules_json)
-                        : rule.rules_json,
-            })),
-        [rawRules],
-    );
+    const rules = useMemo(() => rawRules.map(parseStoredRule), [rawRules]);
     const [step, setStep] = useState<Step>('choose');
     const [selectedRule, setSelectedRule] = useState<AutomationRule | null>(
         null,

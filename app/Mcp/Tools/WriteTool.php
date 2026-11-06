@@ -2,7 +2,6 @@
 
 namespace App\Mcp\Tools;
 
-use App\Enums\AccountType;
 use App\Mcp\Tools\Concerns\PresentsAutomationRules;
 use App\Models\Account;
 use App\Models\AutomationRule;
@@ -12,6 +11,9 @@ use App\Models\Label;
 use App\Models\Space;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\Accounts\AccountBalanceRecorder;
+use App\Services\Accounts\AccountWriteRules;
+use App\Services\Labels\LabelWriter;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
@@ -74,11 +76,29 @@ abstract class WriteTool extends McpTool
      */
     protected function applyFields(Request $request, Model $model, array $fields): void
     {
+        foreach ($this->requestedFields($request, $fields) as $attribute => $value) {
+            $model->{$attribute} = $value;
+        }
+    }
+
+    /**
+     * The values of the fields the request actually carries, resolved the way
+     * applyFields() resolves them, for a shared writer to apply.
+     *
+     * @param  array<string, callable(): mixed>  $fields
+     * @return array<string, mixed>
+     */
+    protected function requestedFields(Request $request, array $fields): array
+    {
+        $values = [];
+
         foreach ($fields as $attribute => $value) {
             if ($request->has($attribute)) {
-                $model->{$attribute} = $value();
+                $values[$attribute] = $value();
             }
         }
+
+        return $values;
     }
 
     /**
@@ -99,13 +119,7 @@ abstract class WriteTool extends McpTool
     {
         $account = $this->accountInSpace($request, $space, $key);
 
-        $this->assertBalanceWritable($account, $key);
-
-        if (! $account->type->hasBalance()) {
-            throw ValidationException::withMessages([
-                $key => AccountType::NO_BALANCE_MESSAGE,
-            ]);
-        }
+        AccountWriteRules::throwIfAny(AccountBalanceRecorder::unwritableErrors($account, $key));
 
         return $account;
     }
@@ -118,9 +132,7 @@ abstract class WriteTool extends McpTool
     protected function assertBalanceWritable(Account $account, string $key = 'account_id'): void
     {
         if ($account->isConnected()) {
-            throw ValidationException::withMessages([
-                $key => 'That account is connected to a bank, so its balances come from the sync and a manual snapshot would be overwritten. Only non-connected (manual) accounts accept balances.',
-            ]);
+            throw ValidationException::withMessages([$key => AccountBalanceRecorder::ConnectedAccountMessage]);
         }
     }
 
@@ -142,6 +154,32 @@ abstract class WriteTool extends McpTool
     protected function ruleInSpace(Request $request, Space $space, string $key = 'automation_rule_id'): AutomationRule
     {
         return $this->modelInSpace($request, $space, AutomationRule::query()->forSpace($space), $key, 'automation rule');
+    }
+
+    /**
+     * Refuse renaming or deleting the label of a savings goal, as the API
+     * does (LabelWriter::savingsGoalLabelErrors()).
+     *
+     * @param  list<array-key>  $sent  the fields the write carries
+     */
+    protected function refuseSavingsGoalLabelChange(Label $label, array $sent, bool $deleting): void
+    {
+        $errors = LabelWriter::savingsGoalLabelErrors($label, $sent, $deleting);
+
+        if ($errors !== []) {
+            throw ValidationException::withMessages($errors);
+        }
+    }
+
+    /**
+     * Refuse a label name already used in the space, whichever member's it is,
+     * optionally ignoring one label by id (for edits).
+     */
+    protected function refuseTakenLabelName(Space $space, string $name, ?string $ignoreId = null): void
+    {
+        if (app(LabelWriter::class)->nameTaken($space, $name, $ignoreId)) {
+            throw ValidationException::withMessages(['name' => LabelWriter::NameTakenMessage]);
+        }
     }
 
     /**

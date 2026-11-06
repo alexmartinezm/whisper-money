@@ -17,6 +17,7 @@ import { useMemo, useState } from 'react';
 
 import { ApplyAutomationRuleDialog } from '@/components/automation-rules/apply-automation-rule-dialog';
 import { AutomationRuleActionBadges } from '@/components/automation-rules/automation-rule-action-badges';
+import { InvalidRuleBadge } from '@/components/automation-rules/automation-rule-title';
 import { CreateAutomationRuleDialog } from '@/components/automation-rules/create-automation-rule-dialog';
 import { DeleteAutomationRuleDialog } from '@/components/automation-rules/delete-automation-rule-dialog';
 import { EditAutomationRuleDialog } from '@/components/automation-rules/edit-automation-rule-dialog';
@@ -51,6 +52,7 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table';
+import { parseStoredRule } from '@/lib/rule-builder-utils';
 import { type AutomationRule } from '@/types/automation-rule';
 import { type Category } from '@/types/category';
 import { type Label } from '@/types/label';
@@ -210,17 +212,7 @@ export function AutomationRulesDialog({
 
     const categories = usePage().props.categories as Category[];
     const labels = usePage().props.labels as Label[];
-    const rules = useMemo(
-        () =>
-            rawRules.map((rule) => ({
-                ...rule,
-                rules_json:
-                    typeof rule.rules_json === 'string'
-                        ? JSON.parse(rule.rules_json)
-                        : rule.rules_json,
-            })),
-        [rawRules],
-    );
+    const rules = useMemo(() => rawRules.map(parseStoredRule), [rawRules]);
     const [sorting, setSorting] = useState<SortingState>([]);
     const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
     const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(
@@ -233,7 +225,10 @@ export function AutomationRulesDialog({
             header: __('Title'),
             cell: ({ row }) => {
                 return (
-                    <div className="font-medium">{row.getValue('title')}</div>
+                    <div className="flex items-center gap-2 font-medium">
+                        {row.getValue('title')}
+                        <InvalidRuleBadge rule={row.original} />
+                    </div>
                 );
             },
         },
