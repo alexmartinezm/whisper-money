@@ -175,7 +175,7 @@ class TransactionCsvExporter
      * @param  array<string, mixed>  $filters
      * @return Generator<int, Transaction>
      */
-    private function postings(iterable $transactions, array $filters): Generator
+    public function postings(iterable $transactions, array $filters): Generator
     {
         $inBlock = $this->blocks->postingFilter($filters);
 

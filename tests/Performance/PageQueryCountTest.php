@@ -77,7 +77,10 @@ test('account show page does not exceed query threshold', function () {
 });
 
 test('transactions index page does not exceed query threshold', function () {
-    assertMaxQueries(24, function () {
+    // One more since the day headers count and add up each day on the server: one
+    // grouped query over the days the page shows. A reader with transactions in
+    // another currency pays one more, the rates of those days.
+    assertMaxQueries(25, function () {
         $this->get(route('transactions.index'))->assertOk();
     }, 'Transactions Index');
 });
@@ -185,10 +188,14 @@ test('transactions page query count does not scale with number of transactions',
         'user_id' => $this->user->id,
         'account_id' => $account->id,
         'category_id' => $category->id,
+        'currency_code' => $this->user->currency_code,
     ]);
 
     // Same threshold — paginated queries should not scale
-    assertMaxQueries(24, function () {
+    // One more since the day headers count and add up each day on the server: one
+    // grouped query over the days the page shows. A reader with transactions in
+    // another currency pays one more, the rates of those days.
+    assertMaxQueries(25, function () {
         $this->get(route('transactions.index'))->assertOk();
     }, 'Transactions with 120 records');
 });

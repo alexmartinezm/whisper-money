@@ -8,8 +8,8 @@ export interface TransactionRowAction {
     variant?: 'destructive';
 }
 
-interface TransactionRowActionsOptions {
-    transaction: DecryptedTransaction;
+/** What each row action calls, handed down by the page that owns the dialogs. */
+export interface TransactionRowActionHandlers {
     onEdit: (transaction: DecryptedTransaction) => void;
     onDuplicate: (transaction: DecryptedTransaction) => void;
     onReEvaluateRules: (transaction: DecryptedTransaction) => void;
@@ -24,6 +24,10 @@ interface TransactionRowActionsOptions {
  */
 function canBeDuplicated(transaction: DecryptedTransaction): boolean {
     return !transaction.description_iv && !transaction.notes_iv;
+}
+
+interface TransactionRowActionsOptions extends TransactionRowActionHandlers {
+    transaction: DecryptedTransaction;
 }
 
 /**
