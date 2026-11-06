@@ -40,6 +40,7 @@ function bulkFilters(
         amountMin: null,
         amountMax: null,
         categoryIds: [],
+        categoryTypes: [],
         accountIds: [],
         labelIds: [],
         creditorName: '',

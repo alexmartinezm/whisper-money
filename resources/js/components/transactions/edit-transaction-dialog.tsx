@@ -4,6 +4,7 @@ import { LabelCombobox } from '@/components/shared/label-combobox';
 import { Shortcut } from '@/components/shortcuts/shortcut';
 import { ShortcutKbd } from '@/components/shortcuts/shortcut-kbd';
 import { CategorySelect } from '@/components/transactions/category-select';
+import { TransactionRowDropdownMenuContent } from '@/components/transactions/transaction-row-dropdown-menu';
 import {
     TransactionSplitEditor,
     validTransactionSplits,
@@ -20,6 +21,10 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
+import {
+    DropdownMenu,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label as FormLabel } from '@/components/ui/label';
 import {
@@ -42,6 +47,10 @@ import { captureEvent } from '@/lib/posthog';
 import { refreshPageAfterWrite } from '@/lib/refresh-page';
 import { evaluateRulesForNewTransaction } from '@/lib/rule-engine';
 import { readStoredValue, writeStoredValue } from '@/lib/safe-storage';
+import {
+    getTransactionRowActions,
+    type TransactionRowActionHandlers,
+} from '@/lib/transaction-row-actions';
 import { appendNoteIfNotPresent, cn } from '@/lib/utils';
 import { transactionSyncService } from '@/services/transaction-sync';
 import { type SharedData } from '@/types';
@@ -77,6 +86,7 @@ import {
     HelpCircle,
     Landmark,
     Lock,
+    MoreHorizontal,
     Plus,
     Trash2,
 } from 'lucide-react';
@@ -131,6 +141,11 @@ interface EditTransactionDialogProps {
     ) => void;
     onLabelCreated?: (label: Label) => void;
     onDelete?: (transaction: DecryptedTransaction) => void;
+    /**
+     * Edit mode: the row menu's actions, offered in the header on a phone,
+     * whose compact list has no row menu to reach them from.
+     */
+    rowActions?: TransactionRowActionHandlers;
     mode: 'create' | 'edit';
     initialAccountId?: string | null;
     /**
@@ -245,6 +260,7 @@ export function EditTransactionDialog({
     onCategorized,
     onLabelCreated,
     onDelete,
+    rowActions,
     mode,
     initialAccountId = null,
     duplicateFrom = null,
@@ -1379,6 +1395,20 @@ export function EditTransactionDialog({
         )
     );
 
+    // Edit is where we already are; every other action leaves the dialog.
+    const rowMenuActions =
+        mode === 'edit' && transaction && rowActions
+            ? getTransactionRowActions({ transaction, ...rowActions })
+                  .filter((action) => action.id !== 'edit')
+                  .map((action) => ({
+                      ...action,
+                      onSelect: () => {
+                          onOpenChange(false);
+                          action.onSelect();
+                      },
+                  }))
+            : [];
+
     const splitsAreComplete = validTransactionSplits(
         signedAmount,
         splits,
@@ -1823,6 +1853,30 @@ export function EditTransactionDialog({
                         </Button>
                     </DialogFooter>
                 </form>
+                {rowMenuActions.length > 0 && (
+                    // Beside the dialog's X, and last in the DOM so it never
+                    // takes the focus the dialog opens with. The table's row
+                    // menu already offers all this from md up.
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                disabled={isSubmitting}
+                                aria-label={__('More actions')}
+                                data-testid="transaction-more-actions"
+                                className="absolute top-2.5 right-11 size-7 opacity-70 hover:opacity-100 md:hidden"
+                            >
+                                <MoreHorizontal />
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <TransactionRowDropdownMenuContent
+                            align="end"
+                            actions={rowMenuActions}
+                        />
+                    </DropdownMenu>
+                )}
             </DialogContent>
         </Dialog>
     );

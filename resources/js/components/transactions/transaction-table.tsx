@@ -10,12 +10,12 @@ import { Button } from '@/components/ui/button';
 import { DataTablePagination } from '@/components/ui/data-table-pagination';
 import { DataTableViewOptions } from '@/components/ui/data-table-view-options';
 import { Spinner } from '@/components/ui/spinner';
-import { useLocale } from '@/hooks/use-locale';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { useMobileSelectionMode } from '@/hooks/use-mobile-selection-mode';
 import { useStoredColumnVisibility } from '@/hooks/use-stored-column-visibility';
 import { useTransactionBulkActions } from '@/hooks/use-transaction-bulk-actions';
-import { useTransactionDayGrouping } from '@/hooks/use-transaction-day-grouping';
 import { useTransactionRowEditing } from '@/hooks/use-transaction-row-editing';
+import { PHONE_INSET } from '@/lib/compact-list-style';
 import {
     type Account,
     type Bank,
@@ -35,7 +35,6 @@ import {
     type ColumnFiltersState,
     getCoreRowModel,
     getFilteredRowModel,
-    getSortedRowModel,
     type Row,
     type RowSelectionState,
     useReactTable,
@@ -54,7 +53,10 @@ const NO_HIDDEN_COLUMNS: string[] = [];
 
 /** What the toolbar beside the filters can reach of the table. */
 export interface TransactionTableToolbar {
-    /** The picker for the table's columns, for the page to place. */
+    /**
+     * The picker for the table's columns, for the page to place on a phone.
+     * Null on desktop, where it closes the filters' toolbar.
+     */
     columnPicker: ReactNode;
     /** The labels, including any a dialog created since the page loaded. */
     labels: Label[];
@@ -69,7 +71,10 @@ interface TransactionTableProps {
     banks: Bank[];
     labels: Label[];
     automationRules: AutomationRule[];
-    /** What sits beside the filters: menus, export, the column picker. */
+    /**
+     * The page's row over the filters: menus, export, the column picker on a
+     * phone. /transactions puts its title and actions there on desktop.
+     */
     renderToolbar: (toolbar: TransactionTableToolbar) => ReactNode;
     /** Keep the column picker's text on narrow screens. */
     showColumnPickerTextOnMobile?: boolean;
@@ -91,6 +96,17 @@ interface TransactionTableProps {
     rowCellClassName?: string;
     /** Scrolls inside a box this tall instead of with the window. */
     maxHeight?: number;
+    /**
+     * The table sits inside a card rather than straight in the page's padded
+     * content, so on a phone its compact list keeps its plain frame instead of
+     * being pulled 16px from the screen's edges.
+     */
+    framedOnPhone?: boolean;
+    /**
+     * Between the filters and the rows, outside the list's frame, such as a
+     * summary of what the filters match.
+     */
+    aboveRows?: ReactNode;
     /** Drawn above the first row, such as a banner. */
     topRow?: ReactNode;
     /** Beside "Load more" below the rows. */
@@ -131,6 +147,8 @@ export function TransactionTable({
     isNewRow,
     rowCellClassName,
     maxHeight,
+    framedOnPhone = false,
+    aboveRows,
     topRow,
     footerActions,
     confirmBulkByTyping = false,
@@ -138,8 +156,7 @@ export function TransactionTable({
     onBalanceUpdated,
     onTransactionsChanged,
 }: TransactionTableProps) {
-    const locale = useLocale();
-    const { sorting } = source;
+    const isMobile = useIsMobile();
     const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
     const [columnVisibility, setColumnVisibility] = useStoredColumnVisibility();
     const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
@@ -189,25 +206,15 @@ export function TransactionTable({
         onClear: selectOnlyVisible,
     });
 
-    const { isGroupedByDay, tableColumnVisibility, onColumnVisibilityChange } =
-        useTransactionDayGrouping({
-            sorting,
-            columnVisibility,
-            setColumnVisibility,
-        });
-
     const columns = useMemo(() => {
         const allColumns = createTransactionColumns({
             categories,
             accounts,
             banks,
             labels,
-            locale,
             ...rowActions,
             onUpdate: updateTransaction,
             onCategorized: handleCategorized,
-            isDateHidden: tableColumnVisibility.transaction_date === false,
-            isGroupedByDay,
             hiddenLabelId,
             statementPayments,
             categorizingIds,
@@ -228,13 +235,10 @@ export function TransactionTable({
         banks,
         categories,
         labels,
-        locale,
         rowActions,
         updateTransaction,
         handleCategorized,
         hideColumns,
-        tableColumnVisibility,
-        isGroupedByDay,
         hiddenLabelId,
         statementPayments,
         categorizingIds,
@@ -244,20 +248,16 @@ export function TransactionTable({
     const table = useReactTable({
         data: source.rows,
         columns,
-        manualSorting: source.manualSorting,
-        onSortingChange: source.onSortingChange,
         onColumnFiltersChange: setColumnFilters,
         getRowId: (row) => row.id.toString(),
         getCoreRowModel: getCoreRowModel(),
-        getSortedRowModel: getSortedRowModel(),
         getFilteredRowModel: getFilteredRowModel(),
-        onColumnVisibilityChange,
+        onColumnVisibilityChange: setColumnVisibility,
         onRowSelectionChange: setRowSelection,
         enableRowSelection: true,
         state: {
-            sorting,
             columnFilters,
-            columnVisibility: tableColumnVisibility,
+            columnVisibility,
             rowSelection,
         },
     });
@@ -286,31 +286,43 @@ export function TransactionTable({
     return (
         <>
             <div className="space-y-4">
-                <TransactionFiltersComponent
-                    filters={source.filters}
-                    onFiltersChange={source.onFiltersChange}
-                    categories={categories}
-                    labels={labels}
-                    accounts={accounts}
-                    hideAccountFilter={hideAccountFilter}
-                    enableSavedFilters={enableSavedFilters}
-                    actions={renderToolbar({
-                        columnPicker: (
-                            <DataTableViewOptions
-                                table={table}
-                                hideColumnTextOnMobile={
-                                    !showColumnPickerTextOnMobile
-                                }
-                            />
-                        ),
-                        labels,
-                        onLabelCreated: handleLabelCreated,
-                        clearSelection,
-                    })}
-                />
+                {/* On a phone the filters line up with the inset list. */}
+                <div className={framedOnPhone ? undefined : PHONE_INSET}>
+                    <TransactionFiltersComponent
+                        filters={source.filters}
+                        onFiltersChange={source.onFiltersChange}
+                        categories={categories}
+                        labels={labels}
+                        accounts={accounts}
+                        hideAccountFilter={hideAccountFilter}
+                        enableSavedFilters={enableSavedFilters}
+                        countMatching={source.countMatching}
+                        facets={source.facets}
+                        actions={renderToolbar({
+                            columnPicker: isMobile ? (
+                                <DataTableViewOptions
+                                    table={table}
+                                    hideColumnTextOnMobile={
+                                        !showColumnPickerTextOnMobile
+                                    }
+                                />
+                            ) : null,
+                            labels,
+                            onLabelCreated: handleLabelCreated,
+                            clearSelection,
+                        })}
+                        trailing={
+                            isMobile ? null : (
+                                <DataTableViewOptions table={table} iconOnly />
+                            )
+                        }
+                    />
+                </div>
+
+                {aboveRows}
 
                 {source.isLoading ? (
-                    <TransactionListSkeleton />
+                    <TransactionListSkeleton framedOnPhone={framedOnPhone} />
                 ) : (
                     <>
                         <ResponsiveTransactionTable
@@ -319,10 +331,8 @@ export function TransactionTable({
                             emptyMessage={__('No transactions found.')}
                             renderRow={renderTransactionRow}
                             maxHeight={maxHeight}
-                            sorting={sorting}
                             rowSelection={rowSelection}
                             daySummaryOf={source.daySummaryOf}
-                            isGroupedByDay={isGroupedByDay}
                             selectionMode={selectionMode.forRows}
                             listRow={{
                                 categories,
@@ -335,6 +345,7 @@ export function TransactionTable({
                             }}
                             rowActions={rowActions}
                             topRow={topRow}
+                            framedOnPhone={framedOnPhone}
                         />
 
                         <TransactionTableFooter

@@ -1,19 +1,12 @@
-import { expandCategorySelection } from '@/lib/transaction-category-filter';
+import {
+    categoriesOfTypes,
+    expandCategorySelection,
+} from '@/lib/transaction-category-filter';
 import { type Category } from '@/types/category';
 import { type Transaction, type TransactionFilters } from '@/types/transaction';
 import { formatDate, toLocalDate } from '@/utils/date';
 import { __ } from '@/utils/i18n';
-import { type SortingState } from '@tanstack/react-table';
 import { isToday, isValid, isYesterday } from 'date-fns';
-
-/**
- * The table groups rows under a header per day only while it is sorted by
- * date: sorted by anything else, the rows of one day are scattered and the
- * headers would repeat.
- */
-export function isSortedByDate(sorting: SortingState): boolean {
-    return sorting[0]?.id === 'transaction_date';
-}
 
 function capitalize(text: string): string {
     return text.charAt(0).toUpperCase() + text.slice(1);
@@ -107,7 +100,8 @@ const wholeAmount: RowTotalAmount = (transaction) => transaction.amount;
  * What a row adds to its day's total, the way `TransactionDayTotals` adds it on
  * the server. A split transaction stands at its own amount unless the filters
  * narrow its lines: a label it carries keeps them all, labels living on the
- * transaction, and otherwise it adds only the lines in a wanted category.
+ * transaction, and otherwise it adds only the lines in a wanted category. A
+ * wanted type narrows on top of that: only lines whose category has it stay.
  *
  * A cashflow block is decided by the budgets the page does not hold, so under
  * one a split transaction has no amount here.
@@ -115,17 +109,24 @@ const wholeAmount: RowTotalAmount = (transaction) => transaction.amount;
 export function createRowTotalAmount(
     filters: Pick<
         TransactionFilters,
-        'categoryIds' | 'labelIds' | 'cashflowBlock'
+        'categoryIds' | 'categoryTypes' | 'labelIds' | 'cashflowBlock'
     >,
     categories: Category[],
 ): RowTotalAmount {
-    const { categoryIds, labelIds, cashflowBlock } = filters;
+    const { categoryIds, categoryTypes, labelIds, cashflowBlock } = filters;
+    const narrowsByCategoryOrLabel =
+        categoryIds.length > 0 || labelIds.length > 0;
+    const narrowsByType = categoryTypes.length > 0;
 
-    if (categoryIds.length === 0 && labelIds.length === 0 && !cashflowBlock) {
+    if (!narrowsByCategoryOrLabel && !narrowsByType && !cashflowBlock) {
         return wholeAmount;
     }
 
     const wantedCategoryIds = expandCategorySelection(categoryIds, categories);
+    const categoriesOfWantedTypes = categoriesOfTypes(
+        categoryTypes,
+        categories,
+    );
 
     return (transaction) => {
         if (!transaction.splits?.length) {
@@ -136,12 +137,18 @@ export function createRowTotalAmount(
             return null;
         }
 
-        if (transaction.label_ids?.some((id) => labelIds.includes(id))) {
-            return transaction.amount;
-        }
+        const keepsEveryCategory =
+            !narrowsByCategoryOrLabel ||
+            transaction.label_ids?.some((id) => labelIds.includes(id));
 
         return transaction.splits
-            .filter((line) => wantedCategoryIds.has(line.category_id))
+            .filter(
+                (line) =>
+                    (keepsEveryCategory ||
+                        wantedCategoryIds.has(line.category_id)) &&
+                    (!narrowsByType ||
+                        categoriesOfWantedTypes.has(line.category_id)),
+            )
             .reduce((sum, line) => sum + line.amount, 0);
     };
 }
@@ -318,8 +325,7 @@ export function reconcileDaySummary(
     userCurrency: string,
     rowTotalAmount: RowTotalAmount = wholeAmount,
 ): DaySummary {
-    // Served without a figure: the list is switching to a date sort and the
-    // answer that carries one is still on its way.
+    // Served without a figure: the answer that carries one is still on its way.
     if (server === undefined && served.length > 0) {
         return { count: loaded.length, total: { status: 'pending' } };
     }

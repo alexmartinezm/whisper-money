@@ -1,14 +1,28 @@
+import { searchableCategories } from '@/lib/category-tree.fixture';
 import {
-    expectFoodListedWithSubcategories,
-    searchableCategories,
-} from '@/lib/category-tree.fixture';
+    FILTER_FACETS,
+    type FilterFacet,
+} from '@/lib/transaction-filter-facets';
 import { type Account } from '@/types/account';
 import { type Category } from '@/types/category';
 import { type TransactionFilters as FiltersType } from '@/types/transaction';
 import { formatLocalDate, toLocalDate } from '@/utils/date';
-import { fireEvent, render, screen } from '@testing-library/react';
+import {
+    cleanup,
+    fireEvent,
+    render,
+    screen,
+    waitFor,
+    within,
+} from '@testing-library/react';
+import axios from 'axios';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TransactionFilters } from './transaction-filters';
+
+// The phone's bar and filters sheet; the desktop chips toolbar has its own tests.
+vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => true }));
+vi.mock('@/hooks/use-locale', () => ({ useLocale: () => 'en-US' }));
+vi.mock('axios');
 
 const accounts: Account[] = [
     {
@@ -28,18 +42,6 @@ const accounts: Account[] = [
         external_account_id: null,
         linked_at: null,
     },
-    {
-        id: 'acc-2',
-        name: 'Savings',
-        name_iv: null,
-        encrypted: false,
-        bank: null,
-        type: 'savings',
-        currency_code: 'USD',
-        banking_connection_id: null,
-        external_account_id: null,
-        linked_at: null,
-    },
 ];
 
 const emptyFilters: FiltersType = {
@@ -48,186 +50,421 @@ const emptyFilters: FiltersType = {
     amountMin: null,
     amountMax: null,
     categoryIds: [],
+    categoryTypes: [],
     accountIds: [],
     labelIds: [],
     creditorName: '',
     debtorName: '',
     searchText: '',
     aiCategorizedOnly: false,
+    cashflowBlock: null,
+};
+
+const october: Partial<FiltersType> = {
+    dateFrom: toLocalDate('2026-10-01'),
+    dateTo: toLocalDate('2026-10-31'),
 };
 
 function renderFilters(
-    filters: FiltersType,
-    accountList: Account[] = accounts,
-    categoryList: Category[] = [],
+    filters: Partial<FiltersType> = {},
+    {
+        categories = searchableCategories,
+        hideAccountFilter = false,
+        enableSavedFilters = false,
+        countMatching = vi.fn().mockResolvedValue(21),
+        facets = FILTER_FACETS,
+    }: {
+        categories?: Category[];
+        hideAccountFilter?: boolean;
+        enableSavedFilters?: boolean;
+        countMatching?: ReturnType<typeof vi.fn>;
+        facets?: readonly FilterFacet[];
+    } = {},
 ) {
     const onFiltersChange = vi.fn();
     render(
         <TransactionFilters
-            filters={filters}
+            filters={{ ...emptyFilters, ...filters }}
             onFiltersChange={onFiltersChange}
-            categories={categoryList}
+            categories={categories}
             labels={[]}
-            accounts={accountList}
+            accounts={accounts}
+            hideAccountFilter={hideAccountFilter}
+            enableSavedFilters={enableSavedFilters}
+            countMatching={countMatching}
+            facets={facets}
         />,
     );
-    return onFiltersChange;
+    return { onFiltersChange, countMatching };
 }
 
-describe('TransactionFilters accounts dropdown', () => {
-    beforeEach(() => {
-        globalThis.ResizeObserver = class {
-            observe() {}
-            unobserve() {}
-            disconnect() {}
-        };
-        Element.prototype.scrollIntoView = vi.fn();
-    });
+function openSheet() {
+    fireEvent.click(screen.getByTestId('open-filters-sheet'));
+    return screen.getByTestId('transaction-filters-sheet');
+}
 
-    it('adds an account id when an account is selected', () => {
-        const onFiltersChange = renderFilters(emptyFilters);
+function applied(onFiltersChange: ReturnType<typeof vi.fn>): FiltersType {
+    expect(onFiltersChange).toHaveBeenCalledTimes(1);
+    return onFiltersChange.mock.calls[0][0] as FiltersType;
+}
 
-        fireEvent.click(screen.getByRole('button', { name: /Filters/ }));
-        fireEvent.click(screen.getByText('Select accounts...'));
-        fireEvent.click(screen.getByText('Checking'));
-
-        expect(onFiltersChange).toHaveBeenCalledWith(
-            expect.objectContaining({ accountIds: ['acc-1'] }),
-        );
-    });
-
-    it('removes an account id when a selected account is toggled off', () => {
-        const onFiltersChange = renderFilters({
-            ...emptyFilters,
-            accountIds: ['acc-1'],
-        });
-
-        fireEvent.click(screen.getByRole('button', { name: /Filters/ }));
-        fireEvent.click(screen.getByText('1 selected'));
-        fireEvent.click(screen.getByText('Checking'));
-
-        expect(onFiltersChange).toHaveBeenCalledWith(
-            expect.objectContaining({ accountIds: [] }),
-        );
-    });
-
-    it('shows an empty state when there are no accounts', () => {
-        renderFilters(emptyFilters, []);
-
-        fireEvent.click(screen.getByRole('button', { name: /Filters/ }));
-        fireEvent.click(screen.getByText('Select accounts...'));
-
-        expect(screen.getByText('No accounts found.')).toBeInTheDocument();
-    });
-});
-
-describe('TransactionFilters categories dropdown', () => {
-    it('lists the subcategories of a parent that matches the search, highlighting the parent', async () => {
-        renderFilters(emptyFilters, accounts, searchableCategories);
-
-        fireEvent.click(screen.getByRole('button', { name: /Filters/ }));
-        fireEvent.click(screen.getByText('Select categories...'));
-        fireEvent.change(screen.getByPlaceholderText('Search categories...'), {
-            target: { value: 'food' },
-        });
-
-        await expectFoodListedWithSubcategories();
-    });
-});
-
-describe('TransactionFilters amount', () => {
-    it('counts the amount as one filter even when a single bound sets both ends', () => {
-        renderFilters({ ...emptyFilters, amountMin: -30, amountMax: 0 });
-
-        expect(
-            screen.getByRole('button', { name: /Filters/ }),
-        ).toHaveTextContent(/^Filters1$/);
-    });
-});
-
-describe('TransactionFilters cashflow block chip', () => {
-    const blockFilters: FiltersType = {
-        ...emptyFilters,
-        dateFrom: toLocalDate('2026-10-01'),
-        dateTo: toLocalDate('2026-10-31'),
-        cashflowBlock: 'variable',
+beforeEach(() => {
+    globalThis.ResizeObserver = class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
     };
+    Element.prototype.scrollIntoView = vi.fn();
+    Element.prototype.hasPointerCapture = vi.fn(() => false);
+    Element.prototype.setPointerCapture = vi.fn();
+    Element.prototype.releasePointerCapture = vi.fn();
+});
 
-    it('shows the block the list is narrowed to', () => {
-        renderFilters(blockFilters);
+describe('TransactionFilters phone bar', () => {
+    it('counts the active facets on "Filters", leaving the period out', () => {
+        renderFilters({
+            ...october,
+            categoryIds: ['food'],
+            // One amount facet, though a single typed bound sets both ends.
+            amountMin: -30,
+            amountMax: 0,
+        });
 
-        expect(screen.getByTestId('cashflow-block-chip').textContent).toBe(
-            'Block: Variable expense',
-        );
+        expect(screen.getByTestId('filters-badge')).toHaveTextContent('2');
     });
 
-    it('drops only the block when the chip is removed', () => {
-        const onFiltersChange = renderFilters(blockFilters);
+    it('shows no badge without a facet', () => {
+        renderFilters(october);
+
+        expect(screen.queryByTestId('filters-badge')).toBeNull();
+    });
+
+    it('steps the period month by month', () => {
+        const { onFiltersChange } = renderFilters(october);
+
+        expect(screen.getByTestId('period-stepper-label')).toHaveTextContent(
+            'October 2026',
+        );
+        fireEvent.click(screen.getByRole('button', { name: 'Next period' }));
+
+        const next = applied(onFiltersChange);
+        expect(formatLocalDate(next.dateFrom!)).toBe('2026-11-01');
+        expect(formatLocalDate(next.dateTo!)).toBe('2026-11-30');
+    });
+});
+
+describe('TransactionFilters phone sheet', () => {
+    it('keeps every change pending until "See N transactions" applies it', async () => {
+        const { onFiltersChange, countMatching } = renderFilters();
+        const sheet = openSheet();
 
         fireEvent.click(
-            screen.getByRole('button', {
-                name: 'Remove the Variable expense filter',
-            }),
+            within(sheet).getByRole('button', { name: 'Expenses' }),
         );
+        fireEvent.click(within(sheet).getByText('Categories'));
+        fireEvent.click(within(sheet).getByRole('checkbox', { name: 'Food' }));
 
-        expect(onFiltersChange).toHaveBeenCalledWith({
-            ...blockFilters,
-            cashflowBlock: null,
+        expect(onFiltersChange).not.toHaveBeenCalled();
+        await waitFor(() =>
+            expect(screen.getByTestId('apply-filters')).toHaveTextContent(
+                'See 21 transactions',
+            ),
+        );
+        // Counted once the draft settled, not once per tap.
+        expect(countMatching).toHaveBeenCalledTimes(1);
+        expect(countMatching.mock.calls[0][0]).toMatchObject({
+            amountMax: 0,
+            categoryIds: ['food'],
+        });
+
+        fireEvent.click(screen.getByTestId('apply-filters'));
+
+        expect(applied(onFiltersChange)).toMatchObject({
+            amountMin: null,
+            amountMax: 0,
+            categoryIds: ['food'],
+        });
+        expect(screen.queryByTestId('transaction-filters-sheet')).toBeNull();
+    });
+
+    it('reads "See transactions" while the count is on its way', () => {
+        renderFilters(
+            {},
+            { countMatching: vi.fn(() => new Promise(() => {})) },
+        );
+        openSheet();
+
+        expect(screen.getByTestId('apply-filters')).toHaveTextContent(
+            /^See transactions$/,
+        );
+    });
+
+    it('drops the draft on ✕', () => {
+        const { onFiltersChange } = renderFilters();
+        const sheet = openSheet();
+
+        fireEvent.click(within(sheet).getByRole('button', { name: 'Income' }));
+        fireEvent.click(within(sheet).getByRole('button', { name: 'Close' }));
+
+        expect(onFiltersChange).not.toHaveBeenCalled();
+        openSheet();
+        expect(
+            screen
+                .getByRole('button', { name: 'All' })
+                .getAttribute('aria-pressed'),
+        ).toBe('true');
+    });
+
+    it('resets the facets and the period, keeping the search', () => {
+        const { onFiltersChange } = renderFilters({
+            ...october,
+            searchText: 'coffee',
+            categoryIds: ['transport'],
+            aiCategorizedOnly: true,
+        });
+        const sheet = openSheet();
+
+        fireEvent.click(within(sheet).getByRole('button', { name: 'Reset' }));
+        fireEvent.click(screen.getByTestId('apply-filters'));
+
+        expect(applied(onFiltersChange)).toEqual({
+            ...emptyFilters,
+            searchText: 'coffee',
         });
     });
 
-    it('shows no chip without a block', () => {
-        renderFilters(emptyFilters);
+    it('turns the AI guesses switch on', () => {
+        const { onFiltersChange } = renderFilters();
+        const sheet = openSheet();
 
-        expect(screen.queryByTestId('cashflow-block-chip')).toBeNull();
-    });
-});
+        fireEvent.click(
+            within(sheet).getByRole('switch', { name: 'AI guesses only' }),
+        );
+        fireEvent.click(screen.getByTestId('apply-filters'));
 
-describe('TransactionFilters quick periods', () => {
-    beforeEach(() => {
-        globalThis.ResizeObserver = class {
-            observe() {}
-            unobserve() {}
-            disconnect() {}
-        };
+        expect(applied(onFiltersChange).aiCategorizedOnly).toBe(true);
     });
 
-    function openPanel() {
-        fireEvent.click(screen.getByRole('button', { name: /Filters/ }));
-    }
-
-    it('widens the range to the quarter containing the start date', () => {
-        const onFiltersChange = renderFilters({
-            ...emptyFilters,
+    it('picks a quick period from the period view', () => {
+        const { onFiltersChange } = renderFilters({
             dateFrom: toLocalDate('2026-05-20'),
             dateTo: toLocalDate('2026-05-31'),
         });
-        openPanel();
+        openSheet();
 
+        fireEvent.click(screen.getByTestId('sheet-period-row'));
         fireEvent.click(screen.getByRole('button', { name: 'Quarter' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+        expect(screen.getByTestId('sheet-period-row')).toHaveTextContent(
+            'Q2 2026',
+        );
+        fireEvent.click(screen.getByTestId('apply-filters'));
 
-        const next = onFiltersChange.mock.calls[0][0] as FiltersType;
+        const next = applied(onFiltersChange);
         expect(formatLocalDate(next.dateFrom!)).toBe('2026-04-01');
         expect(formatLocalDate(next.dateTo!)).toBe('2026-06-30');
     });
 
-    it('marks the period the range matches as pressed', () => {
-        renderFilters({
-            ...emptyFilters,
-            dateFrom: toLocalDate('2026-10-01'),
-            dateTo: toLocalDate('2026-10-31'),
-        });
-        openPanel();
+    it('lists five categories, the rest behind "View all"', () => {
+        renderFilters();
+        const sheet = openSheet();
 
+        fireEvent.click(within(sheet).getByText('Categories'));
+        // Uncategorized plus the four of the tree.
+        expect(within(sheet).getAllByRole('checkbox')).toHaveLength(5);
+
+        const many: Category[] = Array.from({ length: 8 }, (_, i) => ({
+            ...searchableCategories[3],
+            id: `c${i}`,
+            name: `Category ${i}`,
+        }));
+        cleanup();
+        renderFilters({}, { categories: many });
+        const crowded = openSheet();
+        fireEvent.click(within(crowded).getByText('Categories'));
+
+        expect(within(crowded).getAllByRole('checkbox')).toHaveLength(5);
+        fireEvent.click(
+            within(crowded).getByRole('button', { name: 'View all (9)' }),
+        );
+        expect(within(crowded).getAllByRole('checkbox')).toHaveLength(9);
+    });
+
+    it('picks several category types, applied together', () => {
+        const { onFiltersChange } = renderFilters();
+        const sheet = openSheet();
+
+        fireEvent.click(within(sheet).getByText('Category type'));
+        fireEvent.click(
+            within(sheet).getByRole('checkbox', { name: 'Expense' }),
+        );
+        fireEvent.click(
+            within(sheet).getByRole('checkbox', { name: 'Savings' }),
+        );
         expect(
-            screen
-                .getByRole('button', { name: 'Month' })
-                .getAttribute('aria-pressed'),
+            within(screen.getByTestId('sheet-category-types')).getByText(
+                'Expense, Savings',
+            ),
+        ).toBeTruthy();
+
+        fireEvent.click(screen.getByTestId('apply-filters'));
+        expect(applied(onFiltersChange).categoryTypes).toEqual([
+            'expense',
+            'savings',
+        ]);
+    });
+
+    it('picks an account, and has no accounts row where the page is one', () => {
+        const { onFiltersChange } = renderFilters();
+        const sheet = openSheet();
+
+        fireEvent.click(within(sheet).getByText('Accounts'));
+        fireEvent.click(
+            within(sheet).getByRole('checkbox', { name: /Checking/ }),
+        );
+        fireEvent.click(screen.getByTestId('apply-filters'));
+        expect(applied(onFiltersChange).accountIds).toEqual(['acc-1']);
+
+        cleanup();
+        renderFilters({}, { hideAccountFilter: true });
+        expect(within(openSheet()).queryByText('Accounts')).toBeNull();
+    });
+
+    it('offers the cashflow block only over a whole date range', () => {
+        renderFilters();
+        expect(
+            within(openSheet()).queryByTestId('sheet-cashflow-block'),
+        ).toBeNull();
+
+        cleanup();
+        const { onFiltersChange } = renderFilters(october);
+        const sheet = openSheet();
+        fireEvent.click(within(sheet).getByText('Cashflow block'));
+        fireEvent.click(
+            within(sheet).getByRole('checkbox', { name: 'Variable expense' }),
+        );
+        fireEvent.click(screen.getByTestId('apply-filters'));
+
+        expect(applied(onFiltersChange).cashflowBlock).toBe('variable');
+    });
+
+    it('applies the counterparty names', () => {
+        const { onFiltersChange } = renderFilters();
+        const sheet = openSheet();
+
+        fireEvent.click(within(sheet).getByText('Counterparty'));
+        fireEvent.change(within(sheet).getByLabelText('Creditor name'), {
+            target: { value: 'Mercadona' },
+        });
+        fireEvent.click(screen.getByTestId('apply-filters'));
+
+        expect(applied(onFiltersChange).creditorName).toBe('Mercadona');
+    });
+
+    it('offers only the facets the list applies', () => {
+        renderFilters(october, {
+            facets: FILTER_FACETS.filter(
+                (facet) => facet !== 'cashflowBlock' && facet !== 'label',
+            ),
+        });
+
+        const sheet = within(openSheet());
+
+        expect(sheet.queryByTestId('sheet-cashflow-block')).toBeNull();
+        expect(sheet.queryByTestId('sheet-labels')).toBeNull();
+        expect(sheet.getByTestId('sheet-categories')).toBeTruthy();
+    });
+
+    it("Reset takes a saved view's search with it", async () => {
+        vi.mocked(axios.get).mockResolvedValue({
+            data: {
+                data: [
+                    {
+                        id: 'saved-1',
+                        name: 'Rent',
+                        filters: {
+                            search: 'rent',
+                            category_ids: ['food'],
+                        },
+                    },
+                ],
+            },
+        });
+        const { onFiltersChange, countMatching } = renderFilters(
+            {},
+            { enableSavedFilters: true },
+        );
+        const sheet = within(openSheet());
+
+        fireEvent.pointerDown(
+            await sheet.findByRole('button', { name: /saved/i }),
+            { button: 0, ctrlKey: false },
+        );
+        fireEvent.click(await screen.findByRole('menuitem', { name: 'Rent' }));
+
+        await waitFor(() =>
+            expect(countMatching).toHaveBeenLastCalledWith(
+                expect.objectContaining({ searchText: 'rent' }),
+                expect.anything(),
+            ),
+        );
+
+        fireEvent.click(sheet.getByRole('button', { name: 'Reset' }));
+        fireEvent.click(sheet.getByTestId('apply-filters'));
+
+        expect(applied(onFiltersChange)).toMatchObject({
+            searchText: '',
+            categoryIds: [],
+        });
+    });
+
+    it('Reset leaves the search on the bar, which it does not own', () => {
+        const { onFiltersChange } = renderFilters({
+            searchText: 'coffee',
+            categoryIds: ['food'],
+        });
+        const sheet = within(openSheet());
+
+        fireEvent.click(sheet.getByRole('button', { name: 'Reset' }));
+        fireEvent.click(sheet.getByTestId('apply-filters'));
+
+        expect(applied(onFiltersChange)).toMatchObject({
+            searchText: 'coffee',
+            categoryIds: [],
+        });
+    });
+
+    it('drops the cashflow block with the dates it narrows', () => {
+        const { onFiltersChange } = renderFilters({
+            ...october,
+            cashflowBlock: 'variable',
+        });
+        openSheet();
+
+        fireEvent.click(screen.getByTestId('sheet-period-row'));
+        fireEvent.click(screen.getByRole('button', { name: 'All dates' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+        fireEvent.click(screen.getByTestId('apply-filters'));
+
+        expect(applied(onFiltersChange)).toMatchObject({
+            dateFrom: null,
+            dateTo: null,
+            cashflowBlock: null,
+        });
+    });
+
+    it('toggles the AI guesses from anywhere on its row', () => {
+        const { onFiltersChange } = renderFilters();
+        const sheet = openSheet();
+
+        fireEvent.click(within(sheet).getByText('AI guesses only'));
+        expect(
+            within(sheet)
+                .getByRole('switch', { name: 'AI guesses only' })
+                .getAttribute('aria-checked'),
         ).toBe('true');
-        expect(
-            screen
-                .getByRole('button', { name: 'Year' })
-                .getAttribute('aria-pressed'),
-        ).toBe('false');
+        fireEvent.click(screen.getByTestId('apply-filters'));
+
+        expect(applied(onFiltersChange).aiCategorizedOnly).toBe(true);
     });
 });

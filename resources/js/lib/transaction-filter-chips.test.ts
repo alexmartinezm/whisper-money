@@ -8,6 +8,7 @@ const none: TransactionFilters = {
     amountMin: null,
     amountMax: null,
     categoryIds: [],
+    categoryTypes: [],
     accountIds: [],
     labelIds: [],
     creditorName: '',
@@ -61,5 +62,23 @@ describe('describeActiveFilters', () => {
         expect(
             describeActiveFilters({ ...none, amountMax: 50 }, sources),
         ).toEqual(['Up to 50']);
+    });
+
+    it('reads a side with no sizes as the side, not as its zero bound', () => {
+        expect(
+            describeActiveFilters({ ...none, amountMin: 0 }, sources),
+        ).toEqual(['Income']);
+        expect(
+            describeActiveFilters({ ...none, amountMax: 0 }, sources),
+        ).toEqual(['Expenses']);
+    });
+
+    it('keeps the bounds of a range with sizes', () => {
+        expect(
+            describeActiveFilters(
+                { ...none, amountMin: -50, amountMax: 0 },
+                sources,
+            ),
+        ).toEqual(['-50 – 0']);
     });
 });

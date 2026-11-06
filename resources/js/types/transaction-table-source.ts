@@ -1,9 +1,9 @@
 import { type DaySummaryOf } from '@/lib/transaction-day-groups';
+import { type FilterFacet } from '@/lib/transaction-filter-facets';
 import {
     type DecryptedTransaction,
     type TransactionFilters,
 } from '@/types/transaction';
-import { type OnChangeFn, type SortingState } from '@tanstack/react-table';
 import { type Dispatch, type SetStateAction } from 'react';
 
 /** The footer below a transactions table: how much it shows, and more. */
@@ -21,8 +21,8 @@ export interface TransactionTablePagination {
 }
 
 /**
- * Where a transactions table gets its rows, and how it filters, sorts, pages
- * and counts them. `/transactions` pages them from the server; the account,
+ * Where a transactions table gets its rows, newest first, and how it filters,
+ * pages and counts them. `/transactions` pages them from the server; the account,
  * budget and savings-goal pages hold all of theirs in memory.
  */
 export interface TransactionTableSource {
@@ -36,10 +36,8 @@ export interface TransactionTableSource {
     isLoading: boolean;
     filters: TransactionFilters;
     onFiltersChange: (filters: TransactionFilters) => void;
-    sorting: SortingState;
-    onSortingChange: OnChangeFn<SortingState>;
-    /** The source orders the rows itself, so the table must not re-sort them. */
-    manualSorting: boolean;
+    /** The facets this source applies: the filters offer these and no others. */
+    facets: readonly FilterFacet[];
     daySummaryOf: DaySummaryOf;
     pagination: TransactionTablePagination;
     /** Fetches the rows again, after a change the source cannot apply itself. */
@@ -51,6 +49,14 @@ export interface TransactionTableSource {
      * those changes until the next visit rather than reloading the page.
      */
     refreshRows?: () => void;
+    /**
+     * How many rows a filter set would list, before it is applied: the phone's
+     * filters sheet counts what its "See N transactions" would show.
+     */
+    countMatching: (
+        filters: TransactionFilters,
+        signal: AbortSignal,
+    ) => Promise<number>;
     /** Changes when a new query replaces the rows, so the ticked rows go. */
     queryKey: number;
     /**

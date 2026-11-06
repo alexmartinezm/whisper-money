@@ -37,6 +37,8 @@ export interface TransactionListProps {
     showActionsMenu?: boolean;
     headerActions?: ReactNode;
     maxHeight?: number;
+    /** Inside a card: keep the plain frame on a phone instead of design D's inset one. */
+    framedOnPhone?: boolean;
     hideColumns?: string[];
     onBalanceUpdated?: () => void;
     /**
@@ -63,6 +65,7 @@ export function TransactionList({
     showActionsMenu = true,
     headerActions,
     maxHeight,
+    framedOnPhone,
     hideColumns,
     onBalanceUpdated,
     onTransactionsChanged,
@@ -89,35 +92,38 @@ export function TransactionList({
             hiddenLabelId={hiddenLabelId}
             statementPayments={statementPayments}
             maxHeight={maxHeight}
+            framedOnPhone={framedOnPhone}
             onBalanceUpdated={onBalanceUpdated}
             onTransactionsChanged={onTransactionsChanged}
             showColumnPickerTextOnMobile
-            renderToolbar={({
-                columnPicker,
-                onLabelCreated,
-                clearSelection,
-            }) => (
-                <div className="flex flex-wrap justify-end gap-2">
-                    {showActionsMenu && (
-                        <TransactionActionsMenu
-                            transactions={source.heldRows}
-                            hasTransactionalAccounts={
-                                filterTransactionalAccounts(accounts).length > 0
-                            }
-                            onLabelCreated={onLabelCreated}
-                            onReEvaluateComplete={() => {
-                                clearSelection();
-                                setTimeout(() => {
-                                    reloadPage();
-                                }, 500);
-                            }}
-                            filters={source.filters}
-                        />
-                    )}
-                    {headerActions}
-                    {columnPicker}
-                </div>
-            )}
+            renderToolbar={({ columnPicker, onLabelCreated, clearSelection }) =>
+                // Nothing to show (a desktop page without the menu or extra
+                // actions) leaves no empty row above the filters.
+                !showActionsMenu && !headerActions && !columnPicker ? null : (
+                    <div className="flex flex-wrap justify-end gap-2">
+                        {showActionsMenu && (
+                            <TransactionActionsMenu
+                                transactions={source.heldRows}
+                                hasTransactionalAccounts={
+                                    filterTransactionalAccounts(accounts)
+                                        .length > 0
+                                }
+                                onLabelCreated={onLabelCreated}
+                                onReEvaluateComplete={() => {
+                                    clearSelection();
+                                    setTimeout(() => {
+                                        reloadPage();
+                                    }, 500);
+                                }}
+                                showAnalysis
+                                filters={source.filters}
+                            />
+                        )}
+                        {headerActions}
+                        {columnPicker}
+                    </div>
+                )
+            }
             footerActions={
                 accountId && (
                     <Button asChild variant="outline">

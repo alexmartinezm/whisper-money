@@ -43,7 +43,7 @@ class SavingsGoalController extends Controller
      *
      * @var list<string>
      */
-    private const TRANSACTION_RELATIONS = ['account.bank', 'category', 'labels'];
+    private const TRANSACTION_RELATIONS = ['account.bank', 'category', 'labels', 'splits.category'];
 
     public function __construct(
         private SavingsGoalService $goals,

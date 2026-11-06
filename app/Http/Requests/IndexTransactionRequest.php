@@ -3,8 +3,9 @@
 namespace App\Http\Requests;
 
 use App\Enums\CashflowBlock;
-use App\Models\Transaction;
+use App\Enums\CategoryType;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Pagination\Cursor;
 use Illuminate\Validation\Rule;
 
 class IndexTransactionRequest extends FormRequest
@@ -16,7 +17,7 @@ class IndexTransactionRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        $fields = ['category_ids', 'account_ids', 'label_ids'];
+        $fields = ['category_ids', 'category_types', 'account_ids', 'label_ids'];
 
         foreach ($fields as $field) {
             $value = $this->input($field);
@@ -43,6 +44,8 @@ class IndexTransactionRequest extends FormRequest
             'amount_max' => ['nullable', 'numeric'],
             'category_ids' => ['nullable', 'array'],
             'category_ids.*' => ['string'],
+            'category_types' => ['nullable', 'array'],
+            'category_types.*' => [Rule::enum(CategoryType::class)],
             'account_ids' => ['nullable', 'array'],
             'account_ids.*' => ['string', 'uuid'],
             'label_ids' => ['nullable', 'array'],
@@ -51,7 +54,6 @@ class IndexTransactionRequest extends FormRequest
             'debtor_name' => ['nullable', 'string', 'max:255'],
             'category_source' => ['nullable', 'string', 'in:manual,rule,ai,bank'],
             'search' => ['nullable', 'string', 'max:200'],
-            'sort' => ['nullable', 'string', Rule::in(collect(Transaction::LIST_SORT_COLUMNS)->flatMap(fn (string $column) => [$column, '-'.$column]))],
             'cursor' => ['nullable', 'string'],
             'per_page' => ['nullable', 'integer', 'min:10', 'max:100'],
         ];
@@ -74,6 +76,7 @@ class IndexTransactionRequest extends FormRequest
             'amount_min' => $validated['amount_min'] ?? null,
             'amount_max' => $validated['amount_max'] ?? null,
             'category_ids' => $validated['category_ids'] ?? null,
+            'category_types' => $validated['category_types'] ?? null,
             'account_ids' => $validated['account_ids'] ?? null,
             'label_ids' => $validated['label_ids'] ?? null,
             'creditor_name' => $validated['creditor_name'] ?? null,
@@ -86,19 +89,30 @@ class IndexTransactionRequest extends FormRequest
     }
 
     /**
-     * The list's sort, a column name with a leading `-` for descending.
+     * The page to read, as an encoded cursor. A cursor bookmarked under one of
+     * the sorts the list used to offer holds that sort's columns instead of
+     * the date this order pages on: it reads as no cursor, the first page,
+     * rather than failing the page. Empty stops the paginator falling back
+     * to the raw query parameter.
      */
-    public function sort(): string
+    public function listCursor(): string
     {
-        return $this->validated('sort') ?? '-transaction_date';
+        $cursor = Cursor::fromEncoded($this->validated('cursor'));
+
+        if ($cursor === null || array_diff(['transaction_date', 'id'], array_keys($cursor->toArray())) !== []) {
+            return '';
+        }
+
+        return $cursor->encode();
     }
 
     /**
-     * Whether the list is sorted by date, either way: the only order that
-     * draws day headers, mirrored by `isSortedByDate()` on the client.
+     * Whether a filter the page counts as one narrows the list, as the page's
+     * `hasActiveFilters()` reads it: the owner aside, and the AI-only toggle
+     * too, which no saved filter keeps.
      */
-    public function isSortedByDate(): bool
+    public function hasFilters(): bool
     {
-        return ltrim($this->sort(), '-') === 'transaction_date';
+        return array_diff_key($this->filters(), array_flip(['user_id', 'category_source'])) !== [];
     }
 }

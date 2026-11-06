@@ -73,6 +73,7 @@ class TransactionAnalysisController extends Controller
                 ->values();
         }
 
+        $analysisTransactions = $this->postingsOfCategoryTypes($analysisTransactions, $filters);
         $analysisTransactions = $this->postingsInCashflowBlock($analysisTransactions, $filters);
 
         $byCategory = $this->categoryBreakdown($analysisTransactions, $currency, $user->id, $this->drillParentId($filters));
@@ -96,6 +97,26 @@ class TransactionAnalysisController extends Controller
                 'over_time' => $this->overTime($analysisTransactions, $currency),
             ])
             ->header('Cache-Control', 'no-store, private');
+    }
+
+    /**
+     * A split transaction enters a category type's list through any one of its
+     * lines, so the postings are narrowed back to the lines of those types, as
+     * the day totals and the CSV export narrow them.
+     *
+     * @param  Collection<int, Transaction>  $postings
+     * @param  array<string, mixed>  $filters
+     * @return Collection<int, Transaction>
+     */
+    private function postingsOfCategoryTypes(Collection $postings, array $filters): Collection
+    {
+        if (empty($filters['category_types'])) {
+            return $postings;
+        }
+
+        return $postings
+            ->filter(fn (Transaction $posting): bool => in_array($posting->category?->type?->value, $filters['category_types'], true))
+            ->values();
     }
 
     /**

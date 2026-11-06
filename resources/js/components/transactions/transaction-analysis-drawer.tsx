@@ -414,7 +414,9 @@ interface TransactionAnalysisDrawerProps {
     filters: TransactionFilters;
 }
 
-function buildQueryString(filters: SerializedFilters): string {
+function buildQueryString(
+    filters: SerializedFilters & { category_source?: string },
+): string {
     const params = new URLSearchParams();
 
     Object.entries(filters).forEach(([key, value]) => {
@@ -586,7 +588,12 @@ export function TransactionAnalysisDrawer({
         setError(null);
 
         try {
-            const query = buildQueryString(serializeFilters(filters));
+            // The AI-only toggle is no saved filter's, but the list it opens
+            // from is narrowed by it.
+            const query = buildQueryString({
+                ...serializeFilters(filters),
+                ...(filters.aiCategorizedOnly ? { category_source: 'ai' } : {}),
+            });
             const response = await fetch(
                 `/api/transactions/analysis?${query}`,
                 {
