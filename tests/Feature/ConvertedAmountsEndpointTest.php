@@ -107,6 +107,27 @@ test('a provider answering with server errors counts as an outage too', function
     expect($calls)->toBe(2);
 });
 
+test('one source failing while the other has no release stops the provider too', function () {
+    $calls = 0;
+    Http::fake(function (Request $request) use (&$calls) {
+        $calls++;
+
+        return str_contains($request->url(), 'jsdelivr')
+            ? Http::response('Server Error', 500)
+            : Http::response('Not Found', 404);
+    });
+
+    actingAs(User::factory()->onboarded()->create(['currency_code' => 'EUR']))
+        ->postJson('/api/converted-amounts', ['items' => [
+            ['from' => 'USD', 'amount' => 1000, 'date' => '2025-11-12'],
+            ['from' => 'USD', 'amount' => 1000, 'date' => '2025-11-11'],
+        ]])
+        ->assertOk()
+        ->assertExactJson(['amounts' => [null, null]]);
+
+    expect($calls)->toBe(2);
+});
+
 test('a day the provider has no release for does not stop the days after it', function () {
     Http::fake(fn (Request $request) => str_contains($request->url(), '@2025-11-12') || str_contains($request->url(), 'v1/2025-11-12')
         ? Http::response(['eur' => ['usd' => 2.0]])

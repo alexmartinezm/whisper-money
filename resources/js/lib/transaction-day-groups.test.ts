@@ -7,6 +7,7 @@ import {
     formatDayHeading,
     formatTransactionCount,
     isSortedByDate,
+    mergeNextPage,
     reconcileDaySummary,
     sumDayTotal,
     summarizeDay,
@@ -424,5 +425,103 @@ describe('reconcileDaySummary with split transactions', () => {
                 underBlock,
             ),
         ).toEqual({ count: 1, total: { status: 'ready', amount: -3000 } });
+    });
+});
+
+describe('mergeNextPage', () => {
+    function row(id: string, date: string, amount = -100): Transaction {
+        return {
+            id,
+            amount,
+            currency_code: 'EUR',
+            transaction_date: date,
+        } as Transaction;
+    }
+
+    it('keeps the figure a day came with, the page edits being measured against it', () => {
+        const served = {
+            transactions: [row('a', '2026-10-26')],
+            dayTotals: { '2026-10-26': { count: 3, total: -300 } },
+        };
+
+        const merged = mergeNextPage(
+            served,
+            {
+                transactions: [row('b', '2026-10-26'), row('c', '2026-10-25')],
+                dayTotals: {
+                    '2026-10-26': { count: 3, total: -999 },
+                    '2026-10-25': { count: 1, total: -100 },
+                },
+            },
+            served.transactions,
+        );
+
+        expect(merged.dayTotals).toEqual({
+            '2026-10-26': { count: 3, total: -300 },
+            '2026-10-25': { count: 1, total: -100 },
+        });
+        expect(merged.transactions.map(({ id }) => id)).toEqual([
+            'a',
+            'b',
+            'c',
+        ]);
+    });
+
+    it('takes a later total for a day that came without one', () => {
+        const merged = mergeNextPage(
+            {
+                transactions: [row('a', '2026-10-26')],
+                dayTotals: { '2026-10-26': { count: 2, total: null } },
+            },
+            {
+                transactions: [row('b', '2026-10-26')],
+                dayTotals: { '2026-10-26': { count: 2, total: -200 } },
+            },
+            [row('a', '2026-10-26')],
+        );
+
+        expect(merged.dayTotals['2026-10-26'].total).toBe(-200);
+    });
+
+    it('does not count again an edit the later total already holds', () => {
+        const edited = row('a', '2026-10-26', -150);
+        const next = row('b', '2026-10-26');
+
+        const merged = mergeNextPage(
+            {
+                transactions: [row('a', '2026-10-26')],
+                dayTotals: { '2026-10-26': { count: 2, total: null } },
+            },
+            {
+                transactions: [next],
+                dayTotals: { '2026-10-26': { count: 2, total: -250 } },
+            },
+            [edited],
+        );
+
+        expect(
+            reconcileDaySummary(
+                merged.dayTotals['2026-10-26'],
+                merged.transactions,
+                [edited, next],
+                'EUR',
+            ),
+        ).toEqual({ count: 2, total: { status: 'ready', amount: -250 } });
+    });
+
+    it('never lets a later empty total replace a figure', () => {
+        const merged = mergeNextPage(
+            {
+                transactions: [],
+                dayTotals: { '2026-10-26': { count: 2, total: -200 } },
+            },
+            {
+                transactions: [],
+                dayTotals: { '2026-10-26': { count: 2, total: null } },
+            },
+            [],
+        );
+
+        expect(merged.dayTotals['2026-10-26'].total).toBe(-200);
     });
 });

@@ -30,8 +30,6 @@ class CurrencyConversionService
     /** @var array<string, array<string, float>> Keyed by "{currency}:{date}" */
     private array $rateCache = [];
 
-    private bool $lastFetchFailed = false;
-
     /**
      * Convert a quantity from one currency to another on a given date.
      *
@@ -74,7 +72,6 @@ class CurrencyConversionService
      */
     public function getRatesForCurrency(string $currency, string $date): array
     {
-        $this->lastFetchFailed = false;
         $currency = strtolower($currency);
         $cacheKey = "{$currency}:{$date}";
 
@@ -97,14 +94,52 @@ class CurrencyConversionService
     }
 
     /**
-     * Whether the last {@see self::getRatesForCurrency()} came back empty
-     * because the sources failed, rather than because they hold no release
-     * for that date. A caller with many dates to fetch stops at the first one:
-     * the rest would only wait out the same failure.
+     * The rates of one date for a caller getting through many dates in one
+     * response, which has to know when to stop asking: an answer that tells a
+     * failure from a date with no release, at the cost of at most both sources
+     * of one date when the sources are down.
+     *
+     * Rates it finds are cached as {@see self::getRatesForCurrency()} caches
+     * them. It never writes an empty map where that method reads: a failure
+     * stores nothing, and a date with no release is noted under a key of its
+     * own, so whatever happens here, the next plain lookup behaves as if this
+     * one had not run.
+     *
+     * @return array<string, float>|null The rates, empty when no release covers
+     *                                   the date, null when a source failed
      */
-    public function lastFetchFailed(): bool
+    public function ratesOrNullOnFailure(string $currency, string $date): ?array
     {
-        return $this->lastFetchFailed;
+        $currency = strtolower($currency);
+        $cacheKey = "{$currency}:{$date}";
+        $persistentKey = "currency-rates:{$cacheKey}";
+        $noReleaseKey = "currency-rates-no-release:{$cacheKey}";
+
+        $held = $this->rateCache[$cacheKey] ?? Cache::get($persistentKey);
+
+        if ($held !== null) {
+            return $held;
+        }
+
+        if (Cache::get($noReleaseKey) !== null) {
+            return [];
+        }
+
+        $rates = $this->fetchRates($currency, $date, stopAtFailure: true);
+
+        if ($rates === null) {
+            return null;
+        }
+
+        if ($rates === []) {
+            $this->cacheRates($noReleaseKey, $rates, $date);
+
+            return [];
+        }
+
+        $this->cacheRates($persistentKey, $rates, $date);
+
+        return $this->rateCache[$cacheKey] = $rates;
     }
 
     /**
@@ -139,56 +174,33 @@ class CurrencyConversionService
     /**
      * Fetch rates from CDN with fallback.
      *
-     * A missing release (404) walks back to earlier historical dates, but a
-     * failing source (connection refused, timeout or a 5xx) aborts the walk:
-     * the same failure would repeat for every candidate date and risk
-     * exhausting the request's execution time. Failures degrade to an empty
-     * rate map rather than throwing, so a slow CDN never crashes the calling
-     * endpoint. One call costs at most both sources of one date.
+     * A missing release (404) walks back to earlier historical dates, and so
+     * does a source answering with an error, but an unreachable source
+     * (connection refused or timeout) aborts the walk: the same timeout would
+     * repeat for every candidate date and risk exhausting the request's
+     * execution time. Failures degrade to an empty rate map rather than
+     * throwing, so a slow CDN never crashes the calling endpoint.
      *
-     * @return array<string, float>
+     * With $stopAtFailure a source answering with anything but a release or a
+     * 404 aborts the walk too, even when the other one answers 404, and a walk
+     * ended by a failure of either kind returns null instead of an empty map.
+     *
+     * @return ($stopAtFailure is true ? array<string, float>|null : array<string, float>)
      */
-    private function fetchRates(string $currency, string $date): array
+    private function fetchRates(string $currency, string $date, bool $stopAtFailure = false): ?array
     {
-        $sourceUnreachable = false;
+        $failed = false;
 
         foreach ($this->candidateDates($date) as $candidateDate) {
-            foreach ($this->rateUrls($currency, $candidateDate) as $url) {
-                try {
-                    $response = Http::connectTimeout(self::HTTP_CONNECT_TIMEOUT_SECONDS)
-                        ->timeout(self::HTTP_TIMEOUT_SECONDS)
-                        ->get($url);
-                } catch (ConnectionException $e) {
-                    $sourceUnreachable = true;
+            $release = $this->fetchRelease($currency, $candidateDate);
 
-                    Log::warning('Currency rate source unreachable', [
-                        'currency' => $currency,
-                        'date' => $candidateDate,
-                        'url' => $url,
-                        'error' => $e->getMessage(),
-                    ]);
-
-                    continue;
-                }
-
-                if ($response->notFound()) {
-                    continue;
-                }
-
-                if ($response->successful()) {
-                    return $response->json($currency) ?? [];
-                }
-
-                $sourceUnreachable = $sourceUnreachable || $response->serverError();
-
-                Log::warning('Currency rate source returned an error', [
-                    'currency' => $currency,
-                    'date' => $candidateDate,
-                    'status' => $response->status(),
-                ]);
+            if ($release['rates'] !== null) {
+                return $release['rates'];
             }
 
-            if ($sourceUnreachable) {
+            $failed = $failed || $release['unreachable'] || $release['errored'];
+
+            if ($release['unreachable'] || ($stopAtFailure && $release['errored'])) {
                 break;
             }
         }
@@ -198,9 +210,57 @@ class CurrencyConversionService
             'date' => $date,
         ]);
 
-        $this->lastFetchFailed = $sourceUnreachable;
+        return $stopAtFailure && $failed ? null : [];
+    }
 
-        return [];
+    /**
+     * One date's release, from the first source that has it, and how the
+     * sources that did not answered.
+     *
+     * @return array{rates: array<string, float>|null, unreachable: bool, errored: bool}
+     */
+    private function fetchRelease(string $currency, string $date): array
+    {
+        $release = ['rates' => null, 'unreachable' => false, 'errored' => false];
+
+        foreach ($this->rateUrls($currency, $date) as $url) {
+            try {
+                $response = Http::connectTimeout(self::HTTP_CONNECT_TIMEOUT_SECONDS)
+                    ->timeout(self::HTTP_TIMEOUT_SECONDS)
+                    ->get($url);
+            } catch (ConnectionException $e) {
+                $release['unreachable'] = true;
+
+                Log::warning('Currency rate source unreachable', [
+                    'currency' => $currency,
+                    'date' => $date,
+                    'url' => $url,
+                    'error' => $e->getMessage(),
+                ]);
+
+                continue;
+            }
+
+            if ($response->notFound()) {
+                continue;
+            }
+
+            if ($response->successful()) {
+                $release['rates'] = $response->json($currency) ?? [];
+
+                return $release;
+            }
+
+            $release['errored'] = true;
+
+            Log::warning('Currency rate source returned an error', [
+                'currency' => $currency,
+                'date' => $date,
+                'status' => $response->status(),
+            ]);
+        }
+
+        return $release;
     }
 
     /**

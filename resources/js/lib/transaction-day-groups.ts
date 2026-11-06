@@ -223,6 +223,50 @@ export interface ServerDayTotal {
     total: number | null;
 }
 
+/** The rows a page was served, and the server's figure for each of their days. */
+export interface ServedDays<T extends Transaction> {
+    transactions: T[];
+    dayTotals: Record<string, ServerDayTotal>;
+}
+
+/**
+ * The next page laid over what was served. A day already there keeps the figure
+ * it came with, since the page's edits are measured against that one, unless it
+ * came without a total and this one has it. That day starts over from the new
+ * figure, which already counts those edits: its rows as held now become its
+ * served rows.
+ */
+export function mergeNextPage<T extends Transaction>(
+    served: ServedDays<T>,
+    next: ServedDays<T>,
+    held: T[],
+): ServedDays<T> {
+    const recovered = new Set(
+        Object.keys(next.dayTotals).filter(
+            (date) =>
+                served.dayTotals[date]?.total === null &&
+                next.dayTotals[date].total !== null,
+        ),
+    );
+    const isRecovered = (row: T) => recovered.has(row.transaction_date);
+
+    return {
+        transactions: [
+            ...served.transactions.filter((row) => !isRecovered(row)),
+            ...held.filter(isRecovered),
+            ...next.transactions,
+        ],
+        dayTotals: {
+            ...next.dayTotals,
+            ...Object.fromEntries(
+                Object.entries(served.dayTotals).filter(
+                    ([date]) => !recovered.has(date),
+                ),
+            ),
+        },
+    };
+}
+
 /** The summary of each day, looked up by its `Y-m-d` date. */
 export type DaySummaryOf = (date: string) => DaySummary;
 

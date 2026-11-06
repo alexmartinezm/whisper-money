@@ -10,6 +10,7 @@ import {
 } from '@/lib/cursor-pagination';
 import {
     createRowTotalAmount,
+    mergeNextPage,
     type ServerDayTotal,
 } from '@/lib/transaction-day-groups';
 import { serializeFilters } from '@/lib/transaction-filter-serialization';
@@ -322,18 +323,27 @@ export function useServerTransactionSource({
             const rows = next.data.map(toDecryptedTransaction);
             setAllTransactions((prev) => [...prev, ...rows]);
             setNextCursor(next.next_cursor);
-            // A day already shown keeps the figure it came with: the page's
-            // own edits are measured against that one.
-            setServed((previous) => ({
-                transactions: [...previous.transactions, ...rows],
-                dayTotals: { ...json.props.dayTotals, ...previous.dayTotals },
-            }));
+            setServed((previous) =>
+                mergeNextPage(
+                    previous,
+                    { transactions: rows, dayTotals: json.props.dayTotals },
+                    allTransactions,
+                ),
+            );
         } catch (error) {
             console.error('Failed to load more transactions:', error);
         } finally {
             setIsLoadingMore(false);
         }
-    }, [nextCursor, isLoadingMore, filters, sortParam, component, version]);
+    }, [
+        nextCursor,
+        isLoadingMore,
+        filters,
+        sortParam,
+        component,
+        version,
+        allTransactions,
+    ]);
 
     const matchingFilters = useMemo(
         () => clientFiltersToBackendFilters(filters),

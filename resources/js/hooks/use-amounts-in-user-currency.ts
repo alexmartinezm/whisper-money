@@ -36,6 +36,10 @@ function toConversionItem(transaction: DatedAmount): ConversionItem {
  * Rows already in the user's currency never leave the browser. The others are
  * asked for together, one request for all the rows not seen yet, and kept: an
  * edited row asks again only because its amount, currency or date changed.
+ *
+ * An amount the server left without a rate is asked for once more the next
+ * time the list changes: the provider may have been down, or out of time, and a
+ * later answer replaces the empty one. Asked twice, it stays empty.
  */
 export function useAmountsInUserCurrency(
     transactions: DatedAmount[],
@@ -45,6 +49,7 @@ export function useAmountsInUserCurrency(
         () => new Map(),
     );
     const requested = useRef(new Set<string>());
+    const retriedOnce = useRef(new Set<string>());
 
     const isInUserCurrency = useCallback(
         (currencyCode: string) =>
@@ -79,7 +84,19 @@ export function useAmountsInUserCurrency(
                     ConvertedAmountsController.url(),
                     { items: chunk.map(([, item]) => item) },
                 )
-                .then(({ data }) => data.amounts)
+                .then(({ data }) => {
+                    chunk.forEach(([key], index) => {
+                        if (
+                            (data.amounts[index] ?? null) === null &&
+                            !retriedOnce.current.has(key)
+                        ) {
+                            retriedOnce.current.add(key);
+                            requested.current.delete(key);
+                        }
+                    });
+
+                    return data.amounts;
+                })
                 .catch(() => {
                     // Offline or a server error: a total is better missing than
                     // wrong for now, and these rows are asked for again the

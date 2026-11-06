@@ -86,16 +86,19 @@ class ExchangeRateService
      * Rates the table holds are read in one query and always answer, so a
      * provider failure never blanks a day that has one. The provider is asked
      * one date at a time for the rest, and stops being asked at its first
-     * failure or once the budget is spent: the remaining dates answer null, and
-     * the next request picks them up. An outage therefore costs one bounded
-     * attempt ({@see CurrencyConversionService::getRatesForCurrency()}), not
-     * one per date.
+     * failure or once the budget is spent: the remaining dates answer null,
+     * and a later request can pick them up. An outage therefore costs one
+     * bounded attempt ({@see CurrencyConversionService::ratesOrNullOnFailure()}),
+     * not one per date, and leaves nothing behind that a plain {@see self::getRates()}
+     * would read.
      *
      * @param  list<array{from: string, amount: int, date: string}>  $items
      * @return list<?int>
      */
     public function convertManyOrNull(array $items, string $target): array
     {
+        $target = strtolower($target);
+
         // Only amounts in another currency need a rate, so a reader who keeps
         // everything in one currency never reads the rates table here.
         $this->preloadRates($target, array_column(array_filter(
@@ -107,20 +110,38 @@ class ExchangeRateService
         $mayAskProvider = true;
 
         return array_map(function (array $item) use ($target, $deadline, &$mayAskProvider): ?int {
-            $needsProvider = strcasecmp($item['from'], $target) !== 0 && ! $this->holdsRates($target, $item['date']);
+            if (strcasecmp($item['from'], $target) === 0 || $this->holdsRates($target, $item['date'])) {
+                return $this->convertOrNull($item['from'], $target, $item['amount'], $item['date']);
+            }
 
-            if ($needsProvider && ! $mayAskProvider) {
+            if (! $mayAskProvider) {
                 return null;
             }
 
-            $converted = $this->convertOrNull($item['from'], $target, $item['amount'], $item['date']);
+            $rates = $this->askProviderOnce($target, $this->normalizeDate($item['date']));
+            $mayAskProvider = $rates !== null && now()->lt($deadline);
 
-            if ($needsProvider) {
-                $mayAskProvider = ! $this->currencyApi->lastFetchFailed() && now()->lt($deadline);
-            }
-
-            return $converted;
+            return $rates ? $this->convertOrNull($item['from'], $target, $item['amount'], $item['date']) : null;
         }, $items);
+    }
+
+    /**
+     * Rates found are kept as {@see self::getRates()} keeps them. An empty or
+     * failed answer is not: this instance's next plain lookup still gets to
+     * ask for itself.
+     *
+     * @return array<string, float>|null as {@see CurrencyConversionService::ratesOrNullOnFailure()}
+     */
+    private function askProviderOnce(string $baseCurrency, string $date): ?array
+    {
+        $rates = $this->currencyApi->ratesOrNullOnFailure($baseCurrency, $date);
+
+        if ($rates) {
+            $this->storeRates($baseCurrency, $date, $rates);
+            $this->ratesCache[$this->cacheKey($baseCurrency, $date)] = $rates;
+        }
+
+        return $rates;
     }
 
     /**
@@ -155,16 +176,24 @@ class ExchangeRateService
         $rates = $this->currencyApi->getRatesForCurrency($baseCurrency, $date);
 
         if (! empty($rates)) {
-            ExchangeRate::query()->upsert([
-                [
-                    'base_currency' => $baseCurrency,
-                    'date' => $date,
-                    'rates' => json_encode($rates, JSON_THROW_ON_ERROR),
-                ],
-            ], uniqueBy: ['base_currency', 'date'], update: ['rates']);
+            $this->storeRates($baseCurrency, $date, $rates);
         }
 
         return $this->ratesCache[$cacheKey] = $rates;
+    }
+
+    /**
+     * @param  array<string, float>  $rates
+     */
+    private function storeRates(string $baseCurrency, string $date, array $rates): void
+    {
+        ExchangeRate::query()->upsert([
+            [
+                'base_currency' => $baseCurrency,
+                'date' => $date,
+                'rates' => json_encode($rates, JSON_THROW_ON_ERROR),
+            ],
+        ], uniqueBy: ['base_currency', 'date'], update: ['rates']);
     }
 
     /**

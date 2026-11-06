@@ -26,6 +26,63 @@ beforeEach(() => {
 });
 
 describe('useAmountsInUserCurrency', () => {
+    it('asks once more for an amount left without a rate, on the next list change', async () => {
+        post.mockResolvedValueOnce({ data: { amounts: [null] } });
+        post.mockResolvedValueOnce({ data: { amounts: [-500] } });
+        const row = transaction('a', -1000, 'USD');
+
+        const { result, rerender } = renderHook(
+            ({ list }) => useAmountsInUserCurrency(list),
+            { initialProps: { list: [row] } },
+        );
+
+        await waitFor(() => expect(result.current(row)).toBeNull());
+        expect(post).toHaveBeenCalledTimes(1);
+
+        rerender({ list: [row] });
+
+        await waitFor(() => expect(result.current(row)).toBe(-500));
+        expect(post).toHaveBeenCalledTimes(2);
+
+        rerender({ list: [row] });
+        expect(post).toHaveBeenCalledTimes(2);
+    });
+
+    it('gives up on an amount still without a rate after the second try', async () => {
+        post.mockResolvedValue({ data: { amounts: [null] } });
+        const row = transaction('a', -1000, 'USD');
+
+        const { result, rerender } = renderHook(
+            ({ list }) => useAmountsInUserCurrency(list),
+            { initialProps: { list: [row] } },
+        );
+
+        await waitFor(() => expect(result.current(row)).toBeNull());
+        rerender({ list: [row] });
+        await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+        await new Promise((resolve) => setTimeout(resolve));
+
+        rerender({ list: [row] });
+        await new Promise((resolve) => setTimeout(resolve));
+
+        expect(post).toHaveBeenCalledTimes(2);
+    });
+
+    it('asks nothing more on its own after an empty answer, while the list stands', async () => {
+        post.mockResolvedValue({ data: { amounts: [null] } });
+        const list = [transaction('a', -1000, 'USD')];
+
+        const { result, rerender } = renderHook(() =>
+            useAmountsInUserCurrency(list),
+        );
+
+        await waitFor(() => expect(result.current(list[0])).toBeNull());
+        rerender();
+        await new Promise((resolve) => setTimeout(resolve));
+
+        expect(post).toHaveBeenCalledTimes(1);
+    });
+
     it('keeps rows in the user currency in the browser', () => {
         const rows = [
             transaction('a', -1000, 'EUR'),
@@ -63,9 +120,13 @@ describe('useAmountsInUserCurrency', () => {
         await waitFor(() => expect(result.current(rows[1])).toBe(-500));
         expect(result.current(rows[2])).toBeNull();
 
-        // Already answered: a new list holding the same rows asks nothing.
+        // A new list holding the same rows leaves the converted one alone and
+        // gives the one without a rate its second try.
         rerender({ list: [...rows] });
-        expect(post).toHaveBeenCalledTimes(1);
+        expect(post).toHaveBeenCalledTimes(2);
+        expect(post.mock.calls[1][1]).toEqual({
+            items: [{ from: 'GBP', amount: -2000, date: '2026-10-24' }],
+        });
     });
 
     it('treats a failed request as amounts it could not convert', async () => {
