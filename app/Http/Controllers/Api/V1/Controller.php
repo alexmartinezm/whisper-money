@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller as BaseController;
 use App\Models\Account;
+use App\Models\Category;
+use App\Models\Label;
 use App\Models\Space;
 use App\Models\User;
 use App\Services\SpaceResolver;
@@ -54,5 +56,19 @@ abstract class Controller extends BaseController
     protected function account(Request $request, string $id): Account
     {
         return $this->owned($request, Account::query())->findOrFail($id);
+    }
+
+    /**
+     * The route's category or label, looked up among the caller's own in the
+     * request's space like account().
+     *
+     * @template TModel of Category|Label
+     *
+     * @param  class-string<TModel>  $model
+     * @return TModel
+     */
+    protected function inSpace(Request $request, string $model, string $id): Category|Label
+    {
+        return app(SpaceResolver::class)->ownedInSpaceOrFail($model, $this->user($request), $this->space($request), $id);
     }
 }
