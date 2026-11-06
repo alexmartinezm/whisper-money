@@ -53,21 +53,6 @@ enum OAuthScope: string
     }
 
     /**
-     * The `scope` parameter of an authorization request, with the `*` wildcard
-     * taken out, or `mcp:use` if nothing is left. A wildcard grants nothing
-     * here: Passport cannot name it, so the consent check would see no scope at
-     * all and skip the screen, and it never reaches the token. Treating it as
-     * the default keeps a connector that sends it working, through the same
-     * consent check as any other request.
-     */
-    public static function normalizeRequested(string $scope): string
-    {
-        $scopeIds = array_diff(array_filter(explode(' ', trim($scope))), ['*']);
-
-        return $scopeIds === [] ? self::Mcp->value : implode(' ', $scopeIds);
-    }
-
-    /**
      * Whether the requested scope ids span more than one surface.
      *
      * @param  array<int, string>  $scopeIds

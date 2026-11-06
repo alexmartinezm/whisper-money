@@ -15,10 +15,10 @@ use Laravel\Passport\Http\Middleware\CheckToken;
  * for `*`, got exactly that, and those connections (and whatever they refresh
  * into, since a refresh keeps the scopes it was given) have to keep working.
  * New authorizations cannot produce one: AuthorizationController gives every
- * request an explicit scope, and OAuthScopeRepository does the same for any
- * authorization code that gets past it. A refresh cannot either: league falls
- * back to the original scopes on a blank `scope`, and refuses any it does not
- * hold, `*` included.
+ * validated request a surface scope, and OAuthScopeRepository does the same for
+ * any authorization code that gets past it, or refuses one that lost its scope.
+ * A refresh cannot either: league falls back to the original scopes on a blank
+ * `scope`, and refuses any it does not hold, `*` included.
  */
 class EnsureMcpOAuthToken extends CheckToken
 {

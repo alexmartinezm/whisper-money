@@ -2,7 +2,6 @@
 
 use App\Enums\OAuthApprovalRefusal;
 use App\Models\User;
-use App\Support\OAuthScopeRepository;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Route as IlluminateRoute;
 use Illuminate\Support\Facades\File;
@@ -15,9 +14,12 @@ use Laravel\Passport\Bridge\Scope;
 use Laravel\Passport\Bridge\ScopeRepository;
 use Laravel\Passport\Client as PassportClient;
 use Laravel\Passport\ClientRepository;
+use Laravel\Passport\Http\Controllers\AuthorizationController as PassportAuthorizationController;
 use Laravel\Passport\Passport;
 use Laravel\Passport\Token;
 use League\OAuth2\Server\AuthorizationServer;
+use League\OAuth2\Server\Entities\ScopeEntityInterface;
+use League\OAuth2\Server\Exception\OAuthServerException;
 
 use function Pest\Laravel\actingAs;
 use function Pest\Laravel\get;
@@ -70,15 +72,49 @@ function connectConnector(User $user, PassportClient $client, ?array $scopes): a
     [$verifier, $challenge] = pkcePair();
 
     $consent = requestOAuthConsent($user, $client, $scopes, $challenge)->assertOk();
-    $code = oauthRedirectQuery(approveOAuthConsent($user, $client, $consent)->assertRedirect())['code'] ?? null;
 
+    return exchangeConnectorCode($client, $verifier, approveOAuthConsent($user, $client, $consent)->assertRedirect());
+}
+
+/**
+ * @return array{access_token: string, refresh_token: string}
+ */
+function exchangeConnectorCode(PassportClient $client, string $verifier, TestResponse $approved): array
+{
     return post('/oauth/token', [
         'grant_type' => 'authorization_code',
         'client_id' => $client->id,
         'redirect_uri' => CLAUDE_CALLBACK,
         'code_verifier' => $verifier,
-        'code' => $code,
+        'code' => oauthRedirectQuery($approved)['code'] ?? null,
     ])->assertOk()->json();
+}
+
+/**
+ * The scopes of the authorization request waiting in the session for approval.
+ *
+ * @return list<string>
+ */
+function scopesAwaitingApproval(): array
+{
+    return array_map(
+        fn (ScopeEntityInterface $scope): string => $scope->getIdentifier(),
+        unserialize(session('authRequest'))->getScopes(),
+    );
+}
+
+/**
+ * Rewrite the authorization request waiting in the session, as one stored
+ * before this change would look.
+ *
+ * @param  list<ScopeEntityInterface>  $scopes
+ */
+function storeScopesAwaitingApproval(array $scopes): void
+{
+    $authRequest = unserialize(session('authRequest'));
+    $authRequest->setScopes($scopes);
+
+    session()->put('authRequest', serialize($authRequest));
 }
 
 /**
@@ -95,40 +131,71 @@ function refreshConnector(PassportClient $client, string $refreshToken, ?string 
 }
 
 /**
- * Run the callback on the OAuth server as it stood before this change: no
- * default scope, and Passport's own scope repository.
+ * An authorization request with `prompt=none`: approved at once or refused,
+ * never a consent screen.
+ */
+function requestSilentAuthorization(User $user, PassportClient $client, string $scope): TestResponse
+{
+    [, $challenge] = pkcePair();
+
+    return test()->actingAs($user)->get('/oauth/authorize?'.http_build_query([
+        'client_id' => $client->id,
+        'redirect_uri' => $client->redirect_uris[0],
+        'response_type' => 'code',
+        'scope' => $scope,
+        'state' => 'state-token',
+        'prompt' => 'none',
+        'code_challenge' => $challenge,
+        'code_challenge_method' => 'S256',
+    ]));
+}
+
+/**
+ * Run the callback with Passport's own scope repository, whatever is bound.
  *
  * @template TResult
  *
  * @param  Closure(): TResult  $callback
  * @return TResult
  */
-function withLegacyOAuthServer(Closure $callback): mixed
+function withStockScopeRepository(Closure $callback): mixed
 {
-    $defaultScope = Passport::$defaultScope;
+    $binding = app()->getBindings()[ScopeRepository::class] ?? null;
 
-    Passport::$defaultScope = '';
     app()->bind(ScopeRepository::class, fn ($app): ScopeRepository => new ScopeRepository($app->make(ClientRepository::class)));
     app()->forgetInstance(AuthorizationServer::class);
 
     try {
         return $callback();
     } finally {
-        Passport::$defaultScope = $defaultScope;
-        app()->bind(ScopeRepository::class, OAuthScopeRepository::class);
+        app()->offsetUnset(ScopeRepository::class);
+
+        if ($binding !== null) {
+            app()->bind(ScopeRepository::class, $binding['concrete'], $binding['shared']);
+        }
+
         app()->forgetInstance(AuthorizationServer::class);
     }
 }
 
 /**
  * A connection as it was authorized before `mcp:use` became the default scope:
- * a connector that asked for no scope got a token with none.
+ * a connector that asked for no scope, or for `*`, got a token with none.
  *
  * @return array{access_token: string, refresh_token: string}
  */
 function connectBeforeDefaultScope(User $user, PassportClient $client): array
 {
-    return withLegacyOAuthServer(fn (): array => connectConnector($user, $client, null));
+    [$verifier, $challenge] = pkcePair();
+
+    $consent = requestOAuthConsent($user, $client, ['mcp:use'], $challenge)->assertOk();
+    storeScopesAwaitingApproval([]);
+
+    return withStockScopeRepository(fn (): array => exchangeConnectorCode(
+        $client,
+        $verifier,
+        approveOAuthConsent($user, $client, $consent)->assertRedirect(),
+    ));
 }
 
 it('walks the connector from discovery to a refreshed token', function () {
@@ -291,6 +358,95 @@ describe('a wildcard or blank scope', function () {
         'blank' => [[]],
     ]);
 
+    it('treats every spelling League reads as a wildcard the same, through the controller', function (string $scope) {
+        $user = User::factory()->create();
+        $client = oauthClient('Budget Sync', 'https://budget-sync.test/callback');
+        issueOAuthToken($user, ['api:use'], $client);
+        [, $challenge] = pkcePair();
+
+        requestOAuthConsent($user, $client, [$scope], $challenge)
+            ->assertOk()
+            ->assertSee('is asking to read and make changes', false)
+            ->assertSee('id="authorizeForm"', false);
+
+        expect(scopesAwaitingApproval())->toBe(['mcp:use']);
+    })->with([
+        'tab after' => "*\t",
+        'tab before' => "\t*",
+        'newline' => "*\n",
+        'carriage return' => "*\r",
+        'vertical tab' => "*\x0B",
+        'NUL' => "*\0",
+    ]);
+
+    it('never approves a request hiding a wildcard behind a control character', function (string $scope) {
+        $user = User::factory()->create();
+        $client = oauthClient('Budget Sync', 'https://budget-sync.test/callback');
+        issueOAuthToken($user, ['api:use'], $client);
+        [, $challenge] = pkcePair();
+
+        $response = requestOAuthConsent($user, $client, [$scope], $challenge);
+
+        $response->assertRedirect();
+        expect(oauthRedirectQuery($response))
+            ->toMatchArray(['error' => 'invalid_scope'])
+            ->not->toHaveKey('code');
+    })->with([
+        'tab, space, wildcard' => "*\t *",
+        'space, tab' => "* \t*",
+        'zero, space, tab' => "0 \t*",
+        'newline' => "*\n *",
+        'carriage return' => "*\r *",
+        'vertical tab' => "*\x0B *",
+        'NUL' => "*\0 *",
+    ]);
+
+    it('corrects the request in the session, so approval and the token read mcp:use', function () {
+        $user = User::factory()->create();
+        $client = registerConnector();
+        [$verifier, $challenge] = pkcePair();
+
+        $consent = requestOAuthConsent($user, $client, ['*'], $challenge)->assertOk();
+        expect(scopesAwaitingApproval())->toBe(['mcp:use']);
+
+        $tokens = exchangeConnectorCode($client, $verifier, approveOAuthConsent($user, $client, $consent)->assertRedirect());
+
+        expect(Token::query()->where('user_id', $user->id)->sole()->scopes)->toBe(['mcp:use']);
+        callConnector($tokens['access_token'])->assertOk();
+    });
+
+    it('answers prompt=none with consent_required for a client granted only api:use', function () {
+        $user = User::factory()->create();
+        $client = oauthClient('Budget Sync', 'https://budget-sync.test/callback');
+        issueOAuthToken($user, ['api:use'], $client);
+
+        $response = requestSilentAuthorization($user, $client, '*')->assertRedirect();
+
+        expect(oauthRedirectQuery($response))
+            ->toMatchArray(['error' => 'consent_required'])
+            ->not->toHaveKey('code');
+    });
+
+    it('answers prompt=none with a code for a connector already holding mcp:use', function () {
+        $user = User::factory()->create();
+        $client = registerConnector();
+        connectConnector($user, $client, ['mcp:use']);
+
+        $response = requestSilentAuthorization($user, $client, '*')->assertRedirect();
+
+        expect(oauthRedirectQuery($response))->toHaveKey('code');
+    });
+
+    it('never treats a request with no scope as already granted', function () {
+        $user = User::factory()->create();
+        $client = registerConnector();
+        connectConnector($user, $client, ['mcp:use']);
+
+        $controller = app(PassportAuthorizationController::class);
+
+        expect((fn (): bool => $this->hasGrantedScopes($user, $client, []))->call($controller))->toBeFalse();
+    });
+
     it('leaves a wildcard next to api:use on the API surface', function () {
         $user = User::factory()->create();
 
@@ -405,26 +561,32 @@ describe('issuing a token', function () {
         expect(finalizedScopes([], 'refresh_token'))->toBe([]);
     });
 
-    it('issues mcp:use from a consent screen left open across the deploy', function () {
+    it('refuses a code whose surface scope was dropped, instead of turning it into MCP', function (string $grantType) {
+        $registered = Passport::$scopes;
+        Passport::$scopes = ['mcp:use' => 'Use MCP server'];
+
+        try {
+            expect(fn () => finalizedScopes([new Scope('api:use')], $grantType))->toThrow(OAuthServerException::class);
+        } finally {
+            Passport::$scopes = $registered;
+        }
+    })->with(['authorization_code', 'refresh_token']);
+
+    it('issues mcp:use from a consent screen left open across the deploy', function (array $scopes) {
         $user = User::factory()->create();
         $client = registerConnector();
         [$verifier, $challenge] = pkcePair();
 
-        $consent = withLegacyOAuthServer(fn (): TestResponse => requestOAuthConsent($user, $client, null, $challenge)->assertOk());
-        app()->forgetInstance(ScopeRepository::class);
+        $consent = requestOAuthConsent($user, $client, ['mcp:use'], $challenge)->assertOk();
+        storeScopesAwaitingApproval($scopes);
 
-        $code = oauthRedirectQuery(approveOAuthConsent($user, $client, $consent)->assertRedirect())['code'] ?? null;
-
-        post('/oauth/token', [
-            'grant_type' => 'authorization_code',
-            'client_id' => $client->id,
-            'redirect_uri' => CLAUDE_CALLBACK,
-            'code_verifier' => $verifier,
-            'code' => $code,
-        ])->assertOk();
+        exchangeConnectorCode($client, $verifier, approveOAuthConsent($user, $client, $consent)->assertRedirect());
 
         expect(Token::query()->where('user_id', $user->id)->sole()->scopes)->toBe(['mcp:use']);
-    });
+    })->with([
+        'no scope' => [[]],
+        'wildcard' => fn () => [new Scope('*')],
+    ]);
 });
 
 describe('dynamic client registration', function () {
