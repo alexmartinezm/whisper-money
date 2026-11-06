@@ -2123,6 +2123,50 @@ test('one iban listed once per currency stays on the right accounts', function (
     ]],
 ]);
 
+test('a lone iban relinks even when the bank now reports another currency', function () {
+    Queue::fake();
+
+    $user = User::factory()->onboarded()->create();
+    [$connection, $account] = connectionWithAccount($user, 'ES0000000000000000000001', [
+        'status' => BankingConnectionStatus::Pending,
+        'session_id' => 'old-session',
+    ]);
+
+    $provider = mockSharedSession([['uid' => 'usd-uid', 'iban' => 'ES0000000000000000000001', 'currency' => 'USD']]);
+    $provider->shouldNotReceive('revokeSession');
+
+    $this->actingAs($user)->get('/open-banking/callback?code=test-code')
+        ->assertSessionHas('success');
+
+    expect($account->refresh()->external_account_id)->toBe('usd-uid')
+        ->and($connection->refresh()->status)->toBe(BankingConnectionStatus::Active)
+        ->and($connection->session_id)->toBe('shared-session');
+});
+
+test('a session without ibans pairs in creation order whether or not the account stores one', function () {
+    Queue::fake();
+
+    $user = User::factory()->onboarded()->create();
+    [$connection, $withIban] = connectionWithAccount($user, 'ES0000000000000000000001', ['status' => BankingConnectionStatus::Pending]);
+    $withIban->forceFill(['created_at' => now()->subDay()])->save();
+    $withoutIban = Account::factory()->create([
+        'currency_code' => 'EUR',
+        'user_id' => $user->id,
+        'banking_connection_id' => $connection->id,
+        'iban' => null,
+    ]);
+
+    mockSharedSession([
+        ['uid' => 'first-uid', 'iban' => null],
+        ['uid' => 'second-uid', 'iban' => null],
+    ]);
+
+    $this->actingAs($user)->get('/open-banking/callback?code=test-code')->assertRedirect();
+
+    expect($withIban->refresh()->external_account_id)->toBe('first-uid')
+        ->and($withoutIban->refresh()->external_account_id)->toBe('second-uid');
+});
+
 test('a currency the bank does not really report vetoes nothing', function (string $reported) {
     Queue::fake();
 

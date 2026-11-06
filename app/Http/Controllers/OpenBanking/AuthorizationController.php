@@ -671,13 +671,16 @@ class AuthorizationController extends Controller
      *
      * Matching strategy (in priority order):
      *   1. Match by IBAN — reliable when the account was created after the iban column existed.
-     *   2. An account without a stored IBAN takes a session account without one, which is
+     *      Currency only tells apart one IBAN listed twice, so a second round ignores it: an
+     *      account created while the bank reported "XXX" holds the user's base currency, and
+     *      the bank's later, real currency must not refuse its own IBAN.
+     *   2. When the session lists no IBANs at all, so the bank does not return them, every
+     *      account left takes a session account by position, and matching ends there.
+     *   3. An account without a stored IBAN takes a session account without one, which is
      *      what a card looks like on both sides.
-     *   3. An account without a stored IBAN takes any session account left.
-     *   4. Only when the session lists no IBANs at all, so the bank does not return them, an
-     *      account with a stored IBAN takes a session account by position. Otherwise a stored
-     *      IBAN the session lacks means this bank account is not in it, and taking another
-     *      one would import its transactions here.
+     *   4. An account without a stored IBAN takes any session account left. A stored IBAN the
+     *      session lacks means this bank account is not in it, and taking another one would
+     *      import its transactions here.
      *
      * Uids a sibling connection has already claimed by IBAN are out of every step but the
      * first, and each step takes the first session account that fits, in creation order.
@@ -692,40 +695,43 @@ class AuthorizationController extends Controller
         $sessionListsIbans = collect($newAccounts)->contains(fn (array $data): bool => $this->sessionIban($data) !== null);
         $unmatchedNew = collect($newAccounts)->filter(fn (array $data): bool => ! empty($data['uid']))->values();
 
-        $matches = $this->pairAccounts($accounts, $unmatchedNew, fn (Account $account, array $data): bool => $this->normalizedIban($account->iban) !== null
-            && $this->normalizedIban($account->iban) === $this->sessionIban($data));
+        $sameIban = fn (Account $account, array $data): bool => $this->normalizedIban($account->iban) !== null
+            && $this->normalizedIban($account->iban) === $this->sessionIban($data);
+
+        $matches = $this->pairAccounts($accounts, $unmatchedNew, $sameIban);
+        $matches += $this->pairAccounts($accounts->except(array_keys($matches)), $unmatchedNew, $sameIban, separateCurrencies: false);
 
         $unmatchedNew = $unmatchedNew->reject(fn (array $data) => in_array($data['uid'], $siblingUids, true))->values();
+
+        if (! $sessionListsIbans) {
+            return $matches + $this->pairAccounts($accounts->except(array_keys($matches)), $unmatchedNew, fn (): bool => true);
+        }
 
         $withoutIban = $accounts->filter(fn (Account $account): bool => $this->normalizedIban($account->iban) === null);
 
         $matches += $this->pairAccounts($withoutIban, $unmatchedNew, fn (Account $account, array $data): bool => $this->sessionIban($data) === null);
         $matches += $this->pairAccounts($withoutIban->except(array_keys($matches)), $unmatchedNew, fn (): bool => true);
 
-        if (! $sessionListsIbans) {
-            $matches += $this->pairAccounts($accounts->except(array_keys($matches)), $unmatchedNew, fn (): bool => true);
-        }
-
         return $matches;
     }
 
     /**
      * Give each account the first session account $accepts allows, taking it out
-     * of $sessionAccounts. Two known currencies that differ never pair: a session
-     * can list one IBAN twice, once per currency.
+     * of $sessionAccounts. Two known currencies that differ do not pair unless
+     * $separateCurrencies is off: a session can list one IBAN twice, once per currency.
      *
      * @param  Collection<int, Account>  $accounts
      * @param  SupportCollection<int, array<string, mixed>>  $sessionAccounts
      * @param  callable(Account, array<string, mixed>): bool  $accepts
      * @return array<string, array<string, mixed>>
      */
-    private function pairAccounts(Collection $accounts, SupportCollection &$sessionAccounts, callable $accepts): array
+    private function pairAccounts(Collection $accounts, SupportCollection &$sessionAccounts, callable $accepts, bool $separateCurrencies = true): array
     {
         $pairs = [];
 
         foreach ($accounts as $account) {
             $matched = $sessionAccounts->first(fn (array $data): bool => $accepts($account, $data)
-                && ! $this->currenciesDiffer($account->currency_code, $data['currency'] ?? null));
+                && ! ($separateCurrencies && $this->currenciesDiffer($account->currency_code, $data['currency'] ?? null)));
 
             if ($matched) {
                 $pairs[$account->id] = $matched;
