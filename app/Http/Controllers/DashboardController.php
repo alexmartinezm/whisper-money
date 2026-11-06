@@ -46,7 +46,7 @@ class DashboardController extends Controller
             // the monthly summary give for that month.
             'monthlySavingsLastMonth' => Inertia::defer(fn () => $this->monthlySavingsTotals->verdicts(
                 $this->monthlySavingsGoals->presentForUser($request->user()),
-                today()->subMonthNoOverflow(),
+                $request->user()->localToday()->subMonthNoOverflow(),
             ), 'dashboard'),
         ]);
     }

@@ -21,7 +21,7 @@ use Carbon\Carbon;
  * in a shared household space is measured against that household's income,
  * the same way what it saved counts tags from any member.
  *
- * Months are calendar months in the app's timezone, like budget periods.
+ * Months are calendar months on the goal owner's calendar, like budget periods.
  */
 class MonthlyTargetResolver
 {
@@ -32,7 +32,7 @@ class MonthlyTargetResolver
 
     /**
      * Income figures per user and month, memoized for the lifetime of this
-     * instance: a page listing several share-of-income goals, or the daily
+     * instance: a page listing several share-of-income goals, or the hourly
      * command going through one user's goals, asks for the same months. An
      * instance is resolved per request or per command run, so a figure is
      * never older than that.

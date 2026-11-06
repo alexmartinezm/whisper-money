@@ -17,12 +17,13 @@ use function Sentry\configureScope;
 // period is found on its (budget, start date) key, and closing one writes the
 // same carry-over to the same row.
 Schedule::command('budgets:generate-periods')->hourly()->withoutOverlapping(60);
-// Just after midnight, so a month opens and the last one closes as soon as it
-// is over (pages open the month themselves if they get there first). Again at
-// breakfast time in Europe, which is when the month-end reminder goes out: the
-// notifier holds it back until then. Every run is idempotent.
-Schedule::command('savings-goals:generate-periods')->dailyAt('00:05')->withoutOverlapping();
-Schedule::command('savings-goals:generate-periods')->dailyAt('07:00')->withoutOverlapping();
+// Hourly, because a month is over at each owner's midnight and the month-end
+// reminder waits for 07:00 on the owner's clock: hourly is the coarsest schedule
+// that closes every timezone's month, and reminds it, within the hour (pages
+// show the new month themselves if they get there first). Every run is
+// idempotent: a month opens once on its (goal, month) key, and closing and the
+// reminder are each claimed on the period, so each happens once a month.
+Schedule::command('savings-goals:generate-periods')->hourly()->withoutOverlapping(60);
 Schedule::command('recurring:detect')->dailyAt('04:00');
 Schedule::command('recurring:remind')->dailyAt('08:00');
 Schedule::command('recurring:alert-shortfall')->dailyAt('08:15');
