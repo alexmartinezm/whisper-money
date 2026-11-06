@@ -179,6 +179,26 @@ test('show drops a connection whose accounts all sync through a sibling', functi
         ->and(Account::query()->where('external_account_id', 'shared-uid')->count())->toBe(1);
 });
 
+test('show keeps a connection with accounts of its own even if a sibling holds every pending uid', function () {
+    Queue::fake();
+
+    [$user] = userWithSiblingHoldingSharedUid();
+    $connection = BankingConnection::factory()->awaitingMapping()->create([
+        'user_id' => $user->id,
+        'pending_accounts_data' => pendingAccountsFor(['shared-uid']),
+    ]);
+    $ownAccount = Account::factory()->connected()->create([
+        'user_id' => $user->id,
+        'banking_connection_id' => $connection->id,
+        'external_account_id' => 'own-uid',
+    ]);
+
+    $this->actingAs($user)->get(route('open-banking.map-accounts', $connection))->assertRedirect();
+
+    $this->assertNotSoftDeleted($connection);
+    expect($ownAccount->refresh()->banking_connection_id)->toBe($connection->id);
+});
+
 test('onboarding does not create an account a sibling connection already syncs', function () {
     Queue::fake();
 

@@ -48,7 +48,11 @@ class AccountMappingController extends Controller
 
         // Every account the bank listed already syncs through a sibling, so this
         // connection adds nothing. The session stays: the sibling is using it.
-        if ($mappableAccounts === [] && collect($connection->pending_accounts_data)->contains(fn (array $account): bool => ! empty($account['uid']))) {
+        if (
+            $mappableAccounts === []
+            && $connection->accounts()->doesntExist()
+            && collect($connection->pending_accounts_data)->contains(fn (array $account): bool => ! empty($account['uid']))
+        ) {
             $connection->delete();
 
             return redirect()->route('settings.connections.index')

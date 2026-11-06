@@ -2791,5 +2791,6 @@
     "1 transaction · :file": "1 transaction · :file",
     "This bank login does not cover the accounts on this connection, so the connection was left as it was. Try again with the login you used for them.": "Cet identifiant bancaire ne couvre pas les comptes de cette connexion, qui est donc restée inchangée. Réessayez avec l'identifiant que vous avez utilisé pour eux.",
     "These accounts already sync through your existing connection to this bank.": "Ces comptes se synchronisent déjà via votre connexion existante à cette banque.",
-    "Not syncing": "Non synchronisé"
+    "Not syncing": "Non synchronisé",
+    "{1}Reconnected, but :count account no longer syncs. Review it in Manage Accounts.|[2,*]Reconnected, but :count accounts no longer sync. Review them in Manage Accounts.": "{1}Reconnexion réussie, mais :count compte ne se synchronise plus. Vérifiez-le dans Gérer les comptes.|[2,*]Reconnexion réussie, mais :count comptes ne se synchronisent plus. Vérifiez-les dans Gérer les comptes."
 }

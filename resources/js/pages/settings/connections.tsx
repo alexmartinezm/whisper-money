@@ -194,8 +194,9 @@ export default function ConnectionsPage({ connections }: Props) {
         return (
             connection.status === 'error' &&
             connection.provider === 'enablebanking' &&
-            (connection.error_message?.includes('Authentication failed') ??
-                false)
+            (connection.failed_on_wrong_login === true ||
+                (connection.error_message?.includes('Authentication failed') ??
+                    false))
         );
     }
 
@@ -537,10 +538,10 @@ export default function ConnectionsPage({ connections }: Props) {
                                                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive dark:text-destructive-foreground" />
                                                     <div className="space-y-2">
                                                         <p className="text-sm text-destructive dark:text-foreground">
-                                                            {connection.error_message ??
-                                                                __(
+                                                            {__(
+                                                                connection.error_message ??
                                                                     'An unexpected error occurred during sync.',
-                                                                )}
+                                                            )}
                                                         </p>
                                                         {connection.is_beta && (
                                                             <p className="text-sm text-muted-foreground">

@@ -1,4 +1,5 @@
 import type { BankingConnection } from '@/types/banking';
+import { setTranslations } from '@/utils/i18n';
 import { render, screen } from '@testing-library/react';
 import type React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -421,6 +422,32 @@ describe('ConnectionsPage', () => {
         expect(
             screen.getByText(/its connection fails more often/i),
         ).toBeInTheDocument();
+    });
+
+    it('offers Reconnect for a reconnect made with the wrong login, in the viewer language', () => {
+        setTranslations({ 'Wrong login.': 'Usuario equivocado.' });
+
+        render(
+            <ConnectionsPage
+                connections={[
+                    makeConnection({
+                        status: 'error',
+                        error_message: 'Wrong login.',
+                        failed_on_wrong_login: true,
+                    }),
+                ]}
+            />,
+        );
+
+        setTranslations({});
+
+        expect(screen.getByText('Usuario equivocado.')).toBeInTheDocument();
+        expect(
+            screen.getAllByRole('button', { name: /reconnect/i }).length,
+        ).toBeGreaterThan(0);
+        expect(
+            screen.queryByRole('button', { name: /retry/i }),
+        ).not.toBeInTheDocument();
     });
 
     it('keeps the beta explanation out of a healthy connection', () => {

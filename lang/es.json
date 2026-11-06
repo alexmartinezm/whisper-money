@@ -3577,5 +3577,6 @@
     "To add another account from that login, use :link on your existing connection instead.": "Para añadir otra cuenta de ese mismo usuario, hazlo desde «:link» en la conexión que ya tienes.",
     "This bank login does not cover the accounts on this connection, so the connection was left as it was. Try again with the login you used for them.": "Este usuario del banco no incluye las cuentas de esta conexión, así que la conexión se ha quedado como estaba. Inténtalo de nuevo con el usuario que usaste para ellas.",
     "These accounts already sync through your existing connection to this bank.": "Estas cuentas ya se sincronizan con la conexión que tienes con este banco.",
-    "Not syncing": "Sin sincronizar"
+    "Not syncing": "Sin sincronizar",
+    "{1}Reconnected, but :count account no longer syncs. Review it in Manage Accounts.|[2,*]Reconnected, but :count accounts no longer sync. Review them in Manage Accounts.": "{1}Reconectada, pero :count cuenta ya no se sincroniza. Revísala en Gestionar cuentas.|[2,*]Reconectada, pero :count cuentas ya no se sincronizan. Revísalas en Gestionar cuentas."
 }

@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
+use Mockery\MockInterface;
 
 beforeEach(function () {
     config([
@@ -1633,7 +1634,7 @@ test('reconnect hands back the full scheduled retry budget', function () {
 /**
  * @param  array<int, array{uid: string, iban: string}>  $accounts
  */
-function mockSharedSession(array $accounts, string $sessionId = 'shared-session'): void
+function mockSharedSession(array $accounts, string $sessionId = 'shared-session'): MockInterface
 {
     $mockProvider = Mockery::mock(BankingProviderInterface::class);
     $mockProvider->shouldReceive('createSession')
@@ -1651,6 +1652,8 @@ function mockSharedSession(array $accounts, string $sessionId = 'shared-session'
         ]);
 
     app()->instance(BankingProviderInterface::class, $mockProvider);
+
+    return $mockProvider;
 }
 
 /**
@@ -1792,7 +1795,8 @@ test('a reconnect whose session only covers a sibling fails instead of unlinking
     ]);
     [$sibling, $siblingAccount] = connectionWithAccount($user, 'ES0000000000000000000002', ['session_id' => 'revoked-session']);
 
-    mockSharedSession([['uid' => 'new-uid-2', 'iban' => 'ES0000000000000000000002']]);
+    mockSharedSession([['uid' => 'new-uid-2', 'iban' => 'ES0000000000000000000002']])
+        ->shouldNotReceive('revokeSession');
 
     $this->actingAs($user)->get('/open-banking/callback?code=test-code')
         ->assertRedirect(route('settings.connections.index'))
@@ -1811,6 +1815,193 @@ test('a reconnect whose session only covers a sibling fails instead of unlinking
 
     Queue::assertPushed(SyncBankingConnectionJob::class, fn (SyncBankingConnectionJob $job) => $job->bankingConnection->is($sibling));
     Queue::assertNotPushed(SyncBankingConnectionJob::class, fn (SyncBankingConnectionJob $job) => $job->bankingConnection->is($connection));
+});
+
+test('a wrong-login reconnect on a lapsed consent stays expired, where the sweep and the reconnect button still reach it', function () {
+    Queue::fake();
+
+    $user = User::factory()->onboarded()->create();
+    [$connection] = connectionWithAccount($user, 'ES0000000000000000000001', [
+        'status' => BankingConnectionStatus::Pending,
+        'session_id' => 'old-session',
+        'valid_until' => now()->subDay(),
+    ]);
+    connectionWithAccount($user, 'ES0000000000000000000002', ['session_id' => 'revoked-session']);
+
+    mockSharedSession([['uid' => 'new-uid-2', 'iban' => 'ES0000000000000000000002']]);
+
+    $this->actingAs($user)->get('/open-banking/callback?code=test-code')->assertSessionHas('error');
+
+    expect($connection->refresh()->status)->toBe(BankingConnectionStatus::Expired)
+        ->and($connection->session_id)->toBe('old-session');
+});
+
+test('a wrong-login reconnect tells the connections page in any language', function () {
+    Queue::fake();
+
+    $user = User::factory()->onboarded()->create(['locale' => 'es']);
+    [$connection] = connectionWithAccount($user, 'ES0000000000000000000001', ['status' => BankingConnectionStatus::Pending]);
+    connectionWithAccount($user, 'ES0000000000000000000002', ['session_id' => 'revoked-session']);
+
+    mockSharedSession([['uid' => 'new-uid-2', 'iban' => 'ES0000000000000000000002']]);
+
+    $this->actingAs($user)->get('/open-banking/callback?code=test-code')
+        ->assertSessionHas('error', fn (string $message): bool => str_contains($message, 'no incluye las cuentas'));
+
+    expect($connection->refresh()->error_message)->toBe(BankingConnection::WRONG_LOGIN_ERROR);
+
+    $this->get(route('settings.connections.index'))
+        ->assertInertia(fn ($page) => $page->where('connections', fn ($connections) => collect($connections)->firstWhere('id', $connection->id)['failed_on_wrong_login'] === true));
+});
+
+test('a reconnect does not pair an account with a session account holding another iban', function () {
+    Queue::fake();
+
+    $user = User::factory()->onboarded()->create();
+    [$connection, $account] = connectionWithAccount($user, 'ES0000000000000000000001', [
+        'status' => BankingConnectionStatus::Pending,
+        'session_id' => 'old-session',
+    ]);
+    [$sibling] = connectionWithAccount($user, 'ES0000000000000000000002', ['session_id' => 'revoked-session']);
+
+    mockSharedSession([
+        ['uid' => 'new-uid-2', 'iban' => 'ES0000000000000000000002'],
+        ['uid' => 'new-uid-3', 'iban' => 'ES0000000000000000000003'],
+    ])->shouldNotReceive('revokeSession');
+
+    $this->actingAs($user)->get('/open-banking/callback?code=test-code')->assertSessionHas('error');
+
+    expect($account->refresh()->external_account_id)->toBe('old-uid-'.$connection->id)
+        ->and($account->iban)->toBe('ES0000000000000000000001')
+        ->and($connection->refresh()->status)->toBe(BankingConnectionStatus::Error)
+        ->and($sibling->refresh()->session_id)->toBe('shared-session');
+});
+
+test('a reconnect unlinks the one account another iban would otherwise have taken', function () {
+    Queue::fake();
+
+    $user = User::factory()->onboarded()->create();
+    [$connection, $kept] = connectionWithAccount($user, 'ES0000000000000000000001', ['status' => BankingConnectionStatus::Pending]);
+    $other = Account::factory()->create([
+        'user_id' => $user->id,
+        'banking_connection_id' => $connection->id,
+        'iban' => 'ES0000000000000000000004',
+    ]);
+
+    mockSharedSession([
+        ['uid' => 'new-uid-1', 'iban' => 'ES0000000000000000000001'],
+        ['uid' => 'new-uid-3', 'iban' => 'ES0000000000000000000003'],
+    ]);
+
+    $this->actingAs($user)->get('/open-banking/callback?code=test-code')->assertRedirect();
+
+    expect($kept->refresh()->external_account_id)->toBe('new-uid-1')
+        ->and($other->refresh()->external_account_id)->toBeNull()
+        ->and($other->iban)->toBe('ES0000000000000000000004');
+});
+
+test('a reconnect matches the same iban written with other spaces and case', function () {
+    Queue::fake();
+
+    $user = User::factory()->onboarded()->create();
+    [, $account] = connectionWithAccount($user, 'es00 0000 0000 0000 0000 0001', ['status' => BankingConnectionStatus::Pending]);
+
+    mockSharedSession([
+        ['uid' => 'new-uid-3', 'iban' => 'ES0000000000000000000003'],
+        ['uid' => 'new-uid-1', 'iban' => 'ES0000000000000000000001'],
+    ]);
+
+    $this->actingAs($user)->get('/open-banking/callback?code=test-code')->assertRedirect();
+
+    expect($account->refresh()->external_account_id)->toBe('new-uid-1');
+});
+
+test('a session without ibans still reaches an account by position and keeps its stored iban', function () {
+    Queue::fake();
+
+    $user = User::factory()->onboarded()->create();
+    [, $account] = connectionWithAccount($user, 'ES0000000000000000000001', ['status' => BankingConnectionStatus::Pending]);
+
+    mockSharedSession([['uid' => 'new-uid', 'iban' => null]]);
+
+    $this->actingAs($user)->get('/open-banking/callback?code=test-code')->assertRedirect();
+
+    expect($account->refresh()->external_account_id)->toBe('new-uid')
+        ->and($account->iban)->toBe('ES0000000000000000000001');
+});
+
+test('an account without a stored iban still reaches a session account by position', function () {
+    Queue::fake();
+
+    $user = User::factory()->onboarded()->create();
+    [, $account] = connectionWithAccount($user, null, ['status' => BankingConnectionStatus::Pending]);
+
+    mockSharedSession([['uid' => 'new-uid', 'iban' => 'ES0000000000000000000001']]);
+
+    $this->actingAs($user)->get('/open-banking/callback?code=test-code')->assertRedirect();
+
+    expect($account->refresh()->external_account_id)->toBe('new-uid')
+        ->and($account->iban)->toBe('ES0000000000000000000001');
+});
+
+test('a reconnect that loses accounts says how many instead of reporting success', function (int $lost, string $locale, string $expected) {
+    Queue::fake();
+
+    $user = User::factory()->onboarded()->create(['locale' => $locale]);
+    [$connection] = connectionWithAccount($user, 'ES0000000000000000000001', ['status' => BankingConnectionStatus::Pending]);
+    Account::factory()->count($lost)->sequence(fn ($sequence) => ['iban' => 'ES000000000000000000001'.$sequence->index])->create([
+        'user_id' => $user->id,
+        'banking_connection_id' => $connection->id,
+    ]);
+
+    mockSharedSession([['uid' => 'new-uid-1', 'iban' => 'ES0000000000000000000001']]);
+
+    $this->actingAs($user)->get('/open-banking/callback?code=test-code')
+        ->assertRedirect(route('settings.connections.index'))
+        ->assertSessionMissing('success')
+        ->assertSessionHas('error', $expected);
+
+    Queue::assertPushed(SyncBankingConnectionJob::class, fn (SyncBankingConnectionJob $job) => $job->bankingConnection->is($connection));
+})->with([
+    'one, in English' => [1, 'en', 'Reconnected, but 1 account no longer syncs. Review it in Manage Accounts.'],
+    'two, in English' => [2, 'en', 'Reconnected, but 2 accounts no longer sync. Review them in Manage Accounts.'],
+    'two, in Spanish' => [2, 'es', 'Reconectada, pero 2 cuentas ya no se sincronizan. Revísalas en Gestionar cuentas.'],
+]);
+
+test('a wrong-login reconnect revokes a session nothing holds', function (array $sessionAccount) {
+    Queue::fake();
+
+    $user = User::factory()->onboarded()->create();
+    [$connection, $account] = connectionWithAccount($user, 'ES0000000000000000000001', [
+        'status' => BankingConnectionStatus::Pending,
+        'session_id' => 'old-session',
+    ]);
+
+    mockSharedSession([$sessionAccount])->shouldReceive('revokeSession')->once()->with('shared-session');
+
+    $this->actingAs($user)->get('/open-banking/callback?code=test-code')->assertSessionHas('error');
+
+    expect($connection->refresh()->session_id)->toBe('old-session')
+        ->and($account->refresh()->external_account_id)->toBe('old-uid-'.$connection->id);
+})->with([
+    'no session account has a uid' => [['uid' => null, 'iban' => 'ES0000000000000000000001']],
+    'the session lists another iban' => [['uid' => 'new-uid-3', 'iban' => 'ES0000000000000000000003']],
+]);
+
+test('a revoke that fails changes nothing about a failed reconnect', function () {
+    Queue::fake();
+
+    $user = User::factory()->onboarded()->create();
+    [$connection] = connectionWithAccount($user, 'ES0000000000000000000001', ['status' => BankingConnectionStatus::Pending]);
+
+    mockSharedSession([['uid' => 'new-uid-3', 'iban' => 'ES0000000000000000000003']])
+        ->shouldReceive('revokeSession')->once()->andThrow(new RuntimeException('The bank is down.'));
+
+    $this->actingAs($user)->get('/open-banking/callback?code=test-code')
+        ->assertRedirect(route('settings.connections.index'))
+        ->assertSessionHas('error', fn (string $message): bool => str_contains($message, 'does not cover the accounts'));
+
+    expect($connection->refresh()->status)->toBe(BankingConnectionStatus::Error);
 });
 
 test('a reconnect that throws halfway leaves everything as it was and tells the user', function () {
@@ -1836,7 +2027,7 @@ test('a reconnect that throws halfway leaves everything as it was and tells the 
         ['uid' => 'new-uid-1', 'iban' => 'ES0000000000000000000001'],
         ['uid' => 'new-uid-2', 'iban' => 'ES0000000000000000000002'],
         ['uid' => 'new-uid-3', 'iban' => 'ES0000000000000000000003'],
-    ]);
+    ])->shouldReceive('revokeSession')->once()->with('shared-session');
 
     Account::updating(function (Account $account) use ($failing): void {
         if ($account->is($failing)) {

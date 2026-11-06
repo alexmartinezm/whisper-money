@@ -21,6 +21,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 /**
  * @property bool $has_pending_accounts
  * @property bool $can_sync_manually
+ * @property bool $failed_on_wrong_login
  * @property bool $is_rate_limited
  * @property bool $is_beta
  * @property Carbon|null $next_sync_attempt_at
@@ -39,6 +40,12 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  */
 class BankingConnection extends Model
 {
+    /**
+     * Stored in English and translated where it is shown, because the
+     * connections page has to recognise it whatever language the user reconnected in.
+     */
+    public const string WRONG_LOGIN_ERROR = 'This bank login does not cover the accounts on this connection, so the connection was left as it was. Try again with the login you used for them.';
+
     /** @use HasFactory<BankingConnectionFactory> */
     use BelongsToSpace, HasFactory, HasUuids, SoftDeletes;
 
@@ -214,6 +221,15 @@ class BankingConnection extends Model
             $query->whereNull('last_synced_at')
                 ->orWhere('last_synced_at', '<', $since);
         });
+    }
+
+    /**
+     * Whether a reconnect left this connection needing another try with the
+     * right login.
+     */
+    public function failedOnWrongLogin(): bool
+    {
+        return $this->error_message === self::WRONG_LOGIN_ERROR;
     }
 
     public function isActive(): bool
