@@ -224,6 +224,20 @@ class BankingConnection extends Model
     }
 
     /**
+     * Where a reconnect that did not go through leaves the connection. While the
+     * consent runs that is Error, which the sweep still retries and which finds
+     * the old session working or expires it. Once the consent has lapsed the sweep
+     * no longer takes an Error connection, and the settings page only offers
+     * Reconnect on some errors, so it is Expired.
+     */
+    public function statusAfterFailedReconnect(): BankingConnectionStatus
+    {
+        return $this->valid_until?->isPast()
+            ? BankingConnectionStatus::Expired
+            : BankingConnectionStatus::Error;
+    }
+
+    /**
      * Whether a reconnect left this connection needing another try with the
      * right login.
      */

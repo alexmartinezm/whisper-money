@@ -22,6 +22,7 @@ use Illuminate\Database\Eloquent\SoftDeletingScope;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection as SupportCollection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -382,15 +383,12 @@ class AuthorizationController extends Controller
     }
 
     /**
-     * Leave the connection on its old session, marked for a reconnect. While the
-     * consent runs that is Error, which the sweep still retries and which finds
-     * the old session working or expires it. Once the consent has lapsed the sweep
-     * no longer takes an Error connection, so it stays Expired.
+     * Leave the connection on its old session, marked for a reconnect.
      */
     private function recordWrongLogin(BankingConnection $connection): void
     {
         $connection->update([
-            'status' => $connection->valid_until?->isPast() ? BankingConnectionStatus::Expired : BankingConnectionStatus::Error,
+            'status' => $connection->statusAfterFailedReconnect(),
             'error_message' => BankingConnection::WRONG_LOGIN_ERROR,
             'state_token' => null,
         ]);
@@ -511,7 +509,7 @@ class AuthorizationController extends Controller
         if ($connection && ! $connection->isActive()) {
             if ($connection->accounts()->exists()) {
                 $connection->update([
-                    'status' => BankingConnectionStatus::Error,
+                    'status' => $connection->statusAfterFailedReconnect(),
                     'error_message' => $errorMessage,
                 ]);
             } else {
@@ -673,10 +671,16 @@ class AuthorizationController extends Controller
      *
      * Matching strategy (in priority order):
      *   1. Match by IBAN — reliable when the account was created after the iban column existed.
-     *   2. Positional fallback — match by creation order, for accounts or sessions without an IBAN.
-     *      Uids a sibling connection has already claimed by IBAN are never handed out here, and
-     *      neither is a session account whose IBAN differs from the account's: that is another
-     *      bank account, and pairing them would import its transactions into this one.
+     *   2. An account without a stored IBAN takes a session account without one, which is
+     *      what a card looks like on both sides.
+     *   3. An account without a stored IBAN takes any session account left.
+     *   4. Only when the session lists no IBANs at all, so the bank does not return them, an
+     *      account with a stored IBAN takes a session account by position. Otherwise a stored
+     *      IBAN the session lacks means this bank account is not in it, and taking another
+     *      one would import its transactions here.
+     *
+     * Uids a sibling connection has already claimed by IBAN are out of every step but the
+     * first, and each step takes the first session account that fits, in creation order.
      *
      * @param  Collection<int, Account>  $accounts
      * @param  array<int, array<string, mixed>>  $newAccounts
@@ -685,56 +689,80 @@ class AuthorizationController extends Controller
      */
     private function matchSessionAccounts(Collection $accounts, array $newAccounts, array $siblingUids): array
     {
+        $sessionListsIbans = collect($newAccounts)->contains(fn (array $data): bool => $this->sessionIban($data) !== null);
         $unmatchedNew = collect($newAccounts)->filter(fn (array $data): bool => ! empty($data['uid']))->values();
-        $unmatchedExisting = collect();
-        $matches = [];
 
-        foreach ($accounts as $account) {
-            $iban = $this->normalizedIban($account->iban);
-
-            $matched = $iban !== null
-                ? $unmatchedNew->first(fn (array $data) => $this->normalizedIban($data['account_id']['iban'] ?? null) === $iban)
-                : null;
-
-            if ($matched) {
-                $matches[$account->id] = $matched;
-                $unmatchedNew = $unmatchedNew->reject(fn (array $data) => $data['uid'] === $matched['uid'])->values();
-
-                continue;
-            }
-
-            $unmatchedExisting->push($account);
-        }
+        $matches = $this->pairAccounts($accounts, $unmatchedNew, fn (Account $account, array $data): bool => $this->normalizedIban($account->iban) !== null
+            && $this->normalizedIban($account->iban) === $this->sessionIban($data));
 
         $unmatchedNew = $unmatchedNew->reject(fn (array $data) => in_array($data['uid'], $siblingUids, true))->values();
 
-        foreach ($unmatchedExisting as $account) {
-            $matched = $unmatchedNew->first(fn (array $data) => ! $this->ibansDiffer($account->iban, $data['account_id']['iban'] ?? null));
+        $withoutIban = $accounts->filter(fn (Account $account): bool => $this->normalizedIban($account->iban) === null);
 
-            if ($matched) {
-                $matches[$account->id] = $matched;
-                $unmatchedNew = $unmatchedNew->reject(fn (array $data) => $data['uid'] === $matched['uid'])->values();
-            }
+        $matches += $this->pairAccounts($withoutIban, $unmatchedNew, fn (Account $account, array $data): bool => $this->sessionIban($data) === null);
+        $matches += $this->pairAccounts($withoutIban->except(array_keys($matches)), $unmatchedNew, fn (): bool => true);
+
+        if (! $sessionListsIbans) {
+            $matches += $this->pairAccounts($accounts->except(array_keys($matches)), $unmatchedNew, fn (): bool => true);
         }
 
         return $matches;
     }
 
     /**
-     * Whether both IBANs are known and name different bank accounts.
+     * Give each account the first session account $accepts allows, taking it out
+     * of $sessionAccounts. Two known currencies that differ never pair: a session
+     * can list one IBAN twice, once per currency.
+     *
+     * @param  Collection<int, Account>  $accounts
+     * @param  SupportCollection<int, array<string, mixed>>  $sessionAccounts
+     * @param  callable(Account, array<string, mixed>): bool  $accepts
+     * @return array<string, array<string, mixed>>
      */
-    private function ibansDiffer(?string $first, ?string $second): bool
+    private function pairAccounts(Collection $accounts, SupportCollection &$sessionAccounts, callable $accepts): array
     {
-        $first = $this->normalizedIban($first);
-        $second = $this->normalizedIban($second);
+        $pairs = [];
 
-        return $first !== null && $second !== null && $first !== $second;
+        foreach ($accounts as $account) {
+            $matched = $sessionAccounts->first(fn (array $data): bool => $accepts($account, $data)
+                && ! $this->currenciesDiffer($account->currency_code, $data['currency'] ?? null));
+
+            if ($matched) {
+                $pairs[$account->id] = $matched;
+                $sessionAccounts = $sessionAccounts->reject(fn (array $data) => $data['uid'] === $matched['uid'])->values();
+            }
+        }
+
+        return $pairs;
+    }
+
+    /**
+     * Whether both currencies are known and differ. "XXX" is ISO 4217's "no
+     * currency", which banks do send, so it counts as unknown.
+     */
+    private function currenciesDiffer(?string $first, ?string $second): bool
+    {
+        $known = collect([$first, $second])
+            ->map(fn (?string $currency): string => strtoupper(trim((string) $currency)))
+            ->reject(fn (string $currency): bool => $currency === '' || $currency === 'XXX');
+
+        return $known->count() === 2 && $known->unique()->count() === 2;
+    }
+
+    /**
+     * The normalized IBAN of a session account, or null when it has none.
+     *
+     * @param  array<string, mixed>  $sessionAccount
+     */
+    private function sessionIban(array $sessionAccount): ?string
+    {
+        return $this->normalizedIban($sessionAccount['account_id']['iban'] ?? null);
     }
 
     /**
      * The IBAN without spaces, upper case, or null when there is none. Not
      * ImportIban::normalize(): that one also drops an IBAN whose check digits
-     * fail, which here would turn a different account into an unknown one.
+     * fail, which here would turn a known account into one with no IBAN.
      */
     private function normalizedIban(?string $iban): ?string
     {
