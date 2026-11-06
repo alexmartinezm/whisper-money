@@ -107,6 +107,14 @@ class TransactionWriteRules
     }
 
     /**
+     * Why the transaction has nothing to merge back, or null when it does.
+     */
+    public static function mergeError(Transaction $transaction): ?string
+    {
+        return $transaction->splits()->exists() ? null : 'That transaction is not split, so there is nothing to merge.';
+    }
+
+    /**
      * Whether the edit may move the account's balance snapshots: a row that
      * came from a bank or import never does, even moved to another date, as
      * in the app's edit dialog.

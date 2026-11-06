@@ -2,18 +2,25 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Features\TransactionSplitting;
+use App\Http\ApiV1\ApiV1Exception;
 use App\Http\ApiV1\CursorPaginator;
 use App\Http\Requests\Api\V1\DeleteTransactionRequest;
+use App\Http\Requests\Api\V1\MergeTransactionSplitsRequest;
+use App\Http\Requests\Api\V1\ReplaceTransactionLabelsRequest;
 use App\Http\Requests\Api\V1\SearchTransactionsRequest;
+use App\Http\Requests\Api\V1\SplitTransactionRequest;
 use App\Http\Requests\Api\V1\StoreTransactionRequest;
 use App\Http\Requests\Api\V1\UpdateTransactionRequest;
 use App\Http\Resources\V1\TransactionResource;
+use App\Services\Transactions\TransactionLabeler;
 use App\Services\Transactions\TransactionSearch;
 use App\Services\Transactions\TransactionWriter;
 use App\Services\Transactions\WrittenTransaction;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Laravel\Pennant\Feature;
 
 class TransactionController extends Controller
 {
@@ -129,6 +136,62 @@ class TransactionController extends Controller
             'deleted' => true,
             'balance_updated' => $this->writer->delete($model, $request->boolean('update_balance')),
         ]);
+    }
+
+    /**
+     * Replace the labels of a transaction
+     *
+     * Sets the transaction's labels to exactly `label_ids`: a label it had
+     * that is not in the list is removed, and an empty list removes them all.
+     * Works on any transaction you own, including one from a bank or an import
+     * and a split one, whose lines share its labels. Labelling is also how a
+     * transaction counts towards a savings goal.
+     *
+     * @param  string  $transaction  The transaction's id.
+     */
+    public function labels(ReplaceTransactionLabelsRequest $request, string $transaction, TransactionLabeler $labeler): TransactionResource
+    {
+        return new TransactionResource($labeler->replace($request->transaction(), $request->labelIds()));
+    }
+
+    /**
+     * Split a transaction
+     *
+     * Files a transaction under 2 to 20 lines, each with its own amount and
+     * category, replacing the lines it had. Works on bank and imported
+     * transactions too, and changes neither the transaction's amount, date and
+     * account nor its balance. Answers the transaction, with the lines nested
+     * under `splits`.
+     *
+     * The lines must add up to the transaction's amount exactly, each with its
+     * sign and none zero, and their categories must all be expense or all be
+     * income. Anything else is a `422` under `splits`.
+     *
+     * @param  string  $transaction  The transaction's id.
+     */
+    public function split(SplitTransactionRequest $request, string $transaction): TransactionResource
+    {
+        if (! Feature::for($this->user($request))->active(TransactionSplitting::class)) {
+            throw new ApiV1Exception(403, 'splitting_disabled', 'Creating or replacing transaction splits is currently disabled. Existing splits may still be merged back.');
+        }
+
+        return new TransactionResource($this->writer->split($request->transaction(), $request->lines()));
+    }
+
+    /**
+     * Merge a split back
+     *
+     * Puts a split transaction back in one piece, removing its lines. It takes
+     * `category_id`, an expense or income category of yours in the space,
+     * because a split transaction holds no category of its own to go back to.
+     * One that is not split answers `422` under `transaction`, and a category
+     * of another type under `splits`.
+     *
+     * @param  string  $transaction  The transaction's id.
+     */
+    public function mergeSplits(MergeTransactionSplitsRequest $request, string $transaction): TransactionResource
+    {
+        return new TransactionResource($this->writer->mergeSplits($request->transaction(), $request->categoryId()));
     }
 
     private function written(WrittenTransaction $written): TransactionResource

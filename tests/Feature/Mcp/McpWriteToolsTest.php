@@ -390,6 +390,22 @@ it('categorizes an imported transaction', function () {
     expect($transaction->category_source)->toBe(CategorySource::Manual);
 });
 
+it('moves a labelled transaction in the app\'s delta sync', function () {
+    $user = User::factory()->create();
+    $transaction = Transaction::factory()->plaintext()->create([
+        'user_id' => $user->id,
+        'account_id' => Account::factory()->create(['user_id' => $user->id])->id,
+    ]);
+    $before = $transaction->fresh()->updated_at;
+
+    callWriteTool($user, LabelTransaction::class, [
+        'transaction_id' => $transaction->id,
+        'add_label_ids' => [Label::factory()->create(['user_id' => $user->id])->id],
+    ])->assertOk();
+
+    expect($transaction->fresh()->updated_at->gt($before))->toBeTrue();
+});
+
 it('adds a label to an imported transaction', function () {
     $user = User::factory()->create();
     $account = Account::factory()->create(['user_id' => $user->id]);

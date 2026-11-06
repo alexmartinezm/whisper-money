@@ -15,8 +15,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Creating, editing and deleting a transaction, shared by the transaction MCP
- * tools and `/api/v1/transactions`. The inputs arrive validated
+ * Creating, editing, splitting and deleting a transaction, shared by the
+ * transaction MCP tools and `/api/v1/transactions`. The inputs arrive validated
  * (TransactionWriteRules) and with the account, category and labels they point
  * at already checked by the caller.
  *
@@ -26,7 +26,10 @@ use Illuminate\Validation\ValidationException;
  */
 class TransactionWriter
 {
-    public function __construct(private ManualBalanceAdjuster $balanceAdjuster) {}
+    public function __construct(
+        private ManualBalanceAdjuster $balanceAdjuster,
+        private ReplaceTransactionSplits $splits,
+    ) {}
 
     /**
      * Automation rules run while the row is saved, so $labelIds go on top of
@@ -106,6 +109,39 @@ class TransactionWriter
             $balanceUpdated = $updateBalance && $this->moveBalance($original, $locked);
 
             return new WrittenTransaction($locked->refresh(), $balanceUpdated);
+        }, attempts: 5);
+    }
+
+    /**
+     * File the transaction under $lines, replacing any it had. Its invariants
+     * and budget reassignment are the web path's: they live in
+     * ReplaceTransactionSplits.
+     *
+     * @param  array<int, array{category_id: string, amount: int}>  $lines
+     */
+    public function split(Transaction $transaction, array $lines): Transaction
+    {
+        return DB::transaction(fn (): Transaction => $this->splits->replace($transaction, $lines), attempts: 5);
+    }
+
+    /**
+     * Put a split transaction back in one piece, filed under $categoryId: its
+     * lines remember no category of its own to go back to. Checked under the
+     * row lock, where a concurrent merge would otherwise pass for a category
+     * change on an unsplit row.
+     */
+    public function mergeSplits(Transaction $transaction, string $categoryId): Transaction
+    {
+        return DB::transaction(function () use ($transaction, $categoryId): Transaction {
+            $locked = Transaction::query()->whereKey($transaction->id)->lockForUpdate()->firstOrFail();
+
+            $mergeError = TransactionWriteRules::mergeError($locked);
+
+            if ($mergeError !== null) {
+                throw ValidationException::withMessages(['transaction' => $mergeError]);
+            }
+
+            return $this->splits->replace($locked, [], $categoryId);
         }, attempts: 5);
     }
 
