@@ -661,7 +661,7 @@ describe('apply', function () {
     it('overwrites existing categories only when only_uncategorized is off', function () {
         $user = User::factory()->create();
         [$rule, $category] = groceryRuleOverExistingTransactions($user, 1);
-        $other = Category::factory()->create(['user_id' => $user->id]);
+        $other = Category::factory()->create(['user_id' => $user->id, 'name' => 'Another category']);
         Transaction::query()->where('description', 'Grocery Store')->update(['category_id' => $other->id]);
         $headers = rulesWriter($user);
 
