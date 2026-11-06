@@ -141,6 +141,8 @@ interface BulkActionButtonProps extends ComponentProps<typeof Button> {
     label: string;
     /** Icon only, with the label and the key in a tooltip instead. */
     compact?: boolean;
+    /** Takes a deliberate click: no key reaches it, and none is shown. */
+    clickOnly?: boolean;
 }
 
 /**
@@ -153,6 +155,7 @@ function BulkActionButton({
     icon: Icon,
     label,
     compact = false,
+    clickOnly = false,
     className,
     disabled,
     ref,
@@ -162,11 +165,15 @@ function BulkActionButton({
     const hint = useShortcutHint(shortcut);
 
     useShortcut(shortcut, () => buttonRef.current?.click(), {
-        enabled: !disabled,
+        enabled: !disabled && !clickOnly,
     });
 
     return (
-        <BarTooltip label={label} shortcut={shortcut} enabled={compact}>
+        <BarTooltip
+            label={label}
+            shortcut={clickOnly ? undefined : shortcut}
+            enabled={compact}
+        >
             <Button
                 {...props}
                 ref={(node) => {
@@ -176,7 +183,9 @@ function BulkActionButton({
                 type="button"
                 disabled={disabled}
                 aria-label={compact ? label : undefined}
-                aria-keyshortcuts={hint?.ariaKeyShortcuts}
+                aria-keyshortcuts={
+                    clickOnly ? undefined : hint?.ariaKeyShortcuts
+                }
                 className={cn(
                     BAR_BUTTON_CLASS,
                     compact ? 'size-9 rounded-[9px]' : 'rounded-[9px] px-2.5',
@@ -187,7 +196,12 @@ function BulkActionButton({
                 {!compact && (
                     <>
                         {label}
-                        <ShortcutKbd id={shortcut} className={BAR_KBD_CLASS} />
+                        {!clickOnly && (
+                            <ShortcutKbd
+                                id={shortcut}
+                                className={BAR_KBD_CLASS}
+                            />
+                        )}
                     </>
                 )}
             </Button>
@@ -396,6 +410,9 @@ function DesktopBulkActionsBar({
                     icon={WandSparkles}
                     label={__('Re-evaluate rules')}
                     compact={isCompact}
+                    // Every matching row is a lot to rewrite on one stray key,
+                    // and no dialog follows to catch it.
+                    clickOnly={isSelectingAll}
                     onClick={onReEvaluateRules}
                     disabled={isUpdating}
                 />

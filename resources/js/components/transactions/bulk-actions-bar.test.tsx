@@ -139,6 +139,31 @@ describe('BulkActionsBar', () => {
         expect(screen.getByText('All matching filters')).toBeInTheDocument();
     });
 
+    it('re-evaluates every matching row only on a click, never on its key', () => {
+        const { onReEvaluateRules } = renderBar({ isSelectingAll: true });
+
+        press('r');
+
+        expect(onReEvaluateRules).not.toHaveBeenCalled();
+
+        const button = screen.getByRole('button', {
+            name: 'Re-evaluate rules',
+        });
+        expect(button).not.toHaveAttribute('aria-keyshortcuts');
+
+        fireEvent.click(button);
+
+        expect(onReEvaluateRules).toHaveBeenCalledOnce();
+    });
+
+    it('re-evaluates the ticked rows on its key', () => {
+        const { onReEvaluateRules } = renderBar();
+
+        press('r');
+
+        expect(onReEvaluateRules).toHaveBeenCalledOnce();
+    });
+
     it('ignores the shortcuts while an update is running', () => {
         const { onReEvaluateRules, onDelete, onClear } = renderBar({
             isUpdating: true,
