@@ -140,9 +140,9 @@ it('can select different field types and operators', function () {
     $rule = AutomationRule::where('user_id', $user->id)->sole();
 
     // AmountInput speaks cents, the rule stores currency units: -5, not -500.
-    // `rules_json` is persisted as a JSON string, and `equals` is the default
+    // `rules_json` is persisted as an object, and `equals` is the default
     // operator for Amount since this test only changes the field.
-    expect(json_decode($rule->rules_json, true))
+    expect($rule->rules_json)
         ->toBe(['==' => [['var' => 'amount'], -5]]);
 });
 
@@ -313,7 +313,7 @@ it('can build an exception rule and reopen it with the negative operator', funct
 
     $rule = AutomationRule::where('user_id', $user->id)->sole();
 
-    expect(json_decode($rule->rules_json, true))->toBe(['and' => [
+    expect($rule->rules_json)->toBe(['and' => [
         ['in' => ['keyword', ['var' => 'description']]],
         ['!' => ['in' => ['visa card', ['var' => 'description']]]],
     ]]);
@@ -380,7 +380,7 @@ it('can move a group up with its arrow and keeps the order', function () {
 
     $rule = AutomationRule::where('user_id', $user->id)->sole();
 
-    expect(json_decode($rule->rules_json, true))->toBe(['or' => [
+    expect($rule->rules_json)->toBe(['or' => [
         ['in' => ['market', ['var' => 'description']]],
         ['in' => ['grocery', ['var' => 'description']]],
     ]]);
@@ -417,7 +417,7 @@ it('can drag a condition with the keyboard without closing the dialog', function
 
     $rule = AutomationRule::where('user_id', $user->id)->sole();
 
-    expect(json_decode($rule->rules_json, true))->toBe(['or' => [
+    expect($rule->rules_json)->toBe(['or' => [
         ['in' => ['second', ['var' => 'description']]],
         ['in' => ['first', ['var' => 'description']]],
     ]]);
@@ -458,7 +458,7 @@ it('moves conditions with labelled arrows on a phone', function () {
 
     $rule = AutomationRule::where('user_id', $user->id)->sole();
 
-    expect(json_decode($rule->rules_json, true))->toBe(['or' => [
+    expect($rule->rules_json)->toBe(['or' => [
         ['in' => ['second', ['var' => 'description']]],
         ['in' => ['first', ['var' => 'description']]],
         ['in' => ['third', ['var' => 'description']]],
