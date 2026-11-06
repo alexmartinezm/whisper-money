@@ -2,14 +2,18 @@
 
 use App\Http\ApiV1\ApiV1Exception;
 use App\Http\ApiV1\CursorPaginator;
+use App\Models\Account;
 use App\Models\Label;
 use App\Models\Space;
+use App\Models\Transaction;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+
+use function Pest\Laravel\withHeaders;
 
 /**
  * Labels created with a tie on `created_at` every two rows, so the second
@@ -170,3 +174,52 @@ it('requires the order to end on the primary key', function () {
         JsonResource::class,
     );
 })->throws(InvalidArgumentException::class);
+
+it('refuses a query key the list does not take, so a misspelt filter cannot return everything', function (string $path) {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id]);
+    $headers = apiV1Bearer($user);
+
+    withHeaders($headers)
+        ->getJson(str_replace('{account}', $account->id, $path).'?categry_id=abc')
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('categry_id');
+
+    withHeaders($headers)
+        ->getJson(str_replace('{account}', $account->id, $path).'?limit=5&space='.$user->personalSpace->id)
+        ->assertOk();
+})->with([
+    'accounts' => '/api/v1/accounts',
+    'balances' => '/api/v1/accounts/{account}/balances',
+    'categories' => '/api/v1/categories',
+    'labels' => '/api/v1/labels',
+    'automation rules' => '/api/v1/automation-rules',
+    'transactions' => '/api/v1/transactions',
+]);
+
+it('refuses one sent in the body of a GET too', function () {
+    $user = User::factory()->create();
+
+    withHeaders(apiV1Bearer($user))
+        ->json('GET', '/api/v1/transactions', ['categry_id' => 'abc'])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('categry_id');
+});
+
+it('still takes the cursors and the filters a list declares', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id]);
+    $older = Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'account_id' => $account->id, 'transaction_date' => '2026-01-01']);
+    $newer = Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'account_id' => $account->id, 'transaction_date' => '2026-01-02']);
+    $headers = apiV1Bearer($user);
+
+    withHeaders($headers)
+        ->getJson('/api/v1/transactions?limit=1&account_id='.$account->id.'&starting_after='.$newer->id)
+        ->assertOk()
+        ->assertJsonPath('data.*.id', [$older->id]);
+
+    withHeaders($headers)
+        ->getJson('/api/v1/transactions?ending_before='.$older->id.'&from=2026-01-01&to=2026-01-31')
+        ->assertOk()
+        ->assertJsonPath('data.*.id', [$newer->id]);
+});

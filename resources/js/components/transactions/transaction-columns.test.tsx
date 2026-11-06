@@ -129,6 +129,35 @@ describe('createTransactionColumns amount', () => {
         expect(screen.getByText(/\$/)).toBeInTheDocument();
         expect(screen.queryByText(/€/)).not.toBeInTheDocument();
     });
+
+    it('draws a row whose stored currency is not a code Intl takes', () => {
+        const amount = buildColumns(false).find(
+            (column) =>
+                'accessorKey' in column && column.accessorKey === 'amount',
+        );
+
+        const transaction = {
+            amount: -1200,
+            currency_code: 'N/A',
+        } as DecryptedTransaction;
+
+        render(
+            <PrivacyModeProvider>
+                {(
+                    amount?.cell as (
+                        context: CellContext<DecryptedTransaction, unknown>,
+                    ) => React.ReactNode
+                )?.({
+                    row: {
+                        getValue: () => transaction.amount,
+                        original: transaction,
+                    },
+                } as unknown as CellContext<DecryptedTransaction, unknown>)}
+            </PrivacyModeProvider>,
+        );
+
+        expect(screen.getByText(/12\.00.*N\/A/)).toBeInTheDocument();
+    });
 });
 
 describe('createTransactionColumns statement payments', () => {

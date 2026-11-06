@@ -4,7 +4,7 @@ namespace App\Mcp\Tools;
 
 use App\Enums\TransactionSource;
 use App\Models\User;
-use App\Services\ManualBalanceAdjuster;
+use App\Services\Transactions\TransactionWriter;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -36,10 +36,7 @@ class DeleteTransaction extends WriteTool
             return Response::error('Only manually-created transactions can be deleted. This one came from a bank or import.');
         }
 
-        $balanceUpdated = $request->boolean('update_balance')
-            && app(ManualBalanceAdjuster::class)->reverseDeletedTransaction($transaction);
-
-        $transaction->delete();
+        $balanceUpdated = app(TransactionWriter::class)->delete($transaction, $request->boolean('update_balance'));
 
         return $this->json([
             'deleted' => true,

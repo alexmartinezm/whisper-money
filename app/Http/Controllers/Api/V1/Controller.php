@@ -8,6 +8,7 @@ use App\Models\AutomationRule;
 use App\Models\Category;
 use App\Models\Label;
 use App\Models\Space;
+use App\Models\Transaction;
 use App\Models\User;
 use App\Services\SpaceResolver;
 use Illuminate\Database\Eloquent\Builder;
@@ -57,6 +58,14 @@ abstract class Controller extends BaseController
     protected function account(Request $request, string $id): Account
     {
         return $this->owned($request, Account::query())->findOrFail($id);
+    }
+
+    /**
+     * The route's transaction, looked up in the request's space like account().
+     */
+    protected function transaction(Request $request, string $id): Transaction
+    {
+        return $this->owned($request, Transaction::query())->findOrFail($id);
     }
 
     /**

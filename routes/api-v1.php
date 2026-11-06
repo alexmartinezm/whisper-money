@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\V1\AutomationRuleController;
 use App\Http\Controllers\Api\V1\CategoryController;
 use App\Http\Controllers\Api\V1\LabelController;
 use App\Http\Controllers\Api\V1\SpaceController;
+use App\Http\Controllers\Api\V1\TransactionController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -54,4 +55,15 @@ Route::whereUuid('automation_rule')->group(function (): void {
     Route::patch('automation-rules/{automation_rule}', [AutomationRuleController::class, 'update'])->name('automation-rules.update');
     Route::delete('automation-rules/{automation_rule}', [AutomationRuleController::class, 'destroy'])->name('automation-rules.destroy');
     Route::post('automation-rules/{automation_rule}/apply', [AutomationRuleController::class, 'apply'])->name('automation-rules.apply');
+});
+
+Route::whereUuid('transaction')->group(function (): void {
+    Route::get('transactions', [TransactionController::class, 'index'])->name('transactions.index');
+    Route::post('transactions', [TransactionController::class, 'store'])->name('transactions.store');
+    Route::get('transactions/{transaction}', [TransactionController::class, 'show'])->name('transactions.show');
+    Route::patch('transactions/{transaction}', [TransactionController::class, 'update'])->name('transactions.update');
+    Route::delete('transactions/{transaction}', [TransactionController::class, 'destroy'])->name('transactions.destroy');
+    Route::put('transactions/{transaction}/labels', [TransactionController::class, 'labels'])->name('transactions.labels.update');
+    Route::post('transactions/{transaction}/split', [TransactionController::class, 'split'])->name('transactions.split');
+    Route::post('transactions/{transaction}/merge-splits', [TransactionController::class, 'mergeSplits'])->name('transactions.merge-splits');
 });

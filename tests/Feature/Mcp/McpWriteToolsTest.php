@@ -75,6 +75,31 @@ it('creates a manual transaction and defaults the currency to the account', func
     expect($transaction->source->value)->toBe('manually_created');
 });
 
+it('keeps what a rule tagged a new transaction with next to the labels it was sent', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id]);
+    $sent = Label::factory()->create(['user_id' => $user->id]);
+    $tagged = Label::factory()->create(['user_id' => $user->id]);
+    $rule = AutomationRule::factory()->create([
+        'user_id' => $user->id,
+        'priority' => 1,
+        'rules_json' => ['in' => ['hucha', ['var' => 'description']]],
+        'action_category_id' => null,
+    ]);
+    $rule->labels()->attach($tagged->id);
+
+    callWriteTool($user, CreateTransaction::class, [
+        'account_id' => $account->id,
+        'description' => 'Hucha enero',
+        'amount' => 5000,
+        'transaction_date' => '2026-01-15',
+        'label_ids' => [$sent->id],
+    ])->assertOk();
+
+    expect(Transaction::query()->sole()->labels()->pluck('labels.id')->sort()->values()->all())
+        ->toBe(collect([$sent->id, $tagged->id])->sort()->values()->all());
+});
+
 it('creates a transaction on a connected account without touching its balances', function () {
     $user = User::factory()->create();
     $account = Account::factory()->connected()->create(['user_id' => $user->id]);
@@ -91,6 +116,93 @@ it('creates a transaction on a connected account without touching its balances',
     expect(Transaction::query()->where('account_id', $account->id)->count())->toBe(1);
     expect($account->balances()->where('balance_date', '2026-01-15')->value('balance'))->toBe(10_000);
 });
+
+it('takes any three-letter currency, as it always has', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
+
+    callWriteTool($user, CreateTransaction::class, [
+        'account_id' => $account->id,
+        'description' => 'Oslo',
+        'amount' => -4000,
+        'transaction_date' => '2026-01-15',
+        'currency_code' => 'NOK',
+    ])->assertOk();
+
+    $transaction = Transaction::query()->sole();
+
+    expect($transaction->currency_code)->toBe('NOK');
+
+    callWriteTool($user, UpdateTransaction::class, [
+        'transaction_id' => $transaction->id,
+        'currency_code' => 'pln',
+    ])->assertOk();
+
+    expect($transaction->fresh()->currency_code)->toBe('PLN');
+});
+
+it('refuses a currency that would break the app\'s money format', function (string $code) {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
+
+    callWriteTool($user, CreateTransaction::class, [
+        'account_id' => $account->id,
+        'description' => 'Odd',
+        'amount' => -1,
+        'transaction_date' => '2026-01-15',
+        'currency_code' => $code,
+    ])->assertHasErrors();
+
+    expect(Transaction::query()->count())->toBe(0);
+})->with(['N/A', '---', '1!a', "NO\n", "NOK\n"]);
+
+it('refuses an amount past what the balances can hold', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id]);
+
+    callWriteTool($user, CreateTransaction::class, [
+        'account_id' => $account->id,
+        'description' => 'Too much',
+        'amount' => PHP_INT_MIN,
+        'transaction_date' => '2026-01-15',
+        'update_balance' => true,
+    ])->assertHasErrors();
+
+    expect(Transaction::query()->count())->toBe(0);
+});
+
+it('refuses an infinite amount as a validation error', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id]);
+
+    callWriteTool($user, CreateTransaction::class, [
+        'account_id' => $account->id,
+        'description' => 'Too much',
+        'amount' => INF,
+        'transaction_date' => '2026-01-15',
+    ])->assertHasErrors(['amount']);
+
+    expect(Transaction::query()->count())->toBe(0);
+});
+
+it('locks the account before anything reads a snapshot when it moves a balance', function (string $tool) {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id, 'type' => 'checking', 'currency_code' => 'EUR']);
+    $transaction = Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'account_id' => $account->id, 'category_id' => null, 'currency_code' => 'EUR']);
+
+    $arguments = match ($tool) {
+        CreateTransaction::class => ['account_id' => $account->id, 'description' => 'Cash', 'amount' => -100, 'transaction_date' => '2026-01-15'],
+        UpdateTransaction::class => ['transaction_id' => $transaction->id, 'amount' => -100],
+        DeleteTransaction::class => ['transaction_id' => $transaction->id],
+    };
+
+    $statements = statementsOfFirstTransaction(fn () => callWriteTool($user, $tool, [...$arguments, 'update_balance' => true])->assertOk());
+    $firstPlainRead = collect($statements)->search(fn (string $sql): bool => str_starts_with($sql, 'select') && ! str_contains($sql, 'for update'));
+    $accountLock = collect($statements)->search(fn (string $sql): bool => str_contains($sql, '`accounts`') && str_contains($sql, 'for update'));
+
+    expect($accountLock)->toBeInt()
+        ->and($firstPlainRead === false || $accountLock < $firstPlainRead)->toBeTrue();
+})->with([CreateTransaction::class, UpdateTransaction::class, DeleteTransaction::class]);
 
 it('edits a manual transaction', function () {
     $user = User::factory()->create();
@@ -363,6 +475,22 @@ it('categorizes an imported transaction', function () {
 
     expect($transaction->category_id)->toBe($category->id);
     expect($transaction->category_source)->toBe(CategorySource::Manual);
+});
+
+it('moves a labelled transaction in the app\'s delta sync', function () {
+    $user = User::factory()->create();
+    $transaction = Transaction::factory()->plaintext()->create([
+        'user_id' => $user->id,
+        'account_id' => Account::factory()->create(['user_id' => $user->id])->id,
+    ]);
+    $before = $transaction->fresh()->updated_at;
+
+    callWriteTool($user, LabelTransaction::class, [
+        'transaction_id' => $transaction->id,
+        'add_label_ids' => [Label::factory()->create(['user_id' => $user->id])->id],
+    ])->assertOk();
+
+    expect($transaction->fresh()->updated_at->gt($before))->toBeTrue();
 });
 
 it('adds a label to an imported transaction', function () {
