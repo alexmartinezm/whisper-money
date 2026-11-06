@@ -9,7 +9,6 @@ use App\Models\Transaction;
 use App\Services\CategoryTree;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Support\Collection as SupportCollection;
 
 /**
  * What assigning transactions to budgets reads over and over. Each user's
@@ -137,9 +136,9 @@ class BudgetAssignmentLookups
      * count nothing any more, so they are left out.
      *
      * @param  array<int, string>  $transactionIds
-     * @return SupportCollection<string, SupportCollection<int, BudgetTransaction>> keyed by transaction id
+     * @return array<array-key, Collection<int, BudgetTransaction>> keyed by transaction id
      */
-    public function rowsHeldElsewhere(Budget $catchAll, array $transactionIds): SupportCollection
+    public function rowsHeldElsewhere(Budget $catchAll, array $transactionIds): array
     {
         return BudgetTransaction::query()
             ->whereIn('transaction_id', $transactionIds)
@@ -149,7 +148,8 @@ class BudgetAssignmentLookups
                 ->where('is_catch_all', false))
             ->with(['budgetPeriod.budget.categories:id', 'budgetPeriod.budget.labels:id'])
             ->get()
-            ->groupBy('transaction_id');
+            ->groupBy('transaction_id')
+            ->all();
     }
 
     /**

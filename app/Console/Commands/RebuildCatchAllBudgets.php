@@ -9,6 +9,11 @@ use App\Services\BudgetTransactionService;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
 
+/**
+ * @phpstan-import-type CatchAllChanges from BudgetTransactionService
+ *
+ * @phpstan-type PeriodResult array{period: BudgetPeriod, state: string, changes: CatchAllChanges}
+ */
 class RebuildCatchAllBudgets extends Command
 {
     private const array LEFT_ALONE_REASONS = [
@@ -56,7 +61,7 @@ class RebuildCatchAllBudgets extends Command
     }
 
     /**
-     * @param  Collection<int, array{period: BudgetPeriod, state: string, changes: array{released_double_count: int, reduced_double_count: int, released_other: int, adjusted: int, absorbed: int, spent_change: int, left_alone: array<int, array{transaction_id: string, transaction_date: string, amount: int, reason: string}>}}>  $results
+     * @param  Collection<int, PeriodResult>  $results
      */
     private function report(Collection $results, string $verb): void
     {
@@ -95,7 +100,7 @@ class RebuildCatchAllBudgets extends Command
     }
 
     /**
-     * @param  array{released_double_count: int, reduced_double_count: int, released_other: int, adjusted: int, absorbed: int}  $changes
+     * @param  CatchAllChanges  $changes
      */
     private function rowsChanged(array $changes): int
     {
@@ -110,7 +115,7 @@ class RebuildCatchAllBudgets extends Command
     /**
      * Every row a person may want to look at, with why it was not touched.
      *
-     * @param  Collection<int, array<string, mixed>>  $results
+     * @param  Collection<int, PeriodResult>  $results
      */
     private function reportLeftAlone(Collection $results): void
     {
@@ -129,7 +134,7 @@ class RebuildCatchAllBudgets extends Command
     }
 
     /**
-     * @param  Collection<int, array<string, mixed>>  $results
+     * @param  Collection<int, PeriodResult>  $results
      */
     private function reportTotals(Collection $results, string $verb): void
     {

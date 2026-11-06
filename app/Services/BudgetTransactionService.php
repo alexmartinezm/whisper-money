@@ -25,7 +25,7 @@ use Illuminate\Support\Facades\DB;
 class BudgetTransactionService
 {
     /** Another budget's row proves the catch-all counts this as well. */
-    public const string DOUBLE_COUNT = 'double_count';
+    private const string DOUBLE_COUNT = 'double_count';
 
     /** A budget tracks this today but holds no row for it, so taking it out of the catch-all could leave it counted nowhere. */
     public const string CLAIMED_NOT_HELD = 'claimed_not_held';
@@ -243,7 +243,7 @@ class BudgetTransactionService
                 ->whereHas('budgetTransactions.budgetPeriod.budget', fn (Builder $budgets) => $budgets->where('is_catch_all', false)))
             ->chunkById(500, function (Collection $transactions) use ($period, $catchAll, $lookups, $frozen, $write, &$totals): void {
                 $verdicts = $this->catchAllVerdicts($transactions, $period, $catchAll, $lookups, $frozen);
-                $changes = $this->snapshotChanges($period, $verdicts->map(fn (array $verdict): int => $verdict['amount']));
+                $changes = $this->snapshotChanges($period, collect($verdicts)->map(fn (array $verdict): int => $verdict['amount']));
 
                 if ($write) {
                     $this->writeSnapshots($period, $changes);
@@ -258,13 +258,13 @@ class BudgetTransactionService
     /**
      * @param  CatchAllChanges  $totals
      * @param  SnapshotChanges  $changes
-     * @param  SupportCollection<string, CatchAllVerdict>  $verdicts
+     * @param  array<string, CatchAllVerdict>  $verdicts
      * @param  Collection<int, Transaction>  $transactions
      * @return CatchAllChanges
      */
-    private function addCatchAllChanges(array $totals, array $changes, SupportCollection $verdicts, Collection $transactions): array
+    private function addCatchAllChanges(array $totals, array $changes, array $verdicts, Collection $transactions): array
     {
-        $doubleCounted = $verdicts->where('reason', self::DOUBLE_COUNT)->keys()->all();
+        $doubleCounted = array_keys(array_filter($verdicts, fn (array $verdict): bool => $verdict['reason'] === self::DOUBLE_COUNT));
         $reduced = count(array_intersect(array_column($changes['rows'], 'transaction_id'), $doubleCounted));
 
         $totals['released_double_count'] += count(array_intersect($changes['released_ids'], $doubleCounted));
@@ -275,7 +275,7 @@ class BudgetTransactionService
         $totals['spent_change'] += $changes['spent_change'];
 
         foreach ($transactions as $transaction) {
-            $verdict = $verdicts->get($transaction->id);
+            $verdict = $verdicts[$transaction->id];
 
             if ($verdict['reason'] !== null && $verdict['reason'] !== self::DOUBLE_COUNT) {
                 $totals['left_alone'][] = [
@@ -325,7 +325,7 @@ class BudgetTransactionService
     private function recordSnapshots(Collection $transactions, BudgetPeriod $period, Budget $budget, BudgetAssignmentLookups $lookups): int
     {
         $wantedAmounts = $budget->is_catch_all
-            ? $this->catchAllVerdicts($transactions, $period, $budget, $lookups, frozen: false)
+            ? collect($this->catchAllVerdicts($transactions, $period, $budget, $lookups, frozen: false))
                 ->map(fn (array $verdict): int => $verdict['amount'])
             : $transactions->mapWithKeys(fn (Transaction $transaction): array => [
                 $transaction->id => $this->amountForBudget($transaction, $budget, $lookups),
@@ -344,29 +344,34 @@ class BudgetTransactionService
      * time, which is written whole.
      *
      * @param  Collection<int, Transaction>  $transactions
-     * @return SupportCollection<string, CatchAllVerdict> keyed by transaction id
+     * @return array<string, CatchAllVerdict> keyed by transaction id
      */
-    private function catchAllVerdicts(Collection $transactions, BudgetPeriod $period, Budget $catchAll, BudgetAssignmentLookups $lookups, bool $frozen): SupportCollection
+    private function catchAllVerdicts(Collection $transactions, BudgetPeriod $period, Budget $catchAll, BudgetAssignmentLookups $lookups, bool $frozen): array
     {
         $held = $lookups->rowsHeldElsewhere($catchAll, $transactions->modelKeys());
         $existingAmounts = $period->budgetTransactions()
             ->whereIn('transaction_id', $transactions->modelKeys())
             ->pluck('amount', 'transaction_id');
+        $verdicts = [];
 
-        return $transactions->mapWithKeys(function (Transaction $transaction) use ($catchAll, $lookups, $frozen, $held, $existingAmounts): array {
+        foreach ($transactions as $transaction) {
             $existing = $existingAmounts->get($transaction->id);
-            ['holders' => $holders, 'doubt' => $doubt] = $this->readHolders($transaction, $held->get($transaction->id, collect()), $lookups, $frozen);
+            ['holders' => $holders, 'doubt' => $doubt] = $this->readHolders($transaction, $held[$transaction->id] ?? [], $lookups, $frozen);
 
             if ($doubt) {
-                return [$transaction->id => ['amount' => (int) $existing, 'reason' => self::HOLDER_ROW_UNEXPLAINED]];
+                $verdicts[$transaction->id] = ['amount' => (int) $existing, 'reason' => self::HOLDER_ROW_UNEXPLAINED];
+
+                continue;
             }
 
             $proved = $this->amountOutside($transaction, $catchAll, $holders, $holders, $lookups);
 
-            return [$transaction->id => $frozen
+            $verdicts[$transaction->id] = $frozen
                 ? $this->frozenVerdict((int) $existing, $proved, $holders)
-                : $this->runningVerdict($transaction, $catchAll, $existing, $proved, $holders, $lookups)];
-        });
+                : $this->runningVerdict($transaction, $catchAll, $existing, $proved, $holders, $lookups);
+        }
+
+        return $verdicts;
     }
 
     /**
@@ -383,10 +388,10 @@ class BudgetTransactionService
      * frozen catch-all period, which will not be looked at again, treats that as
      * doubt rather than ignoring it.
      *
-     * @param  SupportCollection<int, BudgetTransaction>  $rows
+     * @param  iterable<int, BudgetTransaction>  $rows
      * @return array{holders: SupportCollection<int, Budget>, doubt: bool}
      */
-    private function readHolders(Transaction $transaction, SupportCollection $rows, BudgetAssignmentLookups $lookups, bool $frozen): array
+    private function readHolders(Transaction $transaction, iterable $rows, BudgetAssignmentLookups $lookups, bool $frozen): array
     {
         $holders = collect();
         $doubt = false;
