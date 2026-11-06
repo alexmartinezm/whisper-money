@@ -1,3 +1,8 @@
+import {
+    DRAWER_COMMAND_CLASS,
+    type PickerDrawer,
+    PopoverOrDrawer,
+} from '@/components/ui/adaptive-popover';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -6,11 +11,6 @@ import {
     CommandItem,
     CommandList,
 } from '@/components/ui/command';
-import {
-    Popover,
-    PopoverContent,
-    PopoverTrigger,
-} from '@/components/ui/popover';
 import {
     buildCategoryTree,
     flattenCategoryTree,
@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import {
     memo,
+    type ReactElement,
     type ReactNode,
     useEffect,
     useMemo,
@@ -67,6 +68,15 @@ interface CategoryComboboxProps {
     emptyOptionLabel?: string;
     /** Optional content rendered at the very top of the open dropdown. */
     header?: ReactNode;
+    /** Replaces the grey question mark the trigger shows when nothing is picked. */
+    uncategorizedIcon?: ReactNode;
+    /**
+     * Replaces the default trigger button. It must forward its ref and props,
+     * and handles `disabled` itself: the prop only reaches the default one.
+     */
+    trigger?: ReactElement;
+    /** Opens as a bottom drawer with this header instead of a popover. */
+    drawer?: PickerDrawer;
     'data-testid'?: string;
 }
 
@@ -82,6 +92,9 @@ export function CategoryCombobox({
     withoutChevronIcon = false,
     emptyOptionLabel,
     header,
+    uncategorizedIcon,
+    trigger,
+    drawer,
     'data-testid': dataTestId,
 }: CategoryComboboxProps) {
     const noneLabel = emptyOptionLabel ?? __('Uncategorized');
@@ -129,122 +142,131 @@ export function CategoryCombobox({
     }, [open]);
 
     return (
-        <Popover modal open={open} onOpenChange={setOpen}>
-            <PopoverTrigger asChild>
-                <Button
-                    variant="outline"
-                    role="combobox"
-                    aria-expanded={open}
-                    className={cn(
-                        'w-full max-w-full justify-between !pr-2 !pl-1',
-                        triggerClassName,
-                    )}
-                    disabled={disabled}
-                    onClick={(e) => e.stopPropagation()}
-                    data-testid={dataTestId}
-                >
-                    {selectedCategory ? (
-                        <div className="flex items-center gap-2 overflow-x-hidden">
-                            <CategoryIcon category={selectedCategory} />
-                            <span className="truncate">
-                                {selectedCategory.name}
-                            </span>
-                        </div>
-                    ) : value === 'null' ? (
-                        <div className="flex items-center gap-2 truncate">
-                            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-zinc-100 dark:bg-zinc-800">
-                                <HelpCircle className="h-3 w-3 text-zinc-500" />
-                            </div>
-                            <span className="truncate text-zinc-500">
-                                {noneLabel}
-                            </span>
-                        </div>
-                    ) : (
-                        <span className="truncate text-muted-foreground">
-                            {placeholder}
-                        </span>
-                    )}
-                    {withoutChevronIcon === false && (
-                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                    )}
-                </Button>
-            </PopoverTrigger>
-            <PopoverContent
-                className={cn('p-0', contentClassName)}
-                align="start"
-            >
-                {header}
-                <Command shouldFilter={false}>
-                    <CommandInput
-                        placeholder={__('Search categories...')}
-                        value={filterValue}
-                        onValueChange={setFilterValue}
-                    />
-
-                    <CommandList ref={listRef}>
-                        {!hasResults && (
-                            <div className="py-6 text-center text-sm text-muted-foreground">
-                                {__('No category found.')}
-                            </div>
+        <PopoverOrDrawer
+            asDrawer={drawer !== undefined}
+            title={drawer?.title ?? placeholder}
+            description={drawer?.description}
+            modal
+            open={open}
+            onOpenChange={setOpen}
+            align="start"
+            className={cn('w-72', contentClassName)}
+            drawerClassName={cn(DRAWER_COMMAND_CLASS, contentClassName)}
+            trigger={
+                trigger ?? (
+                    <Button
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={open}
+                        className={cn(
+                            'w-full max-w-full justify-between !pr-2 !pl-1',
+                            triggerClassName,
                         )}
-                        {showNone && (
-                            <CommandItem
-                                value="uncategorized"
-                                onSelect={() => {
-                                    onValueChange('null');
-                                    setOpen(false);
-                                }}
-                            >
-                                <div className="flex items-center gap-2">
+                        disabled={disabled}
+                        onClick={(e) => e.stopPropagation()}
+                        data-testid={dataTestId}
+                    >
+                        {selectedCategory ? (
+                            <div className="flex items-center gap-2 overflow-x-hidden">
+                                <CategoryIcon category={selectedCategory} />
+                                <span className="truncate">
+                                    {selectedCategory.name}
+                                </span>
+                            </div>
+                        ) : value === 'null' ? (
+                            <div className="flex items-center gap-2 truncate">
+                                {uncategorizedIcon ?? (
                                     <div className="flex h-6 w-6 items-center justify-center rounded-full bg-zinc-100 dark:bg-zinc-800">
                                         <HelpCircle className="h-3 w-3 text-zinc-500" />
                                     </div>
-                                    <span>{noneLabel}</span>
-                                </div>
-                                <Check
-                                    className={cn(
-                                        'ml-auto h-4 w-4',
-                                        value === 'null'
-                                            ? 'opacity-100'
-                                            : 'opacity-0',
-                                    )}
-                                />
-                            </CommandItem>
+                                )}
+                                <span className="truncate text-zinc-500">
+                                    {noneLabel}
+                                </span>
+                            </div>
+                        ) : (
+                            <span className="truncate text-muted-foreground">
+                                {placeholder}
+                            </span>
                         )}
-                        {visibleNodes.map((category) => (
-                            <CommandItem
-                                key={category.id}
-                                value={getCategoryPath(category.id, categories)}
-                                onSelect={() => {
-                                    onValueChange(String(category.id));
-                                    setOpen(false);
+                        {withoutChevronIcon === false && (
+                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        )}
+                    </Button>
+                )
+            }
+        >
+            {header}
+            <Command shouldFilter={false}>
+                <CommandInput
+                    placeholder={__('Search categories...')}
+                    value={filterValue}
+                    onValueChange={setFilterValue}
+                />
+
+                <CommandList ref={listRef}>
+                    {!hasResults && (
+                        <div className="py-6 text-center text-sm text-muted-foreground">
+                            {__('No category found.')}
+                        </div>
+                    )}
+                    {showNone && (
+                        <CommandItem
+                            value="uncategorized"
+                            onSelect={() => {
+                                onValueChange('null');
+                                setOpen(false);
+                            }}
+                        >
+                            <div className="flex items-center gap-2">
+                                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-zinc-100 dark:bg-zinc-800">
+                                    <HelpCircle className="h-3 w-3 text-zinc-500" />
+                                </div>
+                                <span>{noneLabel}</span>
+                            </div>
+                            <Check
+                                className={cn(
+                                    'ml-auto h-4 w-4',
+                                    value === 'null'
+                                        ? 'opacity-100'
+                                        : 'opacity-0',
+                                )}
+                            />
+                        </CommandItem>
+                    )}
+                    {visibleNodes.map((category) => (
+                        <CommandItem
+                            key={category.id}
+                            value={getCategoryPath(category.id, categories)}
+                            onSelect={() => {
+                                onValueChange(String(category.id));
+                                setOpen(false);
+                            }}
+                        >
+                            <div
+                                className="flex items-center gap-2"
+                                style={{
+                                    paddingLeft: `${category.depth * 1.25}rem`,
                                 }}
                             >
-                                <div
-                                    className="flex items-center gap-2"
-                                    style={{
-                                        paddingLeft: `${category.depth * 1.25}rem`,
-                                    }}
-                                >
-                                    <CategoryIcon category={category} />
-                                    <span className="truncate">
-                                        {category.name}
-                                    </span>
-                                </div>
-                                <Check
-                                    className={cn(
-                                        'ml-auto h-4 w-4',
-                                        value === String(category.id)
-                                            ? 'opacity-100'
-                                            : 'opacity-0',
-                                    )}
-                                />
-                            </CommandItem>
-                        ))}
-                    </CommandList>
-                </Command>
-            </PopoverContent>
-        </Popover>
+                                <CategoryIcon category={category} />
+                                <span className="truncate">
+                                    {category.name}
+                                </span>
+                            </div>
+                            <Check
+                                className={cn(
+                                    'ml-auto h-4 w-4',
+                                    value === String(category.id)
+                                        ? 'opacity-100'
+                                        : 'opacity-0',
+                                )}
+                            />
+                        </CommandItem>
+                    ))}
+                </CommandList>
+            </Command>
+        </PopoverOrDrawer>
     );
 }
 
