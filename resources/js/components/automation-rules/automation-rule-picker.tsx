@@ -1,3 +1,4 @@
+import { InvalidRuleBadge } from '@/components/automation-rules/automation-rule-title';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -68,8 +69,9 @@ export function AutomationRulePicker({
                         onClick={() => onSelect(rule)}
                     >
                         <span>
-                            <span className="block font-medium">
+                            <span className="flex items-center gap-2 font-medium">
                                 {rule.title}
+                                <InvalidRuleBadge rule={rule} />
                             </span>
                             <span className="block text-sm text-muted-foreground">
                                 {rule.category?.name ?? __('No category set')}

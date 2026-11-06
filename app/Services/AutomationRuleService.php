@@ -207,8 +207,9 @@ class AutomationRuleService
     }
 
     /**
-     * Append the rule's note where it is not already present. Encrypted notes are
-     * skipped because applying them requires the user's key.
+     * Append the rule's note where it is not already present. Encrypted notes,
+     * the rule's or the transaction's, are skipped because applying them
+     * requires the user's key: plain text after ciphertext reads as neither.
      *
      * @param  EloquentCollection<int, Transaction>  $transactions
      * @return array<int, string> ids of the transactions changed
@@ -224,7 +225,7 @@ class AutomationRuleService
         foreach ($transactions as $transaction) {
             $existingNotes = $transaction->notes ?? '';
 
-            if ($this->noteAlreadyPresent($existingNotes, $rule->action_note)) {
+            if ($transaction->notes_iv !== null || $this->noteAlreadyPresent($existingNotes, $rule->action_note)) {
                 continue;
             }
 
@@ -482,7 +483,7 @@ class AutomationRuleService
      */
     private function applyNoteAction(Transaction $locked, AutomationRule $rule): void
     {
-        if (! $rule->action_note || $rule->action_note_iv !== null) {
+        if (! $rule->action_note || $rule->action_note_iv !== null || $locked->notes_iv !== null) {
             return;
         }
 

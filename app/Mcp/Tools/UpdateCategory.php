@@ -6,14 +6,9 @@ use App\Enums\CategoryCashflowDirection;
 use App\Enums\CategoryColor;
 use App\Enums\CategoryType;
 use App\Mcp\Tools\Concerns\ResolvesCategoryWrites;
-use App\Models\Category;
-use App\Models\Space;
 use App\Models\User;
-use App\Services\CategoryTree;
+use App\Services\Categories\CategoryWriter;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\Rule;
-use Illuminate\Validation\ValidationException;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
@@ -42,63 +37,21 @@ class UpdateCategory extends WriteTool
 
     protected function write(Request $request, User $user): Response
     {
-        return DB::transaction(function () use ($request, $user): Response {
-            $request->validate([
-                'name' => ['sometimes', 'string', 'max:255'],
-                'icon' => ['sometimes', 'string'],
-                'color' => ['sometimes', Rule::enum(CategoryColor::class)],
-                'type' => ['sometimes', Rule::enum(CategoryType::class)],
-                'cashflow_direction' => ['sometimes', Rule::enum(CategoryCashflowDirection::class)],
-            ]);
+        $request->validate(CategoryWriter::updateRules());
 
-            $space = $this->resolveSpace($request, $user);
-            $category = $this->categoryInSpace($request, $space);
-            $tree = new CategoryTree;
-            $category = $tree->lockSubtreeForMutation($category);
+        $space = $this->resolveSpace($request, $user);
+        $category = $this->categoryInSpace($request, $space);
+        $parent = $this->parentCategory($request, $space);
 
-            $parent = $request->has('parent_id')
-                ? $this->resolveParentCategory($request, $space, $category)
-                : $this->currentParent($category, $space);
+        $this->refuseTakenName(
+            $space,
+            $request->has('name') ? $request->string('name')->toString() : $category->name,
+            $request->has('parent_id') ? $parent?->id : $category->parent_id,
+            $category->id,
+        );
 
-            $type = $parent !== null
-                ? $parent->type
-                : ($request->has('type') ? $request->enum('type', CategoryType::class) : $category->type);
+        $category = app(CategoryWriter::class)->update($category, $space, $request->all(), $parent);
 
-            $requestedDirection = $request->filled('cashflow_direction')
-                ? $request->string('cashflow_direction')->toString()
-                : $category->cashflow_direction->value;
-            $cashflow = $this->cashflowDirectionFor($type, $parent, $requestedDirection);
-
-            $name = $request->has('name') ? $request->string('name')->toString() : $category->name;
-
-            if ($this->categoryNameTaken($space, $name, $parent?->id, $category->id)) {
-                throw ValidationException::withMessages([
-                    'name' => 'A category with that name already exists at this level.',
-                ]);
-            }
-
-            $category->fill([
-                'name' => $name,
-                'icon' => $request->has('icon') ? $request->string('icon')->toString() : $category->icon,
-                'color' => $request->has('color') ? $request->string('color')->toString() : $category->color,
-                'type' => $type->value,
-                'cashflow_direction' => $cashflow->value,
-                'parent_id' => $parent?->id,
-            ]);
-            $category->save();
-
-            $tree->syncDescendantTypes($category);
-
-            return $this->json(['category' => $this->presentCategory($category->refresh())]);
-        }, attempts: 5);
-    }
-
-    private function currentParent(Category $category, Space $space): ?Category
-    {
-        if ($category->parent_id === null) {
-            return null;
-        }
-
-        return Category::query()->forSpace($space)->whereKey($category->parent_id)->first();
+        return $this->json(['category' => $this->presentCategory($category)]);
     }
 }

@@ -12,8 +12,8 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Creating and editing an account, shared by the settings controller and the
- * MCP write tools. Both callers arrive with an already-validated payload and
+ * Creating and editing an account, shared by the settings controller, the MCP
+ * write tools and `/api/v1/accounts`. The callers arrive with an already-validated payload and
  * differ only in how they report a problem back, so nothing here throws or
  * redirects: `update()` returns the loan fields it still needs and lets the
  * caller phrase the error.
@@ -32,7 +32,7 @@ class AccountWriteService
      * limit and usage replace it.
      *
      * `$spaceId` is for callers that know which space to write to (the MCP
-     * tools resolve one per call); left null, the account falls back to the
+     * tools and the API resolve one per call); left null, the account falls back to the
      * owner's current space through BelongsToSpace.
      *
      * Everything is written in one transaction: a detail that fails to save
@@ -166,8 +166,11 @@ class AccountWriteService
     }
 
     /**
-     * The account's own columns. Encryption is gone, so every write clears the
-     * legacy flags rather than leaving stale ones behind.
+     * The account's own columns. Encryption is gone, so a write of the name
+     * clears the legacy flags rather than leaving stale ones behind. A write
+     * that leaves the name alone leaves them alone too: on a row the old
+     * client-side encryption never migrated they are what marks it as
+     * ciphertext.
      *
      * @param  array<string, mixed>  $data
      * @return array<string, mixed>
@@ -179,8 +182,7 @@ class AccountWriteService
                 'name', 'bank_id', 'currency_code', 'type',
                 'ownership_percentage', 'ownership_applies_to_balance',
             ])->toArray(),
-            'encrypted' => false,
-            'name_iv' => null,
+            ...array_key_exists('name', $data) ? ['encrypted' => false, 'name_iv' => null] : [],
         ];
     }
 
