@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\AccountType;
 use App\Models\Account;
+use App\Models\User;
 use App\Services\AccountMetricsService;
 use App\Services\CashflowSummaryService;
 use App\Services\CategorySpendingService;
@@ -13,7 +14,6 @@ use App\Services\NetWorth\ProjectNetWorth;
 use App\Services\PeriodComparator;
 use App\Services\SavingsGoals\MonthlySavingsGoalStats;
 use App\Services\SavingsGoals\MonthlySavingsGoalTotals;
-use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -35,6 +35,9 @@ class DashboardController extends Controller
     {
         return Inertia::render('dashboard', [
             'showEncryptionPrompt' => session('show_encryption_prompt', false),
+            // The window the top categories and top labels cards report on, so
+            // their links and drill-downs ask for the same days the server summed.
+            'spendingWindow' => fn (): array => $this->lastThirtyDays($request->user())->toDateStrings(),
             'netWorthEvolution' => Inertia::defer(fn () => $this->getNetWorthEvolution($request), 'dashboard'),
             'netWorthProjection' => Inertia::defer(fn () => $this->projectNetWorth->forUser($request->user()), 'dashboard'),
             'topCategories' => Inertia::defer(fn () => $this->getTopCategories($request), 'dashboard'),
@@ -112,11 +115,7 @@ class DashboardController extends Controller
     private function getTopCategories(Request $request): array
     {
         $user = $request->user();
-        $now = Carbon::now();
-        $from = $now->copy()->subDays(30);
-        $to = $now->copy();
-
-        $period = new PeriodComparator($from, $to);
+        $period = $this->lastThirtyDays($user);
         $previousPeriod = $period->previous();
 
         $currentSpending = $this->categorySpendingService->forPeriod($user->id, $period->from, $period->to);
@@ -146,20 +145,36 @@ class DashboardController extends Controller
 
     private function getTopLabels(Request $request): array
     {
-        $now = Carbon::now();
-
         return $this->labelSpendingService->topForPeriod(
             $request->user()->id,
-            new PeriodComparator($now->copy()->subDays(30), $now),
+            $this->lastThirtyDays($request->user()),
         );
     }
 
+    /**
+     * The owner's current month, read on their own clock: at 21:00 on 31
+     * October in Buenos Aires the server is already in November, and the card
+     * would show an empty November instead of the month still in progress.
+     */
     private function getCashflowSummary(Request $request): array
     {
         $user = $request->user();
-        $now = Carbon::now();
-        $period = new PeriodComparator($now->copy()->startOfMonth(), $now->copy()->endOfMonth());
+        $today = $user->localToday();
+        $period = new PeriodComparator($today->copy()->startOfMonth(), $today->copy()->endOfMonth());
 
         return $this->summaries->forComparedPeriods($user->id, $user->currency_code, $period, $period->previous());
+    }
+
+    /**
+     * The 30 days ending on the owner's today ({@see User::localToday()}), both
+     * ends included, for the top categories and top labels cards. Whole days:
+     * `transaction_date` is a date, and the server's UTC date is a day off for
+     * American users every evening and for Asian ones every morning.
+     */
+    private function lastThirtyDays(User $user): PeriodComparator
+    {
+        $today = $user->localToday();
+
+        return new PeriodComparator($today->copy()->subDays(29), $today);
     }
 }
