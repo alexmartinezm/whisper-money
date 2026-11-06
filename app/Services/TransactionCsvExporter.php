@@ -53,7 +53,6 @@ class TransactionCsvExporter
      * Eager loads what the rows read: the split lines the filters keep, and
      * whether the transaction is split at all, so a split one whose lines are
      * all filtered out writes no row rather than one for its whole amount.
-     * Apply it after the sort, whose payee columns replace the select list.
      *
      * @param  Builder<Transaction>  $transactions
      * @param  array<string, mixed>  $filters

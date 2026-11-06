@@ -30,7 +30,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\DB;
-use InvalidArgumentException;
 use LogicException;
 
 /**
@@ -62,9 +61,6 @@ class Transaction extends Model
         'updated' => TransactionUpdated::class,
         'deleted' => TransactionDeleted::class,
     ];
-
-    /** Columns the transactions list can sort by, ascending or with a leading `-`. */
-    public const LIST_SORT_COLUMNS = ['transaction_date', 'amount', 'description', 'creditor_name', 'debtor_name'];
 
     protected $fillable = [
         'user_id',
@@ -627,33 +623,15 @@ class Transaction extends Model
     }
 
     /**
-     * The transactions list's order: the column the sort names, then `id` so
-     * rows that tie keep one stable order across pages and exports. Payee
-     * columns sort their blanks as empty strings, the way they read on screen.
+     * The transactions list's order: newest first, then `id` so rows of one
+     * day keep one stable order across pages and exports.
      *
      * @param  Builder<Transaction>  $query
      * @return Builder<Transaction>
      */
-    public function scopeSortedForList(Builder $query, string $sort): Builder
+    public function scopeSortedForList(Builder $query): Builder
     {
-        $column = ltrim($sort, '-');
-        $direction = str_starts_with($sort, '-') ? 'desc' : 'asc';
-
-        // The column ends up in raw SQL below, so it is checked here rather
-        // than trusted to whichever request handed it over.
-        if (! in_array($column, self::LIST_SORT_COLUMNS, true)) {
-            throw new InvalidArgumentException("Transactions cannot be sorted by [{$column}].");
-        }
-
-        if (in_array($column, ['creditor_name', 'debtor_name'], true)) {
-            $query->select('transactions.*')
-                ->selectRaw("COALESCE({$column}, '') as {$column}_sort")
-                ->orderBy("{$column}_sort", $direction);
-        } else {
-            $query->orderBy($column, $direction);
-        }
-
-        return $query->orderBy('id', 'desc');
+        return $query->orderByDesc('transaction_date')->orderByDesc('id');
     }
 
     /**

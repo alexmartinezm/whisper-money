@@ -1,10 +1,7 @@
 import { useInMemoryDaySummaries } from '@/hooks/use-day-summaries';
 import { reloadPage } from '@/lib/leave-page';
 import { createTransactionCategoryFilter } from '@/lib/transaction-category-filter';
-import {
-    createRowTotalAmount,
-    isSortedByDate,
-} from '@/lib/transaction-day-groups';
+import { createRowTotalAmount } from '@/lib/transaction-day-groups';
 import { type Category } from '@/types/category';
 import {
     type DecryptedTransaction,
@@ -14,11 +11,8 @@ import {
 import { type TransactionTableSource } from '@/types/transaction-table-source';
 import { type UUID } from '@/types/uuid';
 import { __ } from '@/utils/i18n';
-import { type SortingState } from '@tanstack/react-table';
 import { isWithinInterval, parseISO } from 'date-fns';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-
-const NO_ROWS: DecryptedTransaction[] = [];
 
 /** The rows as the table edits them: text ready to read, label ids set. */
 function toDecryptedRows(
@@ -124,63 +118,35 @@ function matchesFilters(
     return true;
 }
 
-function compareBy(
-    id: string,
+/**
+ * Newest first, the order the server lists them in: by date, then by id so
+ * rows of one day keep one stable order.
+ */
+function compareNewestFirst(
     a: DecryptedTransaction,
     b: DecryptedTransaction,
 ): number {
-    if (id === 'transaction_date') {
-        return (
-            parseISO(a.transaction_date).getTime() -
-            parseISO(b.transaction_date).getTime()
-        );
-    }
-    if (id === 'amount') {
-        return a.amount - b.amount;
-    }
-    if (id === 'description') {
-        return a.decryptedDescription.localeCompare(b.decryptedDescription);
-    }
-    if (id === 'account') {
-        return (a.account?.name || '').localeCompare(b.account?.name || '');
-    }
-    if (id === 'category') {
-        return (a.category?.name || '').localeCompare(b.category?.name || '');
-    }
-    if (id === 'creditor_name') {
-        return (a.creditor_name || '').localeCompare(b.creditor_name || '');
-    }
-    if (id === 'debtor_name') {
-        return (a.debtor_name || '').localeCompare(b.debtor_name || '');
+    const byDate =
+        parseISO(b.transaction_date).getTime() -
+        parseISO(a.transaction_date).getTime();
+
+    if (byDate !== 0) {
+        return byDate;
     }
 
-    return 0;
-}
-
-function sortRows(
-    rows: DecryptedTransaction[],
-    sorting: SortingState,
-): DecryptedTransaction[] {
-    if (sorting.length === 0) {
-        return rows;
-    }
-
-    return [...rows].sort((a, b) => {
-        for (const { id, desc } of sorting) {
-            const comparison = compareBy(id, a, b);
-
-            if (comparison !== 0) {
-                return desc ? -comparison : comparison;
-            }
-        }
+    // By code unit, not locale: lowercase hex uuids then compare as the
+    // database orders them.
+    if (a.id === b.id) {
         return 0;
-    });
+    }
+
+    return a.id < b.id ? 1 : -1;
 }
 
 /**
- * A transactions table over rows the page already holds: it filters and sorts
- * them in the browser, draws them a page at a time, and counts each day over
- * every row the filters keep.
+ * A transactions table over rows the page already holds: it filters them in
+ * the browser, orders them newest first, draws them a page at a time, and
+ * counts each day over every row the filters keep.
  */
 export function useInMemoryTransactionSource({
     transactions: providedTransactions,
@@ -199,9 +165,6 @@ export function useInMemoryTransactionSource({
     const [transactions, setTransactions] = useState<DecryptedTransaction[]>(
         () => toDecryptedRows(providedTransactions),
     );
-    const [sorting, setSorting] = useState<SortingState>([
-        { id: 'transaction_date', desc: true },
-    ]);
     const [filters, setFilters] = useState<Filters>({
         dateFrom: null,
         dateTo: null,
@@ -273,14 +236,14 @@ export function useInMemoryTransactionSource({
         [transactions, filters, accountId, searchMatchedIds, matchesCategory],
     );
 
-    const sortedTransactions = useMemo(
-        () => sortRows(filteredTransactions, sorting),
-        [filteredTransactions, sorting],
+    const orderedTransactions = useMemo(
+        () => [...filteredTransactions].sort(compareNewestFirst),
+        [filteredTransactions],
     );
 
     const displayedTransactions = useMemo(
-        () => sortedTransactions.slice(0, displayedCount),
-        [sortedTransactions, displayedCount],
+        () => orderedTransactions.slice(0, displayedCount),
+        [orderedTransactions, displayedCount],
     );
 
     // These lists filter by category only, so a split transaction adds the
@@ -297,29 +260,28 @@ export function useInMemoryTransactionSource({
     // Over every row the filters keep, not only the drawn slice, so a day cut
     // by "load more" still says what it holds in full.
     const daySummaryOf = useInMemoryDaySummaries(filteredTransactions, {
-        // The slice bounds the days, and a list not sorted by date has no
-        // headers to fill at all.
-        drawn: isSortedByDate(sorting) ? displayedTransactions : NO_ROWS,
+        // The slice bounds the days.
+        drawn: displayedTransactions,
         rowTotalAmount,
     });
 
     const loadMore = useCallback(() => {
-        if (displayedCount < sortedTransactions.length && !isLoadingMore) {
+        if (displayedCount < orderedTransactions.length && !isLoadingMore) {
             setIsLoadingMore(true);
             requestAnimationFrame(() => {
                 setDisplayedCount((prev) =>
-                    Math.min(prev + pageSize, sortedTransactions.length),
+                    Math.min(prev + pageSize, orderedTransactions.length),
                 );
                 requestAnimationFrame(() => {
                     setIsLoadingMore(false);
                 });
             });
         }
-    }, [displayedCount, sortedTransactions.length, isLoadingMore, pageSize]);
+    }, [displayedCount, orderedTransactions.length, isLoadingMore, pageSize]);
 
     useEffect(() => {
         setDisplayedCount(pageSize);
-    }, [filters, sorting, pageSize]);
+    }, [filters, pageSize]);
 
     return {
         rows: displayedTransactions,
@@ -328,15 +290,12 @@ export function useInMemoryTransactionSource({
         isLoading: providedTransactions === undefined,
         filters,
         onFiltersChange: setFilters,
-        sorting,
-        onSortingChange: setSorting,
-        manualSorting: false,
         daySummaryOf,
         pagination: {
             displayedCount,
-            total: sortedTransactions.length,
+            total: orderedTransactions.length,
             rowCountLabel: __('transactions total'),
-            hasMore: displayedCount < sortedTransactions.length,
+            hasMore: displayedCount < orderedTransactions.length,
             isLoadingMore,
             loadMore,
             loadsOnScroll: false,

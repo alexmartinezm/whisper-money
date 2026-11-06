@@ -1,7 +1,6 @@
 import { useTransactionDayHeaders } from '@/components/transactions/transaction-day-header';
 import { TransactionListRow } from '@/components/transactions/transaction-list-row';
 import { TransactionRowContextMenuContent } from '@/components/transactions/transaction-row-context-menu';
-import { TransactionSortMenu } from '@/components/transactions/transaction-sort-menu';
 import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu';
 import {
     DataTable,
@@ -27,7 +26,6 @@ import {
     type ColumnDef,
     type Row,
     type RowSelectionState,
-    type SortingState,
     type Table,
 } from '@tanstack/react-table';
 import { VirtualItem, Virtualizer } from '@tanstack/react-virtual';
@@ -76,11 +74,9 @@ interface ResponsiveTransactionTableProps {
     maxHeight?: number;
     topRow?: React.ReactNode;
     /** The table's state, handed in because the compiler memoizes past reads off it. */
-    sorting: SortingState;
     rowSelection: RowSelectionState;
     /** What each day header says about its whole day, loaded rows or not. */
     daySummaryOf: DaySummaryOf;
-    isGroupedByDay: boolean;
     selectionMode: RowSelectionMode;
     listRow: TransactionListRowOptions;
     rowActions: TransactionRowActionHandlers;
@@ -103,10 +99,8 @@ export function ResponsiveTransactionTable({
     renderRow,
     maxHeight,
     topRow,
-    sorting,
     rowSelection,
     daySummaryOf,
-    isGroupedByDay,
     selectionMode,
     listRow,
     rowActions,
@@ -121,7 +115,6 @@ export function ResponsiveTransactionTable({
         table,
         rowSelection,
         daySummaryOf,
-        isGroupedByDay,
         layout,
         selectionActive,
     });
@@ -138,7 +131,6 @@ export function ResponsiveTransactionTable({
             {width === null ? null : layout === 'list' ? (
                 <TransactionCompactList
                     table={table}
-                    sorting={sorting}
                     rowSelection={rowSelection}
                     selectionActive={selectionActive}
                     selectionMode={selectionMode}
@@ -167,7 +159,6 @@ export function ResponsiveTransactionTable({
 
 function TransactionCompactList({
     table,
-    sorting,
     rowSelection,
     selectionActive,
     selectionMode,
@@ -182,7 +173,6 @@ function TransactionCompactList({
 }: Pick<
     ResponsiveTransactionTableProps,
     | 'table'
-    | 'sorting'
     | 'rowSelection'
     | 'selectionMode'
     | 'emptyMessage'
@@ -193,7 +183,7 @@ function TransactionCompactList({
     | 'framedOnPhone'
 > & {
     selectionActive: boolean;
-    groupRowsBy?: (transaction: DecryptedTransaction) => string;
+    groupRowsBy: (transaction: DecryptedTransaction) => string;
     renderGroupHeader: (
         group: DataTableRowGroup<DecryptedTransaction>,
         measureProps: DataTableMeasureProps,
@@ -226,9 +216,6 @@ function TransactionCompactList({
             className="flex flex-col gap-2"
             data-testid="transaction-compact-list"
         >
-            <div className="flex justify-end">
-                <TransactionSortMenu table={table} sorting={sorting} />
-            </div>
             {topRow && (
                 <div
                     className={cn(

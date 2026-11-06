@@ -152,7 +152,20 @@ describe('useInMemoryTransactionSource', () => {
         expect(result.current.rows.map((row) => row.id)).toEqual(['a', 'b']);
     });
 
-    it('sorts and searches in the browser, back to the first page', async () => {
+    it('orders the rows of one day by id, newest first, as the server does', () => {
+        const sameDay = ['0b', '0c', '0a'].map((id) => transaction(id));
+        const { result } = renderHook(() =>
+            useInMemoryTransactionSource({ transactions: sameDay }),
+        );
+
+        expect(result.current.rows.map((row) => row.id)).toEqual([
+            '0c',
+            '0b',
+            '0a',
+        ]);
+    });
+
+    it('searches in the browser, back to the first page', async () => {
         const { result } = renderHook(() =>
             useInMemoryTransactionSource({
                 transactions: ROWS,
@@ -162,16 +175,7 @@ describe('useInMemoryTransactionSource', () => {
         );
         await waitFor(() => expect(result.current.isLoading).toBe(false));
         act(() => result.current.pagination.loadMore());
-
-        act(() =>
-            result.current.onSortingChange([
-                { id: 'creditor_name', desc: false },
-            ]),
-        );
-
-        expect(result.current.manualSorting).toBe(false);
-        expect(result.current.pagination.displayedCount).toBe(1);
-        expect(result.current.rows.map((row) => row.id)).toEqual(['c']);
+        expect(result.current.pagination.displayedCount).toBe(2);
 
         act(() =>
             result.current.onFiltersChange({
@@ -183,6 +187,7 @@ describe('useInMemoryTransactionSource', () => {
         await waitFor(() =>
             expect(result.current.rows.map((row) => row.id)).toEqual(['b']),
         );
+        expect(result.current.pagination.displayedCount).toBe(1);
     });
 
     it('counts each day over every row the filters keep, drawn or not', async () => {
@@ -201,7 +206,7 @@ describe('useInMemoryTransactionSource', () => {
         expect(result.current.daySummaryOf('2026-10-01').count).toBe(3);
     });
 
-    it('hands the day summaries only the rows on screen, none without day headers', () => {
+    it('hands the day summaries only the rows on screen', () => {
         const { result } = renderHook(() =>
             useInMemoryTransactionSource({
                 transactions: ROWS,
@@ -214,13 +219,6 @@ describe('useInMemoryTransactionSource', () => {
         expect(drawnRows.current.map((row) => row.id)).toEqual(
             result.current.rows.map((row) => row.id),
         );
-
-        act(() =>
-            result.current.onSortingChange([{ id: 'amount', desc: true }]),
-        );
-
-        result.current.daySummaryOf('2026-10-03');
-        expect(drawnRows.current).toEqual([]);
     });
 
     describe('a split transaction', () => {

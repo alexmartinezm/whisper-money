@@ -6,7 +6,6 @@ import {
     formatDayBand,
     formatDayHeading,
     formatTransactionCount,
-    isSortedByDate,
     mergeNextPage,
     reconcileDaySummary,
     sumDayTotal,
@@ -18,22 +17,6 @@ import {
 function transaction(amount: number, currency_code = 'EUR'): Transaction {
     return { amount, currency_code } as Transaction;
 }
-
-describe('isSortedByDate', () => {
-    it('groups while the table is sorted by date, either way', () => {
-        expect(isSortedByDate([{ id: 'transaction_date', desc: true }])).toBe(
-            true,
-        );
-        expect(isSortedByDate([{ id: 'transaction_date', desc: false }])).toBe(
-            true,
-        );
-    });
-
-    it('does not group under any other sort', () => {
-        expect(isSortedByDate([{ id: 'amount', desc: true }])).toBe(false);
-        expect(isSortedByDate([])).toBe(false);
-    });
-});
 
 describe('formatDayBand', () => {
     beforeEach(() => {

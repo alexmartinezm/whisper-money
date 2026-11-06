@@ -47,7 +47,7 @@ class TransactionExportController extends Controller
         $counts = $exporter->countRowsAndEncryptedDescriptions($selected, $filters);
 
         $transactions = $exporter
-            ->withRowRelations($selected->sortedForList($request->sort()), $filters)
+            ->withRowRelations($selected->sortedForList(), $filters)
             ->lazy(500);
 
         return response()->streamDownload(function () use ($transactions, $exporter, $filters): void {

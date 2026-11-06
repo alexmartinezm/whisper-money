@@ -45,7 +45,6 @@ class TransactionController extends Controller
         $lastVisitAt = $user->transactions_last_visited_at;
 
         $perPage = (int) ($validated['per_page'] ?? 50);
-        $sortParam = $request->sort();
 
         $filters = $request->filters();
 
@@ -55,14 +54,11 @@ class TransactionController extends Controller
 
         $transactions = (clone $filtered)
             ->with(['account.bank', 'category', 'labels', 'categorizedByRule:id,origin', 'splits.category'])
-            ->sortedForList($sortParam)
-            ->cursorPaginate($perPage)
+            ->sortedForList()
+            ->cursorPaginate($perPage, cursor: $request->listCursor())
             ->withQueryString();
 
-        $transactions->getCollection()->each(function (Transaction $transaction): void {
-            $transaction->makeHidden(['creditor_name_sort', 'debtor_name_sort'])
-                ->append(['ai_categorized', 'is_split', 'split_count']);
-        });
+        $transactions->getCollection()->each->append(['ai_categorized', 'is_split', 'split_count']);
 
         $newestServed = $transactions->getCollection()->max('created_at');
         if ($newestServed && (! $lastVisitAt || $newestServed->gt($lastVisitAt))) {
@@ -83,7 +79,6 @@ class TransactionController extends Controller
             'category_source' => $validated['category_source'] ?? null,
             'search' => $validated['search'] ?? '',
             'cashflow_block' => $validated['cashflow_block'] ?? null,
-            'sort' => $sortParam,
         ];
 
         $categories = Category::query()
@@ -115,16 +110,14 @@ class TransactionController extends Controller
 
         return Inertia::render('transactions/index', [
             'transactions' => $transactions,
-            // Only a list sorted by date draws day headers. Asked for beside
-            // `transactions` on every page load, it covers the days that page touches.
-            'dayTotals' => fn (): array => $request->isSortedByDate()
-                ? $dayTotals->forDays(
-                    $filtered,
-                    $transactions->getCollection()->map(fn (Transaction $transaction): string => $transaction->transaction_date->toDateString()),
-                    $user->currency_code,
-                    $filters,
-                )
-                : [],
+            // Asked for beside `transactions` on every page load, it covers
+            // the days that page touches.
+            'dayTotals' => fn (): array => $dayTotals->forDays(
+                $filtered,
+                $transactions->getCollection()->map(fn (Transaction $transaction): string => $transaction->transaction_date->toDateString()),
+                $user->currency_code,
+                $filters,
+            ),
             'appliedFilters' => $appliedFilters,
             'categories' => $categories,
             'accounts' => $accounts,

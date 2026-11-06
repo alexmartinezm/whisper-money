@@ -3,8 +3,8 @@
 namespace App\Http\Requests;
 
 use App\Enums\CashflowBlock;
-use App\Models\Transaction;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Pagination\Cursor;
 use Illuminate\Validation\Rule;
 
 class IndexTransactionRequest extends FormRequest
@@ -51,7 +51,6 @@ class IndexTransactionRequest extends FormRequest
             'debtor_name' => ['nullable', 'string', 'max:255'],
             'category_source' => ['nullable', 'string', 'in:manual,rule,ai,bank'],
             'search' => ['nullable', 'string', 'max:200'],
-            'sort' => ['nullable', 'string', Rule::in(collect(Transaction::LIST_SORT_COLUMNS)->flatMap(fn (string $column) => [$column, '-'.$column]))],
             'cursor' => ['nullable', 'string'],
             'per_page' => ['nullable', 'integer', 'min:10', 'max:100'],
         ];
@@ -86,19 +85,20 @@ class IndexTransactionRequest extends FormRequest
     }
 
     /**
-     * The list's sort, a column name with a leading `-` for descending.
+     * The page to read, as an encoded cursor. A cursor bookmarked under one of
+     * the sorts the list used to offer holds that sort's columns instead of
+     * the date this order pages on: it reads as no cursor, the first page,
+     * rather than failing the page. Empty stops the paginator falling back
+     * to the raw query parameter.
      */
-    public function sort(): string
+    public function listCursor(): string
     {
-        return $this->validated('sort') ?? '-transaction_date';
-    }
+        $cursor = Cursor::fromEncoded($this->validated('cursor'));
 
-    /**
-     * Whether the list is sorted by date, either way: the only order that
-     * draws day headers, mirrored by `isSortedByDate()` on the client.
-     */
-    public function isSortedByDate(): bool
-    {
-        return ltrim($this->sort(), '-') === 'transaction_date';
+        if ($cursor === null || array_diff(['transaction_date', 'id'], array_keys($cursor->toArray())) !== []) {
+            return '';
+        }
+
+        return $cursor->encode();
     }
 }
