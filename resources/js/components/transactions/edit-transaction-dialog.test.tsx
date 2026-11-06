@@ -6,6 +6,7 @@ import type { Category } from '@/types/category';
 import type { DecryptedTransaction } from '@/types/transaction';
 import { todayDateString } from '@/utils/date';
 import {
+    cleanup,
     fireEvent,
     render,
     screen,
@@ -219,6 +220,16 @@ vi.mock('@/components/ui/dialog', () => ({
         <h2>{children}</h2>
     ),
 }));
+
+function openMoreActions() {
+    fireEvent.pointerDown(
+        screen.getByRole('button', { name: 'More actions' }),
+        {
+            button: 0,
+            ctrlKey: false,
+        },
+    );
+}
 
 describe('split line dirty checking', () => {
     const persisted = [
@@ -2626,5 +2637,142 @@ describe('EditTransactionDialog', () => {
                 });
             });
         });
+    });
+});
+
+describe('the row actions in the edit dialog', () => {
+    const rowTransaction = {
+        id: 'tx-row',
+        user_id: 'user-1',
+        account_id: 'account-1',
+        category_id: null,
+        description: 'Groceries',
+        description_iv: null,
+        transaction_date: '2026-05-27',
+        amount: -1200,
+        currency_code: 'EUR',
+        notes: null,
+        notes_iv: null,
+        creditor_name: null,
+        debtor_name: null,
+        source: 'manually_created',
+        created_at: '2026-05-27T00:00:00Z',
+        updated_at: '2026-05-27T00:00:00Z',
+        decryptedDescription: 'Groceries',
+        decryptedNotes: null,
+        label_ids: [],
+    } as unknown as DecryptedTransaction;
+
+    function rowActionHandlers() {
+        return {
+            onEdit: vi.fn(),
+            onDuplicate: vi.fn(),
+            onReEvaluateRules: vi.fn(),
+            onAutomate: vi.fn(),
+            onDelete: vi.fn(),
+        };
+    }
+
+    function renderDialog({
+        transaction = rowTransaction,
+        rowActions = rowActionHandlers() as ReturnType<
+            typeof rowActionHandlers
+        > | null,
+        onOpenChange = vi.fn(),
+        mode = 'edit' as 'edit' | 'create',
+    } = {}) {
+        render(
+            <EditTransactionDialog
+                transaction={transaction}
+                categories={[]}
+                accounts={[]}
+                banks={[]}
+                labels={[]}
+                open
+                onOpenChange={onOpenChange}
+                onSuccess={vi.fn()}
+                rowActions={rowActions ?? undefined}
+                mode={mode}
+            />,
+        );
+    }
+
+    beforeEach(() => {
+        globalThis.ResizeObserver = class {
+            observe() {}
+            unobserve() {}
+            disconnect() {}
+        };
+    });
+
+    it('offers the row menu, edit aside and no split action, only below md', async () => {
+        renderDialog();
+
+        expect(
+            screen.getByRole('button', { name: 'More actions' }).className,
+        ).toContain('md:hidden');
+
+        openMoreActions();
+
+        expect(
+            (await screen.findAllByRole('menuitem')).map(
+                (item) => item.textContent,
+            ),
+        ).toEqual([
+            'Duplicate',
+            'Re-evaluate rules',
+            'Automatize categorization',
+            'Delete',
+        ]);
+    });
+
+    it('follows the row menu on a row still encrypted: no duplicate', async () => {
+        renderDialog({
+            transaction: { ...rowTransaction, description_iv: 'iv' },
+        });
+        openMoreActions();
+
+        expect(
+            (await screen.findAllByRole('menuitem')).map(
+                (item) => item.textContent,
+            ),
+        ).not.toContain('Duplicate');
+    });
+
+    it.each([
+        ['Duplicate', 'onDuplicate'],
+        ['Re-evaluate rules', 'onReEvaluateRules'],
+        ['Automatize categorization', 'onAutomate'],
+        ['Delete', 'onDelete'],
+    ] as const)(
+        'closes the dialog and calls the %s handler',
+        async (label, handler) => {
+            const rowActions = rowActionHandlers();
+            const onOpenChange = vi.fn();
+
+            renderDialog({ rowActions, onOpenChange });
+            openMoreActions();
+            fireEvent.click(
+                await screen.findByRole('menuitem', { name: label }),
+            );
+
+            expect(onOpenChange).toHaveBeenCalledWith(false);
+            expect(rowActions[handler]).toHaveBeenCalledWith(rowTransaction);
+        },
+    );
+
+    it('hides the menu without row actions, and when creating', () => {
+        renderDialog({ rowActions: null });
+
+        expect(
+            screen.queryByRole('button', { name: 'More actions' }),
+        ).not.toBeInTheDocument();
+        cleanup();
+
+        renderDialog({ mode: 'create' });
+
+        expect(
+            screen.queryByRole('button', { name: 'More actions' }),
+        ).not.toBeInTheDocument();
     });
 });

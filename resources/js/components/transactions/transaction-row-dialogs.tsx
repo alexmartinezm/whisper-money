@@ -51,6 +51,7 @@ export function TransactionRowDialogs({
                 onCategorized={editing.handleCategorized}
                 onLabelCreated={editing.handleLabelCreated}
                 onDelete={editing.setDeleteTransaction}
+                rowActions={editing.dialogRowActions}
                 mode="edit"
             />
 

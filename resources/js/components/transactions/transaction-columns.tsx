@@ -11,14 +11,12 @@ import {
     ENCRYPTED_PLACEHOLDER,
     TransactionDescription,
 } from '@/components/transactions/transaction-description';
+import { TransactionRowDropdownMenuContent } from '@/components/transactions/transaction-row-dropdown-menu';
 import { AmountDisplay } from '@/components/ui/amount-display';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
     DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuLabel,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { resolveTransactionLabels } from '@/lib/transaction-labels';
@@ -310,27 +308,17 @@ export function createTransactionColumns({
                                     <MoreHorizontal className="h-4 w-4" />
                                 </Button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                                <DropdownMenuLabel>
-                                    {__('Actions')}
-                                </DropdownMenuLabel>
-                                {getTransactionRowActions({
+                            <TransactionRowDropdownMenuContent
+                                align="end"
+                                actions={getTransactionRowActions({
                                     transaction,
                                     onEdit,
                                     onDuplicate,
                                     onReEvaluateRules,
                                     onAutomate,
                                     onDelete,
-                                }).map((action) => (
-                                    <DropdownMenuItem
-                                        key={action.id}
-                                        variant={action.variant}
-                                        onClick={action.onSelect}
-                                    >
-                                        {action.label}
-                                    </DropdownMenuItem>
-                                ))}
-                            </DropdownMenuContent>
+                                })}
+                            />
                         </DropdownMenu>
                     </div>
                 );
