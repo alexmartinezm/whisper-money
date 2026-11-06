@@ -83,7 +83,7 @@ class TransactionDayTotals
             ->groupBy(fn (Collection $group): string => $this->dayOf($group->first()))
             ->map(fn (Collection $day): array => [
                 'count' => $day->sum(fn (Collection $group): int => (int) $group->first()->transactions_count),
-                'total' => $this->addedUp($day->map(fn (Collection $group): ?int => $group->last())),
+                'total' => $this->addedUp($day->map(fn (Collection $group): ?int => $group->last())->all()),
             ])
             ->all();
     }
@@ -119,11 +119,11 @@ class TransactionDayTotals
     /**
      * A day's converted sums added up, or null when any of them has no rate.
      *
-     * @param  Collection<int, ?int>  $amounts
+     * @param  array<int|string, ?int>  $amounts
      */
-    private function addedUp(Collection $amounts): ?int
+    private function addedUp(array $amounts): ?int
     {
-        return $amounts->containsStrict(null) ? null : (int) $amounts->sum();
+        return in_array(null, $amounts, true) ? null : (int) array_sum($amounts);
     }
 
     /**
