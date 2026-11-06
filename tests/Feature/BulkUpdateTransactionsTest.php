@@ -498,6 +498,77 @@ it('removes every label from the rows matching the filters and no others', funct
         ->and($outside->fresh()->labels)->toHaveCount(1);
 });
 
+it('refuses a removal that names no rows', function (array $removal) {
+    $label = Label::factory()->create(['user_id' => $this->user->id]);
+    $transactions = Transaction::factory()->count(2)->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'category_id' => $this->category->id,
+        'notes' => 'bm90ZS1jaXBoZXI=',
+        'notes_iv' => 'abcdefghijklmnop',
+    ]);
+    $transactions->each(fn (Transaction $transaction) => $transaction->labels()->attach($label->id));
+
+    $this->actingAs($this->user)
+        ->patchJson('/transactions/bulk', $removal)
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors('transaction_ids');
+
+    foreach ($transactions as $transaction) {
+        $fresh = $transaction->fresh();
+
+        expect($fresh->labels)->toHaveCount(1)
+            ->and($fresh->category_id)->toBe($this->category->id)
+            ->and($fresh->notes)->toBe('bm90ZS1jaXBoZXI=')
+            ->and($fresh->notes_iv)->toBe('abcdefghijklmnop');
+    }
+})->with([
+    'every label' => [['remove_all_labels' => true]],
+    'the category' => [['category_id' => null]],
+    'the notes' => [['notes' => null]],
+    'the notes iv' => [['notes_iv' => null]],
+]);
+
+it('refuses a target that is null or empty, for a removal too', function (array $target) {
+    $label = Label::factory()->create(['user_id' => $this->user->id]);
+    $transaction = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+    ]);
+    $transaction->labels()->attach($label->id);
+
+    $this->actingAs($this->user)
+        ->patchJson('/transactions/bulk', ['remove_all_labels' => true, ...$target])
+        ->assertUnprocessable();
+
+    expect($transaction->fresh()->labels)->toHaveCount(1);
+})->with([
+    'null filters' => [['filters' => null]],
+    'null ids' => [['transaction_ids' => null]],
+    'no ids' => [['transaction_ids' => []]],
+]);
+
+it('takes a select-all with no filter set as naming every row', function () {
+    $label = Label::factory()->create(['user_id' => $this->user->id]);
+    $transactions = Transaction::factory()->count(2)->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+    ]);
+    $transactions->each(fn (Transaction $transaction) => $transaction->labels()->attach($label->id));
+
+    // The body the client sends: an empty object, not a missing key.
+    $this->actingAs($this->user)->call(
+        'PATCH',
+        '/transactions/bulk',
+        server: ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json'],
+        content: '{"filters":{},"remove_all_labels":true}',
+    )->assertSuccessful();
+
+    foreach ($transactions as $transaction) {
+        expect($transaction->fresh()->labels)->toHaveCount(0);
+    }
+});
+
 it('refuses a remove-all that also names labels, or that is not a plain yes', function (array $request) {
     $label = Label::factory()->create(['user_id' => $this->user->id]);
     $transaction = Transaction::factory()->create([

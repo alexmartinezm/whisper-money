@@ -5,6 +5,7 @@ namespace App\Http\Requests;
 use App\Enums\CashflowBlock;
 use App\Enums\CategoryType;
 use App\Http\Requests\Concerns\ValidatesUserOwnedResources;
+use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -51,6 +52,31 @@ class BulkUpdateTransactionsRequest extends FormRequest
             'label_ids.*' => ['required', 'string', 'uuid', $this->userOwned('labels')],
             'remove_all_labels' => ['sometimes', 'accepted', 'prohibits:label_ids'],
         ];
+    }
+
+    /**
+     * With neither ids nor filters the controller edits every row of the user,
+     * so a removal has to name its target. The key is what counts: a select-all
+     * with no filter set sends `filters: {}`, which reads as empty.
+     */
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            if ($this->removesSomething() && ! $this->hasAny(['transaction_ids', 'filters'])) {
+                $validator->errors()->add('transaction_ids', 'A bulk removal must name its transactions or its filters.');
+            }
+        });
+    }
+
+    /**
+     * Whether the edit takes something off the rows instead of setting it.
+     */
+    private function removesSomething(): bool
+    {
+        return $this->boolean('remove_all_labels')
+            || collect(['category_id', 'notes', 'notes_iv'])->contains(
+                fn (string $field): bool => $this->has($field) && $this->input($field) === null,
+            );
     }
 
     public function messages(): array
