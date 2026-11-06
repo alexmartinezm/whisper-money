@@ -120,7 +120,7 @@ class TransactionDayTotals
             ->toBase()
             ->map(fn (Transaction $transaction): array => [
                 'transaction' => $transaction,
-                'kept' => collect($this->exporter->postings([$transaction], $filters))->sum('amount'),
+                'kept' => (int) collect($this->exporter->postings([$transaction], $filters))->sum('amount'),
             ]);
     }
 
