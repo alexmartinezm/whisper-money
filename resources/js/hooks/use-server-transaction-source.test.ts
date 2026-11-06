@@ -197,7 +197,7 @@ describe('useServerTransactionSource', () => {
 
     describe('a page that lands after the list moved on', () => {
         function slowPage() {
-            let land = (_response: unknown) => {};
+            let land: (response: unknown) => void = () => {};
             const fetchMock = vi.fn(
                 () =>
                     new Promise((resolve) => {
@@ -227,7 +227,7 @@ describe('useServerTransactionSource', () => {
             const { fetchMock, landWith } = slowPage();
             const { result } = renderSource();
 
-            let pending: Promise<void> | undefined;
+            let pending: unknown;
             act(() => {
                 pending = result.current.pagination.loadMore();
             });
@@ -282,7 +282,7 @@ describe('useServerTransactionSource', () => {
             const { landWith } = slowPage();
             const { result } = renderSource();
 
-            let pending: Promise<void> | undefined;
+            let pending: unknown;
             act(() => {
                 pending = result.current.pagination.loadMore();
             });
