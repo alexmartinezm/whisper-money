@@ -268,8 +268,7 @@ class TransactionWriter
     }
 
     /**
-     * In capitals. ASCII only: the rule counts characters, and a multibyte
-     * upper case can grow past the column (`ß` is `SS`).
+     * In capitals. The rule only lets ASCII letters through.
      */
     private static function currency(mixed $value): string
     {
