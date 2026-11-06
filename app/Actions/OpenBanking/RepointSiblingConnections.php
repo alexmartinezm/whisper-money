@@ -109,7 +109,12 @@ class RepointSiblingConnections
             return $sibling->accounts->pluck('external_account_id')->all();
         });
 
-        SyncBankingConnectionJob::dispatch($sibling, trigger: BankingSyncTrigger::Reconnect);
+        // After the caller's transaction, if there is one: dispatching takes the
+        // job's unique lock, which a rollback would leave holding the sibling's
+        // next sync back with no job behind it.
+        DB::afterCommit(function () use ($sibling): void {
+            SyncBankingConnectionJob::dispatch($sibling, trigger: BankingSyncTrigger::Reconnect);
+        });
 
         return $uids;
     }

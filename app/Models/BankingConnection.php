@@ -292,16 +292,42 @@ class BankingConnection extends Model
     /**
      * Pending accounts the user can actually map. Providers sometimes report accounts
      * without a uid (EnableBanking does it for some French cards); those can never be
-     * synced, so offering them for mapping only produces a validation error.
+     * synced, so offering them for mapping only produces a validation error. A uid
+     * a sibling connection already syncs is left out too: a bank that shares one
+     * session lists the sibling's accounts here, and creating them would import
+     * their history a second time.
      *
      * @return array<int, array<string, mixed>>
      */
     public function mappablePendingAccounts(): array
     {
+        $siblingUids = $this->uidsHeldBySiblings();
+
         return array_values(array_filter(
             $this->pending_accounts_data ?? [],
-            fn (array $account): bool => ! empty($account['uid']),
+            fn (array $account): bool => ! empty($account['uid']) && ! in_array($account['uid'], $siblingUids, true),
         ));
+    }
+
+    /**
+     * The uids the user's other connections sync. Only Enable Banking can share
+     * a session between connections.
+     *
+     * @return list<string>
+     */
+    private function uidsHeldBySiblings(): array
+    {
+        if (! $this->isEnableBanking()) {
+            return [];
+        }
+
+        return Account::query()
+            ->where('user_id', $this->user_id)
+            ->whereNotNull('banking_connection_id')
+            ->where('banking_connection_id', '!=', $this->getKey())
+            ->whereNotNull('external_account_id')
+            ->pluck('external_account_id')
+            ->all();
     }
 
     /**

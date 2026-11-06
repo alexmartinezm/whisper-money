@@ -3574,5 +3574,8 @@
     "1 transaction · :file": "1 transacción · :file",
     "Only continue if you are signing in with a different login, like a partner's.": "Continúa solo si vas a entrar con otro usuario, por ejemplo el de tu pareja.",
     "You already have an active connection with this bank. If you sign in with the same bank login, the previous connection will stop working.": "Ya tienes una conexión activa con este banco. Si entras con el mismo usuario del banco, la conexión anterior dejará de funcionar.",
-    "To add another account from that login, use :link on your existing connection instead.": "Para añadir otra cuenta de ese mismo usuario, hazlo desde «:link» en la conexión que ya tienes."
+    "To add another account from that login, use :link on your existing connection instead.": "Para añadir otra cuenta de ese mismo usuario, hazlo desde «:link» en la conexión que ya tienes.",
+    "This bank login does not cover the accounts on this connection, so the connection was left as it was. Try again with the login you used for them.": "Este usuario del banco no incluye las cuentas de esta conexión, así que la conexión se ha quedado como estaba. Inténtalo de nuevo con el usuario que usaste para ellas.",
+    "These accounts already sync through your existing connection to this bank.": "Estas cuentas ya se sincronizan con la conexión que tienes con este banco.",
+    "Not syncing": "Sin sincronizar"
 }

@@ -982,7 +982,7 @@ test('a full sweep syncs connections that synced recently', function () {
     Queue::assertPushed(SyncBankingConnectionJob::class, fn ($job) => $job->bankingConnection->is($connection) && $job->fullSync);
 });
 
-test('a second sweep right after the first dispatches nothing new', function () {
+test('a redelivered sweep dispatches nothing new once the job\'s unique lock is gone', function () {
     Queue::fake(SyncBankingConnectionJob::class);
 
     $connection = BankingConnection::factory()->create([
@@ -992,9 +992,11 @@ test('a second sweep right after the first dispatches nothing new', function () 
 
     (new SyncAllBankingConnectionsJob)->handle();
 
-    // The first sweep's sync succeeds before the redelivered sweep runs.
+    // The first sweep's sync succeeds before the redelivered sweep runs. Past the
+    // lock on purpose: inside it the second dispatch is dropped with or without
+    // the recency guard, and that guard is what this is here to pin.
     $connection->update(['last_synced_at' => now()]);
-    $this->travel(15)->minutes();
+    $this->travel((new SyncBankingConnectionJob($connection))->uniqueFor + 1)->seconds();
 
     (new SyncAllBankingConnectionsJob)->handle();
 

@@ -396,8 +396,12 @@ class EnableBankingSyncer extends AbstractBankingConnectionSyncer
     }
 
     /**
-     * Whether the connection's session is still authorized and lists accounts,
-     * none of them this one.
+     * Whether the connection's session is still authorized and serves this
+     * connection, but not this account: it has to list another of the connection's
+     * accounts. A session listing only other uids (a sibling's, say) says nothing
+     * about this connection, and unlinking account by account against it would
+     * leave the connection Active with nothing to sync, instead of expiring it so
+     * the user is told.
      */
     private function sessionServesWithout(BankingConnection $connection, Account $account): bool
     {
@@ -417,8 +421,8 @@ class EnableBankingSyncer extends AbstractBankingConnectionSyncer
                 ->all();
 
             return $session['status'] === 'AUTHORIZED'
-                && $uids !== []
-                && ! in_array($account->external_account_id, $uids, true);
+                && ! in_array($account->external_account_id, $uids, true)
+                && $connection->accounts->pluck('external_account_id')->intersect($uids)->isNotEmpty();
         } catch (\Throwable) {
             return false;
         }
@@ -449,12 +453,14 @@ class EnableBankingSyncer extends AbstractBankingConnectionSyncer
 
     /**
      * Whether any of this connection's accounts still owes history to a run the
-     * page budget cut short.
+     * page budget cut short. An unlinked account is never synced again, so its
+     * marker never clears and it cannot hold the daily email back.
      */
     private function isBackfillingHistory(BankingConnection $connection): bool
     {
         return $connection->accounts->contains(
-            fn (Account $account) => $account->transactions_paginate_before !== null
+            fn (Account $account) => $account->external_account_id !== null
+                && $account->transactions_paginate_before !== null
         );
     }
 

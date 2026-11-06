@@ -47,6 +47,24 @@ test('index renders the manage page with synced and available accounts', functio
         );
 });
 
+test('index tells the page which synced accounts have lost their bank link', function () {
+    $user = onboardedUser();
+    $connection = BankingConnection::factory()->create(['user_id' => $user->id]);
+
+    Account::factory()->for($user)->create([
+        'banking_connection_id' => $connection->id,
+        'external_account_id' => null,
+    ]);
+
+    $this->actingAs($user)
+        ->get(route('open-banking.connection-accounts.index', $connection))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('syncedAccounts', 1)
+            ->where('syncedAccounts.0.external_account_id', null)
+        );
+});
+
 test('refresh discovers bank accounts that are not yet synced', function () {
     $user = onboardedUser();
     $connection = BankingConnection::factory()->create(['user_id' => $user->id]);
