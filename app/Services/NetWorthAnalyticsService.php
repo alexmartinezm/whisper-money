@@ -102,6 +102,6 @@ class NetWorthAnalyticsService
 
         return $daily
             ? $this->accountMetrics->getNetWorthDailyEvolution($user->currency_code, $accounts, $start, $end)
-            : $this->accountMetrics->getNetWorthEvolution($user->currency_code, $accounts, $start, $end);
+            : $this->accountMetrics->getNetWorthEvolution($user->currency_code, $accounts, $start, $end, $user->localToday());
     }
 }
