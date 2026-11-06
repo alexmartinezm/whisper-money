@@ -8,6 +8,7 @@ use App\Models\Label;
 use App\Models\McpToolCall;
 use App\Models\Space;
 use App\Models\User;
+use App\Services\PeriodComparator;
 use App\Services\SpaceResolver;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -110,23 +111,14 @@ abstract class McpTool extends Tool
     }
 
     /**
-     * Reuse an existing analytics controller by invoking one of its actions with
-     * a synthesized GET request bound to the MCP user, returning its JSON body.
-     * Keeps the (user-scoped) dashboard maths in exactly one place.
-     *
-     * ponytail: couples to the controllers returning a JsonResponse; acceptable
-     * while they're stable. Extract the orchestration into a shared service if a
-     * controller stops returning JSON or a third tool needs the same maths.
-     *
-     * @param  array<string, mixed>  $query
-     * @return array<array-key, mixed>
+     * The `from`/`to` range of an analytics tool, already validated.
      */
-    protected function callController(object $controller, string $method, User $user, array $query): array
+    protected function requestedPeriod(Request $request): PeriodComparator
     {
-        $httpRequest = \Illuminate\Http\Request::create('/', 'GET', $query);
-        $httpRequest->setUserResolver(fn (): User => $user);
-
-        return $controller->{$method}($httpRequest)->getData(true);
+        return PeriodComparator::fromRequest([
+            'from' => $request->string('from')->toString(),
+            'to' => $request->string('to')->toString(),
+        ]);
     }
 
     /**

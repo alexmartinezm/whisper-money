@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property Carbon $start_date
  * @property Carbon $end_date
  * @property int|null $regular_allocated_amount
+ * @property int|string|null $spent_amount the spend, when a query summed it with withSum()
  */
 class BudgetPeriod extends Model
 {

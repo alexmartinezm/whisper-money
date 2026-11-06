@@ -27,6 +27,13 @@ class Budget extends Model
 {
     use Archivable, BelongsToSpace, HasFactory, HasUuids, SoftDeletes;
 
+    /**
+     * The largest limit, in minor units, the public API lets a period have: the
+     * same ceiling as a savings goal's amounts, so carried-over sums stay well
+     * inside the integers a browser holds exactly.
+     */
+    public const MAX_ALLOCATED_AMOUNT = SavingsGoal::MAX_AMOUNT;
+
     protected $fillable = [
         'user_id',
         'space_id',
@@ -110,13 +117,24 @@ class Budget extends Model
      */
     public function getCurrentPeriod(?CarbonInterface $applicationDate = null): ?BudgetPeriod
     {
+        return $this->currentPeriods($applicationDate)->first();
+    }
+
+    /**
+     * The periods covering the application date, latest start first: the first
+     * one is the current period (see getCurrentPeriod()). A relation, so a list
+     * can eager load the current period of every budget at once.
+     *
+     * @return HasMany<BudgetPeriod, $this>
+     */
+    public function currentPeriods(?CarbonInterface $applicationDate = null): HasMany
+    {
         $applicationDate ??= today();
 
         return $this->periods()
             ->whereDate('start_date', '<=', $applicationDate->toDateString())
             ->whereDate('end_date', '>=', $applicationDate->toDateString())
-            ->orderByDesc('start_date')
-            ->first();
+            ->orderByDesc('start_date');
     }
 
     public function getNextPlanningPeriod(CarbonInterface $applicationDate, ?BudgetPeriod $currentPeriod = null): ?BudgetPeriod

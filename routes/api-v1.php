@@ -2,9 +2,12 @@
 
 use App\Http\Controllers\Api\V1\AccountBalanceController;
 use App\Http\Controllers\Api\V1\AccountController;
+use App\Http\Controllers\Api\V1\AnalyticsController;
 use App\Http\Controllers\Api\V1\AutomationRuleController;
+use App\Http\Controllers\Api\V1\BudgetController;
 use App\Http\Controllers\Api\V1\CategoryController;
 use App\Http\Controllers\Api\V1\LabelController;
+use App\Http\Controllers\Api\V1\SavingsGoalController;
 use App\Http\Controllers\Api\V1\SpaceController;
 use App\Http\Controllers\Api\V1\TransactionController;
 use Illuminate\Support\Facades\Route;
@@ -67,3 +70,23 @@ Route::whereUuid('transaction')->group(function (): void {
     Route::post('transactions/{transaction}/split', [TransactionController::class, 'split'])->name('transactions.split');
     Route::post('transactions/{transaction}/merge-splits', [TransactionController::class, 'mergeSplits'])->name('transactions.merge-splits');
 });
+
+Route::whereUuid('budget')->group(function (): void {
+    Route::get('budgets', [BudgetController::class, 'index'])->name('budgets.index');
+    Route::post('budgets', [BudgetController::class, 'store'])->name('budgets.store');
+    Route::get('budgets/{budget}', [BudgetController::class, 'show'])->name('budgets.show');
+    Route::patch('budgets/{budget}', [BudgetController::class, 'update'])->name('budgets.update');
+    Route::delete('budgets/{budget}', [BudgetController::class, 'destroy'])->name('budgets.destroy');
+    Route::patch('budgets/{budget}/period', [BudgetController::class, 'updatePeriod'])->name('budgets.period.update');
+});
+
+Route::whereUuid('savings_goal')->group(function (): void {
+    Route::get('savings-goals', [SavingsGoalController::class, 'index'])->name('savings-goals.index');
+    Route::post('savings-goals', [SavingsGoalController::class, 'store'])->name('savings-goals.store');
+    Route::get('savings-goals/{savings_goal}', [SavingsGoalController::class, 'show'])->name('savings-goals.show');
+    Route::patch('savings-goals/{savings_goal}', [SavingsGoalController::class, 'update'])->name('savings-goals.update');
+});
+
+Route::get('analytics/cashflow', [AnalyticsController::class, 'cashflow'])->name('analytics.cashflow');
+Route::get('analytics/net-worth', [AnalyticsController::class, 'netWorth'])->name('analytics.net-worth');
+Route::get('analytics/spending-by-category', [AnalyticsController::class, 'spendingByCategory'])->name('analytics.spending-by-category');

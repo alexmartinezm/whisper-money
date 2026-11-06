@@ -48,7 +48,10 @@ class NetWorthCalculator
         return $total;
     }
 
-    private function counts(Account $account): bool
+    /**
+     * Whether the account adds to the total at all.
+     */
+    public function counts(Account $account): bool
     {
         return $account->include_in_net_worth !== false
             && $account->type->countsInNetWorth();

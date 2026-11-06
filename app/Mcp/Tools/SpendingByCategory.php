@@ -4,8 +4,8 @@ namespace App\Mcp\Tools;
 
 use App\Models\User;
 use App\Services\CategorySpendingService;
+use App\Services\PeriodComparator;
 use App\Support\Money;
-use Carbon\Carbon;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -38,15 +38,14 @@ class SpendingByCategory extends McpTool
 
     protected function respond(Request $request, User $user): Response
     {
-        $request->validate([
-            'from' => ['required', 'date'],
-            'to' => ['required', 'date'],
-        ]);
+        $request->validate(PeriodComparator::rules());
+
+        $period = $this->requestedPeriod($request);
 
         $spending = app(CategorySpendingService::class)->forPeriod(
             $user->id,
-            Carbon::parse($request->string('from')->toString()),
-            Carbon::parse($request->string('to')->toString()),
+            $period->from,
+            $period->to,
             $request->string('parent_category_id')->toString() ?: null,
         );
 

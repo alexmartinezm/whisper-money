@@ -9,6 +9,7 @@ use App\Models\Category;
 use App\Models\Label;
 use App\Models\Space;
 use App\Models\User;
+use App\Services\Budgets\BudgetPresenter;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\JsonSchema\Types\StringType;
@@ -110,16 +111,7 @@ trait InteractsWithBudgets
             'rollover_type' => $budget->rollover_type->value,
             'expense_type' => $budget->expense_type->value,
             'is_catch_all' => (bool) $budget->is_catch_all,
-            'categories' => $budget->categories
-                ->sortBy(fn (Category $category): string => $category->name.'|'.$category->id)
-                ->values()
-                ->map(fn (Category $category): array => ['id' => $category->id, 'name' => $category->name])
-                ->all(),
-            'labels' => $budget->labels
-                ->sortBy(fn (Label $label): string => $label->name.'|'.$label->id)
-                ->values()
-                ->map(fn (Label $label): array => ['id' => $label->id, 'name' => $label->name])
-                ->all(),
+            ...app(BudgetPresenter::class)->tracking($budget),
             'current_period' => $current === null ? null : $this->presentCurrentPeriod($current),
             'next_period' => $next === null ? null : $this->presentNextPeriod($next),
             'updated_at' => $budget->updated_at?->toISOString(),
@@ -129,42 +121,12 @@ trait InteractsWithBudgets
     /** @return array<string, mixed> */
     protected function presentCurrentPeriod(BudgetPeriod $period): array
     {
-        $spent = (int) ($period->spent_amount ?? $period->spentAmount());
-        $available = $period->availableAmount();
-
-        return [
-            ...$this->presentPeriodAllocation($period),
-            'carried_over_amount' => (int) ($period->carried_over_amount ?? 0),
-            'available_amount' => $available,
-            'spent_amount' => $spent,
-            'remaining_amount' => $available - $spent,
-            'status' => $period->limitStatus($spent),
-            'processing_historical' => (bool) $period->processing_historical,
-        ];
+        return app(BudgetPresenter::class)->period($period);
     }
 
     /** @return array<string, mixed> */
     protected function presentNextPeriod(BudgetPeriod $period): array
     {
-        return $this->presentPeriodAllocation($period);
-    }
-
-    /**
-     * A period's dates and allocation. `regular_allocated_amount` is what the
-     * period goes back to when `is_one_off` is true, and equals
-     * `allocated_amount` otherwise.
-     *
-     * @return array<string, mixed>
-     */
-    private function presentPeriodAllocation(BudgetPeriod $period): array
-    {
-        return [
-            'id' => $period->id,
-            'start_date' => $period->start_date->toDateString(),
-            'end_date' => $period->end_date->toDateString(),
-            'allocated_amount' => (int) $period->allocated_amount,
-            'is_one_off' => $period->hasOneOffAllocation(),
-            'regular_allocated_amount' => $period->regularAllocatedAmount(),
-        ];
+        return app(BudgetPresenter::class)->allocation($period);
     }
 }

@@ -59,8 +59,11 @@ class CreateBudget extends WriteTool
         // into 0, which no calendar-following cadence accepts. A weekly or
         // biweekly budget keeps null, which its periods read as Sunday.
         $periodStartDay = $request->filled('period_start_day') ? $request->integer('period_start_day') : null;
-        $this->validateStartDay($periodType, $periodStartDay);
-        $periodStartDay ??= $periodType->followsCalendar() ? 1 : null;
+
+        if (! $periodType->acceptsStartDay($periodStartDay)) {
+            throw ValidationException::withMessages(['period_start_day' => 'The start day is invalid for the selected cadence.']);
+        }
+
         $space = $this->resolveSpace($request, $user);
         $result = $this->budgets->create(
             $user,
@@ -68,7 +71,7 @@ class CreateBudget extends WriteTool
             [
                 'name' => $request->string('name')->toString(),
                 'period_type' => $periodType->value,
-                'period_start_day' => $periodStartDay,
+                'period_start_day' => $periodType->storedStartDay($periodStartDay),
                 'rollover_type' => $request->enum('rollover_type', RolloverType::class)->value,
                 'expense_type' => $request->enum('expense_type', BudgetExpenseType::class) ?? BudgetExpenseType::Variable,
                 'allocated_amount' => $request->integer('allocated_amount'),
@@ -84,18 +87,5 @@ class CreateBudget extends WriteTool
             'budget' => $this->presentBudget($result['budget'], $current, $next),
             'processing_historical' => true,
         ]);
-    }
-
-    private function validateStartDay(BudgetPeriodType $periodType, ?int $startDay): void
-    {
-        $valid = match ($periodType) {
-            BudgetPeriodType::Monthly => $startDay === null || ($startDay >= 1 && $startDay <= 31),
-            BudgetPeriodType::Weekly, BudgetPeriodType::Biweekly => $startDay === null || ($startDay >= 0 && $startDay <= 6),
-            BudgetPeriodType::Quarterly, BudgetPeriodType::Yearly => $startDay === null || $startDay === 1,
-        };
-
-        if (! $valid) {
-            throw ValidationException::withMessages(['period_start_day' => 'The start day is invalid for the selected cadence.']);
-        }
     }
 }

@@ -3,8 +3,10 @@
 namespace App\Services;
 
 use App\Models\AutomationRule;
+use App\Models\Budget;
 use App\Models\Category;
 use App\Models\Label;
+use App\Models\SavingsGoal;
 use App\Models\Space;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
@@ -95,16 +97,16 @@ class SpaceResolver
     }
 
     /**
-     * One of the caller's own categories, labels or automation rules in $space,
-     * the same way as ownedInSpace(): another member's is a
-     * ModelNotFoundException like one that does not exist.
+     * One of the caller's own categories, labels, automation rules, budgets or
+     * savings goals in $space, the same way as ownedInSpace(): another member's
+     * is a ModelNotFoundException like one that does not exist.
      *
-     * @template TModel of AutomationRule|Category|Label
+     * @template TModel of AutomationRule|Budget|Category|Label|SavingsGoal
      *
      * @param  class-string<TModel>  $model
      * @return TModel
      */
-    public function ownedInSpaceOrFail(string $model, User $user, Space $space, string $id): AutomationRule|Category|Label
+    public function ownedInSpaceOrFail(string $model, User $user, Space $space, string $id): AutomationRule|Budget|Category|Label|SavingsGoal
     {
         return $model::query()->forSpace($space)->where('user_id', $user->id)->findOrFail($id);
     }
