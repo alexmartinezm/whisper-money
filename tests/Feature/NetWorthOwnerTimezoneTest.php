@@ -96,6 +96,26 @@ it('ends the accounts page history on the owner\'s current month', function (?st
         ));
 })->with('owner clocks');
 
+it('labels the accounts page history on the owner\'s year on New Year\'s Eve', function () {
+    // 20:00 on 31 December in Los Angeles, already 2027 in UTC: December is
+    // still this year's, so it carries no year.
+    $user = ownerAt('America/Los_Angeles', '2027-01-01 04:00:00');
+    $account = Account::factory()->create(['user_id' => $user->id]);
+    AccountBalance::factory()->create([
+        'account_id' => $account->id,
+        'balance_date' => '2026-06-01',
+        'balance' => 5000,
+    ]);
+
+    $this->actingAs($user)->get(route('accounts.list'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->loadDeferredProps(fn ($reload) => $reload
+            ->where("accountMetrics.{$account->id}.history.12.date", 'Dec')
+            ->where("accountMetrics.{$account->id}.history.11.date", 'Nov')
+            ->where("accountMetrics.{$account->id}.history.0.date", "Dec '25")
+        ));
+});
+
 it('projects a loan from the month after the owner\'s current one', function (?string $timezone, string $now, string $currentMonth) {
     $user = ownerAt($timezone, $now);
     $account = Account::factory()->loan()->create(['user_id' => $user->id]);
