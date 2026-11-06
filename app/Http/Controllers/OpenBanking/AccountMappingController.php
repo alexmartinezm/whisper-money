@@ -46,6 +46,19 @@ class AccountMappingController extends Controller
 
         $mappableAccounts = $connection->mappablePendingAccounts();
 
+        // Every account the bank listed already syncs through a sibling, so this
+        // connection adds nothing. The session stays: the sibling is using it.
+        if (
+            $mappableAccounts === []
+            && $connection->accounts()->doesntExist()
+            && collect($connection->pending_accounts_data)->contains(fn (array $account): bool => ! empty($account['uid']))
+        ) {
+            $connection->delete();
+
+            return redirect()->route('settings.connections.index')
+                ->with('error', __('These accounts already sync through your existing connection to this bank.'));
+        }
+
         // Nothing the bank gave us can be mapped, so there is no decision left for the
         // user to make. Close the connection instead of leaving it awaiting a mapping
         // that can never happen.
@@ -81,7 +94,7 @@ class AccountMappingController extends Controller
 
         $bank = $this->resolveConnectionBank($connection);
 
-        $pendingAccounts = collect($connection->pending_accounts_data)
+        $pendingAccounts = collect($connection->mappablePendingAccounts())
             ->keyBy('uid');
 
         foreach ($mappings as $mapping) {

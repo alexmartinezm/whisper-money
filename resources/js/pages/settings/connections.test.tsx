@@ -1,4 +1,5 @@
 import type { BankingConnection } from '@/types/banking';
+import { setTranslations } from '@/utils/i18n';
 import { render, screen } from '@testing-library/react';
 import type React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -164,6 +165,37 @@ describe('ConnectionsPage', () => {
         expect(
             screen.getAllByRole('button', { name: /reconnect/i }),
         ).toHaveLength(2);
+    });
+
+    it('offers a reconnect for a re-authorization abandoned at the bank', () => {
+        render(
+            <ConnectionsPage
+                connections={[
+                    makeConnection({ status: 'pending', accounts_count: 2 }),
+                ]}
+            />,
+        );
+
+        expect(
+            screen.getByRole('button', { name: /reconnect/i }),
+        ).toBeInTheDocument();
+    });
+
+    it('offers no reconnect for a first connection still being authorized', () => {
+        render(
+            <ConnectionsPage
+                connections={[
+                    makeConnection({ status: 'pending', accounts_count: 0 }),
+                ]}
+            />,
+        );
+
+        expect(
+            screen.queryByRole('button', { name: /reconnect/i }),
+        ).not.toBeInTheDocument();
+        expect(
+            screen.queryByRole('menuitem', { name: /reconnect/i }),
+        ).not.toBeInTheDocument();
     });
 
     it('offers an early renewal on a consent that is about to run out', () => {
@@ -390,6 +422,32 @@ describe('ConnectionsPage', () => {
         expect(
             screen.getByText(/its connection fails more often/i),
         ).toBeInTheDocument();
+    });
+
+    it('offers Reconnect for a reconnect made with the wrong login, in the viewer language', () => {
+        setTranslations({ 'Wrong login.': 'Usuario equivocado.' });
+
+        render(
+            <ConnectionsPage
+                connections={[
+                    makeConnection({
+                        status: 'error',
+                        error_message: 'Wrong login.',
+                        failed_on_wrong_login: true,
+                    }),
+                ]}
+            />,
+        );
+
+        setTranslations({});
+
+        expect(screen.getByText('Usuario equivocado.')).toBeInTheDocument();
+        expect(
+            screen.getAllByRole('button', { name: /reconnect/i }).length,
+        ).toBeGreaterThan(0);
+        expect(
+            screen.queryByRole('button', { name: /retry/i }),
+        ).not.toBeInTheDocument();
     });
 
     it('keeps the beta explanation out of a healthy connection', () => {

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\OpenBanking;
 
+use App\Actions\OpenBanking\RepointSiblingConnections;
 use App\Contracts\BankingProviderInterface;
 use App\Enums\BankingConnectionStatus;
 use App\Enums\BankingProvider;
@@ -11,15 +12,19 @@ use App\Http\Controllers\OpenBanking\Concerns\CreatesAccountsFromPending;
 use App\Http\Controllers\OpenBanking\Concerns\HandlesSubscriptionGate;
 use App\Http\Requests\OpenBanking\StartAuthorizationRequest;
 use App\Jobs\SyncBankingConnectionJob;
+use App\Models\Account;
 use App\Models\BankingConnection;
 use App\Models\User;
 use App\Services\AccountUserCurrencyService;
 use App\Services\Banking\EnableBankingSessionShape;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection as SupportCollection;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
@@ -29,6 +34,8 @@ class AuthorizationController extends Controller
 {
     use CreatesAccountsFromPending;
     use HandlesSubscriptionGate;
+
+    public function __construct(private RepointSiblingConnections $repointSiblingConnections) {}
 
     /**
      * Start the bank authorization flow.
@@ -132,10 +139,11 @@ class AuthorizationController extends Controller
         // email's business, not this gate's.
         $renewable = $connection->isActive()
             || $connection->isExpired()
-            || $connection->status === BankingConnectionStatus::Error;
+            || $connection->status === BankingConnectionStatus::Error
+            || $this->isAbandonedReauthorization($connection);
 
         if (! $renewable) {
-            return ['error' => 'Only active, error or expired connections can be re-authorized.'];
+            return ['error' => 'Only active, error, expired or unfinished reconnects can be re-authorized.'];
         }
 
         $redirectUrl = config('services.enablebanking.redirect_url');
@@ -163,6 +171,18 @@ class AuthorizationController extends Controller
         ]);
 
         return $result;
+    }
+
+    /**
+     * A Pending connection that already has accounts is a re-authorization the
+     * user left at the bank. No callback ever comes for an abandoned flow, and
+     * the scheduled sync skips Pending, so without this it is stuck for good.
+     * A first connection is Pending with no accounts, and stays out of here.
+     */
+    private function isAbandonedReauthorization(BankingConnection $connection): bool
+    {
+        return $connection->status === BankingConnectionStatus::Pending
+            && $connection->accounts()->exists();
     }
 
     /**
@@ -232,7 +252,7 @@ class AuthorizationController extends Controller
         $isReconnect = $connection->accounts()->exists();
 
         if ($isReconnect) {
-            return $this->completeReconnect($connection, $sessionData);
+            return $this->completeReconnect($user, $connection, $sessionData, $provider);
         }
 
         return $this->completeFirstConnection($user, $connection, $sessionData, $accountUserCurrencyService, $provider);
@@ -269,28 +289,111 @@ class AuthorizationController extends Controller
     /**
      * Point a connection that already has accounts at its new session and resync it.
      *
+     * A throw leaves the connection, its accounts and its siblings as they were.
+     * The bank has already spent the code, so a second callback could only fail:
+     * the state token is burnt and the user is told, rather than left on a 500
+     * with a connection still waiting for this one.
+     *
+     * The flash has no warning level, so a reconnect that lost an account goes
+     * out as an error: a success toast would hide that something stopped syncing.
+     *
      * @param  array<string, mixed>  $sessionData
      */
-    private function completeReconnect(BankingConnection $connection, array $sessionData): RedirectResponse|Response
+    private function completeReconnect(User $user, BankingConnection $connection, array $sessionData, BankingProviderInterface $provider): RedirectResponse|Response
     {
-        $connection->update([
-            'session_id' => $sessionData['session_id'],
-            'status' => BankingConnectionStatus::Active,
-            'valid_until' => $sessionData['access']['valid_until'] ?? null,
-            'error_message' => null,
-            'state_token' => null,
-            // Reconnecting is the way out of a parked connection, so it has
-            // to hand back the full retry budget. Carrying the old count over
-            // meant the first failure after a reconnect could re-park it
-            // immediately, which is the state the user just paid SCA to leave.
-            'consecutive_sync_failures' => 0,
-        ]);
+        try {
+            $unlinked = DB::transaction(fn (): ?int => $this->applyReconnect($connection, $sessionData));
+        } catch (\Throwable $e) {
+            report($e);
 
-        $this->refreshAccountIds($connection, $sessionData['accounts']);
+            $this->revokeUnclaimedSession($provider, $connection, $sessionData);
+            $connection->refresh()->update(['state_token' => null]);
+
+            return $this->finishWithError($user, __('We could not complete the connection with your bank. Please try again later.'));
+        }
+
+        if ($unlinked === null) {
+            $this->revokeUnclaimedSession($provider, $connection, $sessionData);
+
+            return $this->finishWithError($user, __(BankingConnection::WRONG_LOGIN_ERROR));
+        }
 
         SyncBankingConnectionJob::dispatch($connection, trigger: BankingSyncTrigger::Reconnect);
 
-        return $this->finishRedirect('settings.connections.index', [], 'success', __('Bank account reconnected successfully.'));
+        return $unlinked === 0
+            ? $this->finishRedirect('settings.connections.index', [], 'success', __('Bank account reconnected successfully.'))
+            : $this->finishRedirect('settings.connections.index', [], 'error', trans_choice('{1}Reconnected, but :count account no longer syncs. Review it in Manage Accounts.|[2,*]Reconnected, but :count accounts no longer sync. Review them in Manage Accounts.', $unlinked));
+    }
+
+    /**
+     * Close a session the reconnect did not end up using, so it does not stay
+     * open at the provider with nothing here to revoke it later. A connection
+     * holding it (a sibling that took it) keeps it. Best effort: the user's
+     * outcome is already decided, and a failure here must not change it.
+     *
+     * @param  array<string, mixed>  $sessionData
+     */
+    private function revokeUnclaimedSession(BankingProviderInterface $provider, BankingConnection $connection, array $sessionData): void
+    {
+        $sessionId = $sessionData['session_id'] ?? null;
+
+        try {
+            if (is_string($sessionId) && ! BankingConnection::query()->where('session_id', $sessionId)->exists()) {
+                $provider->revokeSession($sessionId);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Failed to revoke an unclaimed EnableBanking session', [
+                ...$connection->logContext(),
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Move the connection and its accounts onto the new session, or record that
+     * the session covers none of them.
+     *
+     * That happens when the user signs in with a different login, such as the one
+     * a sibling connection uses, whose accounts the sibling claims. Taking the
+     * session would leave an Active connection with every account unlinked and
+     * nothing syncing, so it keeps its old session and uids and the user is sent
+     * back to reconnect. The sibling keeps the session: it does cover the sibling,
+     * and this bank may have just revoked the one the sibling held.
+     *
+     * @param  array<string, mixed>  $sessionData
+     * @return int|null The accounts left unlinked, or null when none was covered.
+     */
+    private function applyReconnect(BankingConnection $connection, array $sessionData): ?int
+    {
+        $siblingUids = $this->repointSiblingConnections->handle($connection, $sessionData);
+
+        $accounts = $connection->accounts()->orderBy('created_at')->get();
+        $sessionAccounts = $sessionData['accounts'];
+        $matches = $this->matchSessionAccounts($accounts, $sessionAccounts, $siblingUids);
+
+        if (! empty($sessionAccounts) && $matches === []) {
+            $this->recordWrongLogin($connection);
+
+            return null;
+        }
+
+        $connection->activateWithSession($sessionData, ['state_token' => null]);
+
+        return empty($sessionAccounts) ? 0 : $this->refreshAccountIds($connection, $accounts, $matches);
+    }
+
+    /**
+     * Leave the connection on its old session, marked for a reconnect.
+     */
+    private function recordWrongLogin(BankingConnection $connection): void
+    {
+        $connection->update([
+            'status' => $connection->statusAfterFailedReconnect(),
+            'error_message' => BankingConnection::WRONG_LOGIN_ERROR,
+            'state_token' => null,
+        ]);
+
+        Log::warning('EnableBanking reconnect covered none of the connection\'s accounts', $connection->logContext());
     }
 
     /**
@@ -350,6 +453,10 @@ class AuthorizationController extends Controller
             'state_token' => null,
         ]);
 
+        // The new session has just revoked the one any sibling still holds,
+        // whether or not the user finishes mapping this connection.
+        $this->repointSiblingConnections->handle($connection, $sessionData);
+
         if (! $user->isOnboarded()) {
             $this->createAccountsFromPending($user, $connection, $accountUserCurrencyService);
             SyncBankingConnectionJob::dispatch($connection, trigger: BankingSyncTrigger::Connect);
@@ -402,7 +509,7 @@ class AuthorizationController extends Controller
         if ($connection && ! $connection->isActive()) {
             if ($connection->accounts()->exists()) {
                 $connection->update([
-                    'status' => BankingConnectionStatus::Error,
+                    'status' => $connection->statusAfterFailedReconnect(),
                     'error_message' => $errorMessage,
                 ]);
             } else {
@@ -557,57 +664,159 @@ class AuthorizationController extends Controller
     }
 
     /**
-     * Refresh external_account_id and iban on existing accounts after a reconnect.
+     * Which session account each existing account becomes after a reconnect.
      *
      * Enable Banking issues new account UIDs with every new session, so the stored
      * external_account_id values become invalid as soon as the old session expires.
      *
      * Matching strategy (in priority order):
      *   1. Match by IBAN — reliable when the account was created after the iban column existed.
-     *   2. Positional fallback — match by creation order for legacy accounts without a stored IBAN.
+     *      Currency only tells apart one IBAN listed twice, so a second round ignores it: an
+     *      account created while the bank reported "XXX" holds the user's base currency, and
+     *      the bank's later, real currency must not refuse its own IBAN.
+     *   2. When the session lists no IBANs at all, so the bank does not return them, every
+     *      account left takes a session account by position, and matching ends there.
+     *   3. An account without a stored IBAN takes a session account without one, which is
+     *      what a card looks like on both sides.
+     *   4. An account without a stored IBAN takes any session account left. A stored IBAN the
+     *      session lacks means this bank account is not in it, and taking another one would
+     *      import its transactions here.
      *
+     * Uids a sibling connection has already claimed by IBAN are out of every step but the
+     * first, and each step takes the first session account that fits, in creation order.
+     *
+     * @param  Collection<int, Account>  $accounts
      * @param  array<int, array<string, mixed>>  $newAccounts
+     * @param  list<string>  $siblingUids
+     * @return array<string, array<string, mixed>> Session accounts keyed by account id.
      */
-    private function refreshAccountIds(BankingConnection $connection, array $newAccounts): void
+    private function matchSessionAccounts(Collection $accounts, array $newAccounts, array $siblingUids): array
     {
-        if (empty($newAccounts)) {
-            return;
+        $sessionListsIbans = collect($newAccounts)->contains(fn (array $data): bool => $this->sessionIban($data) !== null);
+        /** @var SupportCollection<int, array<string, mixed>> $unmatchedNew */
+        $unmatchedNew = collect($newAccounts)->filter(fn (array $data): bool => ! empty($data['uid']))->values();
+
+        $sameIban = fn (Account $account, array $data): bool => $this->normalizedIban($account->iban) !== null
+            && $this->normalizedIban($account->iban) === $this->sessionIban($data);
+
+        $matches = $this->pairAccounts($accounts, $unmatchedNew, $sameIban);
+        $matches += $this->pairAccounts($accounts->except(array_keys($matches)), $unmatchedNew, $sameIban, separateCurrencies: false);
+
+        $unmatchedNew = $unmatchedNew->reject(fn (array $data) => in_array($data['uid'], $siblingUids, true))->values();
+
+        if (! $sessionListsIbans) {
+            return $matches + $this->pairAccounts($accounts->except(array_keys($matches)), $unmatchedNew, fn (): bool => true);
         }
 
-        $existingAccounts = $connection->accounts()->orderBy('created_at')->get();
+        $withoutIban = $accounts->filter(fn (Account $account): bool => $this->normalizedIban($account->iban) === null);
 
-        $unmatchedNew = collect($newAccounts);
-        $unmatchedExisting = collect();
+        $matches += $this->pairAccounts($withoutIban, $unmatchedNew, fn (Account $account, array $data): bool => $this->sessionIban($data) === null);
+        $matches += $this->pairAccounts($withoutIban->except(array_keys($matches)), $unmatchedNew, fn (): bool => true);
 
-        foreach ($existingAccounts as $account) {
-            if ($account->iban) {
-                $matched = $unmatchedNew->first(fn (array $data) => ($data['account_id']['iban'] ?? null) === $account->iban);
+        return $matches;
+    }
 
-                if ($matched) {
-                    $account->update([
-                        'external_account_id' => $matched['uid'],
-                        'iban' => $matched['account_id']['iban'] ?? $account->iban,
-                    ]);
-                    $unmatchedNew = $unmatchedNew->reject(fn (array $data) => ($data['uid'] ?? null) === $matched['uid'])->values();
+    /**
+     * Give each account the first session account $accepts allows, taking it out
+     * of $sessionAccounts. Two known currencies that differ do not pair unless
+     * $separateCurrencies is off: a session can list one IBAN twice, once per currency.
+     *
+     * @param  Collection<int, Account>  $accounts
+     * @param  SupportCollection<int, array<string, mixed>>  $sessionAccounts
+     * @param  callable(Account, array<string, mixed>): bool  $accepts
+     * @return array<string, array<string, mixed>>
+     */
+    private function pairAccounts(Collection $accounts, SupportCollection &$sessionAccounts, callable $accepts, bool $separateCurrencies = true): array
+    {
+        $pairs = [];
 
-                    continue;
-                }
+        foreach ($accounts as $account) {
+            $matched = $sessionAccounts->first(fn (array $data): bool => $accepts($account, $data)
+                && ! ($separateCurrencies && $this->currenciesDiffer($account->currency_code, $data['currency'] ?? null)));
+
+            if ($matched) {
+                $pairs[$account->id] = $matched;
+                $sessionAccounts = $sessionAccounts->reject(fn (array $data) => $data['uid'] === $matched['uid'])->values();
             }
-
-            $unmatchedExisting->push($account);
         }
 
-        foreach ($unmatchedExisting as $index => $account) {
-            $newAccountData = $unmatchedNew->get($index);
+        return $pairs;
+    }
 
-            if (! $newAccountData) {
+    /**
+     * Whether both currencies are known and differ. "XXX" is ISO 4217's "no
+     * currency", which banks do send, so it counts as unknown.
+     */
+    private function currenciesDiffer(?string $first, ?string $second): bool
+    {
+        $known = collect([$first, $second])
+            ->map(fn (?string $currency): string => strtoupper(trim((string) $currency)))
+            ->reject(fn (string $currency): bool => $currency === '' || $currency === 'XXX');
+
+        return $known->count() === 2 && $known->unique()->count() === 2;
+    }
+
+    /**
+     * The normalized IBAN of a session account, or null when it has none.
+     *
+     * @param  array<string, mixed>  $sessionAccount
+     */
+    private function sessionIban(array $sessionAccount): ?string
+    {
+        return $this->normalizedIban($sessionAccount['account_id']['iban'] ?? null);
+    }
+
+    /**
+     * The IBAN without spaces, upper case, or null when there is none. Not
+     * ImportIban::normalize(): that one also drops an IBAN whose check digits
+     * fail, which here would turn a known account into one with no IBAN.
+     */
+    private function normalizedIban(?string $iban): ?string
+    {
+        $normalized = strtoupper((string) preg_replace('/\s+/', '', (string) $iban));
+
+        return $normalized === '' ? null : $normalized;
+    }
+
+    /**
+     * Refresh external_account_id and iban on existing accounts after a reconnect.
+     *
+     * An account with no match is one the new session does not cover (a closed
+     * account, say), so it is unlinked rather than left holding a uid of the
+     * session this reconnect just replaced: the sync skips an unlinked account,
+     * whereas the old uid answers CLOSED_SESSION and would expire the whole
+     * connection along with the session it was just given.
+     *
+     * @param  Collection<int, Account>  $accounts
+     * @param  array<string, array<string, mixed>>  $matches
+     * @return int The accounts left unlinked.
+     */
+    private function refreshAccountIds(BankingConnection $connection, Collection $accounts, array $matches): int
+    {
+        $unlinked = 0;
+
+        foreach ($accounts as $account) {
+            $matched = $matches[$account->id] ?? null;
+
+            if (! $matched) {
+                $account->update(['external_account_id' => null]);
+
+                Log::warning('Unlinked an EnableBanking account its new session does not return', [
+                    ...$connection->logContext(),
+                    'account_id' => $account->id,
+                ]);
+
+                $unlinked++;
+
                 continue;
             }
 
             $account->update([
-                'external_account_id' => $newAccountData['uid'],
-                'iban' => $newAccountData['account_id']['iban'] ?? null,
+                'external_account_id' => $matched['uid'],
+                'iban' => $matched['account_id']['iban'] ?? $account->iban,
             ]);
         }
+
+        return $unlinked;
     }
 }

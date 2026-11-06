@@ -3,91 +3,12 @@
 use App\Models\Label;
 use App\Models\User;
 use Illuminate\Contracts\Debug\ExceptionHandler;
-use Illuminate\Support\Str;
-use Laravel\Passport\ClientRepository;
+use Laravel\Passport\Passport;
 use League\OAuth2\Server\Exception\OAuthServerException;
 
 use function Pest\Laravel\get;
 use function Pest\Laravel\postJson;
 use function Pest\Laravel\withHeaders;
-
-/**
- * A hosted-callback redirect URI inside the config('mcp.redirect_domains')
- * allowlist (Anthropic's Claude connector callback).
- */
-const CLAUDE_CALLBACK = 'https://claude.ai/api/mcp/auth_callback';
-
-/**
- * Generate a PKCE (verifier, S256 challenge) pair.
- *
- * @return array{0: string, 1: string}
- */
-function pkcePair(): array
-{
-    $verifier = Str::random(64);
-    $challenge = rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '=');
-
-    return [$verifier, $challenge];
-}
-
-/**
- * Drive the full Authorization Code + PKCE flow for the user and return the
- * issued bearer access token, exactly as Claude/ChatGPT would obtain one:
- * register a public client, authorize with a code challenge, approve on the
- * consent screen, then exchange the code + verifier at the token endpoint.
- *
- * @param  list<string>  $scopes
- */
-function issueOAuthToken(User $user, array $scopes = ['mcp:use']): string
-{
-    $client = app(ClientRepository::class)->createAuthorizationCodeGrantClient(
-        name: 'Claude',
-        redirectUris: [CLAUDE_CALLBACK],
-        confidential: false,
-    );
-
-    [$verifier, $challenge] = pkcePair();
-
-    // 1. Authorize: renders the consent screen and primes the session.
-    $authorize = test()->actingAs($user)->get('/oauth/authorize?'.http_build_query([
-        'client_id' => $client->id,
-        'redirect_uri' => CLAUDE_CALLBACK,
-        'response_type' => 'code',
-        'scope' => implode(' ', $scopes),
-        'state' => 'state-token',
-        'code_challenge' => $challenge,
-        'code_challenge_method' => 'S256',
-    ]))->assertOk()
-        // The consent screen uses the self-hosted fonts from app.css, so it
-        // calls no third-party font CDN.
-        ->assertDontSee('fonts.bunny.net', false);
-
-    // The consent form carries the single-use auth token we must echo back.
-    preg_match('/name="auth_token" value="([^"]+)"/', $authorize->getContent(), $matches);
-    $authToken = $matches[1] ?? null;
-    expect($authToken)->not->toBeNull();
-
-    // 2. Approve: redirects back to the client with the authorization code.
-    $approve = test()->actingAs($user)->post('/oauth/authorize', [
-        'auth_token' => $authToken,
-        'client_id' => $client->id,
-        'state' => 'state-token',
-    ])->assertRedirect();
-
-    parse_str((string) parse_url($approve->headers->get('Location'), PHP_URL_QUERY), $redirect);
-    expect($redirect['code'] ?? null)->not->toBeNull();
-
-    // 3. Exchange the code + verifier for a token (public client, no secret).
-    $token = test()->post('/oauth/token', [
-        'grant_type' => 'authorization_code',
-        'client_id' => $client->id,
-        'redirect_uri' => CLAUDE_CALLBACK,
-        'code_verifier' => $verifier,
-        'code' => $redirect['code'],
-    ])->assertOk();
-
-    return $token->json('access_token');
-}
 
 /*
 |--------------------------------------------------------------------------
@@ -171,11 +92,69 @@ it('registers a public PKCE client via dynamic client registration', function ()
     expect($response->json('redirect_uris'))->toContain(CLAUDE_CALLBACK);
 });
 
-it('rejects a DCR redirect URI outside the allowlist', function () {
+it('registers a loopback redirect on any port once the allowlist names loopback', function (string $callback) {
+    config(['mcp.redirect_domains' => [...config('mcp.redirect_domains'), 'http://localhost']]);
+
+    postJson('/oauth/register', [
+        'client_name' => 'Claude Code',
+        'redirect_uris' => [$callback],
+    ])->assertCreated();
+})->with([
+    'localhost' => 'http://localhost:53682/callback',
+    '127.0.0.1' => 'http://127.0.0.1:61234/callback',
+    '127.0.0.1, short path' => 'http://127.0.0.1:5555/cb',
+    'localhost, other port' => 'http://localhost:1234/callback',
+    'localhost, no port' => 'http://localhost/callback',
+    'IPv6 loopback' => 'http://[::1]:7777/callback',
+]);
+
+it('keeps refusing loopback while the allowlist does not name it, as it did before', function (string $callback) {
+    expect(config('mcp.redirect_domains'))->toBe(['https://claude.ai', 'https://chatgpt.com']);
+
+    postJson('/oauth/register', [
+        'client_name' => 'Claude Code',
+        'redirect_uris' => [$callback],
+    ])->assertStatus(400)->assertJson(['error' => 'invalid_redirect_uri']);
+})->with([
+    'localhost' => 'http://localhost:53682/callback',
+    '127.0.0.1' => 'http://127.0.0.1:61234/callback',
+]);
+
+it('registers the hosted connector callbacks', function (string $callback) {
+    postJson('/oauth/register', [
+        'client_name' => 'Connector',
+        'redirect_uris' => [$callback],
+    ])->assertCreated();
+})->with([
+    'Claude' => 'https://claude.ai/api/mcp/auth_callback',
+    'ChatGPT' => 'https://chatgpt.com/connector_platform_oauth_redirect',
+]);
+
+it('rejects a DCR redirect URI outside the allowlist, plain-http or not', function (string $callback) {
     postJson('/oauth/register', [
         'client_name' => 'Evil',
-        'redirect_uris' => ['https://evil.example.com/callback'],
+        'redirect_uris' => [$callback],
     ])->assertStatus(400)->assertJson(['error' => 'invalid_redirect_uri']);
+})->with([
+    'plain-http host that is not loopback' => 'http://evil.example.com/callback',
+    'https host outside the allowlist' => 'https://evil.example.com/callback',
+    'loopback prefix hiding another host' => 'http://127.0.0.1:x@evil.com/cb',
+    'localhost prefix hiding another host' => 'http://localhost:1234@evil.com/cb',
+    'allowed host as user info' => 'https://claude.ai@evil.com/cb',
+    'allowed host as a subdomain' => 'https://claude.ai.evil.com/cb',
+    'allowed host with credentials' => 'https://user:pass@claude.ai/cb',
+    'allowed host, another port' => 'https://claude.ai:8443/cb',
+    'allowed host, explicit default port' => 'https://claude.ai:443/cb',
+    'allowed host, plain http' => 'http://claude.ai/cb',
+]);
+
+it('rejects the whole registration when any redirect URI is outside the allowlist', function () {
+    postJson('/oauth/register', [
+        'client_name' => 'Evil',
+        'redirect_uris' => [CLAUDE_CALLBACK, 'http://127.0.0.1:x@evil.com/cb'],
+    ])->assertStatus(400)->assertJson(['error' => 'invalid_redirect_uri']);
+
+    expect(Passport::client()->newQuery()->count())->toBe(0);
 });
 
 /*

@@ -1,5 +1,7 @@
 <?php
 
+use App\Enums\OAuthScope;
+use App\Http\Middleware\EnsureMcpOAuthToken;
 use App\Mcp\Servers\WhisperMoneyServer;
 use Laravel\Mcp\Facades\Mcp;
 
@@ -20,6 +22,12 @@ use Laravel\Mcp\Facades\Mcp;
 |   scope; the package's AddWwwAuthenticateHeader middleware then turns an
 |   unauthenticated request into the mandatory 401 bootstrap challenge.
 |
+| The same authorization server also serves the public API (`api:use`, see
+| App\Enums\OAuthScope): a token carries one scope or the other, never both,
+| and `/mcp/oauth` refuses anything but `mcp:use`, so an API app's token gets a
+| 403 here. Connections authorized before scopes were defaulted, which carry no
+| scope at all, keep working (see EnsureMcpOAuthToken).
+|
 | OAuth connections carry the single `mcp:use` scope and are trusted with
 | read and write: the user approved the connection on the consent screen, so
 | WriteTool grants write to anything on the `api` guard. Sanctum personal
@@ -36,4 +44,4 @@ Mcp::web('/mcp', WhisperMoneyServer::class)
     ->middleware(['auth:sanctum', 'abilities:mcp:read', 'throttle:60,1']);
 
 Mcp::web('/mcp/oauth', WhisperMoneyServer::class)
-    ->middleware(['auth:api', 'throttle:60,1']);
+    ->middleware(['auth:api', EnsureMcpOAuthToken::using(OAuthScope::Mcp->value), 'throttle:60,1']);
