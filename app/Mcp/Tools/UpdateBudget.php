@@ -6,7 +6,6 @@ use App\Enums\BudgetExpenseType;
 use App\Mcp\Tools\Concerns\InteractsWithBudgets;
 use App\Models\User;
 use App\Services\BudgetManagementService;
-use Carbon\CarbonImmutable;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Validation\Rule;
 use Laravel\Mcp\Request;
@@ -57,7 +56,7 @@ class UpdateBudget extends WriteTool
             $space,
             $request->string('budget_id')->toString(),
             $changes,
-            CarbonImmutable::today(),
+            $user->localToday()->toImmutable(),
         );
         [$current, $next] = $this->periodsFor($result['budget']);
 

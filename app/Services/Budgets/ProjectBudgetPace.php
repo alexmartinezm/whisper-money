@@ -33,13 +33,12 @@ class ProjectBudgetPace
      */
     public function forUser(User $user, ?CarbonImmutable $today = null, ?Space $space = null): array
     {
-        $today ??= CarbonImmutable::today();
+        $today ??= $user->localToday()->toImmutable();
 
         $budgets = $user->budgets()
             ->where('space_id', ($space ?? $user->activeSpace())->id)
             ->with(['periods' => function ($query) use ($today): void {
-                $query->whereDate('start_date', '<=', $today->toDateString())
-                    ->whereDate('end_date', '>=', $today->toDateString())
+                $query->covering($today)
                     ->withSum('budgetTransactions as spent_amount', 'amount');
             }])
             ->get();

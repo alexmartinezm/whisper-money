@@ -11,7 +11,6 @@ use App\Http\Resources\V1\BudgetPeriodAllocationResource;
 use App\Http\Resources\V1\BudgetResource;
 use App\Models\Budget;
 use App\Services\BudgetManagementService;
-use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -91,7 +90,7 @@ class BudgetController extends Controller
             $this->space($request),
             $request->budget()->id,
             $request->changes(),
-            CarbonImmutable::today(),
+            $this->user($request)->localToday()->toImmutable(),
         )['budget']);
     }
 
@@ -113,7 +112,7 @@ class BudgetController extends Controller
             $request->budget()->id,
             $request->periodDate(),
             $request->oneOffAmount(),
-            CarbonImmutable::today(),
+            $this->user($request)->localToday()->toImmutable(),
         ));
     }
 

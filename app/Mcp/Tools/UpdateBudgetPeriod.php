@@ -50,7 +50,7 @@ class UpdateBudgetPeriod extends WriteTool
             $request->string('budget_id')->toString(),
             CarbonImmutable::parse($request->string('date')->toString())->startOfDay(),
             $reset ? null : $request->integer('allocated_amount'),
-            CarbonImmutable::today(),
+            $user->localToday()->toImmutable(),
         );
         [$current, $next] = $this->periodsFor($result['budget']);
         $period = $result['period'];

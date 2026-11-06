@@ -10,7 +10,13 @@ use Sentry\State\Scope;
 
 use function Sentry\configureScope;
 
-Schedule::command('budgets:generate-periods')->daily();
+// Hourly, because a period ends at the owner's midnight, not the server's:
+// for a user in Los Angeles that is 07:00 or 08:00 UTC, for one in Auckland
+// 11:00 or 12:00 UTC the day before. A daily run at 00:00 UTC rolled periods
+// over hours late (or a day late) for most users. Every run is idempotent: a
+// period is found on its (budget, start date) key, and closing one writes the
+// same carry-over to the same row.
+Schedule::command('budgets:generate-periods')->hourly()->withoutOverlapping(60);
 // Just after midnight, so a month opens and the last one closes as soon as it
 // is over (pages open the month themselves if they get there first). Again at
 // breakfast time in Europe, which is when the month-end reminder goes out: the

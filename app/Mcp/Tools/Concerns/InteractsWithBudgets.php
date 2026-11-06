@@ -82,7 +82,7 @@ trait InteractsWithBudgets
     /** @return array{0: ?BudgetPeriod, 1: ?BudgetPeriod} */
     protected function periodsFor(Budget $budget): array
     {
-        $asOf = today();
+        $asOf = $budget->ownerToday();
         $periods = $budget->periods()
             ->where(function ($query) use ($asOf): void {
                 $query->where(function ($current) use ($asOf): void {

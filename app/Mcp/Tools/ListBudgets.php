@@ -28,7 +28,7 @@ class ListBudgets extends McpTool
     protected function respond(Request $request, User $user): Response
     {
         $space = $this->resolveSpace($request, $user);
-        $asOf = today();
+        $asOf = $user->localToday();
         $budgets = Budget::query()
             ->notArchived()
             ->where('user_id', $user->id)

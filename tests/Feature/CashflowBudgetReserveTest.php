@@ -615,3 +615,29 @@ test('each period splits by its own budgets, from the transactions the summary a
         ->and(collect($queries)->filter(fn (string $sql): bool => str_contains($sql, 'pivot_transaction_id'))->count())->toBe(1)
         ->and(collect($queries)->filter(fn (string $sql): bool => str_starts_with($sql, 'select `budgets`.*'))->count())->toBe(1);
 });
+
+test('reserved reads the periods in progress on the user\'s today', function () {
+    // 1 November 00:30 UTC is still 31 October in Buenos Aires: October holds
+    // its margin back, November has not started.
+    $this->travelTo(now()->setDate(2026, 11, 1)->setTime(0, 30));
+    $this->user->update(['timezone' => 'America/Argentina/Buenos_Aires']);
+
+    $groceries = Budget::factory()->monthly()->create(['user_id' => $this->user->id, 'name' => 'Groceries']);
+    budgetPeriodWithSpend($groceries, '2026-10-01', '2026-10-31', 40000, 15000);
+    budgetPeriodWithSpend($groceries, '2026-11-01', '2026-11-30', 40000, 0);
+
+    expect(cashflowSummary('2026-10-01', '2026-11-30')['reserved'])->toBe(25000);
+});
+
+test('reserved reads the owner\'s period east of UTC too', function () {
+    // 31 October 12:00 UTC is already 1 November in Auckland: October gave
+    // back what it left, November holds its whole margin.
+    $this->travelTo(now()->setDate(2026, 10, 31)->setTime(12, 0));
+    $this->user->update(['timezone' => 'Pacific/Auckland']);
+
+    $groceries = Budget::factory()->monthly()->create(['user_id' => $this->user->id, 'name' => 'Groceries']);
+    budgetPeriodWithSpend($groceries, '2026-10-01', '2026-10-31', 40000, 15000);
+    budgetPeriodWithSpend($groceries, '2026-11-01', '2026-11-30', 40000, 0);
+
+    expect(cashflowSummary('2026-10-01', '2026-11-30')['reserved'])->toBe(40000);
+});

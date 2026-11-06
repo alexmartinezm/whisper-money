@@ -126,7 +126,7 @@ class BudgetAssignmentLookups
             ->whereHas('periods', fn ($query) => $query
                 ->where('start_date', '<=', $date)
                 ->where('end_date', '>=', $date)
-                ->where('end_date', '>=', today()->toDateString()))
+                ->where('end_date', '>=', $catchAll->ownerToday()->toDateString()))
             ->get();
     }
 
@@ -146,7 +146,7 @@ class BudgetAssignmentLookups
                 ->where('user_id', $catchAll->user_id)
                 ->where('space_id', $catchAll->space_id)
                 ->where('is_catch_all', false))
-            ->with(['budgetPeriod.budget.categories:id', 'budgetPeriod.budget.labels:id'])
+            ->with(['budgetPeriod.budget.categories:id', 'budgetPeriod.budget.labels:id', 'budgetPeriod.budget.user:id,timezone'])
             ->get()
             ->groupBy('transaction_id')
             ->all();
