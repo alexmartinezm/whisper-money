@@ -20,7 +20,10 @@ class SavingsGoalController extends Controller
      * List savings goals
      *
      * Your goals in a space, newest first, archived ones included. As in the
-     * app, another member's goals are not listed.
+     * app, another member's goals are not listed. In a space with other
+     * members, a goal measured against the space's income shows what it saved
+     * but not its targets, nor anything worked out from them: they would give
+     * away what the others earn.
      */
     public function index(Request $request): AnonymousResourceCollection
     {
@@ -49,7 +52,8 @@ class SavingsGoalController extends Controller
      * contributions with. A one-off goal needs `target_amount`; a monthly goal
      * needs `monthly_target_type` with its `monthly_target_amount` or
      * `monthly_target_rate`, and its first month opens right away. The fields
-     * of the other kind are refused. A monthly goal given
+     * of the other kind are refused, and so is `income_rate` in a space with
+     * other members. A monthly goal given
      * `auto_tag_account_id`, one of your savings accounts in the space, also
      * gets an automation rule that tags the transfers into that account to the
      * goal, the ones already there since the start of this month included.
@@ -68,7 +72,8 @@ class SavingsGoalController extends Controller
      * kind: the others, and `kind` itself, are refused. A new name renames the
      * goal's label too. A new monthly target applies to the month in progress
      * and later ones, never to the months already over. An archived goal can
-     * no longer change: `422` under `savings_goal`.
+     * no longer change: `422` under `savings_goal`. As on create, `income_rate`
+     * is refused in a space with other members.
      *
      * @param  string  $savings_goal  The goal's id.
      */

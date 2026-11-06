@@ -3,6 +3,7 @@
 namespace App\Http\Resources\V1;
 
 use App\Models\SavingsGoal;
+use App\Services\SavingsGoals\SavingsGoalIncomeWithholding;
 use App\Services\SavingsGoals\SavingsGoalPresenter;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Http\Request;
@@ -13,7 +14,9 @@ use Illuminate\Http\Resources\Json\JsonResource;
  * A savings goal, tracked through a label: its contributions are the
  * transactions tagged with it. A `one_off` goal carries its `progress`
  * towards a total, a `monthly` goal its `monthly` record; the fields of the
- * other kind are `null`.
+ * other kind are `null`. In a space with other members, the `monthly` figures
+ * of a goal measured against the space's income are `null` too, because they
+ * would give away what the others earn: see SavingsGoalIncomeWithholding.
  *
  * @mixin SavingsGoal
  */
@@ -36,7 +39,8 @@ class SavingsGoalResource extends JsonResource
     {
         $collection = parent::collection($resource);
         $goals = $collection->collection->map(fn (self $goal): mixed => $goal->resource)->whereInstanceOf(SavingsGoal::class)->values();
-        $rows = app(SavingsGoalPresenter::class)->many(new EloquentCollection($goals->all()));
+        $page = new EloquentCollection($goals->all());
+        $rows = app(SavingsGoalIncomeWithholding::class)->apply($page, app(SavingsGoalPresenter::class)->many($page));
 
         $collection->collection->each(function (self $goal) use ($rows): void {
             $goal->row = $rows[$goal->resource->id];
@@ -50,7 +54,10 @@ class SavingsGoalResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
-        $row = $this->row ?? app(SavingsGoalPresenter::class)->one($this->resource);
+        $row = $this->row ?? app(SavingsGoalIncomeWithholding::class)->apply(
+            $this->resource->newCollection([$this->resource]),
+            [$this->id => app(SavingsGoalPresenter::class)->one($this->resource)],
+        )[$this->id];
 
         return [
             'id' => $this->id,

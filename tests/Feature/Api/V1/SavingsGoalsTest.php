@@ -1,12 +1,15 @@
 <?php
 
 use App\Enums\AccountType;
+use App\Enums\CategoryType;
 use App\Enums\LabelSource;
 use App\Mcp\Servers\WhisperMoneyServer;
 use App\Mcp\Tools\CreateSavingsGoal;
 use App\Mcp\Tools\ListSavingsGoals;
+use App\Mcp\Tools\UpdateSavingsGoal;
 use App\Models\Account;
 use App\Models\AutomationRule;
+use App\Models\Category;
 use App\Models\Label;
 use App\Models\SavingsGoal;
 use App\Models\Space;
@@ -17,6 +20,7 @@ use App\Services\SavingsGoals\SavingsGoalService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Testing\TestResponse;
 
 use function Pest\Laravel\withHeaders;
 
@@ -60,6 +64,76 @@ function sharedGoalSpace(User $member, User $owner): Space
 function newMonthlyGoal(array $overrides = []): array
 {
     return ['name' => 'Emergency fund', 'kind' => 'monthly', 'monthly_target_type' => 'amount', 'monthly_target_amount' => 30_000, ...$overrides];
+}
+
+/**
+ * A 10% income-rate goal of $saver's, with a closed month and the one in
+ * progress, in a space whose only income is $earner's: 4,321,700 in each month
+ * before the goal's. The target that gives is 432,170 and September's shortfall
+ * 419,825, so any of the three in a response is $earner's income.
+ */
+function goalOnTheIncomeOf(User $earner, User $saver, Space $space, array $attributes = []): SavingsGoal
+{
+    $account = Account::factory()->create(['user_id' => $earner->id, 'space_id' => $space->id, 'type' => AccountType::Checking, 'currency_code' => 'EUR']);
+    $salary = Category::factory()->create(['user_id' => $earner->id, 'space_id' => $space->id, 'type' => CategoryType::Income]);
+
+    foreach (['2026-06-28', '2026-07-28', '2026-08-28', '2026-09-28'] as $date) {
+        Transaction::factory()->create([
+            'user_id' => $earner->id,
+            'account_id' => $account->id,
+            'category_id' => $salary->id,
+            'currency_code' => 'EUR',
+            'amount' => 4_321_700,
+            'transaction_date' => $date,
+        ]);
+    }
+
+    test()->travelTo(Carbon::parse('2026-09-02 12:00:00'));
+    $goal = SavingsGoal::factory()->incomeRate(10)->create(['user_id' => $saver->id, 'space_id' => $space->id, 'created_at' => now(), ...$attributes]);
+    app(SavingsGoalPeriodService::class)->advance($goal);
+    Transaction::factory()->create([
+        'user_id' => $saver->id,
+        'account_id' => savingsAccount($saver, ['space_id' => $space->id])->id,
+        'category_id' => Category::factory()->create(['user_id' => $saver->id, 'space_id' => $space->id, 'type' => CategoryType::Savings])->id,
+        'currency_code' => 'EUR',
+        'amount' => 12_345,
+        'transaction_date' => '2026-09-15',
+    ])->labels()->attach($goal->label_id);
+    test()->travelTo(Carbon::parse('2026-10-03 12:00:00'));
+    app(SavingsGoalPeriodService::class)->advance($goal);
+
+    return $goal;
+}
+
+/**
+ * The goal's row hides everything worked out from the income it is measured
+ * against, down to the raw body.
+ */
+function expectNoIncomeFigure(TestResponse $response, string $row = 'data'): void
+{
+    expect($response->getContent())->not->toContain('4321700')->not->toContain('432170')->not->toContain('419825');
+
+    $month = fn (string $month, int $saved): array => ['month' => $month, 'target' => null, 'saved' => $saved, 'difference' => null, 'status' => null, 'income_base' => null];
+
+    expect($response->json("{$row}.monthly.current"))->toBe([...$month('2026-10', 0), 'remaining' => null, 'days_left' => 29])
+        ->and($response->json("{$row}.monthly.history"))->toBe([$month('2026-09', 12_345), $month('2026-10', 0)])
+        ->and($response->json("{$row}.monthly"))->toMatchArray([
+            'months_met' => null,
+            'months_closed' => null,
+            'cumulative_difference' => null,
+            'streak' => null,
+            'best_streak' => null,
+        ]);
+}
+
+/**
+ * The goal's row with its figures: the ones of goalOnTheIncomeOf().
+ */
+function expectIncomeFigures(TestResponse $response, string $row = 'data'): void
+{
+    expect($response->json("{$row}.monthly.current"))->toMatchArray(['target' => 432_170, 'income_base' => 4_321_700, 'remaining' => 432_170, 'status' => 'in_progress'])
+        ->and($response->json("{$row}.monthly.history.0"))->toMatchArray(['target' => 432_170, 'income_base' => 4_321_700, 'difference' => -419_825, 'status' => 'missed'])
+        ->and($response->json("{$row}.monthly"))->toMatchArray(['months_met' => 0, 'months_closed' => 1, 'cumulative_difference' => -419_825, 'streak' => 0, 'best_streak' => 0]);
 }
 
 beforeEach(function () {
@@ -441,6 +515,167 @@ describe('labels', function () {
     });
 });
 
+describe('a goal measured against a shared space\'s income', function () {
+    it('never shows a co-member\'s income, whoever of the two owns the space', function (bool $callerOwnsTheSpace) {
+        $saver = goalUser();
+        $earner = goalUser();
+        $space = $callerOwnsTheSpace ? sharedGoalSpace($earner, $saver) : sharedGoalSpace($saver, $earner);
+        $goal = goalOnTheIncomeOf($earner, $saver, $space);
+        $headers = goalsWriter($saver);
+
+        $list = withHeaders($headers)->getJson("/api/v1/savings-goals?space={$space->id}")->assertOk();
+        expectNoIncomeFigure($list, 'data.0');
+        $list->assertJsonPath('data.0.monthly_target_type', 'income_rate')
+            ->assertJsonPath('data.0.monthly_target_rate', 10)
+            ->assertJsonPath('data.0.monthly_target_amount', null);
+
+        expectNoIncomeFigure(withHeaders($headers)->getJson("/api/v1/savings-goals/{$goal->id}?space={$space->id}")->assertOk());
+        expectNoIncomeFigure(
+            withHeaders($headers)->patchJson("/api/v1/savings-goals/{$goal->id}?space={$space->id}", ['name' => 'Renamed'])
+                ->assertOk()
+                ->assertJsonPath('data.name', 'Renamed'),
+        );
+    })->with(['the caller is a member' => false, 'the caller is the owner' => true]);
+
+    it('hides them on an archived goal too, and leaves a one-off goal of the same space alone', function () {
+        $saver = goalUser();
+        $earner = goalUser();
+        $space = sharedGoalSpace($saver, $earner);
+        $goal = goalOnTheIncomeOf($earner, $saver, $space);
+        app(SavingsGoalService::class)->archive($goal);
+        $oneOff = SavingsGoal::factory()->create(['user_id' => $saver->id, 'space_id' => $space->id, 'target_amount' => 500_000]);
+
+        $response = withHeaders(goalsWriter($saver))->getJson("/api/v1/savings-goals?space={$space->id}")->assertOk();
+        $row = fn (string $id): array => collect($response->json('data'))->firstWhere('id', $id);
+
+        expect($response->getContent())->not->toContain('4321700')->not->toContain('432170')->not->toContain('419825')
+            ->and($row($goal->id)['monthly']['current'])->toBeNull()
+            ->and($row($goal->id)['monthly']['history'][0]['saved'])->toBe(12_345)
+            ->and($row($goal->id)['monthly']['history'][0]['target'])->toBeNull()
+            ->and($row($oneOff->id)['target_amount'])->toBe(500_000)
+            ->and($row($oneOff->id)['progress'])->not->toBeNull();
+    });
+
+    it('keeps the months measured against that income hidden once the goal moves to a fixed amount', function () {
+        $saver = goalUser();
+        $earner = goalUser();
+        $space = sharedGoalSpace($saver, $earner);
+        $goal = goalOnTheIncomeOf($earner, $saver, $space);
+        $headers = goalsWriter($saver);
+        $url = "/api/v1/savings-goals/{$goal->id}?space={$space->id}";
+
+        $moved = withHeaders($headers)->patchJson($url, ['monthly_target_type' => 'amount', 'monthly_target_amount' => 20_000])
+            ->assertOk()
+            ->assertJsonPath('data.monthly_target_type', 'amount')
+            ->assertJsonPath('data.monthly_target_amount', 20_000);
+
+        foreach ([$moved, withHeaders($headers)->getJson($url)->assertOk()] as $response) {
+            expect($response->getContent())->not->toContain('4321700')->not->toContain('432170')->not->toContain('419825')
+                ->and($response->json('data.monthly.history.0.target'))->toBeNull()
+                ->and($response->json('data.monthly.history.0.income_base'))->toBeNull()
+                ->and($response->json('data.monthly.cumulative_difference'))->toBeNull();
+        }
+    });
+
+    it('hides the figures of a goal whose space gains a member after it was created', function () {
+        $saver = goalUser();
+        $earner = goalUser();
+        $space = Space::factory()->create(['owner_id' => $saver->id, 'personal' => false]);
+        $goal = goalOnTheIncomeOf($saver, $saver, $space);
+        $url = "/api/v1/savings-goals/{$goal->id}?space={$space->id}";
+
+        expectIncomeFigures(withHeaders(goalsWriter($saver))->getJson($url)->assertOk());
+
+        $space->members()->attach($earner->id, ['id' => (string) Str::uuid(), 'role' => 'member']);
+
+        expectNoIncomeFigure(withHeaders(goalsWriter($saver))->getJson($url)->assertOk());
+    });
+
+    it('leaves a goal with nobody else in its space, and a fixed amount in a shared one, as they are', function () {
+        $user = goalUser();
+        $alone = Space::factory()->create(['owner_id' => $user->id, 'personal' => false]);
+        $goal = goalOnTheIncomeOf($user, $user, $alone);
+        $personal = goalOnTheIncomeOf($user, $user, $user->personalSpace);
+
+        expectIncomeFigures(withHeaders(goalsWriter($user))->getJson("/api/v1/savings-goals/{$goal->id}?space={$alone->id}")->assertOk());
+        expectIncomeFigures(withHeaders(goalsWriter($user))->getJson("/api/v1/savings-goals/{$personal->id}")->assertOk());
+
+        $shared = sharedGoalSpace($user, goalUser());
+        $amount = apiMonthlyGoal($user, ['space_id' => $shared->id]);
+
+        withHeaders(goalsWriter($user))->getJson("/api/v1/savings-goals/{$amount->id}?space={$shared->id}")
+            ->assertOk()
+            ->assertJsonPath('data.monthly.current.target', 30_000)
+            ->assertJsonPath('data.monthly.current.remaining', 30_000)
+            ->assertJsonPath('data.monthly.current.status', 'in_progress')
+            ->assertJsonPath('data.monthly.months_closed', 0);
+    });
+
+    it('reads a page of a shared space\'s goals in the same number of database queries however many it holds', function () {
+        $user = goalUser();
+        $space = sharedGoalSpace($user, goalUser());
+        $headers = apiV1Bearer($user);
+        $queriesFor = function () use ($headers, $space): int {
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            withHeaders($headers)->getJson("/api/v1/savings-goals?space={$space->id}")->assertOk();
+
+            return collect(DB::getQueryLog())->reject(fn (array $query): bool => str_contains($query['query'], '`cache`'))->count();
+        };
+
+        apiMonthlyGoal($user, ['space_id' => $space->id]);
+        $queriesFor();
+        $one = $queriesFor();
+        apiMonthlyGoal($user, ['space_id' => $space->id]);
+        apiMonthlyGoal($user, ['space_id' => $space->id]);
+
+        expect($queriesFor())->toBe($one);
+    });
+
+    it('refuses an income rate on a goal in a space with another member', function (string $target) {
+        $saver = goalUser();
+        $space = sharedGoalSpace($saver, goalUser());
+        $body = ['monthly_target_type' => 'income_rate', 'monthly_target_rate' => 10];
+        $amount = apiMonthlyGoal($saver, ['space_id' => $space->id]);
+        $rate = SavingsGoal::factory()->incomeRate(5)->create(['user_id' => $saver->id, 'space_id' => $space->id]);
+
+        $response = match ($target) {
+            'create' => withHeaders(goalsWriter($saver))->postJson("/api/v1/savings-goals?space={$space->id}", newMonthlyGoal(['monthly_target_amount' => null, ...$body])),
+            'switch' => withHeaders(goalsWriter($saver))->patchJson("/api/v1/savings-goals/{$amount->id}?space={$space->id}", $body),
+            'new rate' => withHeaders(goalsWriter($saver))->patchJson("/api/v1/savings-goals/{$rate->id}?space={$space->id}", $body),
+        };
+
+        $response->assertUnprocessable()
+            ->assertJsonPath('errors.monthly_target_type.0', 'An income rate is measured against the income of everyone in a shared space. Use an amount in this space.');
+
+        expect($amount->fresh()->monthly_target_type->value)->toBe('amount')
+            ->and((float) $rate->fresh()->monthly_target_rate)->toBe(5.0)
+            ->and($saver->savingsGoals()->count())->toBe(2);
+    })->with(['create', 'switch', 'new rate']);
+
+    it('takes an income rate where the user is alone', function () {
+        $user = goalUser();
+        $alone = Space::factory()->create(['owner_id' => $user->id, 'personal' => false]);
+        $body = newMonthlyGoal(['monthly_target_amount' => null, 'monthly_target_type' => 'income_rate', 'monthly_target_rate' => 10]);
+
+        withHeaders(goalsWriter($user))->postJson('/api/v1/savings-goals', $body)->assertCreated();
+        $created = withHeaders(goalsWriter($user))->postJson("/api/v1/savings-goals?space={$alone->id}", [...$body, 'name' => 'Other'])->assertCreated();
+
+        withHeaders(goalsWriter($user))->patchJson('/api/v1/savings-goals/'.$created->json('data.id')."?space={$alone->id}", ['monthly_target_type' => 'income_rate', 'monthly_target_rate' => 12])
+            ->assertOk()
+            ->assertJsonPath('data.monthly_target_rate', 12);
+    });
+
+    it('reports a type refused for its own reason only once', function () {
+        $saver = goalUser();
+        $space = sharedGoalSpace($saver, goalUser());
+
+        withHeaders(goalsWriter($saver))->postJson("/api/v1/savings-goals?space={$space->id}", newMonthlyGoal(['monthly_target_type' => ['income_rate']]))
+            ->assertUnprocessable()
+            ->assertJsonCount(1, 'errors.monthly_target_type');
+    });
+});
+
 describe('the MCP tools, which read a whole space', function () {
     it('still lists every member\'s goals and tags any member\'s account', function () {
         $user = goalUser();
@@ -464,6 +699,36 @@ describe('the MCP tools, which read a whole space', function () {
         ])->assertOk();
 
         expect($user->savingsGoals()->sole()->auto_tag_account_id)->toBe($theirAccount->id);
+    });
+
+    it('still shows the figures of a goal measured against a shared space\'s income, and still takes a rate there', function () {
+        $saver = goalUser();
+        $earner = goalUser();
+        $space = sharedGoalSpace($saver, $earner);
+        $goal = goalOnTheIncomeOf($earner, $saver, $space);
+        $saver->withAccessToken($saver->createToken('mcp', ['mcp:read', 'mcp:write'])->accessToken);
+
+        WhisperMoneyServer::actingAs($saver)->tool(ListSavingsGoals::class, ['space' => $space->id])
+            ->assertOk()
+            ->assertSee('{"month":"2026-09","target":432170,"saved":12345,"difference":-419825,"status":"missed","income_base":4321700}')
+            ->assertSee('"months_met":0,"months_closed":1,"cumulative_difference":-419825,"streak":0,"best_streak":0');
+
+        WhisperMoneyServer::actingAs($saver)->tool(UpdateSavingsGoal::class, [
+            'space' => $space->id,
+            'savings_goal_id' => $goal->id,
+            'monthly_target_type' => 'income_rate',
+            'monthly_target_rate' => 12,
+        ])->assertOk();
+
+        WhisperMoneyServer::actingAs($saver)->tool(CreateSavingsGoal::class, [
+            'space' => $space->id,
+            'name' => 'Rainy day',
+            'kind' => 'monthly',
+            'monthly_target_type' => 'income_rate',
+            'monthly_target_rate' => 10,
+        ])->assertOk();
+
+        expect((float) $goal->fresh()->monthly_target_rate)->toBe(12.0);
     });
 
     it('still names the goal feeding an account', function () {
