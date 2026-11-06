@@ -18,9 +18,10 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * @phpstan-type LeftAlone array{transaction_id: string, transaction_date: string, amount: int, reason: string}
- * @phpstan-type CatchAllChanges array{released_double_count: int, reduced_double_count: int, released_other: int, adjusted: int, absorbed: int, spent_change: int, left_alone: array<int, LeftAlone>}
+ * @phpstan-type UnprovedChange array{transaction_id: string, transaction_date: string, from: int, to: int}
+ * @phpstan-type CatchAllChanges array{released_double_count: int, reduced_double_count: int, released_other: int, adjusted: int, absorbed: int, spent_change: int, left_alone: array<int, LeftAlone>, unproved_changes: array<int, UnprovedChange>}
  * @phpstan-type CatchAllVerdict array{amount: int, reason: ?string}
- * @phpstan-type SnapshotChanges array{rows: array<int, array{transaction_id: string, budget_period_id: string, amount: int}>, released_ids: array<int, string>, absorbed: int, adjusted: int, spent_change: int}
+ * @phpstan-type SnapshotChanges array{rows: array<int, array{transaction_id: string, budget_period_id: string, amount: int}>, released_ids: array<int, string>, previous_amounts: array<string, int>, absorbed: int, adjusted: int, spent_change: int}
  */
 class BudgetTransactionService
 {
@@ -32,6 +33,9 @@ class BudgetTransactionService
 
     /** A budget's row does not match what that budget tracks today, so nothing proves which part of the transaction it counts. */
     public const string HOLDER_ROW_UNEXPLAINED = 'holder_row_unexplained';
+
+    /** The same, for a transaction the catch-all holds no row for: there is nothing to leave alone, it just is not absorbed. */
+    public const string NOT_ABSORBED_UNEXPLAINED = 'not_absorbed_unexplained';
 
     public function __construct(
         private readonly CategoryTree $tree = new CategoryTree,
@@ -188,10 +192,13 @@ class BudgetTransactionService
      * silently, like every historical assignment. Runs under the period's row
      * lock, the one every other reconciliation of the period takes.
      *
-     * A period still running is re-derived, except that it only gives up a row
-     * another budget's row accounts for. A closed one keeps the figure it ran on:
-     * it absorbs nothing and loses only a proved double count. What cannot be
-     * proved stays as it is and comes back in `left_alone`.
+     * A period still running is re-derived, except that a claim by another
+     * budget takes a row away only as far as that budget's rows account for it.
+     * Rows can still change there with no budget involved: an expense that is
+     * not one any more, or an amount out of date. Those come back in
+     * `unproved_changes`. A closed period keeps the figure it ran on: it absorbs
+     * nothing and loses only a proved double count. What a claim cannot prove
+     * stays as it is and comes back in `left_alone`.
      *
      * @return CatchAllChanges
      */
@@ -227,6 +234,7 @@ class BudgetTransactionService
             'absorbed' => 0,
             'spent_change' => 0,
             'left_alone' => [],
+            'unproved_changes' => [],
         ];
         $catchAll = $this->budgetOfPeriod($period);
 
@@ -276,14 +284,12 @@ class BudgetTransactionService
 
         foreach ($transactions as $transaction) {
             $verdict = $verdicts[$transaction->id];
+            $row = ['transaction_id' => $transaction->id, 'transaction_date' => $transaction->transaction_date->toDateString()];
 
             if ($verdict['reason'] !== null && $verdict['reason'] !== self::DOUBLE_COUNT) {
-                $totals['left_alone'][] = [
-                    'transaction_id' => $transaction->id,
-                    'transaction_date' => $transaction->transaction_date->toDateString(),
-                    'amount' => $verdict['amount'],
-                    'reason' => $verdict['reason'],
-                ];
+                $totals['left_alone'][] = [...$row, 'amount' => $verdict['amount'], 'reason' => $verdict['reason']];
+            } elseif ($verdict['reason'] === null && isset($changes['previous_amounts'][$transaction->id])) {
+                $totals['unproved_changes'][] = [...$row, 'from' => $changes['previous_amounts'][$transaction->id], 'to' => $verdict['amount']];
             }
         }
 
@@ -359,7 +365,7 @@ class BudgetTransactionService
             ['holders' => $holders, 'doubt' => $doubt] = $this->readHolders($transaction, $held[$transaction->id] ?? [], $lookups, $frozen);
 
             if ($doubt) {
-                $verdicts[$transaction->id] = ['amount' => (int) $existing, 'reason' => self::HOLDER_ROW_UNEXPLAINED];
+                $verdicts[$transaction->id] = ['amount' => (int) $existing, 'reason' => $existing === null ? self::NOT_ABSORBED_UNEXPLAINED : self::HOLDER_ROW_UNEXPLAINED];
 
                 continue;
             }
@@ -426,11 +432,13 @@ class BudgetTransactionService
     }
 
     /**
-     * A period written whole: it takes what nothing claims, but gives up a row
-     * only as far as other rows account for it. A claim by tracking alone keeps
-     * an expense from being absorbed, and never takes one away: if the budget
-     * has not got it (a backfill that failed, a period generated later), the
-     * catch-all may be the only thing counting it.
+     * A period written whole: it takes what nothing claims, and a claim takes a
+     * row away only as far as other rows account for it. A claim by tracking
+     * alone keeps an expense from being absorbed, and never moves a row: if the
+     * budget has not got it (a backfill that failed, a period generated later),
+     * the catch-all may be the only thing counting it. Told apart by the amounts
+     * themselves rather than by size, since a split with a refund line can come
+     * out larger once a line is claimed.
      *
      * @param  SupportCollection<int, Budget>  $holders
      * @return CatchAllVerdict
@@ -440,7 +448,7 @@ class BudgetTransactionService
         $claimants = $holders->merge($lookups->runningClaimants($catchAll, $transaction))->unique('id');
         $wanted = $this->amountOutside($transaction, $catchAll, $claimants, $holders, $lookups);
 
-        if ($existing === null || abs($wanted) >= abs($existing)) {
+        if ($existing === null || $wanted === $existing) {
             return ['amount' => $wanted, 'reason' => null];
         }
 
@@ -448,7 +456,7 @@ class BudgetTransactionService
             return ['amount' => $existing, 'reason' => self::CLAIMED_NOT_HELD];
         }
 
-        return ['amount' => $wanted, 'reason' => $holders->isNotEmpty() ? self::DOUBLE_COUNT : null];
+        return ['amount' => $wanted, 'reason' => $holders->isNotEmpty() && abs($wanted) < abs($existing) ? self::DOUBLE_COUNT : null];
     }
 
     /**
@@ -479,7 +487,7 @@ class BudgetTransactionService
             ->whereIn('transaction_id', $wantedAmounts->keys()->all())
             ->pluck('amount', 'transaction_id');
 
-        $changes = ['rows' => [], 'released_ids' => [], 'absorbed' => 0, 'adjusted' => 0, 'spent_change' => 0];
+        $changes = ['rows' => [], 'released_ids' => [], 'previous_amounts' => [], 'absorbed' => 0, 'adjusted' => 0, 'spent_change' => 0];
 
         foreach ($wantedAmounts as $transactionId => $amount) {
             $existing = $existingAmounts->get($transactionId);
@@ -489,6 +497,10 @@ class BudgetTransactionService
             }
 
             $changes['spent_change'] += $amount - (int) $existing;
+
+            if ($existing !== null) {
+                $changes['previous_amounts'][$transactionId] = $existing;
+            }
 
             if ($amount === 0) {
                 $changes['released_ids'][] = $transactionId;

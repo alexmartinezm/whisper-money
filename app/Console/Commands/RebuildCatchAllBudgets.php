@@ -19,13 +19,14 @@ class RebuildCatchAllBudgets extends Command
     private const array LEFT_ALONE_REASONS = [
         BudgetTransactionService::CLAIMED_NOT_HELD => 'a budget tracks it today but holds no row for it',
         BudgetTransactionService::HOLDER_ROW_UNEXPLAINED => 'a budget holds a row that does not match what it tracks today',
+        BudgetTransactionService::NOT_ABSORBED_UNEXPLAINED => 'no catch-all row, and not absorbed: a budget holds a row that does not match what it tracks today',
     ];
 
     protected $signature = 'budgets:rebuild-catch-all
         {--user= : Only rebuild the catch-all budgets of the user with this email address}
         {--dry-run : Report what would change without making changes}';
 
-    protected $description = 'Heal the running catch-all budgets, which used to keep what a budget created later also counts. Rows go only when another budget\'s row proves the double count; closed periods absorb nothing; what cannot be proved is left alone and listed';
+    protected $description = 'Heal the running catch-all budgets, which used to keep what a budget created later also counts. A claim by another budget moves a row only when that budget\'s rows prove it; closed periods change for nothing else and absorb nothing; running periods may also lose or adjust rows no budget is involved in. Those, and what was left alone, are listed';
 
     public function handle(BudgetTransactionService $service): int
     {
@@ -85,6 +86,7 @@ class RebuildCatchAllBudgets extends Command
             );
         }
 
+        $this->reportUnprovedChanges($results, $verb);
         $this->reportLeftAlone($results);
         $this->reportTotals($results, $verb);
 
@@ -113,6 +115,29 @@ class RebuildCatchAllBudgets extends Command
     }
 
     /**
+     * What changes with no other budget's row behind it, row by row, so a dry
+     * run can be checked before the real one.
+     *
+     * @param  Collection<int, PeriodResult>  $results
+     */
+    private function reportUnprovedChanges(Collection $results, string $verb): void
+    {
+        $rows = $results->flatMap(fn (array $result): array => array_map(fn (array $row): array => [
+            $this->periodLabel($result['period']),
+            $row['transaction_id'],
+            $row['transaction_date'],
+            $row['from'],
+            $row['to'],
+            $row['to'] === 0 ? 'the catch-all should hold nothing of it, and no budget is involved' : 'the catch-all should hold a different amount, and no budget row explains the difference',
+        ], $result['changes']['unproved_changes']));
+
+        if ($rows->isNotEmpty()) {
+            $this->warn("{$rows->count()} row(s) {$verb} changed with no other budget's row proving it:");
+            $this->table(['Period', 'Transaction', 'Date', 'From (cents)', 'To (cents)', 'Why'], $rows->all());
+        }
+    }
+
+    /**
      * Every row a person may want to look at, with why it was not touched.
      *
      * @param  Collection<int, PeriodResult>  $results
@@ -128,7 +153,7 @@ class RebuildCatchAllBudgets extends Command
         ], $result['changes']['left_alone']));
 
         if ($rows->isNotEmpty()) {
-            $this->warn("{$rows->count()} row(s) left alone, nothing proves they should change:");
+            $this->warn("{$rows->count()} transaction(s) left alone, nothing proves they should change:");
             $this->table(['Period', 'Transaction', 'Date', 'Catch-all amount (cents)', 'Why it was left alone'], $rows->all());
         }
     }

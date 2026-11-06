@@ -18,6 +18,7 @@ use App\Models\User;
 use App\Services\BudgetManagementService;
 use App\Services\BudgetTransactionService;
 use Carbon\CarbonImmutable;
+use Illuminate\Contracts\Queue\Job;
 use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
@@ -144,6 +145,7 @@ function rebuildChanges(array $changes = []): array
         'absorbed' => 0,
         'spent_change' => 0,
         'left_alone' => [],
+        'unproved_changes' => [],
         ...$changes,
     ];
 }
@@ -540,9 +542,61 @@ describe('the rebuild job', function () {
         expect(periodTransactionIds($this->claimed))->toBe([]);
     });
 
-    test('it keeps retrying for a while rather than counting tries', function () {
-        expect(($this->job)()->retryUntil()->greaterThan(now()->addMinutes(14)))->toBeTrue()
-            ->and(($this->job)()->maxExceptions)->toBe(3);
+    test('it keeps retrying for hours, slowly enough to fit in the attempts column', function () {
+        $otherBudget = Budget::factory()->monthly()->create(['user_id' => $this->user->id, 'space_id' => $this->user->personalSpace->id]);
+        BudgetPeriod::factory()->create(['budget_id' => $otherBudget->id, 'start_date' => '2026-10-01', 'end_date' => '2026-10-31', 'processing_historical' => true]);
+        $delayAfter = function (int $attempts): int {
+            $job = Mockery::mock(Job::class);
+            $job->shouldReceive('attempts')->andReturn($attempts);
+            $job->shouldReceive('isDeletedOrReleased')->andReturn(false);
+            $delay = null;
+            $job->shouldReceive('release')->once()->andReturnUsing(function (int $seconds) use (&$delay): void {
+                $delay = $seconds;
+            });
+
+            ($this->job)()->setJob($job)->handle($this->rebuilder);
+
+            return $delay;
+        };
+
+        expect(($this->job)()->retryUntil()->equalTo(now()->addHours(6)))->toBeTrue()
+            ->and(($this->job)()->maxExceptions)->toBe(3)
+            ->and($delayAfter(1))->toBe(10)
+            ->and($delayAfter(2))->toBe(20)
+            ->and($delayAfter(5))->toBe(160)
+            ->and($delayAfter(6))->toBe(300)
+            ->and($delayAfter(200))->toBe(300);
+    });
+
+    test('a stuck old flag neither delays nor blocks it, is named in a warning, and stays set', function (bool $firstBackfill) {
+        Log::spy();
+        $missing = expense($this->user, $this->category, '2026-10-05');
+        BudgetTransaction::query()->delete();
+        $owner = $firstBackfill
+            ? $this->catchAll
+            : Budget::factory()->archived()->monthly()->create(['user_id' => $this->user->id, 'space_id' => $this->user->personalSpace->id]);
+        $stuck = BudgetPeriod::factory()->create(['budget_id' => $owner->id, 'start_date' => '2026-01-01', 'end_date' => '2026-01-31', 'processing_historical' => true]);
+        BudgetPeriod::query()->whereKey($stuck->id)->toBase()->update(['updated_at' => now()->subMinutes(361)]);
+
+        $job = ($this->jobFor)([$this->claimed->id => 'ours'])->withFakeQueueInteractions();
+        $job->handle($this->rebuilder);
+
+        $job->assertNotReleased();
+        expect(periodTransactionIds($this->claimed))->toBe([$missing->id])
+            ->and($stuck->fresh()->processing_historical)->toBeTrue();
+        Log::shouldHaveReceived('warning')->once()->withArgs(fn (string $message, array $context): bool => str_contains($message, 'stuck')
+            && $context['stuck_period_ids'] === [$stuck->id]);
+    })->with(['a first backfill' => true, 'an archived budget' => false]);
+
+    test('a flag still inside the window holds it up', function () {
+        $other = Budget::factory()->monthly()->create(['user_id' => $this->user->id, 'space_id' => $this->user->personalSpace->id]);
+        $fresh = BudgetPeriod::factory()->create(['budget_id' => $other->id, 'start_date' => '2026-10-01', 'end_date' => '2026-10-31', 'processing_historical' => true]);
+        BudgetPeriod::query()->whereKey($fresh->id)->toBase()->update(['updated_at' => now()->subMinutes(359)]);
+
+        $job = ($this->jobFor)([$this->claimed->id => 'ours'])->withFakeQueueInteractions();
+        $job->handle($this->rebuilder);
+
+        $job->assertReleased();
     });
 });
 
@@ -765,7 +819,7 @@ describe('a split transaction in a closed period', function () {
         switchTracking($this->user, $this->holder, $this->other);
 
         $this->artisan('budgets:rebuild-catch-all', ['--dry-run' => true])
-            ->expectsOutputToContain('1 row(s) left alone')
+            ->expectsOutputToContain('1 transaction(s) left alone')
             ->expectsOutputToContain($transaction->id)
             ->assertSuccessful();
 
@@ -936,6 +990,59 @@ test('a failed backfill costs the catch-all nothing', function (string $date, ar
     'its period has ended' => ['2026-09-05', []],
 ]);
 
+test('a running tracking claim with no row moves nothing, however a split with a refund line adds up', function () {
+    $catchAll = createBudget($this->user, 'yearly', isCatchAll: true);
+    $current = $catchAll->getCurrentPeriod();
+    $budget = createBudget($this->user, 'monthly', categoryIds: [$this->category->id]);
+    $transaction = splitInto(expense($this->user, $this->other, '2026-10-05', -4000), [[$this->other, 6000], [$this->category, -10000]]);
+    BudgetTransaction::query()->where('transaction_id', $transaction->id)->delete();
+    doubleCount($current, $transaction, 4000);
+
+    // Claiming the -100 line would leave the catch-all at -60, further from 0
+    // than the 40 it holds, with nothing proving the budget counts that line.
+    expect($this->rebuilder->rebuildCatchAllPeriod($current))->toBe(rebuildChanges(['left_alone' => [[
+        'transaction_id' => $transaction->id,
+        'transaction_date' => '2026-10-05',
+        'amount' => 4000,
+        'reason' => BudgetTransactionService::CLAIMED_NOT_HELD,
+    ]]]))
+        ->and(snapshotAmount($current, $transaction))->toBe(4000)
+        ->and(budgetTransactionIds($budget))->toBe([]);
+});
+
+test('a downward adjustment with no budget behind it is listed with both amounts', function () {
+    $catchAll = createBudget($this->user, 'yearly', isCatchAll: true);
+    $current = $catchAll->getCurrentPeriod();
+    $transaction = expense($this->user, $this->category, '2026-10-05', -1000);
+    doubleCount($current, $transaction, 1500);
+
+    $this->artisan('budgets:rebuild-catch-all', ['--dry-run' => true])
+        ->expectsOutputToContain("1 row(s) would be changed with no other budget's row proving it")
+        ->assertSuccessful();
+
+    expect($this->rebuilder->rebuildCatchAllPeriod($current))->toBe(rebuildChanges([
+        'adjusted' => 1,
+        'spent_change' => -500,
+        'unproved_changes' => [['transaction_id' => $transaction->id, 'transaction_date' => '2026-10-05', 'from' => 1500, 'to' => 1000]],
+    ]));
+});
+
+test('a transaction in doubt with no catch-all row is reported as not absorbed, not as a row left alone', function () {
+    $catchAll = createBudget($this->user, 'yearly', isCatchAll: true);
+    $current = $catchAll->getCurrentPeriod();
+    $budget = createBudget($this->user, 'monthly', categoryIds: [$this->category->id]);
+    $transaction = splitInto(expense($this->user, $this->category, '2026-09-05', -10000), [[$this->category, -3000], [$this->other, -7000]]);
+    switchTracking($this->user, $budget, $this->other);
+    BudgetTransaction::query()->where('budget_period_id', $current->id)->delete();
+
+    Artisan::call('budgets:rebuild-catch-all', ['--dry-run' => true]);
+
+    expect(Artisan::output())->toContain('no catch-all row, and not absorbed');
+
+    expect(array_column($this->rebuilder->rebuildCatchAllPeriod($current)['left_alone'], 'reason'))->toBe([BudgetTransactionService::NOT_ABSORBED_UNEXPLAINED])
+        ->and(snapshotAmount($current, $transaction))->toBeNull();
+});
+
 test('the sync queue runs the rebuild after the backfills it depends on', function () {
     $ran = [];
     Queue::before(function (JobProcessing $event) use (&$ran): void {
@@ -975,9 +1082,12 @@ test('the command tells a proved double count from any other release and lists w
 
     expect(Artisan::output())
         ->toContain('Running periods: 1 proved double count(s) would be released, 0 would be reduced; 1 row(s) would be released for another reason')
-        ->toContain('1 row(s) left alone')
+        ->toContain('1 transaction(s) left alone')
         ->toContain('a budget tracks it today but holds no row for it')
-        ->toContain($unheld->id);
+        ->toContain($unheld->id)
+        ->toContain("1 row(s) would be changed with no other budget's row proving it")
+        ->toContain($noLongerAnExpense->id)
+        ->toContain('the catch-all should hold nothing of it, and no budget is involved');
 
     expect($this->rebuilder->rebuildCatchAllPeriod($current))->toBe(rebuildChanges([
         'released_double_count' => 1,
@@ -988,6 +1098,12 @@ test('the command tells a proved double count from any other release and lists w
             'transaction_date' => '2026-10-07',
             'amount' => 700,
             'reason' => BudgetTransactionService::CLAIMED_NOT_HELD,
+        ]],
+        'unproved_changes' => [[
+            'transaction_id' => $noLongerAnExpense->id,
+            'transaction_date' => '2026-10-06',
+            'from' => 1000,
+            'to' => 0,
         ]],
     ]))->and(periodTransactionIds($current))->toBe([$unheld->id])
         ->and(budgetTransactionIds($budget))->toBe([$doubleCounted->id]);

@@ -31,6 +31,21 @@ class RebuildCatchAllBudgetPeriods implements ShouldQueue
     use Queueable;
 
     /**
+     * How long this job keeps trying, and how long a flagged period can hold it
+     * up. One figure on purpose: a flag older than this is not a backfill still
+     * on its way, and a rebuild always outlives the flags it waits on. Generous,
+     * since this shares the `default` queue with the bank syncs and a late run
+     * is safe: what cannot be proved stays as it is.
+     */
+    private const int WINDOW_MINUTES = 360;
+
+    /**
+     * The longest wait between looks. Every release adds to `jobs.attempts`, an
+     * unsigned tiny integer, so the delay has to grow for the window to fit.
+     */
+    private const int MAX_DELAY_SECONDS = 300;
+
+    /**
      * Waiting on a backfill releases the job without failing it, which still
      * spends a try: retried for a while instead, and failed after three genuine
      * exceptions.
@@ -50,13 +65,13 @@ class RebuildCatchAllBudgetPeriods implements ShouldQueue
 
     public function retryUntil(): Carbon
     {
-        return now()->addMinutes(15);
+        return now()->addMinutes(self::WINDOW_MINUTES);
     }
 
     public function handle(BudgetTransactionService $service): void
     {
         if ($this->isWaitingOnBackfill()) {
-            $this->release($this->backoff);
+            $this->release((int) min($this->backoff * 2 ** max($this->attempts() - 1, 0), self::MAX_DELAY_SECONDS));
 
             return;
         }
@@ -92,16 +107,31 @@ class RebuildCatchAllBudgetPeriods implements ShouldQueue
      * them, for this user and space, goes first. That covers runs queued by an
      * earlier edit whose own rebuild this one superseded. Periods claimed by
      * another rebuild are not waited on: two rebuilds would wait on each other.
+     *
+     * A flag no run has touched for the whole window is stuck, not pending. It
+     * could hold up every budget edit of the user for good, so it is reported
+     * and ignored. It stays set: clearing it is not this job's call.
      */
     private function isWaitingOnBackfill(): bool
     {
-        return BudgetPeriod::query()
+        [$stuck, $pending] = BudgetPeriod::query()
             ->where('processing_historical', true)
             ->whereHas('budget', fn (Builder $budget) => $budget->where('user_id', $this->userId)->where('space_id', $this->spaceId))
             ->where(fn (Builder $periods) => $periods
                 ->whereNull('reconciliation_token')
                 ->orWhereHas('budget', fn (Builder $budget) => $budget->where('is_catch_all', false)))
-            ->exists();
+            ->get(['id', 'updated_at'])
+            ->partition(fn (BudgetPeriod $period): bool => $period->updated_at->lt(now()->subMinutes(self::WINDOW_MINUTES)));
+
+        if ($stuck->isNotEmpty()) {
+            Log::warning('Catch-all budget rebuild is ignoring a stuck processing flag', [
+                'user_id' => $this->userId,
+                'space_id' => $this->spaceId,
+                'stuck_period_ids' => $stuck->modelKeys(),
+            ]);
+        }
+
+        return $pending->isNotEmpty();
     }
 
     /**
