@@ -16,6 +16,7 @@ const sync = vi.hoisted(() => ({
     updateByFilters: vi.fn(),
 }));
 const reEvaluate = vi.hoisted(() => vi.fn());
+const countMatching = vi.hoisted(() => vi.fn());
 const toastMock = vi.hoisted(() => ({
     success: vi.fn(),
     error: vi.fn(),
@@ -104,6 +105,7 @@ function renderBulk(
                 isReEvaluating: false,
             },
             filters: FILTERS,
+            countMatching,
             ...options,
         });
 
@@ -125,6 +127,7 @@ describe('useTransactionBulkActions', () => {
         sync.updateMany.mockResolvedValue(updateResult());
         sync.updateByFilters.mockResolvedValue(updateResult());
         reEvaluate.mockResolvedValue('done');
+        countMatching.mockResolvedValue(42);
     });
 
     it('offers "all matching filters" only when the table pages from the server', () => {
@@ -306,6 +309,114 @@ describe('useTransactionBulkActions', () => {
             remove_all_labels: true,
         });
         expect(sync.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('counts the rows a removal over every matching row reaches', async () => {
+        const { result } = renderBulk([transaction('a')], ['a'], {
+            matchingFilters: { search: 'coffee' },
+        });
+
+        act(() => result.current.bulk.barProps.onSelectAll?.());
+        await act(async () => result.current.bulk.barProps.onRemoveAllLabels());
+
+        expect(countMatching).toHaveBeenCalledWith(
+            FILTERS,
+            expect.any(AbortSignal),
+        );
+        expect(result.current.bulk.removeLabelsDialog).toMatchObject({
+            hasFilters: true,
+            matchingCount: 42,
+            countFailed: false,
+            canConfirm: true,
+        });
+    });
+
+    it('holds the confirmation back until the rows are counted', async () => {
+        let finishCount: (count: number) => void = () => {};
+        countMatching.mockReturnValue(
+            new Promise<number>((resolve) => {
+                finishCount = resolve;
+            }),
+        );
+        const { result } = renderBulk([transaction('a')], ['a'], {
+            matchingFilters: {},
+        });
+
+        act(() => result.current.bulk.barProps.onSelectAll?.());
+        await act(async () => result.current.bulk.barProps.onRemoveAllLabels());
+
+        expect(result.current.bulk.removeLabelsDialog).toMatchObject({
+            hasFilters: false,
+            matchingCount: null,
+            canConfirm: false,
+        });
+
+        await act(async () => finishCount(7));
+
+        expect(result.current.bulk.removeLabelsDialog).toMatchObject({
+            matchingCount: 7,
+            canConfirm: true,
+        });
+    });
+
+    it('lets a failed count through only where the wording says all transactions', async () => {
+        countMatching.mockRejectedValue(new Error('offline'));
+
+        const unfiltered = renderBulk([transaction('a')], ['a'], {
+            matchingFilters: {},
+        });
+        act(() => unfiltered.result.current.bulk.barProps.onSelectAll?.());
+        await act(async () =>
+            unfiltered.result.current.bulk.barProps.onRemoveAllLabels(),
+        );
+
+        const filtered = renderBulk([transaction('a')], ['a'], {
+            matchingFilters: { search: 'coffee' },
+        });
+        act(() => filtered.result.current.bulk.barProps.onSelectAll?.());
+        await act(async () =>
+            filtered.result.current.bulk.barProps.onRemoveAllLabels(),
+        );
+
+        expect(unfiltered.result.current.bulk.removeLabelsDialog).toMatchObject(
+            { countFailed: true, canConfirm: true },
+        );
+        expect(filtered.result.current.bulk.removeLabelsDialog).toMatchObject({
+            countFailed: true,
+            canConfirm: false,
+        });
+    });
+
+    it('drops the count when the dialog closes before it arrives', async () => {
+        let finishCount: (count: number) => void = () => {};
+        countMatching.mockReturnValue(
+            new Promise<number>((resolve) => {
+                finishCount = resolve;
+            }),
+        );
+        const { result } = renderBulk([transaction('a')], ['a'], {
+            matchingFilters: {},
+        });
+
+        act(() => result.current.bulk.barProps.onSelectAll?.());
+        await act(async () => result.current.bulk.barProps.onRemoveAllLabels());
+        act(() => result.current.bulk.removeLabelsDialog.onClose());
+
+        const signal = countMatching.mock.lastCall![1] as AbortSignal;
+
+        await act(async () => finishCount(7));
+
+        expect(signal.aborted).toBe(true);
+        expect(result.current.bulk.removeLabelsDialog.matchingCount).toBeNull();
+    });
+
+    it('counts nothing for the ticked rows, whose number is known', () => {
+        const { result } = renderBulk([transaction('a')], ['a']);
+
+        act(() => result.current.bulk.barProps.onRemoveAllLabels());
+
+        expect(countMatching).not.toHaveBeenCalled();
+        expect(result.current.bulk.removeLabelsDialog.canConfirm).toBe(true);
     });
 
     it('does not ask to remove labels with nothing selected', () => {

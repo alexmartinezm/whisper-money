@@ -12,6 +12,7 @@ import {
     type DecryptedTransaction,
     type TransactionFilters,
 } from '@/types/transaction';
+import { type TransactionTableSource } from '@/types/transaction-table-source';
 import { __ } from '@/utils/i18n';
 import { type RowSelectionState } from '@tanstack/react-table';
 import {
@@ -19,6 +20,7 @@ import {
     type SetStateAction,
     useCallback,
     useMemo,
+    useRef,
     useState,
 } from 'react';
 import { toast } from 'sonner';
@@ -43,6 +45,8 @@ interface TransactionBulkActionsOptions {
      * matching them, not just the loaded ones.
      */
     matchingFilters?: Record<string, unknown>;
+    /** How many rows a filter set lists, for a removal reaching them all. */
+    countMatching: TransactionTableSource['countMatching'];
     /** Reloads the rows after the server changed some it does not hand back. */
     onServerChanged?: () => void;
     /** Toast how many rows a bulk edit changed, or that it failed. */
@@ -87,6 +91,7 @@ export function useTransactionBulkActions({
     },
     filters,
     matchingFilters,
+    countMatching,
     onServerChanged,
     announceOutcome = false,
     onBalanceUpdated,
@@ -101,6 +106,9 @@ export function useTransactionBulkActions({
     const [isSelectingAll, setIsSelectingAll] = useState(false);
     const [isRemoveLabelsDialogOpen, setIsRemoveLabelsDialogOpen] =
         useState(false);
+    const [matchingCount, setMatchingCount] = useState<number | null>(null);
+    const [countFailed, setCountFailed] = useState(false);
+    const matchingCountRequest = useRef<AbortController | null>(null);
 
     const selectedIds = useMemo(
         () => Object.keys(rowSelection),
@@ -109,6 +117,7 @@ export function useTransactionBulkActions({
     const selectedCount = selectedIds.length;
     const canSelectAllMatching = matchingFilters !== undefined;
     const reachesAllMatching = canSelectAllMatching && isSelectingAll;
+    const hasFilters = Object.keys(matchingFilters ?? {}).length > 0;
 
     const selectAllMatching = useCallback(() => setIsSelectingAll(true), []);
     const selectOnlyVisible = useCallback(() => setIsSelectingAll(false), []);
@@ -346,14 +355,45 @@ export function useTransactionBulkActions({
         }
     }
 
-    function handleRemoveAllLabelsClick() {
-        if (selectedIds.length > 0 || reachesAllMatching) {
-            setIsRemoveLabelsDialogOpen(true);
+    /** A select-all has no number of its own: the dialog needs the real one. */
+    async function countRowsLosingLabels() {
+        const request = new AbortController();
+        matchingCountRequest.current = request;
+        setMatchingCount(null);
+        setCountFailed(false);
+
+        try {
+            const count = await countMatching(filters, request.signal);
+
+            if (!request.signal.aborted) {
+                setMatchingCount(count);
+            }
+        } catch {
+            if (!request.signal.aborted) {
+                setCountFailed(true);
+            }
         }
     }
 
-    async function handleRemoveAllLabels() {
+    function handleRemoveAllLabelsClick() {
+        if (selectedIds.length === 0 && !reachesAllMatching) {
+            return;
+        }
+
+        setIsRemoveLabelsDialogOpen(true);
+
+        if (reachesAllMatching) {
+            void countRowsLosingLabels();
+        }
+    }
+
+    function closeRemoveLabelsDialog() {
+        matchingCountRequest.current?.abort();
         setIsRemoveLabelsDialogOpen(false);
+    }
+
+    async function handleRemoveAllLabels() {
+        closeRemoveLabelsDialog();
         await applyLabelEdit({ remove_all_labels: true });
     }
 
@@ -421,9 +461,18 @@ export function useTransactionBulkActions({
         removeLabelsDialog: {
             isOpen: isRemoveLabelsDialogOpen,
             isAllMatching: reachesAllMatching,
+            hasFilters,
             selectedCount,
+            matchingCount,
+            countFailed,
+            // Never blind: the number is known, or no filter is set and the
+            // dialog says it is every transaction.
+            canConfirm:
+                !reachesAllMatching ||
+                matchingCount !== null ||
+                (countFailed && !hasFilters),
             onConfirm: handleRemoveAllLabels,
-            onClose: () => setIsRemoveLabelsDialogOpen(false),
+            onClose: closeRemoveLabelsDialog,
         },
     };
 }

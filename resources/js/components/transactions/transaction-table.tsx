@@ -184,6 +184,7 @@ export function TransactionTable({
         editing,
         filters: source.filters,
         matchingFilters: source.matchingFilters,
+        countMatching: source.countMatching,
         onServerChanged: source.refreshRows,
         announceOutcome: announceBulkOutcome,
         onBalanceUpdated,

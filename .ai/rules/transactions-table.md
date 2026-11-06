@@ -7,6 +7,7 @@ paths:
   - resources/js/components/transactions/transaction-table-row.tsx
   - resources/js/components/transactions/transaction-row-dialogs.tsx
   - resources/js/components/transactions/transaction-delete-dialogs.tsx
+  - resources/js/components/transactions/transaction-remove-labels-dialog.tsx
   - resources/js/components/transactions/transaction-filter-summary.tsx
   - resources/js/components/transactions/transaction-list-row.tsx
   - resources/js/components/transactions/transaction-day-header.tsx
