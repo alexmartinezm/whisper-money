@@ -693,6 +693,7 @@ class AuthorizationController extends Controller
     private function matchSessionAccounts(Collection $accounts, array $newAccounts, array $siblingUids): array
     {
         $sessionListsIbans = collect($newAccounts)->contains(fn (array $data): bool => $this->sessionIban($data) !== null);
+        /** @var SupportCollection<int, array<string, mixed>> $unmatchedNew */
         $unmatchedNew = collect($newAccounts)->filter(fn (array $data): bool => ! empty($data['uid']))->values();
 
         $sameIban = fn (Account $account, array $data): bool => $this->normalizedIban($account->iban) !== null
