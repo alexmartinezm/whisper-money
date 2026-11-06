@@ -141,6 +141,21 @@ it('takes any three-letter currency, as it always has', function () {
     expect($transaction->fresh()->currency_code)->toBe('PLN');
 });
 
+it('refuses an amount past what the balances can hold', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id]);
+
+    callWriteTool($user, CreateTransaction::class, [
+        'account_id' => $account->id,
+        'description' => 'Too much',
+        'amount' => PHP_INT_MIN,
+        'transaction_date' => '2026-01-15',
+        'update_balance' => true,
+    ])->assertHasErrors();
+
+    expect(Transaction::query()->count())->toBe(0);
+});
+
 it('locks the account before anything reads a snapshot when it moves a balance', function (string $tool) {
     $user = User::factory()->create();
     $account = Account::factory()->create(['user_id' => $user->id, 'type' => 'checking', 'currency_code' => 'EUR']);

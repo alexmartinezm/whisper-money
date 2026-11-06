@@ -40,6 +40,14 @@ class TransactionWriteRules
     private const int NotesMaxLength = 10000;
 
     /**
+     * In minor units on either side of zero: ten trillion of a two-decimal
+     * currency, past any real transaction, and far enough from the 64-bit
+     * limit that negating an amount, adding it to a balance or weighing it by
+     * an ownership percentage cannot overflow.
+     */
+    private const int MaxAmount = 1_000_000_000_000_000;
+
+    /**
      * @return array<string, array<mixed>>
      */
     public static function createRules(): array
@@ -47,7 +55,7 @@ class TransactionWriteRules
         return [
             'account_id' => ['required', 'string'],
             'description' => ['required', 'string', 'max:'.self::DescriptionMaxLength],
-            'amount' => ['required', 'integer'],
+            'amount' => ['required', ...self::amountRules()],
             'transaction_date' => ['required', 'date', new StorableDate],
             ...self::optionalFieldRules(),
         ];
@@ -62,7 +70,7 @@ class TransactionWriteRules
     {
         return [
             'description' => ['sometimes', 'string', 'max:'.self::DescriptionMaxLength],
-            'amount' => ['sometimes', 'integer'],
+            'amount' => ['sometimes', ...self::amountRules()],
             'transaction_date' => ['sometimes', 'date', new StorableDate],
             ...self::optionalFieldRules(),
         ];
@@ -149,6 +157,14 @@ class TransactionWriteRules
         }
 
         return 'These notes are encrypted on your device and read as empty here, so a blank value would erase them. Send new text to replace them, or leave notes out.';
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function amountRules(): array
+    {
+        return ['integer', 'between:-'.self::MaxAmount.','.self::MaxAmount];
     }
 
     /**

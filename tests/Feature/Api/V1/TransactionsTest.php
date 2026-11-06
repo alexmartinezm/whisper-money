@@ -489,6 +489,32 @@ describe('create', function () {
             ->assertCreated();
     });
 
+    it('bounds the amount, on create and on update', function () {
+        $user = User::factory()->create();
+        $account = Account::factory()->create(['user_id' => $user->id, 'type' => 'checking']);
+        $transaction = transactionOn($account);
+        $body = ['account_id' => $account->id, 'description' => 'Big', 'transaction_date' => '2026-01-15', 'update_balance' => true];
+
+        foreach ([PHP_INT_MIN, PHP_INT_MAX, 1_000_000_000_000_001, -1_000_000_000_000_001] as $amount) {
+            withHeaders(transactionsWriter($user))
+                ->postJson('/api/v1/transactions', [...$body, 'amount' => $amount])
+                ->assertUnprocessable()
+                ->assertJsonValidationErrors('amount');
+
+            withHeaders(transactionsWriter($user))
+                ->patchJson('/api/v1/transactions/'.$transaction->id, ['amount' => $amount])
+                ->assertUnprocessable()
+                ->assertJsonValidationErrors('amount');
+        }
+
+        foreach ([1_000_000_000_000_000, -1_000_000_000_000_000] as $amount) {
+            withHeaders(transactionsWriter($user))
+                ->postJson('/api/v1/transactions', [...$body, 'amount' => $amount])
+                ->assertCreated()
+                ->assertJsonPath('data.amount', $amount);
+        }
+    });
+
     it('stores the day of a date sent with a time, and the ids as they are stored', function () {
         $user = User::factory()->create();
         $account = Account::factory()->create(['user_id' => $user->id]);
