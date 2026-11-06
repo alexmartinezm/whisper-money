@@ -8,6 +8,9 @@ use Illuminate\Support\Carbon;
 use function Pest\Laravel\actingAs;
 
 beforeEach(function () {
+    // The factory books rows in random currencies, which the day totals convert.
+    fakeCurrencyApi();
+
     $this->user = User::factory()->onboarded()->create();
     $this->account = Account::factory()->create(['user_id' => $this->user->id]);
 });

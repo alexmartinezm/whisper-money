@@ -1,6 +1,6 @@
 import { formatDate } from '@/utils/date';
 import { __ } from '@/utils/i18n';
-import { ColumnDef } from '@tanstack/react-table';
+import { Column, ColumnDef } from '@tanstack/react-table';
 import { getYear, parseISO } from 'date-fns';
 import { ArrowDown, ArrowUp, ArrowUpDown, MoreHorizontal } from 'lucide-react';
 
@@ -23,6 +23,7 @@ import {
     DropdownMenuLabel,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { resolveTransactionLabels } from '@/lib/transaction-labels';
 import { getTransactionRowActions } from '@/lib/transaction-row-actions';
 import {
     type Account,
@@ -51,6 +52,11 @@ interface CreateColumnsOptions {
     onReEvaluateRules: (transaction: DecryptedTransaction) => void;
     onAutomate: (transaction: DecryptedTransaction) => void;
     isDateHidden?: boolean;
+    /**
+     * Rows sit under a header per day, which carries the date: the Date column
+     * is hidden and cannot be toggled back meanwhile.
+     */
+    isGroupedByDay?: boolean;
     /** Ids of transactions AI is categorizing in the background right now. */
     categorizingIds?: Set<string>;
     categoryFilterIds?: ReadonlySet<string>;
@@ -61,6 +67,49 @@ interface CreateColumnsOptions {
      * pays. Only the credit card account page passes it.
      */
     statementPayments?: Map<string, CreditCardPayment>;
+}
+
+/**
+ * The columns a list of transactions can be sorted by, which the table offers
+ * from its headings and the card layout from its sort menu.
+ */
+export const SORTABLE_TRANSACTION_COLUMNS = [
+    'transaction_date',
+    'creditor_name',
+    'debtor_name',
+] as const;
+
+/**
+ * A column heading that sorts on click. The sort direction comes in as a prop:
+ * read off the column, the React Compiler would memoize the arrow in place.
+ */
+function SortableHeader({
+    column,
+    sorted,
+    label,
+    className,
+}: {
+    column: Column<DecryptedTransaction>;
+    sorted: false | 'asc' | 'desc';
+    label: string;
+    className?: string;
+}) {
+    return (
+        <Button
+            variant="ghost"
+            className={className}
+            onClick={() => column.toggleSorting(sorted === 'asc')}
+        >
+            {label}
+            {sorted === 'desc' ? (
+                <ArrowDown className="h-3 w-3" />
+            ) : sorted === 'asc' ? (
+                <ArrowUp className="h-3 w-3" />
+            ) : (
+                <ArrowUpDown className="h-3 w-3 opacity-25" />
+            )}
+        </Button>
+    );
 }
 
 export function createTransactionColumns({
@@ -77,6 +126,7 @@ export function createTransactionColumns({
     onReEvaluateRules,
     onAutomate,
     isDateHidden = false,
+    isGroupedByDay = false,
     categorizingIds,
     categoryFilterIds,
     hiddenLabelId,
@@ -85,9 +135,6 @@ export function createTransactionColumns({
     return [
         {
             id: 'select',
-            meta: {
-                cellClassName: 'hidden md:table-cell',
-            },
             header: ({ table }) => (
                 <Checkbox
                     checked={
@@ -122,26 +169,14 @@ export function createTransactionColumns({
                 label: __('Date'),
                 cellClassName: 'whitespace-normal',
             },
-            header: ({ column }) => {
-                return (
-                    <Button
-                        variant="ghost"
-                        className="px-0"
-                        onClick={() =>
-                            column.toggleSorting(column.getIsSorted() === 'asc')
-                        }
-                    >
-                        {__('Date')}
-                        {column.getIsSorted() === 'desc' ? (
-                            <ArrowDown className="h-3 w-3" />
-                        ) : column.getIsSorted() === 'asc' ? (
-                            <ArrowUp className="h-3 w-3" />
-                        ) : (
-                            <ArrowUpDown className="h-3 w-3 opacity-25" />
-                        )}
-                    </Button>
-                );
-            },
+            header: ({ column }) => (
+                <SortableHeader
+                    column={column}
+                    sorted={column.getIsSorted()}
+                    label={__('Date')}
+                    className="px-0"
+                />
+            ),
             cell: ({ row }) => {
                 const date = parseISO(row.getValue('transaction_date'));
                 const currentYear = getYear(new Date());
@@ -158,7 +193,7 @@ export function createTransactionColumns({
                     <div className="pl-3 whitespace-nowrap">{capitalized}</div>
                 );
             },
-            enableHiding: true,
+            enableHiding: !isGroupedByDay,
         },
         {
             accessorKey: 'category_id',
@@ -166,7 +201,28 @@ export function createTransactionColumns({
                 label: __('Category'),
                 cellClassName: `${isDateHidden ? 'pl-2' : 'pl-0'} max-w-[170px] !sm:max-w-[170px] md:max-w-[190px] !min-w-[170px] whitespace-normal`,
             },
-            header: () => __('Category'),
+            // The Date column steps aside while grouped by day, but the order
+            // it sets must stay reachable: its button moves in front of the
+            // Category heading, right above the day headers carrying the date.
+            header: ({ table }) => {
+                const dateColumn = table.getColumn('transaction_date');
+
+                if (!isGroupedByDay || !dateColumn) {
+                    return __('Category');
+                }
+
+                return (
+                    <div className="flex items-center gap-3">
+                        <SortableHeader
+                            column={dateColumn}
+                            sorted={dateColumn.getIsSorted()}
+                            label={__('Date')}
+                            className="px-0"
+                        />
+                        <span>{__('Category')}</span>
+                    </div>
+                );
+            },
             cell: ({ row }) => {
                 return (
                     <CategoryCell
@@ -232,10 +288,11 @@ export function createTransactionColumns({
                 const showLabels = columnVisibility.labels !== false;
                 const showNotes = columnVisibility.notes !== false;
 
-                const transactionLabels = (transaction.label_ids || [])
-                    .filter((id) => id !== hiddenLabelId)
-                    .map((id) => labels.find((l) => l.id === id))
-                    .filter(Boolean) as Label[];
+                const transactionLabels = resolveTransactionLabels(
+                    transaction,
+                    labels,
+                    hiddenLabelId,
+                );
 
                 const hasLabels = transactionLabels.length > 0;
                 const hasNotes = !!transaction.notes;
@@ -282,25 +339,13 @@ export function createTransactionColumns({
                 label: __('Creditor'),
                 cellClassName: 'max-w-[180px] whitespace-normal',
             },
-            header: ({ column }) => {
-                return (
-                    <Button
-                        variant="ghost"
-                        onClick={() =>
-                            column.toggleSorting(column.getIsSorted() === 'asc')
-                        }
-                    >
-                        {__('Creditor')}
-                        {column.getIsSorted() === 'desc' ? (
-                            <ArrowDown className="h-3 w-3" />
-                        ) : column.getIsSorted() === 'asc' ? (
-                            <ArrowUp className="h-3 w-3" />
-                        ) : (
-                            <ArrowUpDown className="h-3 w-3 opacity-25" />
-                        )}
-                    </Button>
-                );
-            },
+            header: ({ column }) => (
+                <SortableHeader
+                    column={column}
+                    sorted={column.getIsSorted()}
+                    label={__('Creditor')}
+                />
+            ),
             cell: ({ row }) => {
                 const creditorName = row.original.creditor_name;
 
@@ -318,25 +363,13 @@ export function createTransactionColumns({
                 label: __('Debtor'),
                 cellClassName: 'max-w-[180px] whitespace-normal',
             },
-            header: ({ column }) => {
-                return (
-                    <Button
-                        variant="ghost"
-                        onClick={() =>
-                            column.toggleSorting(column.getIsSorted() === 'asc')
-                        }
-                    >
-                        {__('Debtor')}
-                        {column.getIsSorted() === 'desc' ? (
-                            <ArrowDown className="h-3 w-3" />
-                        ) : column.getIsSorted() === 'asc' ? (
-                            <ArrowUp className="h-3 w-3" />
-                        ) : (
-                            <ArrowUpDown className="h-3 w-3 opacity-25" />
-                        )}
-                    </Button>
-                );
-            },
+            header: ({ column }) => (
+                <SortableHeader
+                    column={column}
+                    sorted={column.getIsSorted()}
+                    label={__('Debtor')}
+                />
+            ),
             cell: ({ row }) => {
                 const debtorName = row.original.debtor_name;
 

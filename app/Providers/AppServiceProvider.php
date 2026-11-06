@@ -162,6 +162,13 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(10)->by((string) $request->user()?->getAuthIdentifier());
         });
 
+        // One request per batch of day totals a list draws, so thirty a minute
+        // is plenty, and each can reach the rates provider. Named for the same
+        // reason as above: its own bucket, not the API routes' counter.
+        RateLimiter::for('converted-amounts', function (Request $request): Limit {
+            return Limit::perMinute(30)->by((string) $request->user()?->getAuthIdentifier());
+        });
+
         // `mcp:use` (MCP connectors) and `api:use` (third-party API apps). An
         // authorization request naming no scope gets `mcp:use`, so a connector
         // that never asked for one keeps reaching `/mcp/oauth`.

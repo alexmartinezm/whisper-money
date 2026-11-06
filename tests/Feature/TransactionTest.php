@@ -1525,6 +1525,8 @@ test('guests are redirected from categorize page', function () {
 });
 
 test('transactions index hides internal columns and keeps the standard field set', function () {
+    fakeCurrencyApi();
+
     $user = User::factory()->onboarded()->create();
     $account = Account::factory()->create(['user_id' => $user->id]);
     Transaction::factory()->create([

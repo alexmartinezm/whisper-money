@@ -10,20 +10,18 @@ type TransactionCategoryFilter = (
     transaction: CategorizedTransaction,
 ) => boolean;
 
-export function createTransactionCategoryFilter(
+/**
+ * The categories a selection reaches, each picked one with its whole subtree.
+ * The "uncategorized" pseudo id stands for no category, so it is not one.
+ */
+export function expandCategorySelection(
     categoryIds: UUID[],
     categories: Category[],
-): TransactionCategoryFilter {
-    if (categoryIds.length === 0) {
-        return () => true;
-    }
-
+): Set<UUID> {
     const selectedCategoryIds = new Set<UUID>();
-    let uncategorizedSelected = false;
 
     for (const categoryId of categoryIds) {
         if (categoryId === UNCATEGORIZED_CATEGORY_ID) {
-            uncategorizedSelected = true;
             continue;
         }
 
@@ -32,6 +30,25 @@ export function createTransactionCategoryFilter(
             selectedCategoryIds.add(descendantId);
         }
     }
+
+    return selectedCategoryIds;
+}
+
+export function createTransactionCategoryFilter(
+    categoryIds: UUID[],
+    categories: Category[],
+): TransactionCategoryFilter {
+    if (categoryIds.length === 0) {
+        return () => true;
+    }
+
+    const selectedCategoryIds = expandCategorySelection(
+        categoryIds,
+        categories,
+    );
+    const uncategorizedSelected = categoryIds.includes(
+        UNCATEGORIZED_CATEGORY_ID,
+    );
 
     return (transaction) => {
         if (

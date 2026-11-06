@@ -2,6 +2,7 @@
 
 use App\Models\ExchangeRate;
 use App\Services\ExchangeRateService;
+use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 
@@ -263,4 +264,37 @@ test('getRates caps future dates to today', function () {
     expect($rates)->toHaveKey('usd');
     expect($rates['usd'])->toBe(1.12);
     Http::assertNothingSent();
+});
+
+test('a failed convertManyOrNull leaves plain conversions on the same instance untouched', function () {
+    $calls = 0;
+    Http::fake(function (Request $request) use (&$calls) {
+        $calls++;
+
+        return str_contains($request->url(), '2026-01-14')
+            ? Http::response(['usd' => ['eur' => 0.5]])
+            : Http::response('Server Error', 500);
+    });
+    $service = app(ExchangeRateService::class);
+    $item = ['from' => 'EUR', 'amount' => 1000, 'date' => '2026-01-15'];
+
+    expect($service->convertManyOrNull([$item], 'USD'))->toBe([null])
+        ->and($calls)->toBe(2)
+        ->and(ExchangeRate::query()->count())->toBe(0);
+
+    // The walk main does: both sources of the failing day, then the day before.
+    expect($service->convert('EUR', 'USD', 1000, '2026-01-15'))->toBe(2000)
+        ->and($calls)->toBe(5)
+        ->and(ExchangeRate::query()->where('date', '2026-01-15')->exists())->toBeTrue();
+});
+
+test('convertManyOrNull stores what it finds, for the next conversion to read', function () {
+    Http::fake(['*' => Http::response(['usd' => ['eur' => 0.5]])]);
+    $service = app(ExchangeRateService::class);
+
+    expect($service->convertManyOrNull([['from' => 'EUR', 'amount' => 1000, 'date' => '2026-01-15']], 'usd'))
+        ->toBe([2000])
+        ->and(ExchangeRate::query()->where('base_currency', 'usd')->where('date', '2026-01-15')->exists())->toBeTrue();
+
+    Http::assertSentCount(1);
 });
