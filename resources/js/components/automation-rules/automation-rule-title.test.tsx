@@ -39,6 +39,16 @@ describe('AutomationRuleTitle', () => {
         ).toBeInTheDocument();
     });
 
+    it('marks a rule whose stored conditions could not be read', () => {
+        render(
+            <AutomationRuleTitle
+                rule={{ ...makeRule('user'), invalid_rules_json: true }}
+            />,
+        );
+
+        expect(screen.getByText('Invalid conditions')).toBeInTheDocument();
+    });
+
     it('shows no marker for user-created rules', () => {
         render(<AutomationRuleTitle rule={makeRule('user')} />);
 

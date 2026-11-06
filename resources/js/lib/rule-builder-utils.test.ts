@@ -1,3 +1,4 @@
+import type { AutomationRule } from '@/types/automation-rule';
 import { describe, expect, it } from 'vitest';
 import {
     addDescriptionMatchToRuleStructure,
@@ -11,6 +12,7 @@ import {
     moveGroup,
     type Operator,
     parseJsonLogic,
+    parseStoredRule,
     reorderConditions,
     type RuleStructure,
 } from './rule-builder-utils';
@@ -529,4 +531,46 @@ describe('reordering', () => {
 
         expect(parsed.groups.map(valuesOf)).toEqual(groups.map(valuesOf));
     });
+});
+
+describe('parseStoredRule', () => {
+    const rule = {
+        id: 'rule-1',
+        user_id: 'user-1',
+        title: 'Groceries',
+        priority: 1,
+        origin: 'user',
+        rules_json: {},
+        action_category_id: null,
+        action_note: null,
+        action_note_iv: null,
+        created_at: '2026-06-15T00:00:00Z',
+        updated_at: '2026-06-15T00:00:00Z',
+        deleted_at: null,
+    } as AutomationRule;
+    const stored = (rulesJson: unknown): AutomationRule =>
+        ({ ...rule, rules_json: rulesJson }) as AutomationRule;
+
+    it('keeps conditions stored as an object, and a rule that has none', () => {
+        const conditions = { in: ['x', { var: 'description' }] };
+
+        expect(parseStoredRule(stored(conditions))).toEqual(stored(conditions));
+        expect(parseStoredRule(stored({})).invalid_rules_json).toBeUndefined();
+    });
+
+    it('decodes conditions stored as a JSON string', () => {
+        expect(
+            parseStoredRule(stored('{"in":["x",{"var":"description"}]}')),
+        ).toEqual(stored({ in: ['x', { var: 'description' }] }));
+    });
+
+    it.each(['', '   ', 'not json', '"text"', '5', 'null', '[]', null, 5])(
+        'marks anything else as invalid instead of throwing: %j',
+        (value) => {
+            expect(parseStoredRule(stored(value))).toEqual({
+                ...stored({}),
+                invalid_rules_json: true,
+            });
+        },
+    );
 });

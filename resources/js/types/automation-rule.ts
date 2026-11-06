@@ -21,6 +21,8 @@ export interface AutomationRule {
     priority: number;
     origin: RuleOrigin;
     rules_json: Record<string, unknown>;
+    /** Set by parseStoredRule() when the stored conditions could not be read. */
+    invalid_rules_json?: boolean;
     action_category_id: UUID | null;
     action_note: string | null;
     action_note_iv: string | null;

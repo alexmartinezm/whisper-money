@@ -1,4 +1,5 @@
 import { AiSparkleIcon } from '@/components/ui/ai-sparkle-icon';
+import { Badge } from '@/components/ui/badge';
 import {
     Tooltip,
     TooltipContent,
@@ -7,6 +8,22 @@ import {
 } from '@/components/ui/tooltip';
 import { type AutomationRule } from '@/types/automation-rule';
 import { __ } from '@/utils/i18n';
+
+/**
+ * Says a rule's stored conditions could not be read, so it matches nothing
+ * until they are written again.
+ */
+export function InvalidRuleBadge({ rule }: { rule: AutomationRule }) {
+    if (!rule.invalid_rules_json) {
+        return null;
+    }
+
+    return (
+        <Badge variant="destructive" className="shrink-0">
+            {__('Invalid conditions')}
+        </Badge>
+    );
+}
 
 /**
  * A rule's title, prefixed with the shared AI sparkle when the rule came from AI
@@ -40,6 +57,7 @@ export function AutomationRuleTitle({ rule }: { rule: AutomationRule }) {
             <span className="truncate" title={rule.title}>
                 {rule.title}
             </span>
+            <InvalidRuleBadge rule={rule} />
         </div>
     );
 }

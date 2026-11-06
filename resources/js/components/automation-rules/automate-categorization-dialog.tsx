@@ -1,4 +1,5 @@
 import { AutomationRuleForm } from '@/components/automation-rules/automation-rule-form';
+import { InvalidRuleBadge } from '@/components/automation-rules/automation-rule-title';
 import { Button } from '@/components/ui/button';
 import {
     Dialog,
@@ -11,6 +12,7 @@ import {
     addDescriptionMatchToRuleStructure,
     createDescriptionCondition,
     parseJsonLogic,
+    parseStoredRule,
     type RuleStructure,
 } from '@/lib/rule-builder-utils';
 import type { AutomationRule } from '@/types/automation-rule';
@@ -62,17 +64,7 @@ export function AutomateCategorizationDialog({
         automationRules: AutomationRule[];
         labels: Label[];
     }>().props;
-    const rules = useMemo(
-        () =>
-            rawRules.map((rule) => ({
-                ...rule,
-                rules_json:
-                    typeof rule.rules_json === 'string'
-                        ? JSON.parse(rule.rules_json)
-                        : rule.rules_json,
-            })),
-        [rawRules],
-    );
+    const rules = useMemo(() => rawRules.map(parseStoredRule), [rawRules]);
     const [step, setStep] = useState<Step>('choose');
     const [selectedRule, setSelectedRule] = useState<AutomationRule | null>(
         null,
@@ -211,8 +203,9 @@ export function AutomateCategorizationDialog({
                                     }}
                                 >
                                     <span>
-                                        <span className="block font-medium">
+                                        <span className="flex items-center gap-2 font-medium">
                                             {rule.title}
+                                            <InvalidRuleBadge rule={rule} />
                                         </span>
                                         <span className="block text-sm text-muted-foreground">
                                             {rule.category?.name ??

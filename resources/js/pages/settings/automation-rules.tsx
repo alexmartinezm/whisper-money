@@ -47,6 +47,7 @@ import { Input } from '@/components/ui/input';
 import { TableCell, TableRow } from '@/components/ui/table';
 import AppLayout from '@/layouts/app-layout';
 import SettingsLayout from '@/layouts/settings/layout';
+import { parseStoredRule } from '@/lib/rule-builder-utils';
 import { cn } from '@/lib/utils';
 import { type BreadcrumbItem } from '@/types';
 import { type AutomationRule } from '@/types/automation-rule';
@@ -223,17 +224,7 @@ export default function AutomationRules() {
 
     const categories = usePage().props.categories as Category[];
     const labels = usePage().props.labels as Label[];
-    const rules = useMemo(
-        () =>
-            rawRules.map((rule) => ({
-                ...rule,
-                rules_json:
-                    typeof rule.rules_json === 'string'
-                        ? JSON.parse(rule.rules_json)
-                        : rule.rules_json,
-            })),
-        [rawRules],
-    );
+    const rules = useMemo(() => rawRules.map(parseStoredRule), [rawRules]);
 
     const columns: ColumnDef<AutomationRule>[] = [
         {

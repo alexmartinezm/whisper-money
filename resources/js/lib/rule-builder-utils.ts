@@ -1,3 +1,5 @@
+import type { AutomationRule } from '@/types/automation-rule';
+
 export type FieldType = 'string' | 'number';
 
 export type Operator =
@@ -315,6 +317,36 @@ function parseConditionFromJsonLogic(
     }
 
     return null;
+}
+
+function asConditions(stored: unknown): Record<string, unknown> | null {
+    if (typeof stored === 'string') {
+        try {
+            return asConditions(JSON.parse(stored));
+        } catch {
+            return null;
+        }
+    }
+
+    return typeof stored === 'object' &&
+        stored !== null &&
+        !Array.isArray(stored)
+        ? (stored as Record<string, unknown>)
+        : null;
+}
+
+/**
+ * A rule as the pages read it. Rules stored before the form stopped
+ * double-encoding them come back as a JSON string. Anything that is not a
+ * condition object is marked instead of thrown on: these rules render on every
+ * transactions page, so one bad row must not take the page down.
+ */
+export function parseStoredRule(rule: AutomationRule): AutomationRule {
+    const conditions = asConditions(rule.rules_json);
+
+    return conditions === null
+        ? { ...rule, rules_json: {}, invalid_rules_json: true }
+        : { ...rule, rules_json: conditions };
 }
 
 export function parseJsonLogic(jsonLogic: JsonLogicRule): RuleStructure {
