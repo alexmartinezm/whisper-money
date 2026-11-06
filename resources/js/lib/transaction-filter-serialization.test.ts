@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
     deserializeFilters,
     filtersFingerprint,
+    type SerializedFilters,
     serializeFilters,
 } from './transaction-filter-serialization';
 
@@ -115,6 +116,19 @@ describe('the category types in saved and analysed filters', () => {
         expect(
             filtersFingerprint({ category_types: ['savings', 'expense'] }),
         ).toBe(filtersFingerprint({ category_types: ['expense', 'savings'] }));
+    });
+
+    it('loads a filter saved before they existed, and any sort it carried', () => {
+        const old = {
+            category_ids: ['food'],
+            sort: '-amount',
+        } as SerializedFilters;
+
+        expect(deserializeFilters(old)).toMatchObject({
+            categoryIds: ['food'],
+            categoryTypes: [],
+        });
+        expect(deserializeFilters(old)).not.toHaveProperty('sort');
     });
 
     it('keeps the fingerprint of a filter saved before they existed', () => {
