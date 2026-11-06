@@ -36,6 +36,23 @@ function outcome(Transaction $transaction, string $categoryId, float $confidence
     return new CategorizationOutcome($transaction, $categoryId, $confidence, $unambiguous, true);
 }
 
+/**
+ * Production holds rules both ways: a JSON object, and the string a web save
+ * used to wrap it in, which the model's array cast hands back undecoded.
+ *
+ * @param  array<string, mixed>  $conditions
+ * @return array<string, mixed>|string
+ */
+function rulesJsonStoredAs(string $form, array $conditions): array|string
+{
+    return $form === 'double-encoded' ? (string) json_encode($conditions) : $conditions;
+}
+
+function creditorClause(string $merchant): array
+{
+    return ['==' => [['var' => 'creditor_name'], $merchant]];
+}
+
 it('creates an ai-owned rule at the lowest priority and links the transaction', function () {
     $user = User::factory()->create();
     $category = expenseCategory($user);
@@ -296,3 +313,169 @@ it('keeps the generated title within the column when the bank stuffs the stateme
         ->and($rule->title)->toStartWith('15/06 12/06 Pago Con Tarjeta En Discos,…, ')
         ->and($rule->rules_json['or'])->toHaveCount(2);
 });
+
+it('stores the two forms the learner has to read as different columns', function (string $form, string $expectedType) {
+    $user = User::factory()->create();
+    $rule = AutomationRule::factory()->for($user)->create([
+        'rules_json' => rulesJsonStoredAs($form, creditorClause('mercadona')),
+    ]);
+
+    $stored = json_decode((string) DB::table('automation_rules')->where('id', $rule->id)->value('rules_json'), true);
+
+    expect(get_debug_type($stored))->toBe($expectedType);
+})->with([
+    'object' => ['object', 'array'],
+    'double-encoded' => ['double-encoded', 'string'],
+]);
+
+it('keeps the conditions when a correction lands on a rule', function (string $form) {
+    $user = User::factory()->create();
+    $target = expenseCategory($user);
+    $existing = expenseCategory($user);
+    $rule = AutomationRule::factory()->for($user)->create([
+        'origin' => RuleOrigin::Correction,
+        'action_category_id' => $target->id,
+        'rules_json' => rulesJsonStoredAs($form, ['or' => [creditorClause('mercadona'), creditorClause('lidl')]]),
+    ]);
+    $corrected = merchantTransaction($user, 'Carrefour');
+    $corrected->update(['category_id' => $existing->id]);
+
+    $learned = app(AiRuleLearner::class)->learnFromCorrection($corrected, $target->id);
+
+    expect($learned->id)->toBe($rule->id)
+        ->and($rule->refresh()->rules_json)->toBe(['or' => [
+            creditorClause('mercadona'),
+            creditorClause('lidl'),
+            creditorClause('carrefour'),
+        ]]);
+})->with(['object', 'double-encoded']);
+
+it('keeps a single condition when a correction lands on a rule', function (string $form) {
+    $user = User::factory()->create();
+    $target = expenseCategory($user);
+    $rule = AutomationRule::factory()->for($user)->create([
+        'origin' => RuleOrigin::Correction,
+        'action_category_id' => $target->id,
+        'rules_json' => rulesJsonStoredAs($form, creditorClause('mercadona')),
+    ]);
+
+    app(AiRuleLearner::class)->learnFromCorrection(merchantTransaction($user, 'Carrefour'), $target->id);
+
+    expect($rule->refresh()->rules_json)->toBe(['or' => [creditorClause('mercadona'), creditorClause('carrefour')]]);
+})->with(['object', 'double-encoded']);
+
+it('does not repeat a condition the rule already has', function (string $form) {
+    $user = User::factory()->create();
+    $target = expenseCategory($user);
+    $conditions = ['or' => [creditorClause('mercadona'), creditorClause('lidl')]];
+    $rule = AutomationRule::factory()->for($user)->create([
+        'origin' => RuleOrigin::Correction,
+        'action_category_id' => $target->id,
+        'rules_json' => rulesJsonStoredAs($form, $conditions),
+    ]);
+
+    app(AiRuleLearner::class)->learnFromCorrection(merchantTransaction($user, 'Lidl'), $target->id);
+
+    expect($rule->refresh()->rules_json)->toBe(rulesJsonStoredAs($form, $conditions));
+})->with(['object', 'double-encoded']);
+
+it('keeps the conditions when an ai categorization lands on a rule', function (string $form) {
+    $user = User::factory()->create();
+    $category = expenseCategory($user);
+    $rule = AutomationRule::factory()->for($user)->create([
+        'origin' => RuleOrigin::Ai,
+        'action_category_id' => $category->id,
+        'rules_json' => rulesJsonStoredAs($form, creditorClause('mercadona')),
+    ]);
+
+    app(AiRuleLearner::class)->learn(outcome(merchantTransaction($user, 'Carrefour'), $category->id));
+
+    expect($rule->refresh()->rules_json)->toBe(['or' => [creditorClause('mercadona'), creditorClause('carrefour')]]);
+})->with(['object', 'double-encoded']);
+
+it('moves a merchant out of the correction rule it was in', function (string $form) {
+    $user = User::factory()->create();
+    $before = expenseCategory($user);
+    $after = expenseCategory($user);
+    $rule = AutomationRule::factory()->for($user)->create([
+        'origin' => RuleOrigin::Correction,
+        'action_category_id' => $before->id,
+        'rules_json' => rulesJsonStoredAs($form, ['or' => [creditorClause('mercadona'), creditorClause('lidl')]]),
+    ]);
+
+    app(AiRuleLearner::class)->learnFromCorrection(merchantTransaction($user, 'Mercadona'), $after->id);
+
+    expect($rule->refresh()->rules_json)->toBe(creditorClause('lidl'));
+})->with(['object', 'double-encoded']);
+
+it('deletes a correction rule left with nothing when its merchant moves', function (string $form) {
+    $user = User::factory()->create();
+    $rule = AutomationRule::factory()->for($user)->create([
+        'origin' => RuleOrigin::Correction,
+        'action_category_id' => expenseCategory($user)->id,
+        'rules_json' => rulesJsonStoredAs($form, creditorClause('mercadona')),
+    ]);
+
+    app(AiRuleLearner::class)->learnFromCorrection(merchantTransaction($user, 'Mercadona'), expenseCategory($user)->id);
+
+    expect(AutomationRule::query()->whereKey($rule->id)->exists())->toBeFalse();
+})->with(['object', 'double-encoded']);
+
+it('forgets a merchant and keeps the rest of the rule', function (string $form) {
+    $user = User::factory()->create();
+    $rule = AutomationRule::factory()->for($user)->create([
+        'origin' => RuleOrigin::Ai,
+        'action_category_id' => expenseCategory($user)->id,
+        'rules_json' => rulesJsonStoredAs($form, ['or' => [creditorClause('mercadona'), creditorClause('lidl'), creditorClause('aldi')]]),
+    ]);
+
+    app(AiRuleLearner::class)->forget($rule, merchantTransaction($user, 'Lidl'));
+
+    expect($rule->refresh()->rules_json)->toBe(['or' => [creditorClause('mercadona'), creditorClause('aldi')]]);
+})->with(['object', 'double-encoded']);
+
+it('deletes the rule when the merchant forgotten was its last condition', function (string $form) {
+    $user = User::factory()->create();
+    $rule = AutomationRule::factory()->for($user)->create([
+        'origin' => RuleOrigin::Ai,
+        'action_category_id' => expenseCategory($user)->id,
+        'rules_json' => rulesJsonStoredAs($form, creditorClause('mercadona')),
+    ]);
+
+    app(AiRuleLearner::class)->forget($rule, merchantTransaction($user, 'Mercadona'));
+
+    expect(AutomationRule::query()->whereKey($rule->id)->exists())->toBeFalse();
+})->with(['object', 'double-encoded']);
+
+it('releases a merchant from every ai rule that carries it', function (string $form) {
+    $user = User::factory()->create();
+    $narrowed = AutomationRule::factory()->for($user)->create([
+        'origin' => RuleOrigin::Ai,
+        'action_category_id' => expenseCategory($user)->id,
+        'rules_json' => rulesJsonStoredAs($form, ['or' => [creditorClause('mercadona'), creditorClause('lidl')]]),
+    ]);
+    $emptied = AutomationRule::factory()->for($user)->create([
+        'origin' => RuleOrigin::Ai,
+        'action_category_id' => expenseCategory($user)->id,
+        'rules_json' => rulesJsonStoredAs($form, creditorClause('mercadona')),
+    ]);
+
+    app(AiRuleLearner::class)->forgetFromAiRules(merchantTransaction($user, 'Mercadona'));
+
+    expect($narrowed->refresh()->rules_json)->toBe(creditorClause('lidl'))
+        ->and(AutomationRule::query()->whereKey($emptied->id)->exists())->toBeFalse();
+})->with(['object', 'double-encoded']);
+
+it('leaves a rule alone when it does not carry the merchant to forget', function (string $form) {
+    $user = User::factory()->create();
+    $conditions = creditorClause('lidl');
+    $rule = AutomationRule::factory()->for($user)->create([
+        'origin' => RuleOrigin::Ai,
+        'action_category_id' => expenseCategory($user)->id,
+        'rules_json' => rulesJsonStoredAs($form, $conditions),
+    ]);
+
+    app(AiRuleLearner::class)->forget($rule, merchantTransaction($user, 'Mercadona'));
+
+    expect($rule->refresh()->rules_json)->toBe(rulesJsonStoredAs($form, $conditions));
+})->with(['object', 'double-encoded']);

@@ -32,6 +32,14 @@ export interface TransactionUpdateData extends Omit<
     splits?: SplitLineInput[];
 }
 
+/**
+ * `label_ids` adds to the labels each row has. Taking them all off is asked for
+ * by name, so an edit that lost its labels on the way can never clear a row.
+ */
+export type BulkTransactionUpdateData = TransactionUpdateData & {
+    remove_all_labels?: true;
+};
+
 export type TransactionCreateData = Omit<
     Transaction,
     'id' | 'created_at' | 'updated_at' | 'splits'
@@ -165,7 +173,7 @@ class TransactionSyncService {
 
     async updateMany(
         ids: string[],
-        data: TransactionUpdateData,
+        data: BulkTransactionUpdateData,
     ): Promise<BulkUpdateResult> {
         const { label_ids, ...transactionData } = data;
 
@@ -180,7 +188,7 @@ class TransactionSyncService {
 
     async updateByFilters(
         filters: TransactionFilters,
-        data: TransactionUpdateData,
+        data: BulkTransactionUpdateData,
     ): Promise<BulkUpdateResult> {
         const { label_ids, ...transactionData } = data;
 

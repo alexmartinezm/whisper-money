@@ -15,6 +15,7 @@ use App\Services\AutomationRules\AutomationRuleWriter;
 use App\Services\AutomationRuleService;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
@@ -496,6 +497,38 @@ describe('update', function () {
             ->patchJson('/api/v1/automation-rules/'.$rule->id, ['action_label_ids' => [], 'action_note' => null])
             ->assertOk()
             ->assertJsonPath('data.action_label_ids', [])
+            ->assertJsonPath('data.action_note', null);
+    });
+
+    it('still clears a note a web save left alone', function () {
+        $user = User::factory()->create();
+        $rule = AutomationRule::factory()->create([
+            'user_id' => $user->id,
+            'action_category_id' => Category::factory()->create(['user_id' => $user->id])->id,
+        ]);
+        $headers = rulesWriter($user);
+
+        withHeaders($headers)
+            ->patchJson('/api/v1/automation-rules/'.$rule->id, ['action_note' => 'Weekly shop'])
+            ->assertOk();
+
+        $this->actingAs($user)
+            ->patch(route('automation-rules.update', $rule), [
+                'title' => 'Renamed',
+                'priority' => 1,
+                'rules_json' => json_encode(groceryConditions()),
+                'action_category_id' => $rule->action_category_id,
+            ])
+            ->assertRedirect();
+
+        expect($rule->refresh()->action_note)->toBe('Weekly shop');
+
+        // Back to a bearer token, as a client calling after the web session.
+        Auth::forgetGuards();
+
+        withHeaders(rulesWriter($user))
+            ->patchJson('/api/v1/automation-rules/'.$rule->id, ['action_note' => null])
+            ->assertOk()
             ->assertJsonPath('data.action_note', null);
     });
 

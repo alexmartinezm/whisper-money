@@ -23,6 +23,7 @@ use App\Services\ManualBalanceAdjuster;
 use App\Services\TransactionDayTotals;
 use App\Services\TransactionFilterSummary;
 use App\Services\Transactions\ReplaceTransactionSplits;
+use Closure;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\JsonResponse;
@@ -448,10 +449,9 @@ class TransactionController extends Controller
         $filters = $request->input('filters');
 
         $updateData = $this->bulkUpdateData($request);
-        $hasLabelUpdate = $request->has('label_ids');
-        $labelIds = $request->input('label_ids');
+        $labelChange = $this->bulkLabelChange($request);
 
-        if ($updateData === [] && ! $hasLabelUpdate) {
+        if ($updateData === [] && $labelChange === null) {
             return response()->json([
                 'message' => 'No update data provided.',
             ], 400);
@@ -463,8 +463,7 @@ class TransactionController extends Controller
             $filters,
             $request,
             $updateData,
-            $hasLabelUpdate,
-            $labelIds,
+            $labelChange,
         ): array {
             $lockedTransactions = $this->lockBulkTargets($user, $transactionIds, $filters);
 
@@ -495,8 +494,8 @@ class TransactionController extends Controller
                 $changedIds = $changedIds->merge($this->massUpdate($candidates, $generalData));
             }
 
-            if ($hasLabelUpdate) {
-                $changedIds = $changedIds->merge($this->syncBulkLabels($lockedTransactions, $labelIds ?? []));
+            if ($labelChange !== null) {
+                $changedIds = $changedIds->merge($this->changeBulkLabels($lockedTransactions, $labelChange));
             }
 
             $updatedIds = $changedIds->unique()->values();
@@ -625,16 +624,36 @@ class TransactionController extends Controller
     }
 
     /**
+     * What a bulk edit does to each row's labels, or null when it leaves them
+     * alone. Labels go on top of the ones a row has. Taking them all off is the
+     * request's explicit `remove_all_labels`, so an add can never clear a row.
+     *
+     * @return (Closure(Transaction): array{attached: array<mixed>, detached: array<mixed>, updated: array<mixed>})|null
+     */
+    private function bulkLabelChange(BulkUpdateTransactionsRequest $request): ?Closure
+    {
+        if ($request->boolean('remove_all_labels')) {
+            return fn (Transaction $transaction): array => $transaction->labels()->sync([]);
+        }
+
+        $labelIds = $request->input('label_ids') ?? [];
+
+        return $labelIds === []
+            ? null
+            : fn (Transaction $transaction): array => $transaction->labels()->syncWithoutDetaching($labelIds);
+    }
+
+    /**
      * @param  EloquentCollection<int, Transaction>  $transactions
-     * @param  array<int, string>  $labelIds
+     * @param  Closure(Transaction): array{attached: array<mixed>, detached: array<mixed>, updated: array<mixed>}  $change
      * @return Collection<int, string> the ids whose labels actually moved
      */
-    private function syncBulkLabels(EloquentCollection $transactions, array $labelIds): Collection
+    private function changeBulkLabels(EloquentCollection $transactions, Closure $change): Collection
     {
         $changed = collect();
 
         foreach ($transactions as $transaction) {
-            $changes = $transaction->labels()->sync($labelIds);
+            $changes = $change($transaction);
 
             if ($changes['attached'] !== [] || $changes['detached'] !== [] || $changes['updated'] !== []) {
                 $transaction->touch();

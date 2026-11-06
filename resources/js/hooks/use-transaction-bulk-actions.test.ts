@@ -16,6 +16,7 @@ const sync = vi.hoisted(() => ({
     updateByFilters: vi.fn(),
 }));
 const reEvaluate = vi.hoisted(() => vi.fn());
+const countMatching = vi.hoisted(() => vi.fn());
 const toastMock = vi.hoisted(() => ({
     success: vi.fn(),
     error: vi.fn(),
@@ -104,6 +105,7 @@ function renderBulk(
                 isReEvaluating: false,
             },
             filters: FILTERS,
+            countMatching,
             ...options,
         });
 
@@ -125,6 +127,7 @@ describe('useTransactionBulkActions', () => {
         sync.updateMany.mockResolvedValue(updateResult());
         sync.updateByFilters.mockResolvedValue(updateResult());
         reEvaluate.mockResolvedValue('done');
+        countMatching.mockResolvedValue(42);
     });
 
     it('offers "all matching filters" only when the table pages from the server', () => {
@@ -257,6 +260,226 @@ describe('useTransactionBulkActions', () => {
         expect(sync.updateMany).not.toHaveBeenCalled();
         expect(onServerChanged).toHaveBeenCalledOnce();
         expect(result.current.bulk.barProps.isSelectingAll).toBe(false);
+    });
+
+    it('removes every label from the ticked rows only once confirmed', async () => {
+        const onTransactionsChanged = vi.fn();
+        const { result } = renderBulk([transaction('a')], ['a'], {
+            onTransactionsChanged,
+        });
+
+        act(() => result.current.bulk.barProps.onRemoveAllLabels());
+
+        expect(result.current.bulk.removeLabelsDialog.isOpen).toBe(true);
+        expect(result.current.bulk.removeLabelsDialog.selectedCount).toBe(1);
+        expect(sync.updateMany).not.toHaveBeenCalled();
+
+        await act(() => result.current.bulk.removeLabelsDialog.onConfirm());
+
+        expect(sync.updateMany).toHaveBeenCalledWith(['a'], {
+            remove_all_labels: true,
+        });
+        expect(onTransactionsChanged).toHaveBeenCalledOnce();
+    });
+
+    it('sends nothing when the removal of every label is cancelled', () => {
+        const { result } = renderBulk([transaction('a')], ['a']);
+
+        act(() => result.current.bulk.barProps.onRemoveAllLabels());
+        act(() => result.current.bulk.removeLabelsDialog.onClose());
+
+        expect(result.current.bulk.removeLabelsDialog.isOpen).toBe(false);
+        expect(sync.updateMany).not.toHaveBeenCalled();
+        expect(sync.updateByFilters).not.toHaveBeenCalled();
+    });
+
+    it('removes every label from every matching row once confirmed', async () => {
+        const { result } = renderBulk([transaction('a')], ['a'], {
+            matchingFilters: { search: 'coffee' },
+        });
+
+        act(() => result.current.bulk.barProps.onSelectAll?.());
+        act(() => result.current.bulk.barProps.onRemoveAllLabels());
+
+        expect(result.current.bulk.removeLabelsDialog.isAllMatching).toBe(true);
+
+        await act(() => result.current.bulk.removeLabelsDialog.onConfirm());
+
+        expect(sync.updateByFilters).toHaveBeenCalledWith(FILTERS, {
+            remove_all_labels: true,
+        });
+        expect(sync.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('counts the rows a removal over every matching row reaches', async () => {
+        const { result } = renderBulk([transaction('a')], ['a'], {
+            matchingFilters: { search: 'coffee' },
+        });
+
+        act(() => result.current.bulk.barProps.onSelectAll?.());
+        await act(async () => result.current.bulk.barProps.onRemoveAllLabels());
+
+        expect(countMatching).toHaveBeenCalledWith(
+            FILTERS,
+            expect.any(AbortSignal),
+        );
+        expect(result.current.bulk.removeLabelsDialog).toMatchObject({
+            hasFilters: true,
+            matchingCount: 42,
+            countFailed: false,
+            canConfirm: true,
+        });
+    });
+
+    it('holds the confirmation back until the rows are counted', async () => {
+        let finishCount: (count: number) => void = () => {};
+        countMatching.mockReturnValue(
+            new Promise<number>((resolve) => {
+                finishCount = resolve;
+            }),
+        );
+        const { result } = renderBulk([transaction('a')], ['a'], {
+            matchingFilters: {},
+        });
+
+        act(() => result.current.bulk.barProps.onSelectAll?.());
+        await act(async () => result.current.bulk.barProps.onRemoveAllLabels());
+
+        expect(result.current.bulk.removeLabelsDialog).toMatchObject({
+            hasFilters: false,
+            matchingCount: null,
+            canConfirm: false,
+        });
+
+        await act(async () => finishCount(7));
+
+        expect(result.current.bulk.removeLabelsDialog).toMatchObject({
+            matchingCount: 7,
+            canConfirm: true,
+        });
+    });
+
+    it('lets a failed count through only where the wording says all transactions', async () => {
+        countMatching.mockRejectedValue(new Error('offline'));
+
+        const unfiltered = renderBulk([transaction('a')], ['a'], {
+            matchingFilters: {},
+        });
+        act(() => unfiltered.result.current.bulk.barProps.onSelectAll?.());
+        await act(async () =>
+            unfiltered.result.current.bulk.barProps.onRemoveAllLabels(),
+        );
+
+        const filtered = renderBulk([transaction('a')], ['a'], {
+            matchingFilters: { search: 'coffee' },
+        });
+        act(() => filtered.result.current.bulk.barProps.onSelectAll?.());
+        await act(async () =>
+            filtered.result.current.bulk.barProps.onRemoveAllLabels(),
+        );
+
+        expect(unfiltered.result.current.bulk.removeLabelsDialog).toMatchObject(
+            { countFailed: true, canConfirm: true },
+        );
+        expect(filtered.result.current.bulk.removeLabelsDialog).toMatchObject({
+            countFailed: true,
+            canConfirm: false,
+        });
+    });
+
+    it('drops the count when the dialog closes before it arrives', async () => {
+        let finishCount: (count: number) => void = () => {};
+        countMatching.mockReturnValue(
+            new Promise<number>((resolve) => {
+                finishCount = resolve;
+            }),
+        );
+        const { result } = renderBulk([transaction('a')], ['a'], {
+            matchingFilters: {},
+        });
+
+        act(() => result.current.bulk.barProps.onSelectAll?.());
+        await act(async () => result.current.bulk.barProps.onRemoveAllLabels());
+        act(() => result.current.bulk.removeLabelsDialog.onClose());
+
+        const signal = countMatching.mock.lastCall![1] as AbortSignal;
+
+        await act(async () => finishCount(7));
+
+        expect(signal.aborted).toBe(true);
+        expect(result.current.bulk.removeLabelsDialog.matchingCount).toBeNull();
+    });
+
+    /** A select-all's dialog, closed once and left to count again. */
+    async function reopenWithPendingCount(firstCount: () => Promise<number>) {
+        countMatching.mockImplementationOnce(firstCount);
+        const rendered = renderBulk([transaction('a')], ['a'], {
+            matchingFilters: {},
+        });
+
+        act(() => rendered.result.current.bulk.barProps.onSelectAll?.());
+        await act(async () =>
+            rendered.result.current.bulk.barProps.onRemoveAllLabels(),
+        );
+        act(() => rendered.result.current.bulk.removeLabelsDialog.onClose());
+
+        countMatching.mockReturnValue(new Promise<number>(() => {}));
+        await act(async () =>
+            rendered.result.current.bulk.barProps.onRemoveAllLabels(),
+        );
+
+        return rendered;
+    }
+
+    it('forgets the last count when the dialog opens again', async () => {
+        const { result } = await reopenWithPendingCount(() =>
+            Promise.resolve(7),
+        );
+
+        expect(result.current.bulk.removeLabelsDialog).toMatchObject({
+            isOpen: true,
+            matchingCount: null,
+            countFailed: false,
+            canConfirm: false,
+        });
+    });
+
+    it('forgets the last failure when the dialog opens again', async () => {
+        const { result } = await reopenWithPendingCount(() =>
+            Promise.reject(new Error('offline')),
+        );
+
+        expect(result.current.bulk.removeLabelsDialog).toMatchObject({
+            isOpen: true,
+            matchingCount: null,
+            countFailed: false,
+            canConfirm: false,
+        });
+    });
+
+    it('counts nothing for the ticked rows, whose number is known', () => {
+        const { result } = renderBulk([transaction('a')], ['a']);
+
+        act(() => result.current.bulk.barProps.onRemoveAllLabels());
+
+        expect(countMatching).not.toHaveBeenCalled();
+        expect(result.current.bulk.removeLabelsDialog.canConfirm).toBe(true);
+    });
+
+    it('does not ask to remove labels with nothing selected', () => {
+        const { result } = renderBulk([transaction('a')], []);
+
+        act(() => result.current.bulk.barProps.onRemoveAllLabels());
+
+        expect(result.current.bulk.removeLabelsDialog.isOpen).toBe(false);
+    });
+
+    it('sends no empty label list', async () => {
+        const { result } = renderBulk([transaction('a')], ['a']);
+
+        await act(() => result.current.bulk.barProps.onLabelsChange([]));
+
+        expect(sync.updateMany).not.toHaveBeenCalled();
     });
 
     it('clears the progress toast when the server rejects a bulk edit', async () => {

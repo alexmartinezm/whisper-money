@@ -7,6 +7,7 @@ use App\Models\AutomationRule;
 use App\Models\Category;
 use App\Models\Transaction;
 use App\Services\Ai\Contracts\TransactionMatcher;
+use App\Services\AutomationRules\RuleConditions;
 use Illuminate\Support\Str;
 
 /**
@@ -441,22 +442,25 @@ class AiRuleLearner
 
     /**
      * The individual condition clauses of a rule, normalised to a flat list
-     * regardless of whether it is a single clause or an OR of several.
+     * regardless of whether it is a single clause or an OR of several, and of
+     * whether the column holds it as an object or as a double-encoded string.
      *
-     * @param  mixed  $rulesJson
+     * @param  array<string, mixed>|string  $rulesJson
      * @return list<array<string, mixed>>
      */
-    private function clauses($rulesJson): array
+    private function clauses(array|string $rulesJson): array
     {
-        if (! is_array($rulesJson) || $rulesJson === []) {
+        $conditions = RuleConditions::decoded($rulesJson);
+
+        if ($conditions === []) {
             return [];
         }
 
-        if (isset($rulesJson['or']) && is_array($rulesJson['or'])) {
-            return array_values($rulesJson['or']);
+        if (isset($conditions['or']) && is_array($conditions['or'])) {
+            return array_values($conditions['or']);
         }
 
-        return [$rulesJson];
+        return [$conditions];
     }
 
     /**

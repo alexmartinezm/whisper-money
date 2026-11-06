@@ -31,6 +31,7 @@ function renderBar(props: Partial<ComponentProps<typeof BulkActionsBar>> = {}) {
     const handlers = {
         onCategoryChange: vi.fn(),
         onLabelsChange: vi.fn(),
+        onRemoveAllLabels: vi.fn(),
         onDelete: vi.fn(),
         onReEvaluateRules: vi.fn(),
         onSelectAll: vi.fn(),
@@ -89,6 +90,28 @@ describe('BulkActionsBar', () => {
         fireEvent.click(await screen.findByText('Work'));
 
         expect(onLabelsChange).toHaveBeenCalledWith(['label-1']);
+    });
+
+    it('never sends fewer labels when one is picked again', async () => {
+        const { onLabelsChange } = renderBar();
+
+        press('l');
+        fireEvent.click(await screen.findByText('Work'));
+        fireEvent.click(await screen.findByText('Work'));
+
+        expect(onLabelsChange).toHaveBeenCalledTimes(2);
+        expect(onLabelsChange).toHaveBeenNthCalledWith(1, ['label-1']);
+        expect(onLabelsChange).toHaveBeenNthCalledWith(2, ['label-1']);
+    });
+
+    it('asks for a removal of every label instead of sending an empty list', async () => {
+        const { onLabelsChange, onRemoveAllLabels } = renderBar();
+
+        press('l');
+        fireEvent.click(await screen.findByText('Remove all labels'));
+
+        expect(onRemoveAllLabels).toHaveBeenCalledOnce();
+        expect(onLabelsChange).not.toHaveBeenCalled();
     });
 
     it('re-evaluates the rules on R', () => {
@@ -313,6 +336,23 @@ describe('BulkActionsBar on the phone', () => {
         renderBar({ selectionMode: mobileSelection({ isActive: false }) });
 
         expect(screen.queryByRole('toolbar')).not.toBeInTheDocument();
+    });
+
+    it('adds a label from the drawer and asks before removing them all', async () => {
+        vi.stubGlobal('matchMedia', () => ({ matches: false }));
+        const { onLabelsChange, onRemoveAllLabels } = renderBar({
+            selectionMode: mobileSelection(),
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: 'Labels' }));
+        fireEvent.click(await screen.findByText('Work'));
+
+        expect(onLabelsChange).toHaveBeenCalledWith(['label-1']);
+
+        fireEvent.click(await screen.findByText('Remove all labels'));
+
+        expect(onRemoveAllLabels).toHaveBeenCalledOnce();
+        expect(onLabelsChange).toHaveBeenCalledOnce();
     });
 
     it('opens the category picker as a drawer and applies the pick', async () => {

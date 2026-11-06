@@ -29,11 +29,9 @@ class AutomationRuleController extends Controller
      */
     public function store(StoreAutomationRuleRequest $request): RedirectResponse
     {
-        $validated = $request->validated();
-        $labelIds = $validated['action_label_ids'] ?? [];
-        unset($validated['action_label_ids']);
+        $labelIds = $request->validated('action_label_ids') ?? [];
 
-        $rule = auth()->user()->automationRules()->create($validated);
+        $rule = auth()->user()->automationRules()->create($request->ruleAttributes());
 
         if (! empty($labelIds)) {
             $rule->labels()->sync($labelIds);
@@ -53,11 +51,9 @@ class AutomationRuleController extends Controller
     {
         $this->authorize('update', $automationRule);
 
-        $validated = $request->validated();
-        $labelIds = $validated['action_label_ids'] ?? [];
-        unset($validated['action_label_ids']);
+        $labelIds = $request->validated('action_label_ids') ?? [];
 
-        $automationRule->update($validated);
+        $automationRule->update($request->ruleAttributes());
         $automationRule->labels()->sync($labelIds);
         $automationRule->touch();
 

@@ -101,6 +101,8 @@ it('adds a label to the selection and clears it from the rows without a reload',
         ->click('tr:has-text("Coffee subscription") [aria-label="Select row"]')
         ->click('[data-testid="bulk-labels-trigger"]')
         ->click('[cmdk-item]:has-text("Remove all labels")')
+        ->assertSee('Are you sure you want to remove every label from 2 transactions?')
+        ->click('[data-testid="confirm-remove-all-labels"]')
         ->assertSee('Updated 2 transactions');
 
     // PHP-LARAVEL-952: the badges used to survive on screen until a reload.

@@ -31,8 +31,20 @@ vi.mock('@/components/transactions/responsive-transaction-table', () => ({
     ),
 }));
 vi.mock('@/components/transactions/bulk-actions-bar', () => ({
-    BulkActionsBar: ({ selectedCount }: { selectedCount: number }) => (
-        <div data-testid="bulk-bar">{selectedCount} selected</div>
+    BulkActionsBar: ({
+        selectedCount,
+        onRemoveAllLabels,
+        onSelectAll,
+    }: {
+        selectedCount: number;
+        onRemoveAllLabels: () => void;
+        onSelectAll?: () => void;
+    }) => (
+        <div>
+            <div data-testid="bulk-bar">{selectedCount} selected</div>
+            <button onClick={onSelectAll}>select all matching</button>
+            <button onClick={onRemoveAllLabels}>ask to remove labels</button>
+        </div>
     ),
 }));
 vi.mock('@/components/transactions/transaction-filters', () => ({
@@ -204,6 +216,37 @@ describe('TransactionTable', () => {
         act(() => fireEvent.click(screen.getByText('clear selection')));
 
         expect(screen.getByTestId('bulk-bar').textContent).toBe('0 selected');
+    });
+
+    it('asks before the bulk bar takes the labels off the ticked rows', () => {
+        renderTable(source());
+
+        fireEvent.click(screen.getByText('tick b'));
+
+        expect(screen.queryByRole('alertdialog')).toBeNull();
+
+        fireEvent.click(screen.getByText('ask to remove labels'));
+
+        expect(
+            within(screen.getByRole('alertdialog')).getByText(
+                'Are you sure you want to remove every label from 1 transactions? This action cannot be undone.',
+            ),
+        ).toBeTruthy();
+    });
+
+    it('counts through the source before clearing every row of a select-all', async () => {
+        const countMatching = vi.fn().mockResolvedValue(8350);
+        renderTable(source({ countMatching, matchingFilters: {} }));
+
+        fireEvent.click(screen.getByText('tick b'));
+        fireEvent.click(screen.getByText('select all matching'));
+        fireEvent.click(screen.getByText('ask to remove labels'));
+
+        expect(
+            await screen.findByText(
+                'No filter is set: this removes every label from all your 8350 transactions. This action cannot be undone.',
+            ),
+        ).toBeTruthy();
     });
 
     it('loads more by itself only when the source pages that way', () => {

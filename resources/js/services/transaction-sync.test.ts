@@ -170,6 +170,20 @@ describe('transactionSyncService bulk updates', () => {
         );
     });
 
+    it('sends a removal of every label for explicit ids', async () => {
+        await transactionSyncService.updateMany(['tx-1'], {
+            remove_all_labels: true,
+        });
+
+        expect(axiosMock.patch).toHaveBeenLastCalledWith(
+            '/transactions/bulk',
+            expect.objectContaining({
+                transaction_ids: ['tx-1'],
+                remove_all_labels: true,
+            }),
+        );
+    });
+
     it('returns updated and skipped split counts for explicit ids', async () => {
         await expect(
             transactionSyncService.updateMany(['tx-1', 'tx-2', 'tx-3'], {
@@ -210,6 +224,36 @@ describe('transactionSyncService bulk updates', () => {
                 process.env.TZ = previousTimezone;
             }
         }
+    });
+
+    it('sends a removal of every label for filters', async () => {
+        await transactionSyncService.updateByFilters(bulkFilters(), {
+            remove_all_labels: true,
+        });
+
+        expect(axiosMock.patch).toHaveBeenLastCalledWith(
+            '/transactions/bulk',
+            expect.objectContaining({
+                filters: {},
+                remove_all_labels: true,
+            }),
+        );
+    });
+
+    it('sends the Uncategorized filter as the list reads it', async () => {
+        await transactionSyncService.updateByFilters(
+            bulkFilters({ categoryIds: ['uncategorized'] }),
+            { label_ids: ['label-1'] },
+        );
+
+        expect(axiosMock.patch).toHaveBeenLastCalledWith(
+            '/transactions/bulk',
+            expect.objectContaining({
+                filters: expect.objectContaining({
+                    category_ids: ['uncategorized'],
+                }),
+            }),
+        );
     });
 
     it('returns updated and skipped split counts for filters', async () => {

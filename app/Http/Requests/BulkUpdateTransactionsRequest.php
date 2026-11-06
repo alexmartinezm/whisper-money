@@ -5,12 +5,20 @@ namespace App\Http\Requests;
 use App\Enums\CashflowBlock;
 use App\Enums\CategoryType;
 use App\Http\Requests\Concerns\ValidatesUserOwnedResources;
+use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 class BulkUpdateTransactionsRequest extends FormRequest
 {
     use ValidatesUserOwnedResources;
+
+    /**
+     * The fields that change the rows.
+     *
+     * @var list<string>
+     */
+    private const array WriteFields = ['category_id', 'notes', 'notes_iv', 'label_ids', 'remove_all_labels'];
 
     public function authorize(): bool
     {
@@ -29,7 +37,11 @@ class BulkUpdateTransactionsRequest extends FormRequest
             'filters.amount_min' => ['nullable', 'numeric'],
             'filters.amount_max' => ['nullable', 'numeric'],
             'filters.category_ids' => ['nullable', 'array'],
-            'filters.category_ids.*' => ['string', 'uuid', $this->userOwned('categories')],
+            // Besides real categories, the list's filter takes the "uncategorized"
+            // pseudo id, which Transaction::scopeApplyFilters() reads.
+            'filters.category_ids.*' => Rule::forEach(fn (mixed $categoryId): array => $categoryId === 'uncategorized'
+                ? ['string']
+                : ['string', 'uuid', $this->userOwned('categories')]),
             'filters.category_types' => ['nullable', 'array'],
             'filters.category_types.*' => [Rule::enum(CategoryType::class)],
             'filters.account_ids' => ['nullable', 'array'],
@@ -45,7 +57,23 @@ class BulkUpdateTransactionsRequest extends FormRequest
             'notes_iv' => ['nullable', 'string', 'size:16'],
             'label_ids' => ['nullable', 'array'],
             'label_ids.*' => ['required', 'string', 'uuid', $this->userOwned('labels')],
+            'remove_all_labels' => ['sometimes', 'accepted', 'prohibits:label_ids'],
         ];
+    }
+
+    /**
+     * With neither ids nor filters the controller would edit every row of the
+     * user, so a write has to name its target. The key is what counts: a
+     * select-all with no filter set sends `filters: {}`, which reads as empty.
+     * A request writing nothing is the controller's 400.
+     */
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator): void {
+            if ($this->hasAny(self::WriteFields) && ! $this->hasAny(['transaction_ids', 'filters'])) {
+                $validator->errors()->add('transaction_ids', 'A bulk edit must name its transactions or its filters.');
+            }
+        });
     }
 
     public function messages(): array

@@ -53,13 +53,18 @@ class StoreAutomationRuleRequest extends FormRequest
     }
 
     /**
-     * Decode the rules_json string into an array so the model's array cast doesn't double-encode it.
+     * The validated fields as the model takes them, without the labels. The
+     * form posts the conditions as a JSON string: left as one, the model's
+     * array cast would encode it a second time.
+     *
+     * @return array<string, mixed>
      */
-    protected function passedValidation(): void
+    public function ruleAttributes(): array
     {
-        $this->merge([
-            'rules_json' => json_decode($this->rules_json, true),
-        ]);
+        return [
+            ...$this->safe()->except('action_label_ids'),
+            'rules_json' => json_decode($this->validated('rules_json'), true),
+        ];
     }
 
     /**

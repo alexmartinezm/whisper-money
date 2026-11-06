@@ -42,7 +42,10 @@ export interface BulkActionsBarProps {
     categories: Category[];
     labels?: Label[];
     onCategoryChange: (categoryId: string | null) => void;
+    /** Labels to add to the ones each row has. */
     onLabelsChange: (labelIds: string[]) => void;
+    /** Asks before taking every label off the rows. */
+    onRemoveAllLabels: () => void;
     onLabelCreated?: (label: Label) => void;
     onDelete: () => void;
     onReEvaluateRules: () => void;
@@ -273,6 +276,7 @@ function DesktopBulkActionsBar({
     labels = [],
     onCategoryChange,
     onLabelsChange,
+    onRemoveAllLabels,
     onLabelCreated,
     onDelete,
     onReEvaluateRules,
@@ -392,6 +396,7 @@ function DesktopBulkActionsBar({
                 <BulkLabelSelect
                     labels={labels}
                     onLabelsChange={onLabelsChange}
+                    onRemoveAllLabels={onRemoveAllLabels}
                     onLabelCreated={onLabelCreated}
                     trigger={
                         <BulkActionButton
