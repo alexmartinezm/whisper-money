@@ -9,6 +9,7 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 
 /**
@@ -18,6 +19,10 @@ use InvalidArgumentException;
  * `ending_before`, the id of an object from a previous page. The response is
  * `{"data": [...], "has_more": bool}`; `has_more` says whether more objects
  * exist past the page in the direction being walked.
+ *
+ * Any other query key is a 422, listed as a filter by the caller or not: a
+ * misspelt filter must not answer with the whole list, which a client could
+ * go on to act on.
  *
  * The caller fixes the ordering, which must end on a unique column (the
  * primary key) so ties on the leading sort keys still have a stable order.
@@ -33,15 +38,21 @@ class CursorPaginator
 
     private const int MaxLimit = 100;
 
+    /** @var list<string> */
+    private const array PaginationKeys = ['limit', 'starting_after', 'ending_before', 'space'];
+
     /**
      * @template TModel of Model
      *
      * @param  Builder<TModel>  $query  already scoped to what the caller may see
      * @param  list<array{0: string, 1: 'asc'|'desc'}>  $order  e.g. [['transaction_date', 'desc'], ['id', 'desc']]
      * @param  class-string<JsonResource>  $resource
+     * @param  list<string>  $filters  the query keys the endpoint takes on top of the pagination ones
      */
-    public static function paginate(Builder $query, Request $request, array $order, string $resource): AnonymousResourceCollection
+    public static function paginate(Builder $query, Request $request, array $order, string $resource, array $filters = []): AnonymousResourceCollection
     {
+        self::refuseUnknownKeys($request, $filters);
+
         if ($order === [] || self::column(end($order)[0]) !== $query->getModel()->getKeyName()) {
             throw new InvalidArgumentException('Cursor pagination must be ordered by the primary key last.');
         }
@@ -76,6 +87,26 @@ class CursorPaginator
 
         return $resource::collection($backwards ? $items->reverse()->values() : $items)
             ->additional(['has_more' => $hasMore]);
+    }
+
+    /**
+     * Read off everything the request carries, the body included, since a
+     * form request validates a GET's JSON body too.
+     *
+     * @param  list<string>  $filters
+     *
+     * @throws ValidationException
+     */
+    private static function refuseUnknownKeys(Request $request, array $filters): void
+    {
+        $unknown = array_diff(array_map(strval(...), array_keys($request->all())), self::PaginationKeys, $filters);
+
+        if ($unknown !== []) {
+            throw ValidationException::withMessages(array_map(
+                fn (string $key): string => "This list does not take a {$key} parameter.",
+                array_combine($unknown, $unknown),
+            ));
+        }
     }
 
     /**

@@ -43,6 +43,9 @@ class TransactionController extends Controller
      * `query` reads what the server can read: an encrypted description or note
      * never matches, though the row can still match on the counterparty names
      * or any other filter, and reads as `''` in those fields.
+     *
+     * A parameter this list does not take is a `422`, so a misspelt filter
+     * never answers with every transaction.
      */
     public function index(SearchTransactionsRequest $request, TransactionSearch $search): AnonymousResourceCollection
     {
@@ -51,6 +54,7 @@ class TransactionController extends Controller
             $request,
             [['transaction_date', 'desc'], ['id', 'desc']],
             TransactionResource::class,
+            array_keys($request->rules()),
         );
     }
 
