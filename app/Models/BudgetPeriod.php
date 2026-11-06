@@ -181,6 +181,39 @@ class BudgetPeriod extends Model
             ->where('end_date', '>=', $from->toDateString());
     }
 
+    /**
+     * The periods of catch-all budgets still running, which are the only ones a
+     * reconciliation may touch: an archived catch-all keeps what it counted.
+     *
+     * @param  Builder<BudgetPeriod>  $query
+     * @return Builder<BudgetPeriod>
+     */
+    public function scopeOfRunningCatchAll(Builder $query, ?string $userId = null, ?string $spaceId = null): Builder
+    {
+        return $query->whereHas('budget', fn ($budget) => $budget
+            ->whereNull('archived_at')
+            ->where('is_catch_all', true)
+            ->when($userId !== null, fn ($owned) => $owned->where('user_id', $userId))
+            ->when($spaceId !== null, fn ($owned) => $owned->where('space_id', $spaceId)));
+    }
+
+    /**
+     * Whether the period is over: from then on it keeps what it counted, the
+     * same line `GenerateBudgetPeriods` closes periods on.
+     */
+    public function hasEnded(): bool
+    {
+        return $this->end_date->lt(today());
+    }
+
+    /**
+     * Created flagged and not yet backfilled: every later run stamps a token.
+     */
+    public function awaitsFirstBackfill(): bool
+    {
+        return $this->processing_historical && $this->reconciliation_token === null;
+    }
+
     /** @return HasMany<BudgetTransaction, $this> */
     public function budgetTransactions(): HasMany
     {
