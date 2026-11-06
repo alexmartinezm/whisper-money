@@ -97,14 +97,14 @@ const rowActions = {
     onReEvaluateRules: vi.fn(),
     onAutomate: vi.fn(),
     onDelete: vi.fn(),
-    onSplit: vi.fn(),
-    onUnsplit: vi.fn(),
 };
 
 function TransactionsList({
     onSortingChange = () => {},
+    isNewRow,
 }: {
     onSortingChange?: (sorting: SortingState) => void;
+    isNewRow?: (transaction: DecryptedTransaction) => boolean;
 }) {
     const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
     const [sorting, setSorting] = useState<SortingState>([
@@ -160,7 +160,7 @@ function TransactionsList({
                 }
                 isGroupedByDay
                 selectionMode={selectionMode}
-                listRow={{ categories: [], labels: [] }}
+                listRow={{ categories: [], labels: [], isNewRow }}
                 rowActions={rowActions}
             />
         </PrivacyModeProvider>
@@ -194,6 +194,20 @@ describe('ResponsiveTransactionTable', () => {
 
         expect(screen.getAllByTestId('table-row')).toHaveLength(3);
         expect(listRows()).toHaveLength(0);
+    });
+
+    it('marks the new rows in the compact list too', () => {
+        const newest = TRANSACTIONS[0];
+
+        render(
+            <TransactionsList
+                isNewRow={(transaction) => transaction.id === newest.id}
+            />,
+        );
+
+        expect(
+            listRows().filter((row) => row.hasAttribute('data-new')),
+        ).toHaveLength(1);
     });
 
     it('turns into the compact list under 56rem, grouped under the same days', () => {

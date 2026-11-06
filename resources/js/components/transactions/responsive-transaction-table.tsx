@@ -43,6 +43,8 @@ export interface TransactionListRowOptions {
     labels: Label[];
     /** Ids of transactions AI is categorizing in the background right now. */
     categorizingIds?: Set<string>;
+    /** Marks a row that arrived since the last visit. */
+    isNewRow?: (transaction: DecryptedTransaction) => boolean;
     /** Lists a split transaction's lines in these categories, the rest as one. */
     categoryFilterIds?: ReadonlySet<string>;
     hiddenLabelId?: string;
@@ -292,6 +294,7 @@ function TransactionListRowItem({
                         selectionMode.toggleRow(transaction.id)
                     }
                     onOpen={rowActions.onEdit}
+                    isNew={listRow.isNewRow?.(transaction)}
                     isCategorizing={listRow.categorizingIds?.has(
                         transaction.id,
                     )}

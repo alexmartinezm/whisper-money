@@ -192,6 +192,24 @@ describe('TransactionListRow', () => {
         });
     });
 
+    it('marks a row that arrived since the last visit, in both themes', () => {
+        renderRow({ isNew: true });
+
+        expect(row()).toHaveAttribute('data-new', 'true');
+        expect(row()).toHaveClass(
+            'border-l-blue-500',
+            'bg-blue-500/5',
+            'dark:bg-blue-500/10',
+        );
+    });
+
+    it('leaves an old row unmarked', () => {
+        renderRow();
+
+        expect(row()).not.toHaveAttribute('data-new');
+        expect(row()).not.toHaveClass('border-l-blue-500');
+    });
+
     it('never prints a legacy encrypted description or note', () => {
         renderRow({
             transaction: buildTransaction({

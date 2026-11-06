@@ -34,6 +34,8 @@ interface TransactionListRowProps extends Omit<
     onToggleSelect: (transaction: DecryptedTransaction) => void;
     /** A tap on the row outside selection mode, i.e. edit. */
     onOpen: (transaction: DecryptedTransaction) => void;
+    /** It arrived since the last visit. */
+    isNew?: boolean;
     /** AI is currently categorizing this transaction in the background. */
     isCategorizing?: boolean;
     /** Lists a split's lines in these categories, the rest as one. */
@@ -58,6 +60,7 @@ export function TransactionListRow({
     selectionActive,
     onToggleSelect,
     onOpen,
+    isNew = false,
     isCategorizing,
     categoryFilterIds,
     hiddenLabelId,
@@ -88,11 +91,15 @@ export function TransactionListRow({
             {...props}
             onClick={handleRowClick}
             data-selected={selected || undefined}
+            data-new={isNew || undefined}
             className={cn(
                 'flex cursor-pointer items-start gap-3 border-b border-neutral-100 px-4 py-3 transition-colors select-none dark:border-neutral-800',
+                isNew && 'border-l-2 border-l-blue-500 dark:border-l-blue-500',
                 selected
                     ? 'bg-primary/5 dark:bg-primary/10'
-                    : 'hover:bg-muted/50',
+                    : isNew
+                      ? 'bg-blue-500/5 dark:bg-blue-500/10'
+                      : 'hover:bg-muted/50',
                 className,
             )}
             data-testid="transaction-list-row"

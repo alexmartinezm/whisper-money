@@ -328,6 +328,7 @@ export function TransactionTable({
                                 categories,
                                 labels,
                                 categorizingIds,
+                                isNewRow,
                                 categoryFilterIds,
                                 hiddenLabelId,
                                 statementPayments,
