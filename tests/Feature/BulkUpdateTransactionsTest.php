@@ -560,6 +560,113 @@ it('bulk updates only the rows of a category type, leaving a split transaction a
         ->and($split->fresh()->category_id)->toBeNull();
 });
 
+/**
+ * One row of each kind the "Uncategorized" filter has to tell apart: the row it
+ * lists, one with a category, a split one, whose null category does not make it
+ * uncategorized, and a stranger's.
+ *
+ * @return array{uncategorized: Transaction, categorized: Transaction, split: Transaction, foreign: Transaction}
+ */
+function uncategorizedFilterRows(User $user, Account $account, Category $category): array
+{
+    $rowIn = fn (?string $categoryId): Transaction => Transaction::factory()->plaintext()->create([
+        'user_id' => $user->id,
+        'account_id' => $account->id,
+        'category_id' => $categoryId,
+    ]);
+    $split = $rowIn(null);
+    TransactionSplit::factory()->create(['transaction_id' => $split->id, 'category_id' => $category->id]);
+
+    $stranger = User::factory()->create();
+
+    return [
+        'uncategorized' => $rowIn(null),
+        'categorized' => $rowIn($category->id),
+        'split' => $split,
+        'foreign' => Transaction::factory()->plaintext()->create([
+            'user_id' => $stranger->id,
+            'account_id' => Account::factory()->create(['user_id' => $stranger->id])->id,
+            'category_id' => null,
+        ]),
+    ];
+}
+
+it('categorizes the rows the Uncategorized filter lists and no others', function () {
+    $rows = uncategorizedFilterRows($this->user, $this->account, $this->category);
+    $target = Category::factory()->create(['user_id' => $this->user->id]);
+
+    // What the list says it holds under this filter, split row left out.
+    $this->actingAs($this->user)
+        ->getJson('/api/transactions/listed-count?category_ids=uncategorized')
+        ->assertOk()
+        ->assertJsonPath('count', 1);
+
+    $response = $this->actingAs($this->user)->patchJson('/transactions/bulk', [
+        'filters' => ['category_ids' => ['uncategorized']],
+        'category_id' => $target->id,
+    ])->assertSuccessful();
+
+    expect($response->json('updated_ids'))->toBe([$rows['uncategorized']->id])
+        ->and($rows['uncategorized']->fresh()->category_id)->toBe($target->id)
+        ->and($rows['categorized']->fresh()->category_id)->toBe($this->category->id)
+        ->and($rows['split']->fresh()->category_id)->toBeNull()
+        ->and($rows['foreign']->fresh()->category_id)->toBeNull();
+});
+
+it('labels the rows the Uncategorized filter lists and no others', function () {
+    $rows = uncategorizedFilterRows($this->user, $this->account, $this->category);
+    $label = Label::factory()->create(['user_id' => $this->user->id]);
+
+    $response = $this->actingAs($this->user)->patchJson('/transactions/bulk', [
+        'filters' => ['category_ids' => ['uncategorized']],
+        'label_ids' => [$label->id],
+    ])->assertSuccessful();
+
+    expect($response->json('updated_ids'))->toBe([$rows['uncategorized']->id])
+        ->and($rows['uncategorized']->fresh()->labels)->toHaveCount(1)
+        ->and($rows['categorized']->fresh()->labels)->toHaveCount(0)
+        ->and($rows['split']->fresh()->labels)->toHaveCount(0)
+        ->and($rows['foreign']->fresh()->labels)->toHaveCount(0);
+});
+
+it('takes Uncategorized alongside a real category, as the list does', function () {
+    $rows = uncategorizedFilterRows($this->user, $this->account, $this->category);
+    $outside = Transaction::factory()->plaintext()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'category_id' => Category::factory()->create(['user_id' => $this->user->id])->id,
+    ]);
+    $label = Label::factory()->create(['user_id' => $this->user->id]);
+
+    $response = $this->actingAs($this->user)->patchJson('/transactions/bulk', [
+        'filters' => ['category_ids' => ['uncategorized', $this->category->id]],
+        'label_ids' => [$label->id],
+    ])->assertSuccessful();
+
+    expect($response->json('updated_ids'))->toEqualCanonicalizing([
+        $rows['uncategorized']->id,
+        $rows['categorized']->id,
+        $rows['split']->id,
+    ])->and($outside->fresh()->labels)->toHaveCount(0)
+        ->and($rows['foreign']->fresh()->labels)->toHaveCount(0);
+});
+
+it('refuses any other id in a category filter, whoever it belongs to', function (callable $categoryId) {
+    $rows = uncategorizedFilterRows($this->user, $this->account, $this->category);
+    $target = Category::factory()->create(['user_id' => $this->user->id]);
+
+    $this->actingAs($this->user)->patchJson('/transactions/bulk', [
+        'filters' => ['category_ids' => ['uncategorized', $categoryId()]],
+        'category_id' => $target->id,
+    ])->assertJsonValidationErrors('filters.category_ids.1');
+
+    expect($rows['uncategorized']->fresh()->category_id)->toBeNull();
+})->with([
+    'not an id' => fn (): callable => fn (): string => 'UNCATEGORIZED',
+    'another user\'s category' => fn (): callable => fn (): string => Category::factory()->create()->id,
+    'a uuid of nothing' => fn (): callable => fn (): string => '019a0000-0000-7000-8000-000000000000',
+]);
+
 it('refuses a category type that does not exist in a bulk update', function () {
     $this->actingAs($this->user)->patchJson('/transactions/bulk', [
         'filters' => ['category_types' => ['gifts']],

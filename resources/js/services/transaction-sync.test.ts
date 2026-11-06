@@ -212,6 +212,22 @@ describe('transactionSyncService bulk updates', () => {
         }
     });
 
+    it('sends the Uncategorized filter as the list reads it', async () => {
+        await transactionSyncService.updateByFilters(
+            bulkFilters({ categoryIds: ['uncategorized'] }),
+            { label_ids: ['label-1'] },
+        );
+
+        expect(axiosMock.patch).toHaveBeenLastCalledWith(
+            '/transactions/bulk',
+            expect.objectContaining({
+                filters: expect.objectContaining({
+                    category_ids: ['uncategorized'],
+                }),
+            }),
+        );
+    });
+
     it('returns updated and skipped split counts for filters', async () => {
         await expect(
             transactionSyncService.updateByFilters(

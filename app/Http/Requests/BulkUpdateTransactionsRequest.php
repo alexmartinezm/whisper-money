@@ -29,7 +29,11 @@ class BulkUpdateTransactionsRequest extends FormRequest
             'filters.amount_min' => ['nullable', 'numeric'],
             'filters.amount_max' => ['nullable', 'numeric'],
             'filters.category_ids' => ['nullable', 'array'],
-            'filters.category_ids.*' => ['string', 'uuid', $this->userOwned('categories')],
+            // Besides real categories, the list's filter takes the "uncategorized"
+            // pseudo id, which Transaction::scopeApplyFilters() reads.
+            'filters.category_ids.*' => Rule::forEach(fn (mixed $categoryId): array => $categoryId === 'uncategorized'
+                ? ['string']
+                : ['string', 'uuid', $this->userOwned('categories')]),
             'filters.category_types' => ['nullable', 'array'],
             'filters.category_types.*' => [Rule::enum(CategoryType::class)],
             'filters.account_ids' => ['nullable', 'array'],

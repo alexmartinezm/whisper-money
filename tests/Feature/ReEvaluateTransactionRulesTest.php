@@ -523,6 +523,36 @@ test('bulk endpoint refuses a category type that does not exist', function () {
         ->assertJsonValidationErrors('filters.category_types.0');
 });
 
+test('bulk endpoint re-evaluates only the rows of the Uncategorized filter', function () {
+    $groceries = Category::factory()->create(['user_id' => $this->user->id]);
+    $target = Category::factory()->create(['user_id' => $this->user->id]);
+    $rowIn = fn (?Category $category): Transaction => Transaction::factory()->enableBanking()->plaintext()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'description' => 'Grocery Store',
+        'category_id' => $category?->id,
+    ]);
+
+    $uncategorized = $rowIn(null);
+    $categorized = $rowIn($groceries);
+
+    AutomationRule::factory()->create([
+        'user_id' => $this->user->id,
+        'priority' => 1,
+        'rules_json' => ['in' => ['grocery', ['var' => 'description']]],
+        'action_category_id' => $target->id,
+    ]);
+
+    $this->actingAs($this->user)
+        ->postJson(route('transactions.re-evaluate-rules.bulk'), [
+            'filters' => ['category_ids' => ['uncategorized']],
+        ])
+        ->assertStatus(202);
+
+    expect($uncategorized->fresh()->category_id)->toBe($target->id)
+        ->and($categorized->fresh()->category_id)->toBe($groceries->id);
+});
+
 test('bulk endpoint rejects a filter date that is not a plain Y-m-d date', function () {
     $this->actingAs($this->user)
         ->postJson(route('transactions.re-evaluate-rules.bulk'), [
