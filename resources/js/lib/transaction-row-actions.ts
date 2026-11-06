@@ -17,10 +17,6 @@ export interface TransactionRowActionHandlers {
     onDelete: (transaction: DecryptedTransaction) => void;
 }
 
-interface TransactionRowActionsOptions extends TransactionRowActionHandlers {
-    transaction: DecryptedTransaction;
-}
-
 /**
  * A row still on the legacy client-side encryption holds its description and
  * notes as ciphertext, which the duplicate would copy as an empty description
