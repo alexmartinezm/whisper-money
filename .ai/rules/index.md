@@ -5,6 +5,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | Applies to | Rule file |
 | --- | --- |
 | app/Console/Commands/AgentDatabaseCommand.php | .ai/rules/agent-db.md |
+| app/Http/Controllers/Api/V1/**, app/Http/Requests/Api/V1/**, app/Http/Resources/V1/**, app/Services/SavingsGoals/SavingsGoalIncomeWithholding.php, app/Mcp/**, routes/ai.php | .ai/rules/api.md |
 | app/Services/Banking/*Client.php | .ai/rules/banking.md |
 | ** | .ai/rules/general.md |
 | app/Jobs/** | .ai/rules/jobs.md |
