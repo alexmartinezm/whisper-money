@@ -1,5 +1,5 @@
 import { getDescendantIds } from '@/lib/category-tree';
-import { type Category } from '@/types/category';
+import { type Category, type CategoryType } from '@/types/category';
 import { type Transaction } from '@/types/transaction';
 import { type UUID } from '@/types/uuid';
 
@@ -72,6 +72,67 @@ export function createTransactionCategoryFilter(
             ) ?? false
         );
     };
+}
+
+/** The categories of these types. */
+export function categoriesOfTypes(
+    categoryTypes: CategoryType[],
+    categories: Category[],
+): Set<UUID> {
+    return new Set(
+        categories
+            .filter((category) => categoryTypes.includes(category.type))
+            .map((category) => category.id),
+    );
+}
+
+/**
+ * A row whose category has one of the types, or a split transaction with a
+ * line that does. A row with no category has no type, so it never matches.
+ */
+export function createTransactionCategoryTypeFilter(
+    categoryTypes: CategoryType[],
+    categories: Category[],
+): TransactionCategoryFilter {
+    if (categoryTypes.length === 0) {
+        return () => true;
+    }
+
+    const ofType = categoriesOfTypes(categoryTypes, categories);
+
+    return (transaction) =>
+        (transaction.category_id !== null &&
+            ofType.has(transaction.category_id)) ||
+        (transaction.splits?.some((split) => ofType.has(split.category_id)) ??
+            false);
+}
+
+/**
+ * The categories whose split lines a filter set keeps, for showing them apart
+ * from the rest; undefined when it names no category and no type.
+ */
+export function wantedCategoryIds(
+    {
+        categoryIds,
+        categoryTypes,
+    }: { categoryIds: UUID[]; categoryTypes: CategoryType[] },
+    categories: Category[],
+): Set<UUID> | undefined {
+    if (categoryIds.length === 0 && categoryTypes.length === 0) {
+        return undefined;
+    }
+
+    const ofType = categoriesOfTypes(categoryTypes, categories);
+
+    if (categoryIds.length === 0) {
+        return ofType;
+    }
+
+    const selected = expandCategorySelection(categoryIds, categories);
+
+    return categoryTypes.length === 0
+        ? selected
+        : new Set([...selected].filter((id) => ofType.has(id)));
 }
 
 export function matchesTransactionCategoryFilter(

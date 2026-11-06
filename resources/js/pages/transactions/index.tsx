@@ -17,7 +17,7 @@ import { TransactionsHeaderActions } from '@/components/transactions/transaction
 import AppSidebarLayout from '@/layouts/app/app-sidebar-layout';
 import { type CursorPaginatedResponse } from '@/lib/cursor-pagination';
 import { isNewSince } from '@/lib/new-transactions';
-import { expandCategorySelection } from '@/lib/transaction-category-filter';
+import { wantedCategoryIds } from '@/lib/transaction-category-filter';
 import { type ServerDayTotal } from '@/lib/transaction-day-groups';
 import { describeActiveFilters } from '@/lib/transaction-filter-chips';
 import { facetChips } from '@/lib/transaction-filter-facets';
@@ -119,11 +119,8 @@ export default function Transactions({
     );
 
     const categoryFilterIds = useMemo(
-        () =>
-            filters.categoryIds.length === 0
-                ? undefined
-                : expandCategorySelection(filters.categoryIds, categories),
-        [categories, filters.categoryIds],
+        () => wantedCategoryIds(filters, categories),
+        [categories, filters],
     );
 
     const hasTransactionalAccounts = useMemo(

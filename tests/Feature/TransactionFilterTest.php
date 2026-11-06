@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\CategoryType;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\Label;
@@ -320,6 +321,94 @@ test('filter by uncategorized', function () {
         ->has('transactions.data', 1)
         ->where('transactions.data.0.category_id', null)
     );
+});
+
+test('filter by category type keeps only the rows whose category has one of those types', function () {
+    $categoryOfType = fn (CategoryType $type) => Category::factory()->create([
+        'user_id' => $this->user->id,
+        'type' => $type,
+    ]);
+    $groceries = $categoryOfType(CategoryType::Expense);
+    $piggyBank = $categoryOfType(CategoryType::Savings);
+    $salary = $categoryOfType(CategoryType::Income);
+
+    foreach ([$groceries->id, $piggyBank->id, $salary->id, null] as $categoryId) {
+        Transaction::factory()->plaintext()->create([
+            'user_id' => $this->user->id,
+            'account_id' => $this->account->id,
+            'category_id' => $categoryId,
+        ]);
+    }
+
+    $response = actingAs($this->user)->get(route('transactions.index', [
+        'category_types' => 'expense,savings',
+    ]));
+
+    $response->assertInertia(fn ($page) => $page
+        ->has('transactions.data', 2)
+        ->where('appliedFilters.category_types', ['expense', 'savings'])
+        ->where('transactions.data', fn ($rows) => collect($rows)->pluck('category_id')->sort()->values()->all()
+            === collect([$groceries->id, $piggyBank->id])->sort()->values()->all())
+    );
+});
+
+test('a split transaction matches a category type through any of its lines', function () {
+    $groceries = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Expense]);
+    $piggyBank = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Savings]);
+    $salary = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Income]);
+
+    $transaction = Transaction::factory()->plaintext()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'category_id' => null,
+        'amount' => -10000,
+    ]);
+
+    foreach ([[$groceries, -7000], [$piggyBank, -3000]] as $position => [$category, $amount]) {
+        TransactionSplit::factory()->create([
+            'transaction_id' => $transaction->id,
+            'category_id' => $category->id,
+            'amount' => $amount,
+            'position' => $position,
+        ]);
+    }
+
+    $listedFor = fn (string $types) => actingAs($this->user)
+        ->get(route('transactions.index', ['category_types' => $types]))
+        ->viewData('page')['props']['transactions']['data'];
+
+    expect(array_column($listedFor('savings'), 'id'))->toBe([$transaction->id])
+        ->and(array_column($listedFor('expense,savings'), 'id'))->toBe([$transaction->id])
+        ->and($listedFor($salary->type->value))->toBe([]);
+});
+
+test('category type and category filters must both match', function () {
+    $groceries = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Expense]);
+    $salary = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Income]);
+
+    foreach ([$groceries, $salary] as $category) {
+        Transaction::factory()->plaintext()->create([
+            'user_id' => $this->user->id,
+            'account_id' => $this->account->id,
+            'category_id' => $category->id,
+        ]);
+    }
+
+    $response = actingAs($this->user)->get(route('transactions.index', [
+        'category_types' => 'expense',
+        'category_ids' => $groceries->id.','.$salary->id,
+    ]));
+
+    $response->assertInertia(fn ($page) => $page
+        ->has('transactions.data', 1)
+        ->where('transactions.data.0.category_id', $groceries->id)
+    );
+});
+
+test('rejects a category type that does not exist', function () {
+    actingAs($this->user)
+        ->get(route('transactions.index', ['category_types' => 'expense,gifts']))
+        ->assertSessionHasErrors('category_types.1');
 });
 
 test('filter by account', function () {

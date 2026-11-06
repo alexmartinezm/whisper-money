@@ -21,8 +21,8 @@ use stdClass;
  * matches. It is not the export's row count, which is per line.
  *
  * `total` adds up postings. A split transaction stands at its own amount,
- * unless the filters name a category, a label or a cashflow block: then it only
- * adds the lines they keep, the ones the CSV export would write
+ * unless the filters name a category, a category type, a label or a cashflow
+ * block: then it only adds the lines they keep, the ones the CSV export would write
  * ({@see TransactionCsvExporter::postings()}, which goes through
  * {@see CashflowBlockQuery::postingFilter()}), because the rest of it is not
  * what the list was asked for.
@@ -110,7 +110,7 @@ class TransactionDayTotals
      */
     public function narrowedSplitTransactions(Builder $filtered, array $filters): Collection
     {
-        if (empty($filters['category_ids']) && empty($filters['label_ids']) && empty($filters['cashflow_block'])) {
+        if (! $this->narrowsLines($filters)) {
             return collect();
         }
 
@@ -122,6 +122,15 @@ class TransactionDayTotals
                 'transaction' => $transaction,
                 'kept' => collect($this->exporter->postings([$transaction], $filters))->sum('amount'),
             ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $filters
+     */
+    private function narrowsLines(array $filters): bool
+    {
+        return collect(['category_ids', 'category_types', 'label_ids', 'cashflow_block'])
+            ->contains(fn (string $filter): bool => ! empty($filters[$filter]));
     }
 
     /**

@@ -14,8 +14,8 @@ use Illuminate\Database\Eloquent\Builder;
  *
  * Every figure stands on {@see TransactionDayTotals}, so it agrees with the
  * day headers: `count` is the rows the list shows, a split transaction once,
- * and `total` adds a split transaction's kept lines under a category, label or
- * cashflow block filter, as the analysis drawer does. `average` divides by the
+ * and `total` adds a split transaction's kept lines under a category, category
+ * type, label or cashflow block filter, as the analysis drawer does. `average` divides by the
  * rows, so a split transaction listed for its own category with no matching
  * line weighs on it with nothing added. `kind` reads what each row adds, its
  * kept lines for a narrowed split transaction, so a refund line picked out of

@@ -1,7 +1,11 @@
 import type { Category } from '@/types/category';
 import type { Transaction } from '@/types/transaction';
 import { describe, expect, it } from 'vitest';
-import { matchesTransactionCategoryFilter } from './transaction-category-filter';
+import {
+    createTransactionCategoryTypeFilter,
+    matchesTransactionCategoryFilter,
+    wantedCategoryIds,
+} from './transaction-category-filter';
 
 function category(id: string, parent_id: string | null = null): Category {
     return {
@@ -111,5 +115,82 @@ describe('matchesTransactionCategoryFilter', () => {
                 [],
             ),
         ).toBe(true);
+    });
+});
+
+describe('the category type filter', () => {
+    const food = { ...category('food'), type: 'expense' } as Category;
+    const groceries = {
+        ...category('groceries', 'food'),
+        type: 'expense',
+    } as Category;
+    const piggyBank = {
+        ...category('piggy-bank'),
+        type: 'savings',
+    } as Category;
+    const categories = [food, groceries, piggyBank];
+
+    function row(
+        category_id: string | null,
+        lines: string[] = [],
+    ): Pick<Transaction, 'category_id' | 'splits'> {
+        return {
+            category_id,
+            splits: lines.map((id) => ({ category_id: id })),
+        } as unknown as Pick<Transaction, 'category_id' | 'splits'>;
+    }
+
+    it('matches a row by its category, or a split transaction by any line', () => {
+        const matches = createTransactionCategoryTypeFilter(
+            ['savings'],
+            categories,
+        );
+
+        expect(matches(row('piggy-bank'))).toBe(true);
+        expect(matches(row('food'))).toBe(false);
+        expect(matches(row(null, ['food', 'piggy-bank']))).toBe(true);
+        expect(matches(row(null, ['food', 'groceries']))).toBe(false);
+    });
+
+    it('never matches a row with no category, and lets all through with no type', () => {
+        expect(
+            createTransactionCategoryTypeFilter(
+                ['expense'],
+                categories,
+            )(row(null)),
+        ).toBe(false);
+        expect(
+            createTransactionCategoryTypeFilter([], categories)(row(null)),
+        ).toBe(true);
+    });
+
+    it('says which categories keep their lines: both filters, or the one set', () => {
+        expect(
+            wantedCategoryIds(
+                { categoryIds: [], categoryTypes: [] },
+                categories,
+            ),
+        ).toBeUndefined();
+        expect(
+            wantedCategoryIds(
+                { categoryIds: [], categoryTypes: ['savings'] },
+                categories,
+            ),
+        ).toEqual(new Set(['piggy-bank']));
+        expect(
+            wantedCategoryIds(
+                { categoryIds: ['food'], categoryTypes: [] },
+                categories,
+            ),
+        ).toEqual(new Set(['food', 'groceries']));
+        expect(
+            wantedCategoryIds(
+                {
+                    categoryIds: ['food', 'piggy-bank'],
+                    categoryTypes: ['savings'],
+                },
+                categories,
+            ),
+        ).toEqual(new Set(['piggy-bank']));
     });
 });

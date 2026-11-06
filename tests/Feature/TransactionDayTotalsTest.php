@@ -210,6 +210,29 @@ test('under a category filter a split transaction adds only its matching lines, 
     ]);
 });
 
+test('under a category type filter a split transaction adds only the lines of that type', function () {
+    $groceries = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Expense]);
+    $piggyBank = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Savings]);
+    daySplitTransaction('2025-11-12', [[$groceries, -7000], [$piggyBank, -3000]]);
+    dayTransaction('2025-11-12', -500, attributes: ['category_id' => $piggyBank->id]);
+    dayTransaction('2025-11-12', -9900, attributes: ['category_id' => $groceries->id]);
+
+    expect(dayTotalsFor(['category_types' => 'savings']))->toBe([
+        '2025-11-12' => ['count' => 2, 'total' => -3500],
+    ]);
+});
+
+test('a category type narrows the lines a category or a label keeps', function () {
+    $groceries = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Expense]);
+    $piggyBank = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Savings]);
+    $trip = Label::factory()->create(['user_id' => $this->user->id]);
+    daySplitTransaction('2025-11-12', [[$groceries, -7000], [$piggyBank, -3000]])->labels()->attach($trip);
+
+    expect(dayTotalsFor(['label_ids' => [$trip->id], 'category_types' => 'savings']))->toBe([
+        '2025-11-12' => ['count' => 1, 'total' => -3000],
+    ]);
+});
+
 test('a filter on a parent category keeps the lines of its subcategories', function () {
     $food = Category::factory()->create(['user_id' => $this->user->id]);
     $groceries = Category::factory()->create(['user_id' => $this->user->id, 'parent_id' => $food->id]);

@@ -155,7 +155,10 @@ describe('useInMemoryTransactionSource', () => {
     it('orders the rows of one day by id, newest first, as the server does', () => {
         const sameDay = ['0b', '0c', '0a'].map((id) => transaction(id));
         const { result } = renderHook(() =>
-            useInMemoryTransactionSource({ transactions: sameDay }),
+            useInMemoryTransactionSource({
+                categories: NO_CATEGORIES,
+                transactions: sameDay,
+            }),
         );
 
         expect(result.current.rows.map((row) => row.id)).toEqual([
@@ -358,5 +361,82 @@ describe('useInMemoryTransactionSource', () => {
             'unsplit',
         ]);
         expect(counted).toBe(result.current.rows.length);
+    });
+
+    it('keeps only the rows whose category has a picked type', async () => {
+        const categories = [
+            { id: 'groceries', type: 'expense' },
+            { id: 'piggy-bank', type: 'savings' },
+            { id: 'salary', type: 'income' },
+        ] as Category[];
+        const rows = [
+            transaction('food', { category_id: 'groceries' }),
+            transaction('saved', { category_id: 'piggy-bank' }),
+            transaction('paid', { category_id: 'salary' }),
+            transaction('unsorted'),
+        ];
+        const { result } = renderHook(() =>
+            useInMemoryTransactionSource({ categories, transactions: rows }),
+        );
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+        act(() =>
+            result.current.onFiltersChange({
+                ...result.current.filters,
+                categoryTypes: ['expense', 'savings'],
+            }),
+        );
+
+        await waitFor(() =>
+            expect(result.current.rows.map((row) => row.id).sort()).toEqual([
+                'food',
+                'saved',
+            ]),
+        );
+    });
+
+    describe('the category type of a split transaction', () => {
+        const categories = [
+            { id: 'groceries', type: 'expense' },
+            { id: 'piggy-bank', type: 'savings' },
+        ] as Category[];
+        const rows = [
+            transaction('split', {
+                amount: -10000,
+                splits: [
+                    { category_id: 'groceries', amount: -7000 },
+                    { category_id: 'piggy-bank', amount: -3000 },
+                ],
+            } as unknown as Partial<Transaction>),
+            transaction('other', { category_id: 'groceries' }),
+        ];
+
+        it('lists it for any line of the type, adds only those lines and counts it once', async () => {
+            const { result } = renderHook(() =>
+                useInMemoryTransactionSource({
+                    transactions: rows,
+                    categories,
+                }),
+            );
+            const next: TransactionFilters = {
+                ...result.current.filters,
+                categoryTypes: ['savings'],
+            };
+
+            const counted = await result.current.countMatching(
+                next,
+                new AbortController().signal,
+            );
+
+            act(() => result.current.onFiltersChange(next));
+
+            expect(result.current.rows.map((row) => row.id)).toEqual(['split']);
+            expect(counted).toBe(1);
+            expect(result.current.daySummaryOf('2026-10-01')).toMatchObject({
+                count: 1,
+                total: { amount: -3000 },
+            });
+        });
     });
 });

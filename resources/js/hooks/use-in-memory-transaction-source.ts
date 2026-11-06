@@ -1,6 +1,9 @@
 import { useInMemoryDaySummaries } from '@/hooks/use-day-summaries';
 import { reloadPage } from '@/lib/leave-page';
-import { createTransactionCategoryFilter } from '@/lib/transaction-category-filter';
+import {
+    createTransactionCategoryFilter,
+    createTransactionCategoryTypeFilter,
+} from '@/lib/transaction-category-filter';
 import { createRowTotalAmount } from '@/lib/transaction-day-groups';
 import { type Category } from '@/types/category';
 import {
@@ -118,6 +121,23 @@ function matchesFilters(
     return true;
 }
 
+/** A row in a wanted category that also has a wanted type, split lines included. */
+function categoryMatcher(
+    filters: Pick<Filters, 'categoryIds' | 'categoryTypes'>,
+    categories: Category[],
+): (transaction: DecryptedTransaction) => boolean {
+    const inCategory = createTransactionCategoryFilter(
+        filters.categoryIds,
+        categories,
+    );
+    const ofType = createTransactionCategoryTypeFilter(
+        filters.categoryTypes,
+        categories,
+    );
+
+    return (transaction) => inCategory(transaction) && ofType(transaction);
+}
+
 /** The ids of the rows whose description or notes hold the search text. */
 function searchMatches(
     transactions: DecryptedTransaction[],
@@ -184,7 +204,7 @@ export function useInMemoryTransactionSource({
 }: {
     /** The rows, as the page received them; undefined while they load. */
     transactions?: Transaction[];
-    /** What a category filter reaches, subcategories included. */
+    /** What a category filter reaches, subcategories included, and each one's type. */
     categories: Category[];
     /** Keeps the list to one account, the filter for it hidden. */
     accountId?: UUID;
@@ -199,6 +219,7 @@ export function useInMemoryTransactionSource({
         amountMin: null,
         amountMax: null,
         categoryIds: [],
+        categoryTypes: [],
         accountIds: accountId ? [accountId] : [],
         labelIds: [],
         creditorName: '',
@@ -224,8 +245,8 @@ export function useInMemoryTransactionSource({
     );
 
     const matchesCategory = useMemo(
-        () => createTransactionCategoryFilter(filters.categoryIds, categories),
-        [filters.categoryIds, categories],
+        () => categoryMatcher(filters, categories),
+        [filters, categories],
     );
 
     const filteredTransactions = useMemo(
@@ -257,10 +278,14 @@ export function useInMemoryTransactionSource({
     const rowTotalAmount = useMemo(
         () =>
             createRowTotalAmount(
-                { categoryIds: filters.categoryIds, labelIds: [] },
+                {
+                    categoryIds: filters.categoryIds,
+                    categoryTypes: filters.categoryTypes,
+                    labelIds: [],
+                },
                 categories,
             ),
-        [filters.categoryIds, categories],
+        [filters.categoryIds, filters.categoryTypes, categories],
     );
 
     // Over every row the filters keep, not only the drawn slice, so a day cut
@@ -292,10 +317,7 @@ export function useInMemoryTransactionSource({
     const countMatching = useCallback(
         async (next: Filters) => {
             const matchedIds = searchMatches(transactions, next.searchText);
-            const matchesNextCategory = createTransactionCategoryFilter(
-                next.categoryIds,
-                categories,
-            );
+            const matchesNextCategory = categoryMatcher(next, categories);
 
             return transactions.filter((transaction) =>
                 matchesFilters(

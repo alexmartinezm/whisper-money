@@ -92,6 +92,19 @@ test('it counts, adds up and averages every transaction the filters match', func
         ->currency->toBe('EUR');
 });
 
+test('it adds up only the category types asked for', function () {
+    $savings = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Savings]);
+    $this->groceries->update(['type' => CategoryType::Expense]);
+
+    summaryTransaction('2025-11-12', -1500);
+    summaryTransaction('2025-11-11', -4000, attributes: ['category_id' => $savings->id]);
+    summaryTransaction('2025-11-10', -9900, attributes: ['category_id' => null]);
+
+    expect(filterSummaryFor(['category_types' => ['savings']]))
+        ->count->toBe(1)
+        ->total->toBe(-4000);
+});
+
 test('it covers every matching row, not only the first page', function () {
     foreach (range(1, 12) as $day) {
         summaryTransaction(sprintf('2025-11-%02d', $day), -100);
@@ -304,6 +317,7 @@ test('the total agrees with the day headers and the analysis drawer on split lin
 })->with([
     'a category filter' => [fn (Category $groceries): array => ['category_ids' => [$groceries->id]], -3900],
     'a cashflow block filter' => [fn (): array => ['cashflow_block' => 'general'], -3900],
+    'a category type filter' => [fn (): array => ['category_types' => ['expense']], -3900],
 ]);
 
 test('a cashflow block is read over the trend\'s whole window, each month on its lines', function () {
@@ -320,6 +334,20 @@ test('a cashflow block is read over the trend\'s whole window, each month on its
             ['month' => '2025-10', 'total' => -3000],
             ['month' => '2025-11', 'total' => -400],
         ]);
+});
+
+test('under a category type filter a split transaction adds only the lines of that type', function () {
+    $this->groceries->update(['type' => CategoryType::Expense]);
+    $piggyBank = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Savings]);
+    summarySplitTransaction('2025-11-12', [[$this->groceries, -7000], [$piggyBank, -3000]]);
+    summaryTransaction('2025-11-12', -500, attributes: ['category_id' => $piggyBank->id]);
+    summaryTransaction('2025-11-12', -9900);
+
+    expect(filterSummaryFor(['category_types' => ['savings']]))
+        ->count->toBe(2)
+        ->total->toBe(-3500)
+        ->average->toBe(-1750)
+        ->kind->toBe('expense');
 });
 
 test('a provider outage costs one bounded attempt per figure, and leaves those figures out', function () {

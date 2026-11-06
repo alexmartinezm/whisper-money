@@ -47,6 +47,7 @@ const NO_FILTERS: AppliedFilters = {
     amount_min: null,
     amount_max: null,
     category_ids: [],
+    category_types: [],
     account_ids: [],
     label_ids: [],
     creditor_name: '',
@@ -104,6 +105,7 @@ describe('clientFiltersToQueryParams', () => {
             amountMin: 0,
             amountMax: null,
             categoryIds: ['food', 'fuel'],
+            categoryTypes: ['expense', 'savings'],
             accountIds: [],
             labelIds: [],
             creditorName: '',
@@ -116,6 +118,7 @@ describe('clientFiltersToQueryParams', () => {
             date_from: '2026-10-01',
             amount_min: '0',
             category_ids: 'food,fuel',
+            category_types: 'expense,savings',
             search: 'coffee',
             category_source: 'ai',
         });

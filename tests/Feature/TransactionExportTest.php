@@ -276,6 +276,27 @@ test('a category filter keeps only the split lines in that category or below it'
         ->and(array_column(exportedRows($user), 6))->toBe(['Category', '', 'Rent', 'Groceries']);
 });
 
+test('a category type filter keeps only the split lines of that type, and the count agrees', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $account = Account::factory()->create(['user_id' => $user->id]);
+    $groceries = Category::factory()->create(['user_id' => $user->id, 'name' => 'Groceries', 'type' => CategoryType::Expense]);
+    $piggyBank = Category::factory()->create(['user_id' => $user->id, 'name' => 'Piggy bank', 'type' => CategoryType::Savings]);
+    splitForExport(
+        Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'account_id' => $account->id, 'amount' => -10000]),
+        [[$groceries, -7000], [$piggyBank, -3000]],
+    );
+
+    $rows = exportedRows($user, ['category_types' => ['savings']]);
+
+    expect(array_slice($rows, 1))->toHaveCount(1)
+        ->and(array_column(array_slice($rows, 1), 2))->toBe(['-30.00'])
+        ->and(array_column(array_slice($rows, 1), 6))->toBe(['Piggy bank']);
+
+    $this->actingAs($user)
+        ->getJson(route('api.transactions.count', ['category_types' => 'savings']))
+        ->assertJsonPath('count', 1);
+});
+
 test('a wanted label on a split transaction keeps every one of its lines', function () {
     $user = User::factory()->create(['onboarded_at' => now()]);
     $rent = Category::factory()->create(['user_id' => $user->id, 'name' => 'Rent']);

@@ -15,7 +15,7 @@ import {
     type ServerDayTotal,
 } from '@/lib/transaction-day-groups';
 import { serializeFilters } from '@/lib/transaction-filter-serialization';
-import { type Category } from '@/types/category';
+import { type Category, type CategoryType } from '@/types/category';
 import {
     type DecryptedTransaction,
     type TransactionFilters as Filters,
@@ -35,6 +35,7 @@ export interface AppliedFilters {
     amount_min: number | null;
     amount_max: number | null;
     category_ids: string[];
+    category_types: CategoryType[];
     account_ids: string[];
     label_ids: string[];
     creditor_name: string;
@@ -51,6 +52,8 @@ function serverToClientFilters(applied: AppliedFilters): Filters {
         amountMin: applied.amount_min,
         amountMax: applied.amount_max,
         categoryIds: applied.category_ids,
+        // A page kept in the browser's history may predate the filter.
+        categoryTypes: applied.category_types ?? [],
         accountIds: applied.account_ids,
         labelIds: applied.label_ids,
         creditorName: applied.creditor_name,
@@ -118,6 +121,8 @@ function onlySearchChanged(next: Filters, current: Filters): boolean {
         next.amountMax === current.amountMax &&
         JSON.stringify(next.categoryIds) ===
             JSON.stringify(current.categoryIds) &&
+        JSON.stringify(next.categoryTypes) ===
+            JSON.stringify(current.categoryTypes) &&
         JSON.stringify(next.accountIds) ===
             JSON.stringify(current.accountIds) &&
         JSON.stringify(next.labelIds) === JSON.stringify(current.labelIds) &&

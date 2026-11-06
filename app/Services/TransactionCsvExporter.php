@@ -18,9 +18,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  *
  * A split transaction is written as one row per split line, the way a file
  * that holds each part as a transaction of its own reads: amount and category
- * from the line, everything else from the transaction. Under a category or
- * label filter only the lines that filter would match are written, in SQL
- * through {@see self::constrainLines()}; under a cashflow block filter only
+ * from the line, everything else from the transaction. Under a category,
+ * category type or label filter only the lines that filter would match are
+ * written, in SQL through {@see self::constrainLines()}; under a cashflow block filter only
  * the postings in the block, the way the analysis drawer narrows them. The
  * rows and their count both go through the same narrowing.
  */
@@ -192,16 +192,30 @@ class TransactionCsvExporter
     }
 
     /**
-     * Keeps the split lines a category or label filter would match if each
-     * line were a transaction of its own: a line in a wanted category (its
-     * subcategories included), or every line when the transaction carries a
-     * wanted label, since labels live on the transaction. The "uncategorized"
-     * pseudo id never matches a line. With neither filter every line is kept.
+     * Keeps the split lines a category, category type or label filter would
+     * match if each line were a transaction of its own: a line in a wanted
+     * category (its subcategories included), or every line when the transaction
+     * carries a wanted label, since labels live on the transaction; then, with
+     * a wanted type, only the lines whose category has it. The "uncategorized"
+     * pseudo id never matches a line. With none of them every line is kept.
      *
      * @param  Builder<TransactionSplit>|HasMany<TransactionSplit, Transaction>  $lines
      * @param  array<string, mixed>  $filters
      */
     private function constrainLines(Builder|HasMany $lines, array $filters): void
+    {
+        $this->constrainLinesToCategoriesAndLabels($lines, $filters);
+
+        if (! empty($filters['category_types'])) {
+            $lines->whereHas('category', fn (Builder $category) => $category->whereIn('type', $filters['category_types']));
+        }
+    }
+
+    /**
+     * @param  Builder<TransactionSplit>|HasMany<TransactionSplit, Transaction>  $lines
+     * @param  array<string, mixed>  $filters
+     */
+    private function constrainLinesToCategoriesAndLabels(Builder|HasMany $lines, array $filters): void
     {
         $categoryIds = $filters['category_ids'] ?? [];
         $labelIds = $filters['label_ids'] ?? [];

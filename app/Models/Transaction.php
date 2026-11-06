@@ -617,6 +617,7 @@ class Transaction extends Model
             ));
 
         $this->applyCategoryAndLabelFilters($query, $filters);
+        $this->applyCategoryTypeFilter($query, $filters);
         $this->applyCashflowBlockFilter($query, $filters);
 
         return $query;
@@ -658,6 +659,28 @@ class Transaction extends Model
             $filters['user_id'],
             PeriodComparator::fromRequest(['from' => $filters['date_from'], 'to' => $filters['date_to']]),
         );
+    }
+
+    /**
+     * A transaction whose category has one of the types, or a split transaction
+     * with a line that does: as with a category filter, a split transaction is
+     * filed under its postings. It ANDs with the category and label group, so a
+     * row with no category, which has no type, never matches.
+     *
+     * @param  Builder<Transaction>  $query
+     * @param  array<string, mixed>  $filters
+     */
+    private function applyCategoryTypeFilter(Builder $query, array $filters): void
+    {
+        if (empty($filters['category_types'])) {
+            return;
+        }
+
+        $ofType = fn (Builder $category) => $category->whereIn('type', $filters['category_types']);
+
+        $query->where(fn (Builder $group) => $group
+            ->whereHas('category', $ofType)
+            ->orWhereHas('splits.category', $ofType));
     }
 
     /**
