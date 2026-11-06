@@ -55,6 +55,22 @@ test('it hands back amounts already in the user currency untouched', function ()
     expect(ExchangeRate::query()->count())->toBe(0);
 });
 
+test('it allows thirty requests a minute, whatever else the user calls', function () {
+    $user = User::factory()->onboarded()->create(['currency_code' => 'EUR']);
+    $body = ['items' => [['from' => 'EUR', 'amount' => 100, 'date' => '2025-11-11']]];
+
+    // Well past the limit in other /api routes, which keep their own counter.
+    foreach (range(1, 31) as $ignored) {
+        actingAs($user)->getJson('/api/accounts')->assertOk();
+    }
+
+    foreach (range(1, 30) as $ignored) {
+        actingAs($user)->postJson('/api/converted-amounts', $body)->assertOk();
+    }
+
+    actingAs($user)->postJson('/api/converted-amounts', $body)->assertTooManyRequests();
+});
+
 test('it rejects malformed items', function (array $item) {
     actingAs(User::factory()->onboarded()->create())
         ->postJson('/api/converted-amounts', ['items' => [$item]])

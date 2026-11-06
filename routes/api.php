@@ -47,7 +47,7 @@ Route::middleware(['web', 'auth', 'throttle:300,1'])->group(function () {
 
     // Many amounts converted into the user's currency, for the day totals of the transactions table
     Route::post('converted-amounts', ConvertedAmountsController::class)
-        ->middleware('throttle:30,1')
+        ->middleware('throttle:converted-amounts')
         ->name('api.converted-amounts');
 
     // Category analysis
