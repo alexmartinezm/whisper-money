@@ -46,6 +46,7 @@ const filters: TransactionFilters = {
     creditorName: '',
     debtorName: '',
     searchText: '',
+    aiCategorizedOnly: false,
 };
 
 const trend: Summary['trend'] = [

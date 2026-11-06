@@ -100,29 +100,34 @@ export function TransactionList({
                 columnPicker,
                 onLabelCreated,
                 clearSelection,
-            }) => (
-                <div className="flex flex-wrap justify-end gap-2">
-                    {showActionsMenu && (
-                        <TransactionActionsMenu
-                            transactions={source.heldRows}
-                            hasTransactionalAccounts={
-                                filterTransactionalAccounts(accounts).length > 0
-                            }
-                            onLabelCreated={onLabelCreated}
-                            onReEvaluateComplete={() => {
-                                clearSelection();
-                                setTimeout(() => {
-                                    reloadPage();
-                                }, 500);
-                            }}
-                            showAnalysis
-                            filters={source.filters}
-                        />
-                    )}
-                    {headerActions}
-                    {columnPicker}
-                </div>
-            )}
+            }) =>
+                // Nothing to show (a desktop page without the menu or extra
+                // actions) leaves no empty row above the filters.
+                !showActionsMenu && !headerActions && !columnPicker ? null : (
+                    <div className="flex flex-wrap justify-end gap-2">
+                        {showActionsMenu && (
+                            <TransactionActionsMenu
+                                transactions={source.heldRows}
+                                hasTransactionalAccounts={
+                                    filterTransactionalAccounts(accounts)
+                                        .length > 0
+                                }
+                                onLabelCreated={onLabelCreated}
+                                onReEvaluateComplete={() => {
+                                    clearSelection();
+                                    setTimeout(() => {
+                                        reloadPage();
+                                    }, 500);
+                                }}
+                                showAnalysis
+                                filters={source.filters}
+                            />
+                        )}
+                        {headerActions}
+                        {columnPicker}
+                    </div>
+                )
+            }
             footerActions={
                 accountId && (
                     <Button asChild variant="outline">
