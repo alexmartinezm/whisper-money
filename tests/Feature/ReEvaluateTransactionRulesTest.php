@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\CategoryType;
 use App\Jobs\ReEvaluateTransactionRulesJob;
 use App\Models\Account;
 use App\Models\AutomationRule;
@@ -478,6 +479,48 @@ test('job applies rules to transactions matching filters', function () {
     expect($progress['status'])->toBe('done');
     expect($progress['processed'])->toBe(1);
     expect($progress['updated'])->toBe(1);
+});
+
+test('bulk endpoint re-evaluates only the rows of a category type', function () {
+    $groceries = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Expense]);
+    $piggyBank = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Savings]);
+    $target = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Expense]);
+    $rowIn = fn (?Category $category): Transaction => Transaction::factory()->enableBanking()->plaintext()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'description' => 'Grocery Store',
+        'category_id' => $category?->id,
+    ]);
+
+    $matching = $rowIn($groceries);
+    $outside = $rowIn($piggyBank);
+    $uncategorized = $rowIn(null);
+
+    AutomationRule::factory()->create([
+        'user_id' => $this->user->id,
+        'priority' => 1,
+        'rules_json' => ['in' => ['grocery', ['var' => 'description']]],
+        'action_category_id' => $target->id,
+    ]);
+
+    // The queue runs the job in line, so what the endpoint hands over is what runs.
+    $this->actingAs($this->user)
+        ->postJson(route('transactions.re-evaluate-rules.bulk'), [
+            'filters' => ['category_types' => ['expense']],
+        ])
+        ->assertStatus(202);
+
+    expect($matching->fresh()->category_id)->toBe($target->id)
+        ->and($outside->fresh()->category_id)->toBe($piggyBank->id)
+        ->and($uncategorized->fresh()->category_id)->toBeNull();
+});
+
+test('bulk endpoint refuses a category type that does not exist', function () {
+    $this->actingAs($this->user)
+        ->postJson(route('transactions.re-evaluate-rules.bulk'), [
+            'filters' => ['category_types' => ['gifts']],
+        ])
+        ->assertJsonValidationErrors('filters.category_types.0');
 });
 
 test('bulk endpoint rejects a filter date that is not a plain Y-m-d date', function () {
