@@ -5,6 +5,7 @@ namespace App\Http\Requests\Api\V1;
 use App\Services\PeriodComparator;
 use Carbon\Carbon;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
 /**
@@ -32,7 +33,7 @@ class AnalyticsRangeRequest extends FormRequest
 
         return [
             'from' => [...$rules['from'], 'date_format:Y-m-d'],
-            'to' => [...$rules['to'], 'date_format:Y-m-d', 'after_or_equal:from'],
+            'to' => [...$rules['to'], 'date_format:Y-m-d', Rule::when(is_string($this->input('from')), 'after_or_equal:from')],
         ];
     }
 

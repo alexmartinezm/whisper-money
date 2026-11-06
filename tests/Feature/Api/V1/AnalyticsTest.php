@@ -448,6 +448,18 @@ it('refuses a key sent in the body of a GET too', function () {
         ->assertJsonValidationErrors('space');
 });
 
+it('answers a 422, not a 500, to a list sent for a single value', function (string $endpoint, string $query, string $field) {
+    withHeaders(apiV1Bearer(User::factory()->create()))
+        ->getJson("/api/v1/analytics/{$endpoint}?{$query}")
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors($field);
+})->with([
+    'from' => ['cashflow', 'from[]=2026-10-01&to=2026-10-31', 'from'],
+    'to' => ['net-worth', 'from=2026-10-01&to[]=2026-10-31', 'to'],
+    'granularity' => ['net-worth', 'from=2026-10-01&to=2026-10-31&granularity[]=daily', 'granularity'],
+    'parent category' => ['spending-by-category', 'from=2026-10-01&to=2026-10-31&parent_category_id[]=x', 'parent_category_id'],
+]);
+
 it('refuses an unknown net worth granularity', function () {
     withHeaders(apiV1Bearer(User::factory()->create()))
         ->getJson('/api/v1/analytics/net-worth'.OCTOBER.'&granularity=weekly')

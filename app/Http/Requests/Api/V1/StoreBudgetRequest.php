@@ -63,9 +63,8 @@ class StoreBudgetRequest extends FormRequest
      */
     private function startDayRefusal(Validator $validator): array
     {
-        $periodType = BudgetPeriodType::tryFrom((string) $this->input('period_type'));
-
-        if ($periodType === null || $validator->errors()->has('period_start_day') || $periodType->acceptsStartDay($this->startDay())) {
+        if ($validator->errors()->hasAny(['period_type', 'period_start_day'])
+            || BudgetPeriodType::from($this->input('period_type'))->acceptsStartDay($this->startDay())) {
             return [];
         }
 

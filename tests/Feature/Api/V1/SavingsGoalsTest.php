@@ -274,6 +274,9 @@ describe('create', function () {
         'not a savings account' => [fn (User $user) => newMonthlyGoal(['auto_tag_account_id' => Account::factory()->create(['user_id' => $user->id, 'type' => AccountType::Checking])->id]), 'auto_tag_account_id'],
         'account of another space' => [fn (User $user) => newMonthlyGoal(['auto_tag_account_id' => savingsAccount(User::factory()->create())->id]), 'auto_tag_account_id', 'The auto tag account id is not an account of yours in this space.'],
         'unknown field' => [fn () => newMonthlyGoal(['target' => 100]), 'target', 'This endpoint does not take a target field.'],
+        'a list for the kind' => [fn () => newMonthlyGoal(['kind' => ['monthly']]), 'kind'],
+        'a list for the name' => [fn () => newMonthlyGoal(['name' => ['Fund']]), 'name'],
+        'a list for the auto-tag account' => [fn (User $user) => newMonthlyGoal(['auto_tag_account_id' => [savingsAccount($user)->id]]), 'auto_tag_account_id'],
     ]);
 
     it('refuses an account another running goal already auto-tags', function () {

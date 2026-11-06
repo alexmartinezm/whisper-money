@@ -31,7 +31,9 @@ class StoreSavingsGoalRequest extends FormRequest
 
     private function kind(): ?SavingsGoalKind
     {
-        return SavingsGoalKind::tryFrom((string) $this->input('kind'));
+        $kind = $this->input('kind');
+
+        return is_string($kind) ? SavingsGoalKind::tryFrom($kind) : null;
     }
 
     protected function savingsGoalWriteRules(User $user): array

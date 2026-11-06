@@ -333,6 +333,9 @@ describe('create', function () {
         'someone else\'s category' => [fn (User $user) => newBudget($user, ['category_ids' => [Category::factory()->create()->id]]), 'category_ids.0'],
         'someone else\'s label' => [fn (User $user) => newBudget($user, ['label_ids' => [Label::factory()->create()->id]]), 'label_ids.0'],
         'unknown field' => [fn (User $user) => newBudget($user, ['limit' => 100]), 'limit', 'This endpoint does not take a limit field.'],
+        'a list for the period type' => [fn (User $user) => newBudget($user, ['period_type' => ['monthly']]), 'period_type'],
+        'a list for the name' => [fn (User $user) => newBudget($user, ['name' => ['Groceries']]), 'name'],
+        'a list for the start day' => [fn (User $user) => newBudget($user, ['period_start_day' => [1]]), 'period_start_day'],
         'catch-all with categories' => [fn (User $user) => newBudget($user, ['is_catch_all' => true]), 'tracking', 'A catch-all budget cannot have categories or labels.'],
     ]);
 
@@ -630,6 +633,7 @@ describe('a single period', function () {
         'over the maximum' => [['date' => '2026-10-20', 'allocated_amount' => Budget::MAX_ALLOCATED_AMOUNT + 1], 'allocated_amount'],
         'negative' => [['date' => '2026-10-20', 'allocated_amount' => -1], 'allocated_amount'],
         'unknown field' => [['date' => '2026-10-20', 'allocated_amount' => 1, 'note' => 'x'], 'note'],
+        'a list for the date' => [['date' => ['2026-10-20'], 'allocated_amount' => 1], 'date'],
     ]);
 
     it('refuses an archived budget, someone else\'s and a read-only token', function () {
