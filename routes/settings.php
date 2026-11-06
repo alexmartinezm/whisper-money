@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\OpenBanking\ConnectionController;
 use App\Http\Controllers\Settings\AccountController;
+use App\Http\Controllers\Settings\ApiTokenController;
 use App\Http\Controllers\Settings\AutomationRuleApplicationController;
 use App\Http\Controllers\Settings\AutomationRuleController;
 use App\Http\Controllers\Settings\BankController;
@@ -66,7 +67,9 @@ Route::middleware('auth')->group(function () {
     Route::patch('settings/labels/{label}', [LabelController::class, 'update'])->name('labels.update');
     Route::delete('settings/labels/{label}', [LabelController::class, 'destroy'])->name('labels.destroy');
 
-    Route::get('settings/mcp', [McpTokenController::class, 'index'])->name('mcp.index');
+    Route::get('settings/mcp', [McpTokenController::class, 'index'])
+        ->middleware('deny-framing')
+        ->name('mcp.index');
     Route::post('settings/mcp/tokens', [McpTokenController::class, 'store'])
         ->middleware('block-demo')
         ->name('mcp.tokens.store');
@@ -76,6 +79,27 @@ Route::middleware('auth')->group(function () {
     Route::delete('settings/mcp/tokens/{token}', [McpTokenController::class, 'destroy'])
         ->middleware('block-demo')
         ->name('mcp.tokens.destroy');
+    Route::delete('settings/mcp/apps/{client}', [McpTokenController::class, 'destroyApp'])
+        ->middleware('block-demo')
+        ->name('mcp.apps.destroy');
+
+    // `block-demo`: the API refuses the demo account (EnsureApiAccess), so it
+    // may not hold an API token.
+    Route::get('settings/api', [ApiTokenController::class, 'index'])
+        ->middleware('deny-framing')
+        ->name('api-tokens.index');
+    Route::post('settings/api/tokens', [ApiTokenController::class, 'store'])
+        ->middleware('block-demo')
+        ->name('api-tokens.store');
+    Route::post('settings/api/tokens/{token}/rotate', [ApiTokenController::class, 'rotate'])
+        ->middleware('block-demo')
+        ->name('api-tokens.rotate');
+    Route::delete('settings/api/tokens/{token}', [ApiTokenController::class, 'destroy'])
+        ->middleware('block-demo')
+        ->name('api-tokens.destroy');
+    Route::delete('settings/api/apps/{client}', [ApiTokenController::class, 'destroyApp'])
+        ->middleware('block-demo')
+        ->name('api-tokens.apps.destroy');
 
     Route::redirect('settings/budgets', '/budgets')->name('budgets.settings');
 

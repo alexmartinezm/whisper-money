@@ -1,8 +1,13 @@
 <?php
 
+use App\Jobs\SyncBankingConnectionJob;
+use App\Models\BankingConnection;
+use App\Models\User;
 use Illuminate\Console\Scheduling\Event;
 use Illuminate\Console\Scheduling\Schedule;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 
 /**
@@ -88,3 +93,41 @@ test('a scheduled task that succeeds logs nothing', function () {
 
     Log::shouldNotHaveReceived('error');
 });
+
+/**
+ * The sweep passes over a connection that synced in the last three hours, so the
+ * guard has to stay narrower than the schedule's six-hour gap or a connection
+ * would sit out every other sweep. The lag is how long after a sweep its sync
+ * finishes: a queue backlog eats into that gap, and just under three hours is
+ * the most it can eat before the guard bites.
+ */
+test('the six-hourly banking:sync reaches a connection on all four sweeps of a day', function (int $minutesToFinishSync) {
+    Queue::fake(SyncBankingConnectionJob::class);
+
+    $midnight = Carbon::parse('2026-11-02 00:00:00');
+    $this->travelTo($midnight);
+
+    $connection = BankingConnection::factory()->create([
+        'user_id' => User::factory()->onboarded(),
+        'last_synced_at' => now()->subHours(6),
+    ]);
+
+    $sweep = scheduledEvent('banking:sync');
+
+    foreach (range(0, 23) as $hour) {
+        $this->travelTo($midnight->copy()->addHours($hour));
+
+        if (! $sweep->isDue(app())) {
+            continue;
+        }
+
+        $this->artisan('banking:sync')->assertSuccessful();
+
+        $connection->update(['last_synced_at' => now()->addMinutes($minutesToFinishSync)]);
+    }
+
+    Queue::assertPushedTimes(SyncBankingConnectionJob::class, 4);
+})->with([
+    'sync done minutes after the sweep' => [20],
+    'sync done just under three hours after the sweep' => [179],
+]);
