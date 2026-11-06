@@ -651,20 +651,21 @@ it('takes Uncategorized alongside a real category, as the list does', function (
         ->and($rows['foreign']->fresh()->labels)->toHaveCount(0);
 });
 
-it('refuses any other id in a category filter, whoever it belongs to', function (callable $categoryId) {
+it('refuses any other id in a category filter, whoever it belongs to', function (string $categoryId, string $message) {
     $rows = uncategorizedFilterRows($this->user, $this->account, $this->category);
     $target = Category::factory()->create(['user_id' => $this->user->id]);
 
     $this->actingAs($this->user)->patchJson('/transactions/bulk', [
-        'filters' => ['category_ids' => ['uncategorized', $categoryId()]],
+        'filters' => ['category_ids' => ['uncategorized', $categoryId]],
         'category_id' => $target->id,
-    ])->assertJsonValidationErrors('filters.category_ids.1');
+    ])->assertJsonValidationErrors(['filters.category_ids.1' => $message])
+        ->assertJsonMissingValidationErrors('filters.category_ids.0');
 
     expect($rows['uncategorized']->fresh()->category_id)->toBeNull();
 })->with([
-    'not an id' => fn (): callable => fn (): string => 'UNCATEGORIZED',
-    'another user\'s category' => fn (): callable => fn (): string => Category::factory()->create()->id,
-    'a uuid of nothing' => fn (): callable => fn (): string => '019a0000-0000-7000-8000-000000000000',
+    'not an id' => [fn (): string => 'UNCATEGORIZED', 'must be a valid UUID'],
+    'another user\'s category' => [fn (): string => Category::factory()->create()->id, 'do not belong to you'],
+    'a uuid of nothing' => [fn (): string => '019a0000-0000-7000-8000-000000000000', 'do not belong to you'],
 ]);
 
 it('refuses a category type that does not exist in a bulk update', function () {
