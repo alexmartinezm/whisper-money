@@ -312,7 +312,10 @@ describe('useServerTransactionSource', () => {
             });
             expect(reload).not.toHaveBeenCalled();
 
-            act(() => vi.advanceTimersByTime(500));
+            act(() => vi.advanceTimersByTime(499));
+            expect(reload).not.toHaveBeenCalled();
+
+            act(() => vi.advanceTimersByTime(1));
 
             expect(reload).toHaveBeenCalledOnce();
             expect(reload).toHaveBeenCalledWith(

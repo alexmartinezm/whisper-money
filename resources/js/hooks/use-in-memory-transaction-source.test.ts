@@ -505,6 +505,13 @@ describe('useInMemoryTransactionSource', () => {
                 'split',
             ]);
             await expect(counted).resolves.toBe(3);
+            // The label keeps all the split's lines, not only the food one.
+            expect(result.current.daySummaryOf('2026-10-01')).toMatchObject({
+                count: 3,
+                total: {
+                    amount: rows[0].amount + rows[1].amount + rows[3].amount,
+                },
+            });
         });
 
         it('keeps what AI categorized, in the list, the count and the day', async () => {
