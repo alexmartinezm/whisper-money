@@ -410,6 +410,53 @@ describe('useTransactionBulkActions', () => {
         expect(result.current.bulk.removeLabelsDialog.matchingCount).toBeNull();
     });
 
+    /** A select-all's dialog, closed once and left to count again. */
+    async function reopenWithPendingCount(firstCount: () => Promise<number>) {
+        countMatching.mockImplementationOnce(firstCount);
+        const rendered = renderBulk([transaction('a')], ['a'], {
+            matchingFilters: {},
+        });
+
+        act(() => rendered.result.current.bulk.barProps.onSelectAll?.());
+        await act(async () =>
+            rendered.result.current.bulk.barProps.onRemoveAllLabels(),
+        );
+        act(() => rendered.result.current.bulk.removeLabelsDialog.onClose());
+
+        countMatching.mockReturnValue(new Promise<number>(() => {}));
+        await act(async () =>
+            rendered.result.current.bulk.barProps.onRemoveAllLabels(),
+        );
+
+        return rendered;
+    }
+
+    it('forgets the last count when the dialog opens again', async () => {
+        const { result } = await reopenWithPendingCount(() =>
+            Promise.resolve(7),
+        );
+
+        expect(result.current.bulk.removeLabelsDialog).toMatchObject({
+            isOpen: true,
+            matchingCount: null,
+            countFailed: false,
+            canConfirm: false,
+        });
+    });
+
+    it('forgets the last failure when the dialog opens again', async () => {
+        const { result } = await reopenWithPendingCount(() =>
+            Promise.reject(new Error('offline')),
+        );
+
+        expect(result.current.bulk.removeLabelsDialog).toMatchObject({
+            isOpen: true,
+            matchingCount: null,
+            countFailed: false,
+            canConfirm: false,
+        });
+    });
+
     it('counts nothing for the ticked rows, whose number is known', () => {
         const { result } = renderBulk([transaction('a')], ['a']);
 
