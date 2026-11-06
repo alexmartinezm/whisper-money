@@ -192,7 +192,7 @@ class BudgetPeriodService
             return $lastPeriod->end_date->copy()->addDay();
         }
 
-        return now();
+        return $budget->ownerToday();
     }
 
     private function monthlyBoundary(CarbonInterface $monthStart, int $configuredDay): CarbonInterface

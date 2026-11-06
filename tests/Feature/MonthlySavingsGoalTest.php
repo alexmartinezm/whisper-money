@@ -693,11 +693,11 @@ test('a shared space measures a share-of-income target against every member\'s i
         ->resolved_target_amount->toBe(30000);
 });
 
-test('the daily command runs just after midnight', function () {
+test('the command runs every hour, since a month ends at each owner\'s midnight', function () {
     $event = collect(app(Schedule::class)->events())
         ->first(fn ($event): bool => str_contains($event->command ?? '', 'savings-goals:generate-periods'));
 
-    expect($event->expression)->toBe('5 0 * * *');
+    expect($event->expression)->toBe('0 * * * *');
 });
 
 test('a share-of-income target only counts the income of the goal\'s space', function () {

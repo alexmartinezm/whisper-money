@@ -1108,3 +1108,44 @@ test('the command tells a proved double count from any other release and lists w
     ]))->and(periodTransactionIds($current))->toBe([$unheld->id])
         ->and(budgetTransactionIds($budget))->toBe([$doubleCounted->id]);
 });
+
+/**
+ * A catch-all counting what a budget holds in a period that is over for the
+ * Auckland owner and still running in UTC: 11:00 UTC on 31 October is midnight
+ * on 1 November there. The budget stopped tracking the category afterwards, so
+ * only the close of its period proves its row.
+ *
+ * @return array{october: BudgetPeriod, transaction: Transaction}
+ */
+function doubleCountAtAucklandMidnight(object $test): array
+{
+    $test->user->update(['timezone' => 'Pacific/Auckland']);
+    $catchAll = createBudget($test->user, 'monthly', isCatchAll: true);
+    $budget = createBudget($test->user, 'monthly', categoryIds: [$test->category->id]);
+    $transaction = expense($test->user, $test->category, '2026-10-05', -1000);
+    $october = periodOn($catchAll, '2026-10-10');
+    doubleCount($october, $transaction, 1000);
+
+    $test->travelTo(Carbon::parse('2026-10-31 11:00:00'));
+    app(BudgetManagementService::class)->update($test->user, $test->user->personalSpace, $budget->id, ['category_ids' => [$test->other->id]], $test->user->localToday()->toImmutable());
+
+    return compact('october', 'transaction');
+}
+
+test('a holder row in a period over for its owner still proves a double count', function () {
+    ['october' => $october, 'transaction' => $transaction] = doubleCountAtAucklandMidnight($this);
+
+    $changes = $this->rebuilder->rebuildCatchAllPeriod($october->fresh());
+
+    expect($changes['left_alone'])->toBe([])
+        ->and($changes['released_double_count'])->toBe(1)
+        ->and(snapshotAmount($october, $transaction))->toBeNull();
+});
+
+test('the rebuild command reports a period over for its owner as closed', function () {
+    doubleCountAtAucklandMidnight($this);
+
+    $this->artisan('budgets:rebuild-catch-all')
+        ->expectsOutputToContain('Closed periods: 1 proved double count(s) were released')
+        ->assertSuccessful();
+});

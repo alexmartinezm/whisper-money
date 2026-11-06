@@ -7,6 +7,8 @@ use App\Enums\BudgetPeriodType;
 use App\Enums\RolloverType;
 use App\Models\Concerns\Archivable;
 use App\Models\Concerns\BelongsToSpace;
+use App\Models\Relations\CurrentBudgetPeriods;
+use Carbon\Carbon as BaseCarbon;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -55,10 +57,16 @@ class Budget extends Model
         'expense_type' => BudgetExpenseType::Variable->value,
     ];
 
-    /** @var list<string> */
+    /**
+     * `user` is loaded to read the owner's today (ownerToday()), never to be
+     * sent: a budget handed to a page must not carry its owner's record.
+     *
+     * @var list<string>
+     */
     protected $hidden = [
         'period_duration',
         'space_id',
+        'user',
     ];
 
     protected function casts(): array
@@ -102,7 +110,8 @@ class Budget extends Model
     }
 
     /**
-     * The period covering the application date (today by default), if any.
+     * The period covering the application date, by default its owner's today
+     * (see ownerToday()), if any.
      *
      * Ordered because more than one can cover today. Overlapping periods are
      * not hypothetical - every biweekly budget created before the fix to
@@ -117,24 +126,38 @@ class Budget extends Model
      */
     public function getCurrentPeriod(?CarbonInterface $applicationDate = null): ?BudgetPeriod
     {
-        return $this->currentPeriods($applicationDate)->first();
+        return $this->periods()
+            ->covering($applicationDate ?? $this->ownerToday())
+            ->orderByDesc('start_date')
+            ->first();
     }
 
     /**
-     * The periods covering the application date, latest start first: the first
-     * one is the current period (see getCurrentPeriod()). A relation, so a list
-     * can eager load the current period of every budget at once.
+     * The periods covering the owner's today, latest start first: the first one
+     * is the current period (see getCurrentPeriod()). A relation so a list can
+     * eager load the current period of every budget at once; eager loading
+     * reads each budget's own owner's today (see CurrentBudgetPeriods).
      *
-     * @return HasMany<BudgetPeriod, $this>
+     * @return CurrentBudgetPeriods<$this>
      */
-    public function currentPeriods(?CarbonInterface $applicationDate = null): HasMany
+    public function currentPeriods(): CurrentBudgetPeriods
     {
-        $applicationDate ??= today();
+        $period = new BudgetPeriod;
 
-        return $this->periods()
-            ->whereDate('start_date', '<=', $applicationDate->toDateString())
-            ->whereDate('end_date', '>=', $applicationDate->toDateString())
-            ->orderByDesc('start_date');
+        return new CurrentBudgetPeriods($period->newQuery(), $this, $period->qualifyColumn('budget_id'), $this->getKeyName());
+    }
+
+    /**
+     * The date it is for this budget's owner: the day that decides which
+     * period is in progress and which ones have ended.
+     *
+     * The app's `today()` is UTC, which is already tomorrow for an American
+     * user every evening. Falls back to the app's today for a budget without a
+     * loaded or existing owner.
+     */
+    public function ownerToday(): BaseCarbon
+    {
+        return $this->user?->localToday() ?? today();
     }
 
     public function getNextPlanningPeriod(CarbonInterface $applicationDate, ?BudgetPeriod $currentPeriod = null): ?BudgetPeriod

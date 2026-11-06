@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Carbon\Carbon;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -175,11 +176,22 @@ class BudgetPeriod extends Model
      * @param  Builder<BudgetPeriod>  $query
      * @return Builder<BudgetPeriod>
      */
-    public function scopeOverlapping(Builder $query, Carbon $from, Carbon $to): Builder
+    public function scopeOverlapping(Builder $query, CarbonInterface $from, CarbonInterface $to): Builder
     {
         return $query
             ->where('start_date', '<=', $to->toDateString())
             ->where('end_date', '>=', $from->toDateString());
+    }
+
+    /**
+     * Periods that include the given day.
+     *
+     * @param  Builder<BudgetPeriod>  $query
+     * @return Builder<BudgetPeriod>
+     */
+    public function scopeCovering(Builder $query, CarbonInterface $day): Builder
+    {
+        return $query->overlapping($day, $day);
     }
 
     /**
@@ -199,12 +211,12 @@ class BudgetPeriod extends Model
     }
 
     /**
-     * Whether the period is over: from then on it keeps what it counted, the
-     * same line `GenerateBudgetPeriods` closes periods on.
+     * Whether the period is over for its budget's owner: from then on it keeps
+     * what it counted, the same line `GenerateBudgetPeriods` closes periods on.
      */
     public function hasEnded(): bool
     {
-        return $this->end_date->lt(today());
+        return $this->end_date->lt($this->budget?->ownerToday() ?? today());
     }
 
     /**

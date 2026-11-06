@@ -7,6 +7,7 @@ use App\Enums\CategoryType;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\Transaction;
+use App\Models\User;
 use App\Services\BalanceLookup;
 use App\Services\CategorySpendingService;
 use App\Services\ExchangeRateService;
@@ -78,7 +79,7 @@ class DashboardAnalyticsController extends Controller
         }
 
         return $this->evolutionResponse(
-            [...$points, ...$this->projectedPoints($account, $linkedLoanAccount, $points, $displayCurrencyCode)],
+            [...$points, ...$this->projectedPoints($account, $linkedLoanAccount, $points, $displayCurrencyCode, $request->user()->localToday())],
             $account,
             $displayCurrencyCode,
         );
@@ -332,14 +333,18 @@ class DashboardAnalyticsController extends Controller
      * Future months appended to the historical series: the amortization schedule
      * for loans, and revaluation plus the linked mortgage for real estate.
      *
+     * The projection starts after the owner's current month, read on their own
+     * clock ({@see User::localToday()}): at month-end the server's UTC month is
+     * already the next one for an American user.
+     *
      * @param  list<array<string, mixed>>  $points  the historical series
      * @return list<array<string, mixed>>
      */
-    private function projectedPoints(Account $account, ?Account $linkedLoanAccount, array $points, ?string $displayCurrencyCode): array
+    private function projectedPoints(Account $account, ?Account $linkedLoanAccount, array $points, ?string $displayCurrencyCode, Carbon $today): array
     {
         return match ($account->type) {
-            AccountType::Loan => $this->loanProjection($account, $displayCurrencyCode),
-            AccountType::RealEstate => $this->realEstateProjection($account, $linkedLoanAccount, $points, $displayCurrencyCode),
+            AccountType::Loan => $this->loanProjection($account, $displayCurrencyCode, $today),
+            AccountType::RealEstate => $this->realEstateProjection($account, $linkedLoanAccount, $points, $displayCurrencyCode, $today),
             default => [],
         };
     }
@@ -347,7 +352,7 @@ class DashboardAnalyticsController extends Controller
     /**
      * @return list<array<string, mixed>>
      */
-    private function loanProjection(Account $account, ?string $displayCurrencyCode): array
+    private function loanProjection(Account $account, ?string $displayCurrencyCode, Carbon $today): array
     {
         $loanDetail = $account->loanDetail;
 
@@ -355,18 +360,17 @@ class DashboardAnalyticsController extends Controller
             return [];
         }
 
-        $now = Carbon::now();
         $points = [];
 
-        foreach ($this->loanAmortizationService->generateProjection($loanDetail, 12) as $yearMonth => $balanceCents) {
+        foreach ($this->loanAmortizationService->generateProjection($loanDetail, $today, 12) as $yearMonth => $balanceCents) {
             $projectedDate = Carbon::createFromFormat('Y-m', $yearMonth)->endOfMonth();
 
             // Only add future months that are beyond the current date
-            if ($projectedDate->lte($now)) {
+            if ($projectedDate->lte($today)) {
                 continue;
             }
 
-            $points[] = $this->projectedPoint($account, $projectedDate, $balanceCents, $displayCurrencyCode);
+            $points[] = $this->projectedPoint($account, $projectedDate, $balanceCents, $displayCurrencyCode, $today);
         }
 
         return $points;
@@ -380,7 +384,7 @@ class DashboardAnalyticsController extends Controller
      * @param  list<array<string, mixed>>  $points  the historical series
      * @return list<array<string, mixed>>
      */
-    private function realEstateProjection(Account $account, ?Account $linkedLoanAccount, array $points, ?string $displayCurrencyCode): array
+    private function realEstateProjection(Account $account, ?Account $linkedLoanAccount, array $points, ?string $displayCurrencyCode, Carbon $today): array
     {
         // The ?? already covers a missing detail row, so no nullsafe operator here
         // (phpstan flags the combination as redundant).
@@ -396,16 +400,15 @@ class DashboardAnalyticsController extends Controller
         $baseValue = is_array($lastPoint) ? $lastPoint['value'] : 0;
         $monthlyRate = $revaluationPercentage / 12 / 100;
         $loanProjection = $linkedLoanDetail !== null
-            ? $this->loanAmortizationService->generateProjection($linkedLoanDetail, $monthsAhead)
+            ? $this->loanAmortizationService->generateProjection($linkedLoanDetail, $today, $monthsAhead)
             : [];
 
-        $now = Carbon::now();
         $projected = [];
 
         for ($i = 1; $i <= $monthsAhead; $i++) {
-            $projectedDate = $now->copy()->addMonthsNoOverflow($i)->endOfMonth();
+            $projectedDate = $today->copy()->addMonthsNoOverflow($i)->endOfMonth();
             $projectedValue = (int) round($baseValue * pow(1 + $monthlyRate, $i));
-            $point = $this->projectedPoint($account, $projectedDate, $projectedValue, $displayCurrencyCode);
+            $point = $this->projectedPoint($account, $projectedDate, $projectedValue, $displayCurrencyCode, $today);
             $mortgageProj = $loanProjection[$projectedDate->format('Y-m')] ?? null;
 
             if ($mortgageProj !== null) {
@@ -438,7 +441,7 @@ class DashboardAnalyticsController extends Controller
      *
      * @return array<string, mixed>
      */
-    private function projectedPoint(Account $account, Carbon $projectedDate, int $value, ?string $displayCurrencyCode): array
+    private function projectedPoint(Account $account, Carbon $projectedDate, int $value, ?string $displayCurrencyCode, Carbon $today): array
     {
         $point = [
             'month' => $projectedDate->format('Y-m'),
@@ -452,7 +455,7 @@ class DashboardAnalyticsController extends Controller
                 $account->currency_code,
                 $displayCurrencyCode,
                 $value,
-                Carbon::today(),
+                $today,
             );
         }
 

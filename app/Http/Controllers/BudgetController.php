@@ -43,15 +43,14 @@ class BudgetController extends Controller
     public function index(Request $request): Response
     {
         $user = $request->user();
-        $applicationDate = CarbonImmutable::today();
+        $applicationDate = $user->localToday()->toImmutable();
         $activeSpaceId = $user->activeSpace()->id;
         $budgets = $user
             ->budgets()
             ->orderBy('position')
             ->orderBy('name')
             ->with(['categories', 'labels', 'periods' => function ($query) use ($applicationDate) {
-                $query->whereDate('start_date', '<=', $applicationDate->toDateString())
-                    ->whereDate('end_date', '>=', $applicationDate->toDateString())
+                $query->covering($applicationDate)
                     // Same ordering as Budget::getCurrentPeriod, for the same
                     // reason: the card reads `periods[0]`, and where two periods
                     // cover today the earliest-starting one is the one the user
@@ -89,7 +88,7 @@ class BudgetController extends Controller
             'savingsGoals' => SavingsGoal::withStats($oneOffGoals),
             'monthlySavingsGoals' => $presentedMonthlyGoals,
             // Archived goals included, as on the cashflow card and the summary.
-            'monthlySavingsLastMonth' => $this->monthlySavingsTotals->verdicts($presentedMonthlyGoals, today()->subMonthNoOverflow()),
+            'monthlySavingsLastMonth' => $this->monthlySavingsTotals->verdicts($presentedMonthlyGoals, $user->localToday()->subMonthNoOverflow()),
             // Only when the create dialog asks for them: the savings accounts of
             // the active space, the same set the server validates the auto-tag
             // account against, each with the running goal it already feeds.
@@ -245,7 +244,10 @@ class BudgetController extends Controller
         $this->authorize('view', $budget);
 
         $user = $request->user();
-        $applicationDate = CarbonImmutable::today();
+        // The policy only lets the owner in: reuse them for the owner's today
+        // rather than loading them again.
+        $budget->setRelation('user', $user);
+        $applicationDate = $budget->ownerToday()->toImmutable();
         $activePeriod = $this->activePeriodFor($budget, $applicationDate);
         $directSuccessor = $budget->getNextPlanningPeriod($applicationDate, $activePeriod);
 
@@ -435,7 +437,7 @@ class BudgetController extends Controller
             $budget->space,
             $budget->id,
             $request->only(['name', 'allocated_amount', 'category_ids', 'label_ids', 'expense_type']),
-            CarbonImmutable::today(),
+            $request->user()->localToday()->toImmutable(),
         );
 
         return redirect()->route('budgets.show', $budget);
@@ -451,7 +453,7 @@ class BudgetController extends Controller
             $budget->id,
             $period->id,
             $request->integer('allocated_amount'),
-            CarbonImmutable::today(),
+            $request->user()->localToday()->toImmutable(),
         );
 
         return redirect()->route('budgets.show', ['budget' => $budget, 'period' => $period]);

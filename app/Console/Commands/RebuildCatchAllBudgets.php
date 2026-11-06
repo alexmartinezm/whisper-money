@@ -46,7 +46,7 @@ class RebuildCatchAllBudgets extends Command
 
         $results = BudgetPeriod::query()
             ->ofRunningCatchAll($userId)
-            ->with('budget')
+            ->with('budget.user:id,timezone')
             ->lazyById()
             ->map(fn (BudgetPeriod $period): array => [
                 'period' => $period,

@@ -28,7 +28,7 @@ class SavingsGoalController extends Controller
     public function index(Request $request): AnonymousResourceCollection
     {
         return CursorPaginator::paginate(
-            $this->owned($request, SavingsGoal::query())->with(['user:id,currency_code', 'label' => fn ($query) => $query->withTrashed()]),
+            $this->owned($request, SavingsGoal::query())->with(['user:id,currency_code,timezone', 'label' => fn ($query) => $query->withTrashed()]),
             $request,
             [['created_at', 'desc'], ['id', 'desc']],
             SavingsGoalResource::class,

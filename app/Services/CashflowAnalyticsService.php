@@ -65,7 +65,7 @@ class CashflowAnalyticsService
             $user->currency_code,
             $period,
             $previousPeriod,
-            fn (array $aggregates): array => $this->budgetReserve->forComparedPeriods($user->id, $period, $previousPeriod, $aggregates),
+            fn (array $aggregates): array => $this->budgetReserve->forComparedPeriods($user->id, $period, $previousPeriod, $aggregates, $user->localToday()),
             $this->budgetReserve->trackedLabelIds($user->id, $period, $previousPeriod),
         );
     }

@@ -285,6 +285,7 @@ export default function Dashboard() {
                 'creditCardUsage',
                 'topCategories',
                 'topLabels',
+                'spendingWindow',
                 'cashflowSummary',
             ],
         });

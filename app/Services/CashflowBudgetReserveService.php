@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\BudgetPeriodType;
 use App\Enums\CashflowBlock;
 use App\Models\BudgetPeriod;
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
@@ -82,12 +83,13 @@ class CashflowBudgetReserveService
      * the budget screens read them.
      *
      * @param  array{current: Collection<int, CashflowAggregate>, previous: Collection<int, CashflowAggregate>}  $aggregates
+     * @param  Carbon  $today  the user's today (User::localToday()): which periods are in progress
      * @return array{current: array{reserved: int, budgets: list<BudgetMarginRow>, fixed_expense: int, variable_expense: int, general_expense: int}, previous: ExpenseSplit}
      */
-    public function forComparedPeriods(string $userId, PeriodComparator $period, PeriodComparator $previousPeriod, array $aggregates): array
+    public function forComparedPeriods(string $userId, PeriodComparator $period, PeriodComparator $previousPeriod, array $aggregates, Carbon $today): array
     {
         [$tracked, $previousTracked] = $this->blocks->trackedIdsByPeriod($userId, [$period, $previousPeriod]);
-        $budgets = $this->openBudgetMargins($userId, $period);
+        $budgets = $this->openBudgetMargins($userId, $period, $today);
 
         return [
             'current' => [
@@ -135,7 +137,7 @@ class CashflowBudgetReserveService
     /**
      * @return list<BudgetMarginRow>
      */
-    private function openBudgetMargins(string $userId, PeriodComparator $period): array
+    private function openBudgetMargins(string $userId, PeriodComparator $period, Carbon $today): array
     {
         return BudgetPeriod::query()
             ->whereHas('budget', fn (Builder $query) => $query
@@ -145,8 +147,7 @@ class CashflowBudgetReserveService
             ->overlapping($period->from, $period->to)
             // In progress today: a period that is over already gave back what it
             // left, and one yet to start holds nothing back from this income.
-            ->where('start_date', '<=', today()->toDateString())
-            ->where('end_date', '>=', today()->toDateString())
+            ->covering($today)
             ->with('budget:id,name,expense_type')
             ->withSum('budgetTransactions as spent', 'amount')
             ->orderBy('start_date')
