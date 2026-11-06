@@ -86,9 +86,9 @@ themselves.
   Each budget also has an `expense_type`, `fixed` or `variable` (the default),
   which both tools accept and `update_budget` can change at any time; only the
   cashflow expense split reads it. A catch-all budget is always `variable`.
-- For monthly budgets, allocation changes use the server application date. A change
-  on the first day includes the current period; after that it affects periods whose
-  start date is on or after the application date, plus future periods.
+- For monthly budgets, allocation changes use the user's own date as the application
+  date. A change on the first day includes the current period; after that it affects
+  periods whose start date is on or after the application date, plus future periods.
 - For a one-off month (an extraordinary expense), use `update_budget_period`: it sets
   the allocation of the single period that contains `date`, the one in progress or a
   future one up to 12 months ahead, and leaves every other period as it was. Periods
