@@ -75,7 +75,6 @@ const COLUMNS: ColumnDef<DecryptedTransaction>[] = [
 ];
 
 function TransactionsTable({
-    isGroupedByDay = true,
     columnVisibility = {},
     amountInUserCurrency = (transaction) => transaction.amount,
     daySummaryOf = (date) =>
@@ -85,7 +84,6 @@ function TransactionsTable({
         ),
     onSelectionChange = () => {},
 }: {
-    isGroupedByDay?: boolean;
     columnVisibility?: VisibilityState;
     amountInUserCurrency?: AmountInUserCurrency;
     daySummaryOf?: DaySummaryOf;
@@ -113,9 +111,7 @@ function TransactionsTable({
             <DataTable
                 table={table}
                 columns={COLUMNS}
-                groupRowsBy={
-                    isGroupedByDay ? (row) => row.transaction_date : undefined
-                }
+                groupRowsBy={(row) => row.transaction_date}
                 renderGroupHeader={(group, measureProps) => (
                     <TransactionDayHeader
                         table={table}
@@ -173,6 +169,28 @@ describe('TransactionDayHeader', () => {
         expect(cells[1]).toHaveAttribute('colspan', '2');
         expect(cells[2]).toHaveTextContent('-€20.00');
         expect(dayHeaders()[1]).toHaveTextContent('€3,000.00');
+    });
+
+    it('fades the day total and brings it back while the header is hovered', () => {
+        render(<TransactionsTable />);
+
+        expect(dayHeaders()[0]).toHaveClass('group/day');
+
+        const spending = within(dayHeaders()[0]).getByText('-€20.00')
+            .parentElement as HTMLElement;
+        const income = within(dayHeaders()[1]).getByText('€3,000.00')
+            .parentElement as HTMLElement;
+
+        for (const total of [spending, income]) {
+            expect(total).toHaveClass(
+                'opacity-30',
+                'group-hover/day:opacity-100',
+            );
+            expect(total).not.toHaveClass('bg-green-100/70');
+        }
+
+        expect(income).toHaveClass('group-hover/day:bg-green-100/70');
+        expect(spending).not.toHaveClass('group-hover/day:bg-green-100/70');
     });
 
     it('spans one column less once the Date column is hidden', () => {
@@ -252,12 +270,5 @@ describe('TransactionDayHeader', () => {
         expect(
             within(dayHeaders()[0]).getAllByRole('cell')[2],
         ).toHaveTextContent('-€45.00');
-    });
-
-    it('draws no headers when the table is not sorted by date', () => {
-        render(<TransactionsTable isGroupedByDay={false} />);
-
-        expect(dayHeaders()).toHaveLength(0);
-        expect(screen.getAllByRole('row')).toHaveLength(4);
     });
 });

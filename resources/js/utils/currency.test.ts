@@ -2,6 +2,26 @@ import { describe, expect, it } from 'vitest';
 import { formatCurrency, toMinorUnits } from './currency';
 
 describe('formatCurrency', () => {
+    it.each(['N/A', '---', '1!a', '', 'EURO'])(
+        'falls back to a plain number with the code as text for %j',
+        (code) => {
+            expect(formatCurrency(123456, code, 'en-US')).toBe(
+                `1,234.56${code ? '\u202F' + code : ''}`,
+            );
+        },
+    );
+
+    it('keeps the requested fraction digits in the fallback', () => {
+        expect(formatCurrency(123456, 'N/A', 'en-US', 0, 0)).toBe(
+            '1,235\u202FN/A',
+        );
+    });
+
+    it('formats any three letters as a currency, known to Intl or not', () => {
+        expect(formatCurrency(1000, 'nok', 'en-US')).toContain('NOK');
+        expect(formatCurrency(1000, 'XYZ', 'en-US')).toContain('XYZ');
+    });
+
     it('formats a basic USD amount', () => {
         expect(formatCurrency(1000, 'USD', 'en-US')).toBe('$10.00');
     });

@@ -18,6 +18,13 @@ export function toMinorUnits(
     return Math.round(majorUnits * MINOR_UNITS_PER_MAJOR);
 }
 
+/**
+ * The only shape Intl.NumberFormat takes as a currency: it throws a RangeError
+ * on anything else, whether or not it knows the code. The server refuses other
+ * shapes now, but rows stored before that keep theirs.
+ */
+const CURRENCY_CODE_SHAPE = /^[A-Za-z]{3}$/;
+
 export function formatCurrency(
     valueInCents: number,
     currencyCode = 'USD',
@@ -26,14 +33,17 @@ export function formatCurrency(
     maximumFractionDigits = 2,
 ): string {
     const amount = valueInCents / 100;
-    return new Intl.NumberFormat(locale, {
-        style: 'currency',
-        currency: currencyCode,
+    const isCurrency = CURRENCY_CODE_SHAPE.test(currencyCode);
+    const formatted = new Intl.NumberFormat(locale, {
+        ...(isCurrency ? { style: 'currency', currency: currencyCode } : {}),
         minimumFractionDigits,
         maximumFractionDigits,
         useGrouping: 'always',
-    })
-        .format(amount)
+    }).format(amount);
+
+    // One bad row must not take a whole page down: the number, then the code.
+    return (isCurrency ? formatted : `${formatted} ${currencyCode}`)
+        .trimEnd()
         .replace(/\s/g, '\u202F');
 }
 

@@ -1,13 +1,14 @@
 import { type DecryptedTransaction } from '@/types/transaction';
 import { type TransactionTableSource } from '@/types/transaction-table-source';
 import { type Table } from '@tanstack/react-table';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TransactionTable } from './transaction-table';
 
 vi.mock('@/hooks/use-locale', () => ({ useLocale: () => 'en-US' }));
 
-vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => false }));
+const viewport = vi.hoisted(() => ({ isMobile: false }));
+vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => viewport.isMobile }));
 
 // The heavy pieces have tests of their own; here they only show what the
 // shell hands them.
@@ -35,8 +36,17 @@ vi.mock('@/components/transactions/bulk-actions-bar', () => ({
     ),
 }));
 vi.mock('@/components/transactions/transaction-filters', () => ({
-    TransactionFilters: ({ actions }: { actions: React.ReactNode }) => (
-        <div data-testid="filters">{actions}</div>
+    TransactionFilters: ({
+        actions,
+        trailing,
+    }: {
+        actions: React.ReactNode;
+        trailing: React.ReactNode;
+    }) => (
+        <div data-testid="filters">
+            <div data-testid="page-toolbar">{actions}</div>
+            <div data-testid="filters-trailing">{trailing}</div>
+        </div>
     ),
 }));
 vi.mock('@/components/transactions/transaction-row-dialogs', () => ({
@@ -66,9 +76,7 @@ function source(
         isLoading: false,
         filters: {} as TransactionTableSource['filters'],
         onFiltersChange: vi.fn(),
-        sorting: [{ id: 'transaction_date', desc: true }],
-        onSortingChange: vi.fn(),
-        manualSorting: true,
+        facets: [],
         daySummaryOf: () => ({ count: 0, total: { status: 'pending' } }),
         pagination: {
             displayedCount: 2,
@@ -79,6 +87,7 @@ function source(
             loadsOnScroll: false,
         },
         reload: vi.fn(),
+        countMatching: vi.fn().mockResolvedValue(0),
         queryKey: 0,
         ...overrides,
     };
@@ -116,7 +125,10 @@ describe('TransactionTable', () => {
         );
     });
 
-    afterEach(() => vi.unstubAllGlobals());
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        viewport.isMobile = false;
+    });
 
     it('draws the source rows, the page toolbar, banner and footer', () => {
         renderTable(source());
@@ -127,6 +139,33 @@ describe('TransactionTable', () => {
         expect(screen.getByText('tick a')).toBeTruthy();
         expect(screen.getByText('2 transactions loaded')).toBeTruthy();
         expect(screen.getByText('elsewhere')).toBeTruthy();
+    });
+
+    it('closes the filters toolbar with the column picker on desktop', () => {
+        renderTable(source());
+
+        expect(
+            within(screen.getByTestId('filters-trailing')).getByRole('button', {
+                name: /columns/i,
+            }),
+        ).toBeTruthy();
+        expect(
+            within(screen.getByTestId('page-toolbar')).queryByRole('button', {
+                name: /columns/i,
+            }),
+        ).toBeNull();
+    });
+
+    it('hands the column picker to the page toolbar on a phone', () => {
+        viewport.isMobile = true;
+        renderTable(source());
+
+        expect(
+            within(screen.getByTestId('page-toolbar')).getByRole('button', {
+                name: /columns/i,
+            }),
+        ).toBeTruthy();
+        expect(screen.getByTestId('filters-trailing').textContent).toBe('');
     });
 
     it('draws the skeleton while the source loads', () => {

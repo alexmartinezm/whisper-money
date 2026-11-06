@@ -164,7 +164,9 @@ class TransactionWriteRules
      */
     private static function amountRules(): array
     {
-        return ['integer', 'between:-'.self::MaxAmount.','.self::MaxAmount];
+        // Bail: `between` cannot read what `integer` refuses, and 1e999 decodes
+        // to INF.
+        return ['bail', 'integer', 'between:-'.self::MaxAmount.','.self::MaxAmount];
     }
 
     /**
@@ -176,8 +178,10 @@ class TransactionWriteRules
             // Any code, not just the ones an account can be in: a trip paid in a
             // currency the app holds no account for is a real transaction. With
             // no rate for it, totals count the amount unconverted and a balance
-            // stays where it is, with `balance_updated` saying so.
-            'currency_code' => ['sometimes', 'string', 'size:3'],
+            // stays where it is, with `balance_updated` saying so. Three ASCII
+            // letters, as Intl.NumberFormat takes no other shape in the browser;
+            // \z, since $ would let a trailing newline through.
+            'currency_code' => ['sometimes', 'string', 'regex:/\A[A-Za-z]{3}\z/'],
             'notes' => ['sometimes', 'nullable', 'string', 'max:'.self::NotesMaxLength],
             'creditor_name' => ['sometimes', 'nullable', 'string', 'max:255'],
             'debtor_name' => ['sometimes', 'nullable', 'string', 'max:255'],

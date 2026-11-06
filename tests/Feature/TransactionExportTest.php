@@ -105,13 +105,13 @@ test('the export lists the newest transaction first', function () {
     expect(array_column(exportedRows($user), 1))->toBe(['Description', 'Newer', 'Older']);
 });
 
-test('the export follows the sort of the transactions page', function () {
+test('the export ignores a sort it is handed', function () {
     $user = User::factory()->create(['onboarded_at' => now()]);
-    Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'description' => 'Big', 'amount' => -9000]);
-    Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'description' => 'Small', 'amount' => -100]);
+    Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'description' => 'Older', 'transaction_date' => '2026-01-01', 'amount' => -100]);
+    Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'description' => 'Newer', 'transaction_date' => '2026-02-01', 'amount' => -9000]);
 
-    expect(array_column(exportedRows($user, ['sort' => 'amount']), 1))->toBe(['Description', 'Big', 'Small'])
-        ->and(array_column(exportedRows($user, ['sort' => '-amount']), 1))->toBe(['Description', 'Small', 'Big']);
+    expect(array_column(exportedRows($user, ['sort' => 'amount']), 1))->toBe(['Description', 'Newer', 'Older'])
+        ->and(array_column(exportedRows($user, ['sort' => 'creditor_name']), 1))->toBe(['Description', 'Newer', 'Older']);
 });
 
 test('the export never includes another user\'s transactions', function () {
@@ -217,18 +217,6 @@ test('guests cannot count transactions', function () {
     $this->getJson(route('api.transactions.count'))->assertUnauthorized();
 });
 
-test('the list sort refuses a column it does not know', function () {
-    Transaction::query()->sortedForList('-id; drop table users');
-})->throws(InvalidArgumentException::class);
-
-test('an export follows a payee sort with blanks first', function () {
-    $user = User::factory()->create(['onboarded_at' => now()]);
-    Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'description' => 'Named', 'creditor_name' => 'Acme']);
-    Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'description' => 'Blank', 'creditor_name' => null]);
-
-    expect(array_column(exportedRows($user, ['sort' => 'creditor_name']), 1))->toBe(['Description', 'Blank', 'Named']);
-});
-
 test('the export keeps its own rate limit, apart from the api routes', function () {
     $user = User::factory()->create(['onboarded_at' => now()]);
 
@@ -286,6 +274,27 @@ test('a category filter keeps only the split lines in that category or below it'
         ->and(array_column(exportedRows($user, ['category_ids' => "uncategorized,{$food->id}"]), 1))->toBe(['Description', 'Loose', 'Mixed'])
         ->and(array_column(exportedRows($user, ['category_ids' => 'uncategorized']), 1))->toBe(['Description', 'Loose'])
         ->and(array_column(exportedRows($user), 6))->toBe(['Category', '', 'Rent', 'Groceries']);
+});
+
+test('a category type filter keeps only the split lines of that type, and the count agrees', function () {
+    $user = User::factory()->create(['onboarded_at' => now()]);
+    $account = Account::factory()->create(['user_id' => $user->id]);
+    $groceries = Category::factory()->create(['user_id' => $user->id, 'name' => 'Groceries', 'type' => CategoryType::Expense]);
+    $piggyBank = Category::factory()->create(['user_id' => $user->id, 'name' => 'Piggy bank', 'type' => CategoryType::Savings]);
+    splitForExport(
+        Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'account_id' => $account->id, 'amount' => -10000]),
+        [[$groceries, -7000], [$piggyBank, -3000]],
+    );
+
+    $rows = exportedRows($user, ['category_types' => ['savings']]);
+
+    expect(array_slice($rows, 1))->toHaveCount(1)
+        ->and(array_column(array_slice($rows, 1), 2))->toBe(['-30.00'])
+        ->and(array_column(array_slice($rows, 1), 6))->toBe(['Piggy bank']);
+
+    $this->actingAs($user)
+        ->getJson(route('api.transactions.count', ['category_types' => 'savings']))
+        ->assertJsonPath('count', 1);
 });
 
 test('a wanted label on a split transaction keeps every one of its lines', function () {

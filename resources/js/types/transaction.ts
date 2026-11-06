@@ -1,5 +1,5 @@
 import { type Account, type Bank } from './account';
-import { type Category } from './category';
+import { type Category, type CategoryType } from './category';
 import { type Label } from './label';
 import { UUID } from './uuid';
 
@@ -87,6 +87,8 @@ export interface TransactionFilters {
     amountMin: number | null;
     amountMax: number | null;
     categoryIds: UUID[];
+    /** Rows whose category has one of these types; uncategorized rows never match. */
+    categoryTypes: CategoryType[];
     accountIds: UUID[];
     labelIds: UUID[];
     creditorName: string;
@@ -95,4 +97,20 @@ export interface TransactionFilters {
     aiCategorizedOnly: boolean;
     /** Only arrives from a cashflow link; never picked from the filter menu. */
     cashflowBlock?: CashflowBlock | null;
+}
+
+/**
+ * What every transaction a filter set matches adds up to, in the user's
+ * currency (`TransactionFilterSummary` on the server). `total` and `average`
+ * are null when an amount has no rate to convert it with.
+ */
+export interface TransactionFilterSummary {
+    count: number;
+    total: number | null;
+    average: number | null;
+    /** All expenses, all income, or both (then `total` is the net). */
+    kind: 'expense' | 'income' | 'mixed';
+    currency: string;
+    /** The same filters month by month, oldest first, ending in the filter's last month. */
+    trend: { month: string; total: number | null }[];
 }

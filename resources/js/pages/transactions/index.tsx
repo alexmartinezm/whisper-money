@@ -2,6 +2,7 @@ import { AiConsentBanner } from '@/components/transactions/ai-consent-banner';
 import { TransactionTable } from '@/components/transactions/transaction-table';
 import { useAiCategorizationConsent } from '@/hooks/use-ai-categorization-consent';
 import { useLocale } from '@/hooks/use-locale';
+import { useIsMobile } from '@/hooks/use-mobile';
 import {
     useServerTransactionSource,
     type AppliedFilters,
@@ -11,15 +12,16 @@ import { Head } from '@inertiajs/react';
 import { useCallback, useMemo, useState } from 'react';
 
 import { index as transactionsIndex } from '@/actions/App/Http/Controllers/TransactionController';
-import HeadingSmall from '@/components/heading-small';
-import { TransactionActionsMenu } from '@/components/transactions/transaction-actions-menu';
-import { TransactionExportButton } from '@/components/transactions/transaction-export-button';
+import { TransactionFilterSummary } from '@/components/transactions/transaction-filter-summary';
+import { TransactionsHeaderActions } from '@/components/transactions/transactions-header-actions';
 import AppSidebarLayout from '@/layouts/app/app-sidebar-layout';
 import { type CursorPaginatedResponse } from '@/lib/cursor-pagination';
 import { isNewSince } from '@/lib/new-transactions';
-import { expandCategorySelection } from '@/lib/transaction-category-filter';
+import { wantedCategoryIds } from '@/lib/transaction-category-filter';
 import { type ServerDayTotal } from '@/lib/transaction-day-groups';
 import { describeActiveFilters } from '@/lib/transaction-filter-chips';
+import { facetChips } from '@/lib/transaction-filter-facets';
+import { hasActiveFilters } from '@/lib/transaction-filter-serialization';
 import { type BreadcrumbItem } from '@/types';
 import {
     filterTransactionalAccounts,
@@ -29,7 +31,28 @@ import {
 import { type AutomationRule } from '@/types/automation-rule';
 import { type Category } from '@/types/category';
 import { type Label } from '@/types/label';
-import { type ServerTransaction } from '@/types/transaction';
+import {
+    type TransactionFilterSummary as FilterSummary,
+    type TransactionFilters as Filters,
+    type ServerTransaction,
+} from '@/types/transaction';
+
+/**
+ * The filters in a few words under the phone's summary: the search and each
+ * facet as its chip reads. The dates go without saying beside the list they
+ * head, and the side ("expenses") is already in the count before them.
+ */
+function summaryCaption(
+    filters: Filters,
+    sources: Parameters<typeof facetChips>[1],
+): string[] {
+    return [
+        ...(filters.searchText ? [`“${filters.searchText}”`] : []),
+        ...facetChips(filters, sources)
+            .filter((chip) => chip.facet !== 'type')
+            .map((chip) => chip.value),
+    ];
+}
 
 const breadcrumbs: BreadcrumbItem[] = [
     {
@@ -41,6 +64,8 @@ const breadcrumbs: BreadcrumbItem[] = [
 interface Props {
     transactions: CursorPaginatedResponse<ServerTransaction>;
     dayTotals: Record<string, ServerDayTotal>;
+    /** Deferred, and only sent while a filter is applied. */
+    filterSummary?: FilterSummary | null;
     appliedFilters: AppliedFilters;
     categories: Category[];
     accounts: Account[];
@@ -55,6 +80,7 @@ interface Props {
 export default function Transactions({
     transactions: serverTransactions,
     dayTotals: initialDayTotals,
+    filterSummary,
     appliedFilters,
     categories,
     accounts,
@@ -66,6 +92,7 @@ export default function Transactions({
     lastVisitAt,
 }: Props) {
     const locale = useLocale();
+    const isMobile = useIsMobile();
     const source = useServerTransactionSource({
         transactions: serverTransactions,
         dayTotals: initialDayTotals,
@@ -92,11 +119,8 @@ export default function Transactions({
     );
 
     const categoryFilterIds = useMemo(
-        () =>
-            filters.categoryIds.length === 0
-                ? undefined
-                : expandCategorySelection(filters.categoryIds, categories),
-        [categories, filters.categoryIds],
+        () => wantedCategoryIds(filters, categories),
+        [categories, filters],
     );
 
     const hasTransactionalAccounts = useMemo(
@@ -104,16 +128,25 @@ export default function Transactions({
         [accounts],
     );
 
+    // The labels come from the table, which knows the ones a dialog created
+    // since the page loaded.
+    const exportOptionsWith = (labels: Label[]) => ({
+        params: source.queryParams,
+        loadedIds: allTransactions.map((transaction) => transaction.id),
+        hasMore: source.pagination.hasMore,
+        filterChips: describeActiveFilters(filters, {
+            categories,
+            accounts,
+            labels,
+            locale,
+        }),
+    });
+
     return (
         <AppSidebarLayout breadcrumbs={breadcrumbs}>
             <Head title={__('Transactions')} />
 
             <div className="space-y-6 p-6">
-                <HeadingSmall
-                    title={__('Transactions')}
-                    description={__('View and manage your transactions')}
-                />
-
                 {/* One child, so the dialogs and the bulk bar it mounts after
                     the table never take part in the spacing above. */}
                 <div>
@@ -125,6 +158,7 @@ export default function Transactions({
                         labels={initialLabels}
                         automationRules={automationRules}
                         enableSavedFilters
+                        onTransactionsChanged={source.refreshSummary}
                         categorizingIds={ai.categorizingIds}
                         categoryFilterIds={categoryFilterIds}
                         isNewRow={isNewRow}
@@ -132,47 +166,58 @@ export default function Transactions({
                         confirmBulkByTyping
                         announceBulkOutcome
                         renderToolbar={({
-                            columnPicker,
                             labels,
                             onLabelCreated,
                             clearSelection,
                         }) => (
-                            <div className="flex w-full flex-wrap items-center justify-between gap-2">
-                                <TransactionActionsMenu
-                                    transactions={allTransactions}
-                                    hasTransactionalAccounts={
-                                        hasTransactionalAccounts
-                                    }
-                                    onTransactionSaved={refreshTransactions}
-                                    onLabelCreated={onLabelCreated}
-                                    onReEvaluateComplete={() => {
-                                        clearSelection();
-                                        refreshTransactions();
-                                    }}
-                                    filters={filters}
-                                />
-
-                                <div className="ml-auto flex items-center gap-2">
-                                    <TransactionExportButton
-                                        params={source.queryParams}
-                                        loadedIds={allTransactions.map(
-                                            (transaction) => transaction.id,
+                            // The page's title heads the filters, its actions
+                            // beside it: icon buttons on a phone.
+                            <div className="flex flex-wrap items-center gap-3">
+                                <h1 className="text-[26px] font-semibold tracking-tight md:text-xl">
+                                    {__('Transactions')}
+                                </h1>
+                                <div className="ml-auto">
+                                    <TransactionsHeaderActions
+                                        transactions={allTransactions}
+                                        hasTransactionalAccounts={
+                                            hasTransactionalAccounts
+                                        }
+                                        onTransactionSaved={refreshTransactions}
+                                        onLabelCreated={onLabelCreated}
+                                        onReEvaluateComplete={() => {
+                                            clearSelection();
+                                            refreshTransactions();
+                                        }}
+                                        exportOptions={exportOptionsWith(
+                                            labels,
                                         )}
-                                        hasMore={source.pagination.hasMore}
-                                        filterChips={describeActiveFilters(
-                                            filters,
-                                            {
-                                                categories,
-                                                accounts,
-                                                labels,
-                                                locale,
-                                            },
-                                        )}
+                                        compact={isMobile}
                                     />
-                                    {columnPicker}
                                 </div>
                             </div>
                         )}
+                        aboveRows={
+                            // Null is the server saying there is no filter
+                            // to sum up; while a query is on its way the
+                            // card waits for that query's own summary.
+                            hasActiveFilters(filters) &&
+                            (source.isLoading || filterSummary !== null) ? (
+                                <TransactionFilterSummary
+                                    summary={
+                                        source.isLoading
+                                            ? undefined
+                                            : (filterSummary ?? undefined)
+                                    }
+                                    filters={filters}
+                                    filterDescription={summaryCaption(filters, {
+                                        categories,
+                                        accounts,
+                                        labels: initialLabels,
+                                        locale,
+                                    })}
+                                />
+                            ) : null
+                        }
                         topRow={
                             ai.showBanner ? (
                                 <AiConsentBanner

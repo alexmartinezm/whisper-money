@@ -480,13 +480,49 @@ describe('create', function () {
         expect($account->balances()->sole()->balance)->toBe(10_000);
     });
 
-    it('stores any three-character code without overflowing the column', function () {
+    it('takes any three ASCII letters and refuses what would break the app\'s money format', function (string $code) {
+        $user = User::factory()->create();
+        $account = Account::factory()->create(['user_id' => $user->id]);
+        $transaction = transactionOn($account, ['currency_code' => 'EUR']);
+
+        withHeaders(transactionsWriter($user))
+            ->postJson('/api/v1/transactions', ['account_id' => $account->id, 'description' => 'Odd', 'amount' => -1, 'transaction_date' => '2026-01-15', 'currency_code' => $code])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('currency_code');
+
+        withHeaders(transactionsWriter($user))
+            ->patchJson('/api/v1/transactions/'.$transaction->id, ['currency_code' => $code])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('currency_code');
+
+        expect($transaction->fresh()->currency_code)->toBe('EUR');
+    })->with(['N/A', '---', '1!a', 'ßab', 'EU1']);
+
+    it('keeps taking a code no account can be in', function () {
         $user = User::factory()->create();
         $account = Account::factory()->create(['user_id' => $user->id]);
 
         withHeaders(transactionsWriter($user))
-            ->postJson('/api/v1/transactions', ['account_id' => $account->id, 'description' => 'Odd', 'amount' => -1, 'transaction_date' => '2026-01-15', 'currency_code' => 'ßab'])
-            ->assertCreated();
+            ->postJson('/api/v1/transactions', ['account_id' => $account->id, 'description' => 'Odd', 'amount' => -1, 'transaction_date' => '2026-01-15', 'currency_code' => 'xyz'])
+            ->assertCreated()
+            ->assertJsonPath('data.currency', 'XYZ');
+    });
+
+    it('answers a number too large to decode with a 422, not a 500', function () {
+        $user = User::factory()->create();
+        $account = Account::factory()->create(['user_id' => $user->id]);
+        $transaction = transactionOn($account);
+        $headers = [...transactionsWriter($user), 'Content-Type' => 'application/json', 'Accept' => 'application/json'];
+        $server = collect($headers)->mapWithKeys(fn (string $value, string $name): array => ['HTTP_'.strtoupper(str_replace('-', '_', $name)) => $value])->all();
+        $raw = fn (string $method, string $url, string $body) => $this->call($method, $url, [], [], [], [...$server, 'CONTENT_TYPE' => 'application/json'], $body);
+
+        $raw('POST', '/api/v1/transactions', '{"account_id":"'.$account->id.'","description":"Odd","transaction_date":"2026-01-15","amount":1e999}')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('amount');
+
+        $raw('PATCH', '/api/v1/transactions/'.$transaction->id, '{"amount":-1e999}')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('amount');
     });
 
     it('bounds the amount, on create and on update', function () {

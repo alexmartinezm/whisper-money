@@ -1,10 +1,12 @@
 <?php
 
 use App\Enums\CategorySource;
+use App\Enums\CategoryType;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\Label;
 use App\Models\Transaction;
+use App\Models\TransactionSplit;
 use App\Models\User;
 
 beforeEach(function () {
@@ -317,6 +319,52 @@ it('returns the emptied rows when the bulk action removes every label', function
     expect($returned)->not->toBeNull()
         ->and($returned['labels'])->toBe([])
         ->and($transaction->fresh()->labels)->toHaveCount(0);
+});
+
+it('bulk updates only the rows of a category type, leaving a split transaction alone', function () {
+    $groceries = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Expense]);
+    $piggyBank = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Savings]);
+    $target = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Expense]);
+    $inType = fn (Category $category): Transaction => Transaction::factory()->plaintext()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'category_id' => $category->id,
+    ]);
+
+    $matching = $inType($groceries);
+    $outside = $inType($piggyBank);
+    $uncategorized = Transaction::factory()->plaintext()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'category_id' => null,
+    ]);
+    $split = Transaction::factory()->plaintext()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'category_id' => null,
+        'amount' => -10000,
+    ]);
+    TransactionSplit::factory()->create(['transaction_id' => $split->id, 'category_id' => $groceries->id, 'amount' => -7000, 'position' => 0]);
+    TransactionSplit::factory()->create(['transaction_id' => $split->id, 'category_id' => $piggyBank->id, 'amount' => -3000, 'position' => 1]);
+
+    $response = $this->actingAs($this->user)->patchJson('/transactions/bulk', [
+        'filters' => ['category_types' => ['expense']],
+        'category_id' => $target->id,
+    ])->assertSuccessful();
+
+    expect($response->json('updated_ids'))->toBe([$matching->id])
+        ->and($response->json('skipped_split_ids'))->toBe([$split->id])
+        ->and($matching->fresh()->category_id)->toBe($target->id)
+        ->and($outside->fresh()->category_id)->toBe($piggyBank->id)
+        ->and($uncategorized->fresh()->category_id)->toBeNull()
+        ->and($split->fresh()->category_id)->toBeNull();
+});
+
+it('refuses a category type that does not exist in a bulk update', function () {
+    $this->actingAs($this->user)->patchJson('/transactions/bulk', [
+        'filters' => ['category_types' => ['gifts']],
+        'category_id' => $this->category->id,
+    ])->assertJsonValidationErrors('filters.category_types.0');
 });
 
 it('can update all transactions when no filters or IDs are provided', function () {

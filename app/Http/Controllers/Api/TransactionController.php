@@ -9,6 +9,7 @@ use App\Http\Requests\IndexTransactionRequest;
 use App\Models\Transaction;
 use App\Services\TransactionCsvExporter;
 use App\Services\TransactionDuplicateMatcher;
+use App\Services\TransactionFilterSummary;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -56,6 +57,20 @@ class TransactionController extends Controller
         );
 
         return response()->json(['count' => $count]);
+    }
+
+    /**
+     * How many rows the transactions list shows for these filters, for a
+     * filter set that is not applied yet. Not {@see self::count()}: a split
+     * transaction is one row here however many of its lines match. It reads
+     * no total and no rate, so a count on every pause never reaches the rates
+     * provider.
+     */
+    public function listedCount(IndexTransactionRequest $request, TransactionFilterSummary $summary): JsonResponse
+    {
+        return response()
+            ->json(['count' => $summary->count($request->filters())])
+            ->header('Cache-Control', 'no-store, private');
     }
 
     /**

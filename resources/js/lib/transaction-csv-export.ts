@@ -2,7 +2,7 @@ import TransactionExportController from '@/actions/App/Http/Controllers/Transact
 import { getCsrfToken } from '@/lib/csrf';
 import { formatLocalDate } from '@/utils/date';
 
-/** The transactions page's filters and sort, as its query string carries them. */
+/** The transactions page's filters, as its query string carries them. */
 export type TransactionExportParams = Record<string, string>;
 
 export interface TransactionCsvExportRequest {

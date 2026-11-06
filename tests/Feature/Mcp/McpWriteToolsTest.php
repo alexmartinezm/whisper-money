@@ -141,6 +141,21 @@ it('takes any three-letter currency, as it always has', function () {
     expect($transaction->fresh()->currency_code)->toBe('PLN');
 });
 
+it('refuses a currency that would break the app\'s money format', function (string $code) {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
+
+    callWriteTool($user, CreateTransaction::class, [
+        'account_id' => $account->id,
+        'description' => 'Odd',
+        'amount' => -1,
+        'transaction_date' => '2026-01-15',
+        'currency_code' => $code,
+    ])->assertHasErrors();
+
+    expect(Transaction::query()->count())->toBe(0);
+})->with(['N/A', '---', '1!a', "NO\n", "NOK\n"]);
+
 it('refuses an amount past what the balances can hold', function () {
     $user = User::factory()->create();
     $account = Account::factory()->create(['user_id' => $user->id]);
@@ -152,6 +167,20 @@ it('refuses an amount past what the balances can hold', function () {
         'transaction_date' => '2026-01-15',
         'update_balance' => true,
     ])->assertHasErrors();
+
+    expect(Transaction::query()->count())->toBe(0);
+});
+
+it('refuses an infinite amount as a validation error', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id]);
+
+    callWriteTool($user, CreateTransaction::class, [
+        'account_id' => $account->id,
+        'description' => 'Too much',
+        'amount' => INF,
+        'transaction_date' => '2026-01-15',
+    ])->assertHasErrors(['amount']);
 
     expect(Transaction::query()->count())->toBe(0);
 });

@@ -1,5 +1,6 @@
+import { FILTER_FACETS } from '@/lib/transaction-filter-facets';
 import { type Category } from '@/types/category';
-import { type Transaction } from '@/types/transaction';
+import { type Transaction, type TransactionFilters } from '@/types/transaction';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useInMemoryTransactionSource } from './use-in-memory-transaction-source';
@@ -152,7 +153,23 @@ describe('useInMemoryTransactionSource', () => {
         expect(result.current.rows.map((row) => row.id)).toEqual(['a', 'b']);
     });
 
-    it('sorts and searches in the browser, back to the first page', async () => {
+    it('orders the rows of one day by id, newest first, as the server does', () => {
+        const sameDay = ['0b', '0c', '0a'].map((id) => transaction(id));
+        const { result } = renderHook(() =>
+            useInMemoryTransactionSource({
+                categories: NO_CATEGORIES,
+                transactions: sameDay,
+            }),
+        );
+
+        expect(result.current.rows.map((row) => row.id)).toEqual([
+            '0c',
+            '0b',
+            '0a',
+        ]);
+    });
+
+    it('searches in the browser, back to the first page', async () => {
         const { result } = renderHook(() =>
             useInMemoryTransactionSource({
                 transactions: ROWS,
@@ -162,16 +179,7 @@ describe('useInMemoryTransactionSource', () => {
         );
         await waitFor(() => expect(result.current.isLoading).toBe(false));
         act(() => result.current.pagination.loadMore());
-
-        act(() =>
-            result.current.onSortingChange([
-                { id: 'creditor_name', desc: false },
-            ]),
-        );
-
-        expect(result.current.manualSorting).toBe(false);
-        expect(result.current.pagination.displayedCount).toBe(1);
-        expect(result.current.rows.map((row) => row.id)).toEqual(['c']);
+        expect(result.current.pagination.displayedCount).toBe(2);
 
         act(() =>
             result.current.onFiltersChange({
@@ -183,6 +191,7 @@ describe('useInMemoryTransactionSource', () => {
         await waitFor(() =>
             expect(result.current.rows.map((row) => row.id)).toEqual(['b']),
         );
+        expect(result.current.pagination.displayedCount).toBe(1);
     });
 
     it('counts each day over every row the filters keep, drawn or not', async () => {
@@ -201,7 +210,7 @@ describe('useInMemoryTransactionSource', () => {
         expect(result.current.daySummaryOf('2026-10-01').count).toBe(3);
     });
 
-    it('hands the day summaries only the rows on screen, none without day headers', () => {
+    it('hands the day summaries only the rows on screen', () => {
         const { result } = renderHook(() =>
             useInMemoryTransactionSource({
                 transactions: ROWS,
@@ -214,13 +223,6 @@ describe('useInMemoryTransactionSource', () => {
         expect(drawnRows.current.map((row) => row.id)).toEqual(
             result.current.rows.map((row) => row.id),
         );
-
-        act(() =>
-            result.current.onSortingChange([{ id: 'amount', desc: true }]),
-        );
-
-        result.current.daySummaryOf('2026-10-03');
-        expect(drawnRows.current).toEqual([]);
     });
 
     describe('a split transaction', () => {
@@ -294,5 +296,254 @@ describe('useInMemoryTransactionSource', () => {
             decryptedNotes: 'Beans',
             label_ids: ['label'],
         });
+    });
+
+    it('counts what a filter set would keep without applying it', async () => {
+        const { result } = renderHook(() =>
+            useInMemoryTransactionSource({
+                transactions: ROWS,
+                categories: NO_CATEGORIES,
+                accountId: 'checking',
+            }),
+        );
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+        const count = (changes: Partial<TransactionFilters>) =>
+            result.current.countMatching(
+                { ...result.current.filters, ...changes },
+                new AbortController().signal,
+            );
+
+        // Scoped to its account: "c" is in savings.
+        await expect(count({})).resolves.toBe(2);
+        await expect(count({ searchText: 'coffee' })).resolves.toBe(1);
+        expect(result.current.rows).toHaveLength(2);
+    });
+
+    it('counts what the list shows for a category, through subcategories and split lines', async () => {
+        const food = { id: 'food', parent_id: null } as unknown as Category;
+        const groceries = {
+            id: 'groceries',
+            parent_id: 'food',
+        } as unknown as Category;
+        const home = { id: 'home', parent_id: null } as unknown as Category;
+        const rows = [
+            transaction('split', {
+                amount: -10000,
+                splits: [
+                    { category_id: 'groceries', amount: -3000 },
+                    { category_id: 'groceries', amount: -1000 },
+                    { category_id: 'home', amount: -6000 },
+                ],
+            } as unknown as Partial<Transaction>),
+            transaction('unsplit', { category_id: 'groceries' }),
+            transaction('other', { category_id: 'home' }),
+        ];
+        const { result } = renderHook(() =>
+            useInMemoryTransactionSource({
+                transactions: rows,
+                categories: [food, groceries, home],
+            }),
+        );
+
+        const next = { ...result.current.filters, categoryIds: ['food'] };
+        const counted = await result.current.countMatching(
+            next,
+            new AbortController().signal,
+        );
+
+        expect(result.current.rows).toHaveLength(3);
+
+        act(() => result.current.onFiltersChange(next));
+
+        expect(result.current.rows.map((row) => row.id).sort()).toEqual([
+            'split',
+            'unsplit',
+        ]);
+        expect(counted).toBe(result.current.rows.length);
+    });
+
+    it('keeps only the rows whose category has a picked type', async () => {
+        const categories = [
+            { id: 'groceries', type: 'expense' },
+            { id: 'piggy-bank', type: 'savings' },
+            { id: 'salary', type: 'income' },
+        ] as Category[];
+        const rows = [
+            transaction('food', { category_id: 'groceries' }),
+            transaction('saved', { category_id: 'piggy-bank' }),
+            transaction('paid', { category_id: 'salary' }),
+            transaction('unsorted'),
+        ];
+        const { result } = renderHook(() =>
+            useInMemoryTransactionSource({ categories, transactions: rows }),
+        );
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+        act(() =>
+            result.current.onFiltersChange({
+                ...result.current.filters,
+                categoryTypes: ['expense', 'savings'],
+            }),
+        );
+
+        await waitFor(() =>
+            expect(result.current.rows.map((row) => row.id).sort()).toEqual([
+                'food',
+                'saved',
+            ]),
+        );
+    });
+
+    describe('the category type of a split transaction', () => {
+        const categories = [
+            { id: 'groceries', type: 'expense' },
+            { id: 'piggy-bank', type: 'savings' },
+        ] as Category[];
+        const rows = [
+            transaction('split', {
+                amount: -10000,
+                splits: [
+                    { category_id: 'groceries', amount: -7000 },
+                    { category_id: 'piggy-bank', amount: -3000 },
+                ],
+            } as unknown as Partial<Transaction>),
+            transaction('other', { category_id: 'groceries' }),
+        ];
+
+        it('lists it for any line of the type, adds only those lines and counts it once', async () => {
+            const { result } = renderHook(() =>
+                useInMemoryTransactionSource({
+                    transactions: rows,
+                    categories,
+                }),
+            );
+            const next: TransactionFilters = {
+                ...result.current.filters,
+                categoryTypes: ['savings'],
+            };
+
+            const counted = await result.current.countMatching(
+                next,
+                new AbortController().signal,
+            );
+
+            act(() => result.current.onFiltersChange(next));
+
+            expect(result.current.rows.map((row) => row.id)).toEqual(['split']);
+            expect(counted).toBe(1);
+            expect(result.current.daySummaryOf('2026-10-01')).toMatchObject({
+                count: 1,
+                total: { amount: -3000 },
+            });
+        });
+    });
+
+    describe('the label and AI filters', () => {
+        const food = { id: 'food', parent_id: null } as unknown as Category;
+        const rows = [
+            transaction('labelled', {
+                amount: -100,
+                labels: [{ id: 'trip' }],
+            } as unknown as Partial<Transaction>),
+            transaction('in-food', { category_id: 'food' }),
+            transaction('guessed', { category_source: 'ai' }),
+            transaction('split', {
+                amount: -10000,
+                labels: [{ id: 'trip' }],
+                splits: [
+                    { category_id: 'food', amount: -3000 },
+                    { category_id: 'home', amount: -7000 },
+                ],
+            } as unknown as Partial<Transaction>),
+        ];
+
+        function renderFiltered(changes: Partial<TransactionFilters>) {
+            const { result } = renderHook(() =>
+                useInMemoryTransactionSource({
+                    transactions: rows,
+                    categories: [food],
+                }),
+            );
+            const next = { ...result.current.filters, ...changes };
+            const counted = result.current.countMatching(
+                next,
+                new AbortController().signal,
+            );
+
+            act(() => result.current.onFiltersChange(next));
+
+            return { result, counted };
+        }
+
+        const ids = (rendered: { rows: { id: string }[] }) =>
+            rendered.rows.map((row) => row.id).sort();
+
+        it('keeps the rows carrying a label, in the list, the count and the day', async () => {
+            const { result, counted } = renderFiltered({ labelIds: ['trip'] });
+
+            expect(ids(result.current)).toEqual(['labelled', 'split']);
+            await expect(counted).resolves.toBe(2);
+            expect(result.current.daySummaryOf('2026-10-01')).toMatchObject({
+                count: 2,
+                // A label keeps every line of a split transaction.
+                total: { amount: -10100 },
+            });
+        });
+
+        it('reads a label and a category as one filter, as the server does', async () => {
+            const { result, counted } = renderFiltered({
+                categoryIds: ['food'],
+                labelIds: ['trip'],
+            });
+
+            expect(ids(result.current)).toEqual([
+                'in-food',
+                'labelled',
+                'split',
+            ]);
+            await expect(counted).resolves.toBe(3);
+            // The label keeps all the split's lines, not only the food one.
+            expect(result.current.daySummaryOf('2026-10-01')).toMatchObject({
+                count: 3,
+                total: {
+                    amount: rows[0].amount + rows[1].amount + rows[3].amount,
+                },
+            });
+        });
+
+        it('keeps what AI categorized, in the list, the count and the day', async () => {
+            const { result, counted } = renderFiltered({
+                aiCategorizedOnly: true,
+            });
+
+            expect(ids(result.current)).toEqual(['guessed']);
+            await expect(counted).resolves.toBe(1);
+            expect(result.current.daySummaryOf('2026-10-01').count).toBe(1);
+        });
+    });
+
+    it('offers every facet but the cashflow block, and drops a block with its dates', () => {
+        const { result } = renderHook(() =>
+            useInMemoryTransactionSource({
+                transactions: ROWS,
+                categories: NO_CATEGORIES,
+            }),
+        );
+
+        expect(result.current.facets).toEqual(
+            FILTER_FACETS.filter((facet) => facet !== 'cashflowBlock'),
+        );
+
+        act(() =>
+            result.current.onFiltersChange({
+                ...result.current.filters,
+                cashflowBlock: 'fixed',
+            }),
+        );
+
+        expect(result.current.filters.cashflowBlock).toBeNull();
     });
 });

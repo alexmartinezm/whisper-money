@@ -13,6 +13,7 @@ import {
     TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { useLocale } from '@/hooks/use-locale';
+import { COMPACT_LIST_MUTED_TEXT, DAY_BAND } from '@/lib/compact-list-style';
 import {
     type DaySummary,
     type DaySummaryOf,
@@ -21,6 +22,7 @@ import {
     formatDayHeading,
     formatTransactionCount,
 } from '@/lib/transaction-day-groups';
+import { cn } from '@/lib/utils';
 import { type SharedData } from '@/types';
 import { type DecryptedTransaction } from '@/types/transaction';
 import { __ } from '@/utils/i18n';
@@ -60,12 +62,23 @@ function renderedColumnIds(table: Table<DecryptedTransaction>): string[] {
         .map((column) => column.id);
 }
 
+/**
+ * The day total fades behind the rows it adds up, without its income
+ * highlight, and comes back in full while the day's header is hovered.
+ */
+const DAY_TOTAL_FADED =
+    'opacity-30 transition-[opacity,background-color] duration-200 group-hover/day:opacity-100';
+
+/** The income highlight the faded total gets back on hover. */
+const DAY_TOTAL_HOVER_HIGHLIGHT =
+    'group-hover/day:bg-green-100/70 dark:group-hover/day:bg-green-900';
+
 function DayTotal({
     total,
     quiet = false,
 }: {
     total: DayTotalState;
-    /** Small, grey and signed, without the income highlight. */
+    /** Small, grey and signed, without the income highlight: the band's. */
     quiet?: boolean;
 }) {
     const currencyCode = usePage<SharedData>().props.auth.user.currency_code;
@@ -105,7 +118,7 @@ function DayTotal({
                 currencyCode={currencyCode}
                 showSign
                 monospace
-                className="text-xs text-neutral-600 dark:text-neutral-400"
+                className={cn('text-xs/[1.4]', COMPACT_LIST_MUTED_TEXT)}
             />
         );
     }
@@ -115,9 +128,12 @@ function DayTotal({
             amountInCents={total.amount}
             currencyCode={currencyCode}
             variant="positive-highlight"
-            highlightPositive={total.amount >= 0}
             weight="medium"
             monospace
+            className={cn(
+                DAY_TOTAL_FADED,
+                total.amount >= 0 && DAY_TOTAL_HOVER_HIGHLIGHT,
+            )}
         />
     );
 }
@@ -194,7 +210,7 @@ export function TransactionDayHeader({
     return (
         <TableRow
             {...measureProps}
-            className="bg-muted/50 hover:bg-muted/50 dark:bg-muted/30 dark:hover:bg-muted/30"
+            className="group/day bg-muted/50 hover:bg-muted/50 dark:bg-muted/30 dark:hover:bg-muted/30"
             data-testid="transaction-day-header"
         >
             {hasSelectColumn && (
@@ -255,16 +271,16 @@ export function TransactionDayBand({
     return (
         <div
             {...measureProps}
-            className="flex items-baseline justify-between gap-2 border-b border-neutral-100 bg-neutral-50 px-4 pt-2.5 pb-1.5 dark:border-neutral-800 dark:bg-neutral-900"
+            className={cn(DAY_BAND, 'items-baseline')}
             data-testid="transaction-day-header"
         >
-            <h3 className="min-w-0 truncate text-xs font-semibold tracking-[0.04em] text-neutral-600 uppercase dark:text-neutral-400">
+            <h3 className="min-w-0 truncate text-xs/[1.4] font-semibold tracking-[0.04em] text-neutral-600 uppercase dark:text-neutral-400">
                 {formatDayBand(date, locale)}
             </h3>
             {selectionActive ? (
                 <button
                     type="button"
-                    className="shrink-0 rounded-sm text-xs font-medium text-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                    className="shrink-0 rounded-sm text-xs/[1.4] font-medium text-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
                     onClick={() => setDaySelected(table, rows, !allSelected)}
                 >
                     {allSelected ? __('Deselect day') : __('Select day')}
@@ -281,26 +297,23 @@ const groupByTransactionDate = (transaction: DecryptedTransaction): string =>
 
 /**
  * Everything a list of transactions needs to draw its day headers, so both
- * pages wire them the same way, as table rows or as bands of the compact list. Leaves the
- * list flat when it is not grouped by day.
+ * pages wire them the same way, as table rows or as bands of the compact list.
  */
 export function useTransactionDayHeaders({
     table,
     rowSelection,
     daySummaryOf,
-    isGroupedByDay,
     layout,
     selectionActive,
 }: {
     table: Table<DecryptedTransaction>;
     rowSelection: RowSelectionState;
     daySummaryOf: DaySummaryOf;
-    isGroupedByDay: boolean;
     layout: 'table' | 'list';
     /** Rows are being picked, which the card headers answer to. */
     selectionActive: boolean;
 }): {
-    groupRowsBy?: (transaction: DecryptedTransaction) => string;
+    groupRowsBy: (transaction: DecryptedTransaction) => string;
     renderGroupHeader: (
         group: DataTableRowGroup<DecryptedTransaction>,
         measureProps: DataTableMeasureProps,
@@ -333,7 +346,7 @@ export function useTransactionDayHeaders({
     );
 
     return {
-        groupRowsBy: isGroupedByDay ? groupByTransactionDate : undefined,
+        groupRowsBy: groupByTransactionDate,
         renderGroupHeader,
     };
 }

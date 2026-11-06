@@ -318,7 +318,7 @@ export function useTransactionBulkActions({
     }
 
     async function handleBulkLabelsChange(labelIds: string[]) {
-        await applyBulkEdit(
+        const updated = await applyBulkEdit(
             { label_ids: labelIds },
             { describe: labelsEditOutcome },
             {
@@ -326,6 +326,10 @@ export function useTransactionBulkActions({
                 toast: __('Failed to update transactions with labels'),
             },
         );
+
+        if (updated && !reachesAllMatching) {
+            onTransactionsChanged?.();
+        }
     }
 
     async function handleBulkReEvaluateRules() {

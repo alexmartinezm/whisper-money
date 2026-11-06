@@ -6,7 +6,6 @@ import {
     formatDayBand,
     formatDayHeading,
     formatTransactionCount,
-    isSortedByDate,
     mergeNextPage,
     reconcileDaySummary,
     sumDayTotal,
@@ -18,22 +17,6 @@ import {
 function transaction(amount: number, currency_code = 'EUR'): Transaction {
     return { amount, currency_code } as Transaction;
 }
-
-describe('isSortedByDate', () => {
-    it('groups while the table is sorted by date, either way', () => {
-        expect(isSortedByDate([{ id: 'transaction_date', desc: true }])).toBe(
-            true,
-        );
-        expect(isSortedByDate([{ id: 'transaction_date', desc: false }])).toBe(
-            true,
-        );
-    });
-
-    it('does not group under any other sort', () => {
-        expect(isSortedByDate([{ id: 'amount', desc: true }])).toBe(false);
-        expect(isSortedByDate([])).toBe(false);
-    });
-});
 
 describe('formatDayBand', () => {
     beforeEach(() => {
@@ -300,7 +283,7 @@ describe('createRowTotalAmount', () => {
 
     it('leaves every row whole without a filter that narrows lines', () => {
         const rowTotal = createRowTotalAmount(
-            { categoryIds: [], labelIds: [] },
+            { categoryIds: [], categoryTypes: [], labelIds: [] },
             categories,
         );
 
@@ -310,7 +293,7 @@ describe('createRowTotalAmount', () => {
 
     it('adds a split transaction lines in the wanted categories and their subtrees', () => {
         const rowTotal = createRowTotalAmount(
-            { categoryIds: ['food'], labelIds: [] },
+            { categoryIds: ['food'], categoryTypes: [], labelIds: [] },
             categories,
         );
 
@@ -318,9 +301,50 @@ describe('createRowTotalAmount', () => {
         expect(rowTotal(unsplit)).toBe(-500);
     });
 
+    it('adds a split transaction only the lines of a wanted type, on top of a category or a label', () => {
+        const typed = [
+            { id: 'food', parent_id: null, type: 'expense' },
+            { id: 'groceries', parent_id: 'food', type: 'expense' },
+            { id: 'home', parent_id: null, type: 'savings' },
+        ] as unknown as Category[];
+
+        expect(
+            createRowTotalAmount(
+                { categoryIds: [], categoryTypes: ['savings'], labelIds: [] },
+                typed,
+            )(split),
+        ).toBe(-7000);
+        expect(
+            createRowTotalAmount(
+                {
+                    categoryIds: ['food'],
+                    categoryTypes: ['savings'],
+                    labelIds: [],
+                },
+                typed,
+            )(split),
+        ).toBe(0);
+        expect(
+            createRowTotalAmount(
+                {
+                    categoryIds: [],
+                    categoryTypes: ['savings'],
+                    labelIds: ['trip'],
+                },
+                typed,
+            )(split),
+        ).toBe(-7000);
+        expect(
+            createRowTotalAmount(
+                { categoryIds: [], categoryTypes: ['savings'], labelIds: [] },
+                typed,
+            )(unsplit),
+        ).toBe(-500);
+    });
+
     it('keeps every line of a split transaction carrying a wanted label', () => {
         const rowTotal = createRowTotalAmount(
-            { categoryIds: ['food'], labelIds: ['trip'] },
+            { categoryIds: ['food'], categoryTypes: [], labelIds: ['trip'] },
             categories,
         );
 
@@ -329,7 +353,7 @@ describe('createRowTotalAmount', () => {
 
     it('adds none of a split transaction listed for another reason', () => {
         const rowTotal = createRowTotalAmount(
-            { categoryIds: [], labelIds: ['other'] },
+            { categoryIds: [], categoryTypes: [], labelIds: ['other'] },
             categories,
         );
 
@@ -338,7 +362,12 @@ describe('createRowTotalAmount', () => {
 
     it('cannot value a split transaction under a cashflow block', () => {
         const rowTotal = createRowTotalAmount(
-            { categoryIds: [], labelIds: [], cashflowBlock: 'fixed' },
+            {
+                categoryIds: [],
+                categoryTypes: [],
+                labelIds: [],
+                cashflowBlock: 'fixed',
+            },
             categories,
         );
 
@@ -359,7 +388,7 @@ describe('reconcileDaySummary with split transactions', () => {
         splits: lines,
     } as unknown as Transaction;
     const filtered = createRowTotalAmount(
-        { categoryIds: ['food'], labelIds: [] },
+        { categoryIds: ['food'], categoryTypes: [], labelIds: [] },
         [],
     );
 
@@ -395,7 +424,12 @@ describe('reconcileDaySummary with split transactions', () => {
 
     it('leaves the total out when the page cannot value a changed row', () => {
         const underBlock = createRowTotalAmount(
-            { categoryIds: [], labelIds: [], cashflowBlock: 'fixed' },
+            {
+                categoryIds: [],
+                categoryTypes: [],
+                labelIds: [],
+                cashflowBlock: 'fixed',
+            },
             [],
         );
 
@@ -412,7 +446,12 @@ describe('reconcileDaySummary with split transactions', () => {
 
     it('leaves the server figure alone while nothing changed, under a block too', () => {
         const underBlock = createRowTotalAmount(
-            { categoryIds: [], labelIds: [], cashflowBlock: 'fixed' },
+            {
+                categoryIds: [],
+                categoryTypes: [],
+                labelIds: [],
+                cashflowBlock: 'fixed',
+            },
             [],
         );
 
