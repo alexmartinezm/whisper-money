@@ -27,6 +27,7 @@ use App\Services\Banking\TransactionSyncService;
 use App\Services\BudgetTransactionService;
 use App\Services\Recurring\DetectRecurringSeries;
 use App\Services\Transactions\TransactionWriter;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
@@ -475,7 +476,7 @@ describe('create', function () {
         expect($transaction->getRawOriginal('account_id'))->toBe($account->id)
             ->and($transaction->getRawOriginal('category_id'))->toBe($category->id)
             ->and($transaction->getRawOriginal('transaction_date'))->toBe('2026-01-15')
-            ->and($transaction->labels()->pluck('labels.id')->all())->toBe([$label->id]);
+            ->and(DB::table('label_transaction')->pluck('label_id')->all())->toBe([$label->id]);
     });
 
     it('moves a manual balance when asked, and leaves a connected one alone', function () {
@@ -758,6 +759,29 @@ describe('create', function () {
 
             expect((int) $byCategory->budgetTransactions()->sole()->amount)->toBe(1000)
                 ->and((int) $byLabel->budgetTransactions()->sole()->amount)->toBe(2000);
+        });
+
+        it('gives a labelled one its second budget pass silently, so no limit is announced twice', function () {
+            $user = User::factory()->create();
+            $account = Account::factory()->create(['user_id' => $user->id]);
+            $label = Label::factory()->create(['user_id' => $user->id]);
+            $headers = transactionsWriter($user);
+            Queue::fake();
+
+            $response = withHeaders($headers)
+                ->postJson('/api/v1/transactions', [
+                    'account_id' => $account->id,
+                    'description' => 'Trip',
+                    'amount' => -2000,
+                    'transaction_date' => '2026-01-15',
+                    'label_ids' => [$label->id],
+                ])
+                ->assertCreated();
+
+            Queue::assertPushed(
+                ReassignTransactionsToBudgets::class,
+                fn (ReassignTransactionsToBudgets $job): bool => $job->transactionIds === [$response->json('data.id')] && $job->notify === false,
+            );
         });
 
         it('feeds recurring detection like any other row', function () {
@@ -1293,7 +1317,7 @@ describe('labels', function () {
 
         expect(collect($response->json('data.labels'))->pluck('id')->sort()->values()->all())
             ->toBe(collect([$kept->id, $added->id])->sort()->values()->all())
-            ->and($transaction->labels()->pluck('labels.id')->sort()->values()->all())
+            ->and(DB::table('label_transaction')->where('transaction_id', $transaction->id)->pluck('label_id')->sort()->values()->all())
             ->toBe(collect([$kept->id, $added->id])->sort()->values()->all());
 
         withHeaders(transactionsWriter($user))

@@ -27,7 +27,7 @@ class TransactionSearch
     /**
      * $user's own transactions of $space matching $filters: `query`,
      * `account_id`, `category_id`, `label_ids`, `from`, `to`, `min_amount` and
-     * `max_amount`, the ids already checked and as stored.
+     * `max_amount`, the ids already checked.
      *
      * @param  array<string, mixed>  $filters
      * @return Builder<Transaction>

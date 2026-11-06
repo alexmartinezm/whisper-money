@@ -73,19 +73,16 @@ class TransactionWriteRules
     /**
      * Why `/api/v1` refuses to edit the $sent fields, keyed by the field the
      * error goes under: what the source owns on a row that came from a bank or
-     * import, the ledger of a split transaction, and blanking a note the
-     * server cannot read.
+     * import, and blanking a note the server cannot read. A split's ledger is
+     * TransactionWriter's to refuse, under the row lock.
      *
      * @param  array<string, mixed>  $sent  the fields the edit carries
      * @return array<string, string>
      */
     public static function editRefusals(Transaction $transaction, array $sent): array
     {
-        $names = array_keys($sent);
-
         return [
-            ...self::sourceOwnedRefusals($transaction, $names),
-            ...array_filter(['splits' => self::splitLedgerError($transaction, $names)]),
+            ...self::sourceOwnedRefusals($transaction, array_keys($sent)),
             ...array_filter(['notes' => self::blankedEncryptedNotesError($transaction, $sent)]),
         ];
     }

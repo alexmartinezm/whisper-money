@@ -29,23 +29,4 @@ class SearchTransactionsRequest extends FormRequest
             'max_amount' => ['sometimes', 'integer'],
         ];
     }
-
-    /**
-     * The validated filters as TransactionSearch takes them, the ids as
-     * stored: the lookup ignores case, the category tree does not.
-     *
-     * @return array<string, mixed>
-     */
-    public function filters(): array
-    {
-        $filters = $this->validated();
-
-        foreach (['account_id' => Account::class, 'category_id' => Category::class] as $field => $model) {
-            if (isset($filters[$field])) {
-                $filters[$field] = $this->idInSpace($model, $field, $filters[$field]);
-            }
-        }
-
-        return [...$filters, 'label_ids' => $this->idListAsStored(Label::class, 'label_ids')];
-    }
 }

@@ -34,8 +34,9 @@ class TransactionWriter
     /**
      * Automation rules run while the row is saved, so $labelIds go on top of
      * what a rule tagged it with: the goal a rule fills keeps its transaction.
-     * They arrive after the row's own budget assignment, so a budget that
-     * tracks one of them needs another pass.
+     * A queue that does not wait for the commit would assign the row before
+     * they arrive, so a budget tracking one of them gets a second, silent pass:
+     * the row's own assignment already said what there was to say.
      *
      * @param  array<string, mixed>  $fields  `description`, `amount` and `transaction_date`, and optionally `currency_code` (the account's when left out), `category_id`, `notes`, `creditor_name` and `debtor_name`
      * @param  list<string>  $labelIds
@@ -74,7 +75,7 @@ class TransactionWriter
         }, attempts: 5);
 
         if ($labelIds !== []) {
-            ReassignTransactionsToBudgets::dispatch([$transaction->id]);
+            ReassignTransactionsToBudgets::dispatch([$transaction->id], notify: false);
         }
 
         return new WrittenTransaction($transaction->refresh(), $balanceUpdated);

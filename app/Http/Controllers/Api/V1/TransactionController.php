@@ -47,7 +47,7 @@ class TransactionController extends Controller
     public function index(SearchTransactionsRequest $request, TransactionSearch $search): AnonymousResourceCollection
     {
         return CursorPaginator::paginate(
-            $search->query($this->user($request), $this->space($request), $request->filters())->with(TransactionResource::Relations),
+            $search->query($this->user($request), $this->space($request), $request->validated())->with(TransactionResource::Relations),
             $request,
             [['transaction_date', 'desc'], ['id', 'desc']],
             TransactionResource::class,
