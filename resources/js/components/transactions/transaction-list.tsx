@@ -96,11 +96,7 @@ export function TransactionList({
             onBalanceUpdated={onBalanceUpdated}
             onTransactionsChanged={onTransactionsChanged}
             showColumnPickerTextOnMobile
-            renderToolbar={({
-                columnPicker,
-                onLabelCreated,
-                clearSelection,
-            }) =>
+            renderToolbar={({ columnPicker, onLabelCreated, clearSelection }) =>
                 // Nothing to show (a desktop page without the menu or extra
                 // actions) leaves no empty row above the filters.
                 !showActionsMenu && !headerActions && !columnPicker ? null : (

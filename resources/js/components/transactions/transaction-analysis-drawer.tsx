@@ -592,9 +592,7 @@ export function TransactionAnalysisDrawer({
             // from is narrowed by it.
             const query = buildQueryString({
                 ...serializeFilters(filters),
-                ...(filters.aiCategorizedOnly
-                    ? { category_source: 'ai' }
-                    : {}),
+                ...(filters.aiCategorizedOnly ? { category_source: 'ai' } : {}),
             });
             const response = await fetch(
                 `/api/transactions/analysis?${query}`,

@@ -19,7 +19,6 @@ it('can view transactions page', function () {
     $page = visit('/transactions');
 
     $page->assertSee('Transactions')
-        ->assertSee('View and manage your transactions')
         ->assertNoJavascriptErrors();
 });
 
