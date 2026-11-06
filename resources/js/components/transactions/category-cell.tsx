@@ -24,6 +24,7 @@ import {
     type DecryptedTransaction,
     type TransactionSplit,
 } from '@/types/transaction';
+import { formatCurrency } from '@/utils/currency';
 import { __ } from '@/utils/i18n';
 import { router, usePage } from '@inertiajs/react';
 import { useState } from 'react';
@@ -259,10 +260,11 @@ export function CategoryCell({
                 const name = line.isRest
                     ? __('Rest')
                     : (line.category?.name ?? __('Unknown'));
-                const amount = new Intl.NumberFormat(locale, {
-                    style: 'currency',
-                    currency: transaction.currency_code,
-                }).format(line.amount / 100);
+                const amount = formatCurrency(
+                    line.amount,
+                    transaction.currency_code,
+                    locale,
+                );
 
                 return `${name}: ${amount}`;
             })
