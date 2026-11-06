@@ -89,9 +89,6 @@ export function TransactionActionsMenu({
         setAnalysisDrawerOpen(true);
     };
 
-    const uncategorizedCount = countUncategorized(transactions);
-    const hasUncategorized = uncategorizedCount > 0;
-
     return (
         <>
             <ButtonGroup>
@@ -162,20 +159,7 @@ export function TransactionActionsMenu({
                     </TooltipProvider>
                     <DropdownMenuContent align="end">
                         {isMobile && (
-                            <DropdownMenuItem
-                                disabled={!hasUncategorized}
-                                asChild={hasUncategorized}
-                            >
-                                {withCategorizeLink(
-                                    uncategorizedCount,
-                                    <>
-                                        <Tags className="mr-2 h-4 w-4" />
-                                        <CategorizeLabel
-                                            count={uncategorizedCount}
-                                        />
-                                    </>,
-                                )}
-                            </DropdownMenuItem>
+                            <CategorizeMenuItem transactions={transactions} />
                         )}
                         <DropdownMenuItem
                             onClick={reEvaluate}
@@ -214,6 +198,27 @@ function CategorizeLabel({ count }: { count: number }) {
                 </span>
             )}
         </>
+    );
+}
+
+/** "Categorize" in a "⋯" menu, where the page has no room for its button. */
+export function CategorizeMenuItem({
+    transactions,
+}: {
+    transactions: DecryptedTransaction[];
+}) {
+    const count = countUncategorized(transactions);
+
+    return (
+        <DropdownMenuItem disabled={count === 0} asChild={count > 0}>
+            {withCategorizeLink(
+                count,
+                <>
+                    <Tags className="mr-2 h-4 w-4" />
+                    <CategorizeLabel count={count} />
+                </>,
+            )}
+        </DropdownMenuItem>
     );
 }
 

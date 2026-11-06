@@ -1,5 +1,5 @@
 import { type Category } from '@/types/category';
-import { type Transaction } from '@/types/transaction';
+import { type Transaction, type TransactionFilters } from '@/types/transaction';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useInMemoryTransactionSource } from './use-in-memory-transaction-source';
@@ -292,5 +292,71 @@ describe('useInMemoryTransactionSource', () => {
             decryptedNotes: 'Beans',
             label_ids: ['label'],
         });
+    });
+
+    it('counts what a filter set would keep without applying it', async () => {
+        const { result } = renderHook(() =>
+            useInMemoryTransactionSource({
+                transactions: ROWS,
+                categories: NO_CATEGORIES,
+                accountId: 'checking',
+            }),
+        );
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+        const count = (changes: Partial<TransactionFilters>) =>
+            result.current.countMatching(
+                { ...result.current.filters, ...changes },
+                new AbortController().signal,
+            );
+
+        // Scoped to its account: "c" is in savings.
+        await expect(count({})).resolves.toBe(2);
+        await expect(count({ searchText: 'coffee' })).resolves.toBe(1);
+        expect(result.current.rows).toHaveLength(2);
+    });
+
+    it('counts what the list shows for a category, through subcategories and split lines', async () => {
+        const food = { id: 'food', parent_id: null } as unknown as Category;
+        const groceries = {
+            id: 'groceries',
+            parent_id: 'food',
+        } as unknown as Category;
+        const home = { id: 'home', parent_id: null } as unknown as Category;
+        const rows = [
+            transaction('split', {
+                amount: -10000,
+                splits: [
+                    { category_id: 'groceries', amount: -3000 },
+                    { category_id: 'groceries', amount: -1000 },
+                    { category_id: 'home', amount: -6000 },
+                ],
+            } as unknown as Partial<Transaction>),
+            transaction('unsplit', { category_id: 'groceries' }),
+            transaction('other', { category_id: 'home' }),
+        ];
+        const { result } = renderHook(() =>
+            useInMemoryTransactionSource({
+                transactions: rows,
+                categories: [food, groceries, home],
+            }),
+        );
+
+        const next = { ...result.current.filters, categoryIds: ['food'] };
+        const counted = await result.current.countMatching(
+            next,
+            new AbortController().signal,
+        );
+
+        expect(result.current.rows).toHaveLength(3);
+
+        act(() => result.current.onFiltersChange(next));
+
+        expect(result.current.rows.map((row) => row.id).sort()).toEqual([
+            'split',
+            'unsplit',
+        ]);
+        expect(counted).toBe(result.current.rows.length);
     });
 });

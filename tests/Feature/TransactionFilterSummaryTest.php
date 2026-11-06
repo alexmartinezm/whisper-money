@@ -352,19 +352,41 @@ test('a provider outage costs one bounded attempt per figure, and leaves those f
         ->and(ExchangeRate::query()->count())->toBe(0);
 });
 
-test('counting what a filter set lists asks nothing of the provider', function () {
+test('the listed count is the rows the list shows, and asks nothing of the provider', function () {
     Http::fake(fn () => throw new ConnectionException('cURL error 28: Operation timed out'));
     $home = Category::factory()->create(['user_id' => $this->user->id]);
     summarySplitTransaction('2025-11-12', [[$this->groceries, -3000], [$this->groceries, -1000], [$home, -7000]]);
     summaryTransaction('2025-11-12', -1000, 'USD');
+    $query = ['category_ids' => [$this->groceries->id]];
 
-    $count = app(TransactionFilterSummary::class)->count([
-        'category_ids' => [$this->groceries->id],
-        'user_id' => $this->user->id,
+    $listed = actingAs($this->user)->get(route('transactions.index', $query))->viewData('page')['props']['transactions']['data'];
+    Http::fake(fn () => throw new ConnectionException('cURL error 28: Operation timed out'));
+
+    actingAs($this->user)
+        ->getJson(route('api.transactions.listed-count', $query))
+        ->assertOk()
+        ->assertExactJson(['count' => count($listed)]);
+
+    expect($listed)->toHaveCount(2);
+    actingAs($this->user)->getJson(route('api.transactions.count', $query))->assertJsonPath('count', 3);
+});
+
+test('the listed count validates its filters like the list does', function () {
+    actingAs($this->user)
+        ->getJson(route('api.transactions.listed-count', ['date_from' => 'yesterday']))
+        ->assertUnprocessable();
+});
+
+test('the listed count leaves out other users transactions', function () {
+    $stranger = User::factory()->create();
+    Transaction::factory()->plaintext()->create([
+        'user_id' => $stranger->id,
+        'account_id' => Account::factory()->create(['user_id' => $stranger->id])->id,
     ]);
 
-    expect($count)->toBe(2);
-    Http::assertNothingSent();
+    actingAs($this->user)
+        ->getJson(route('api.transactions.listed-count'))
+        ->assertExactJson(['count' => 0]);
 });
 
 test('it leaves out other users transactions', function () {

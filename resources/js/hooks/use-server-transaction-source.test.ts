@@ -11,9 +11,19 @@ import {
     type AppliedFilters,
 } from './use-server-transaction-source';
 
-const { visit, reload } = vi.hoisted(() => ({
+const { visit, reload, get } = vi.hoisted(() => ({
     visit: vi.fn(),
     reload: vi.fn(),
+    get: vi.fn(),
+}));
+
+vi.mock('axios', () => ({ default: { get } }));
+
+vi.mock('@/actions/App/Http/Controllers/Api/TransactionController', () => ({
+    listedCount: {
+        url: ({ query }: { query: Record<string, string> }) =>
+            `/api/transactions/listed-count?${new URLSearchParams(query)}`,
+    },
 }));
 
 vi.mock('@inertiajs/react', () => ({
@@ -221,5 +231,28 @@ describe('useServerTransactionSource', () => {
                 only: ['transactions', 'dayTotals', 'filterSummary'],
             }),
         );
+    });
+
+    it('counts the rows a filter set lists, without visiting', async () => {
+        get.mockResolvedValue({ data: { count: 21 } });
+        const { result } = renderSource();
+        const signal = new AbortController().signal;
+
+        await expect(
+            result.current.countMatching(
+                {
+                    ...result.current.filters,
+                    categoryIds: ['food', 'home'],
+                    aiCategorizedOnly: true,
+                },
+                signal,
+            ),
+        ).resolves.toBe(21);
+
+        expect(get).toHaveBeenCalledWith(
+            '/api/transactions/listed-count?category_ids=food%2Chome&category_source=ai',
+            { signal },
+        );
+        expect(visit).not.toHaveBeenCalled();
     });
 });
