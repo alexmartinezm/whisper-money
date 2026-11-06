@@ -40,7 +40,13 @@ interface TransactionActionsMenuProps {
     /** A label created while adding a transaction from the bar. */
     onLabelCreated?: (label: Label) => void;
     onReEvaluateComplete?: () => void;
-    filters: TransactionFilters;
+    /**
+     * Offer the analysis of the filtered rows. Off on /transactions, where the
+     * summary of a filtered list opens it instead.
+     */
+    showAnalysis?: boolean;
+    /** What the analysis reports on; needed with `showAnalysis`. */
+    filters?: TransactionFilters;
 }
 
 /**
@@ -54,6 +60,7 @@ export function TransactionActionsMenu({
     onTransactionSaved,
     onLabelCreated,
     onReEvaluateComplete,
+    showAnalysis = false,
     filters,
 }: TransactionActionsMenuProps) {
     const isMobile = useIsMobile();
@@ -61,7 +68,7 @@ export function TransactionActionsMenu({
     const [analysisHintOpen, setAnalysisHintOpen] = useState(false);
     const [isReEvaluating, setIsReEvaluating] = useState(false);
 
-    const canAnalyze = hasActiveFilters(filters);
+    const canAnalyze = filters !== undefined && hasActiveFilters(filters);
 
     // A hint opened while the button was disabled must not outlive that
     // state, or applying a filter would leave a stale tooltip on screen.
@@ -119,39 +126,43 @@ export function TransactionActionsMenu({
     return (
         <>
             <ButtonGroup>
-                <TooltipProvider>
-                    <Tooltip
-                        open={analysisHintOpen}
-                        onOpenChange={setAnalysisHintOpen}
-                    >
-                        <TooltipTrigger asChild>
-                            <Button
-                                variant="outline"
-                                className={cn(
-                                    ICON_ONLY_BELOW_SM.button,
-                                    !canAnalyze &&
-                                        'cursor-not-allowed opacity-50',
-                                )}
-                                aria-disabled={!canAnalyze}
-                                aria-label={__('Analysis')}
-                                onClick={handleAnalysisClick}
-                            >
-                                <BarChart3 className="h-5 w-5" />
-                                <span className={ICON_ONLY_BELOW_SM.label}>
-                                    {__('Analysis')}
-                                </span>
-                            </Button>
-                        </TooltipTrigger>
-                        {/* Enabled, it only names the icon-only button. */}
-                        <TooltipContent
-                            className={canAnalyze ? 'sm:hidden' : undefined}
+                {showAnalysis && (
+                    <TooltipProvider>
+                        <Tooltip
+                            open={analysisHintOpen}
+                            onOpenChange={setAnalysisHintOpen}
                         >
-                            {canAnalyze
-                                ? __('Analysis')
-                                : __('Apply a filter to enable this button')}
-                        </TooltipContent>
-                    </Tooltip>
-                </TooltipProvider>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    variant="outline"
+                                    className={cn(
+                                        ICON_ONLY_BELOW_SM.button,
+                                        !canAnalyze &&
+                                            'cursor-not-allowed opacity-50',
+                                    )}
+                                    aria-disabled={!canAnalyze}
+                                    aria-label={__('Analysis')}
+                                    onClick={handleAnalysisClick}
+                                >
+                                    <BarChart3 className="h-5 w-5" />
+                                    <span className={ICON_ONLY_BELOW_SM.label}>
+                                        {__('Analysis')}
+                                    </span>
+                                </Button>
+                            </TooltipTrigger>
+                            {/* Enabled, it only names the icon-only button. */}
+                            <TooltipContent
+                                className={canAnalyze ? 'sm:hidden' : undefined}
+                            >
+                                {canAnalyze
+                                    ? __('Analysis')
+                                    : __(
+                                          'Apply a filter to enable this button',
+                                      )}
+                            </TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                )}
 
                 <AddTransactionButton
                     hasTransactionalAccounts={hasTransactionalAccounts}
@@ -229,11 +240,13 @@ export function TransactionActionsMenu({
                 </DropdownMenu>
             </ButtonGroup>
 
-            <TransactionAnalysisDrawer
-                open={analysisDrawerOpen}
-                onOpenChange={setAnalysisDrawerOpen}
-                filters={filters}
-            />
+            {showAnalysis && filters && (
+                <TransactionAnalysisDrawer
+                    open={analysisDrawerOpen}
+                    onOpenChange={setAnalysisDrawerOpen}
+                    filters={filters}
+                />
+            )}
         </>
     );
 }

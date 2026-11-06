@@ -59,16 +59,27 @@ class TransactionDayTotals
             return [];
         }
 
-        $listed = $filtered->whereIn('transactions.transaction_date', $dates->all());
+        return $this->forEveryDay($filtered->whereIn('transactions.transaction_date', $dates->all()), $currency, $filters);
+    }
 
-        $groups = (clone $listed)
+    /**
+     * The same figures for every day the query matches, as {@see self::forDays()}
+     * reads them, for a summary that adds those days up rather than showing them.
+     *
+     * @param  Builder<Transaction>  $filtered  A query with its filters, without order or eager loads
+     * @param  array<string, mixed>  $filters  The filters applied to $filtered, as {@see Transaction::scopeApplyFilters()} takes them
+     * @return array<string, array{count: int, total: ?int}>
+     */
+    public function forEveryDay(Builder $filtered, string $currency, array $filters = []): array
+    {
+        $groups = (clone $filtered)
             ->toBase()
             ->select('transactions.transaction_date', 'transactions.currency_code')
             ->selectRaw('count(*) as transactions_count, sum(transactions.amount) as amount_sum')
             ->groupBy('transactions.transaction_date', 'transactions.currency_code')
             ->get();
 
-        $this->narrowSplitTransactions($groups, $listed, $filters);
+        $this->narrowSplitTransactions($groups, $filtered, $filters);
 
         $converted = $this->exchangeRateService->convertManyOrNull($groups
             ->map(fn (stdClass $group): array => [
@@ -89,30 +100,47 @@ class TransactionDayTotals
     }
 
     /**
-     * Swaps each split transaction's amount in its group's sum for the lines
-     * the filters keep. A split transaction's lines are in its own currency,
-     * so it stays in its group. Nothing to do when no filter narrows lines,
-     * which keeps the whole list in the one grouped query.
+     * The split transactions these filters narrow, each with what its kept
+     * lines add up to, in its own currency. Empty when no filter narrows
+     * lines, which keeps the whole list in the one grouped query.
      *
-     * @param  Collection<int, stdClass>  $groups
-     * @param  Builder<Transaction>  $listed
+     * @param  Builder<Transaction>  $filtered
      * @param  array<string, mixed>  $filters
+     * @return Collection<int, array{transaction: Transaction, kept: int}>
      */
-    private function narrowSplitTransactions(Collection $groups, Builder $listed, array $filters): void
+    public function narrowedSplitTransactions(Builder $filtered, array $filters): Collection
     {
         if (empty($filters['category_ids']) && empty($filters['label_ids']) && empty($filters['cashflow_block'])) {
-            return;
+            return collect();
         }
 
-        $splitTransactions = $this->exporter
-            ->withRowRelations((clone $listed)->whereHas('splits'), $filters)
-            ->get();
+        return $this->exporter
+            ->withRowRelations((clone $filtered)->whereHas('splits'), $filters)
+            ->get()
+            ->toBase()
+            ->map(fn (Transaction $transaction): array => [
+                'transaction' => $transaction,
+                'kept' => collect($this->exporter->postings([$transaction], $filters))->sum('amount'),
+            ]);
+    }
 
-        foreach ($splitTransactions as $transaction) {
-            $group = $groups->first(fn (stdClass $group): bool => $this->dayOf($group) === $transaction->transaction_date->toDateString()
-                && strcasecmp($group->currency_code, $transaction->currency_code) === 0);
+    /**
+     * Swaps each split transaction's amount in its group's sum for the lines
+     * the filters keep. A split transaction's lines are in its own currency,
+     * so it stays in its group.
+     *
+     * @param  Collection<int, stdClass>  $groups
+     * @param  Builder<Transaction>  $filtered
+     * @param  array<string, mixed>  $filters
+     */
+    private function narrowSplitTransactions(Collection $groups, Builder $filtered, array $filters): void
+    {
+        $byDayAndCurrency = $groups->keyBy(fn (stdClass $group): string => $this->dayOf($group).strtoupper($group->currency_code));
 
-            $group->amount_sum += collect($this->exporter->postings([$transaction], $filters))->sum('amount') - $transaction->amount;
+        foreach ($this->narrowedSplitTransactions($filtered, $filters) as ['transaction' => $transaction, 'kept' => $kept]) {
+            $group = $byDayAndCurrency[$transaction->transaction_date->toDateString().strtoupper($transaction->currency_code)];
+
+            $group->amount_sum += $kept - $transaction->amount;
         }
     }
 

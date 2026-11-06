@@ -115,6 +115,7 @@ export function TransactionList({
                                     reloadPage();
                                 }, 500);
                             }}
+                            showAnalysis
                             filters={source.filters}
                         />
                     )}

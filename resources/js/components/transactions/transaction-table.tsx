@@ -94,6 +94,11 @@ interface TransactionTableProps {
      * being pulled 16px from the screen's edges.
      */
     framedOnPhone?: boolean;
+    /**
+     * Between the filters and the rows, outside the list's frame, such as a
+     * summary of what the filters match.
+     */
+    aboveRows?: ReactNode;
     /** Drawn above the first row, such as a banner. */
     topRow?: ReactNode;
     /** Beside "Load more" below the rows. */
@@ -135,6 +140,7 @@ export function TransactionTable({
     rowCellClassName,
     maxHeight,
     framedOnPhone = false,
+    aboveRows,
     topRow,
     footerActions,
     confirmBulkByTyping = false,
@@ -293,6 +299,8 @@ export function TransactionTable({
                         clearSelection,
                     })}
                 />
+
+                {aboveRows}
 
                 {source.isLoading ? (
                     <TransactionListSkeleton framedOnPhone={framedOnPhone} />
