@@ -127,7 +127,17 @@ class TransactionController extends Controller
      * Delete a transaction
      *
      * Deletes a transaction, one that came from a bank or an import included:
-     * as in the app, the next sync does not bring it back.
+     * as in the app, the next sync does not bring it back. Re-uploading a file
+     * that holds it does.
+     *
+     * With `update_balance` it also takes the transaction back out of the
+     * account's balance snapshots, and `balance_updated` says whether they
+     * moved: not on a bank-connected account or a credit card, and not when
+     * there is no rate to convert the amount with.
+     *
+     * Unlike an edit, this goes by the account, not the transaction: one that
+     * came from an import onto a manual account does move the balance when
+     * deleted, as in the app, though editing it never does.
      *
      * @param  string  $transaction  The transaction's id.
      */

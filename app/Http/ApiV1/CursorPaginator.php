@@ -110,6 +110,10 @@ class CursorPaginator
     }
 
     /**
+     * The row the page starts from, looked up in the list itself: one that has
+     * left it since the last page (deleted, or edited out of a filter) is a
+     * `400 invalid_cursor`, so the client starts the list over.
+     *
      * @param  Builder<covariant Model>  $query
      */
     private static function cursor(Builder $query, string $id): Model
