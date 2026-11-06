@@ -384,6 +384,34 @@ describe('create', function () {
             ->not->toContain('Secret surgery');
     });
 
+    it('refuses an account whose name is still encrypted on the device as the auto-tag account', function () {
+        $user = goalUser();
+        $account = savingsAccount($user, ['name' => 'c2VjcmV0', 'name_iv' => 'aXZpdml2aXZpdml2', 'encrypted' => true]);
+
+        $response = withHeaders(goalsWriter($user))
+            ->postJson('/api/v1/savings-goals', newMonthlyGoal(['auto_tag_account_id' => $account->id]))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('auto_tag_account_id');
+
+        expect($response->json('errors.auto_tag_account_id.0'))->toContain('encrypted')
+            ->and($response->getContent())->not->toContain('c2VjcmV0')
+            ->and(SavingsGoal::query()->where('user_id', $user->id)->exists())->toBeFalse()
+            ->and(AutomationRule::query()->where('user_id', $user->id)->exists())->toBeFalse();
+    });
+
+    it('takes no auto-tag account on an update, so an encrypted one cannot get in that way', function () {
+        $user = goalUser();
+        $goal = apiMonthlyGoal($user);
+        $account = savingsAccount($user, ['name' => 'c2VjcmV0', 'name_iv' => 'aXZpdml2aXZpdml2', 'encrypted' => true]);
+
+        withHeaders(goalsWriter($user))
+            ->patchJson("/api/v1/savings-goals/{$goal->id}", ['auto_tag_account_id' => $account->id])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('auto_tag_account_id');
+
+        expect(AutomationRule::query()->where('user_id', $user->id)->exists())->toBeFalse();
+    });
+
     it('refuses another member\'s savings account of the shared space as the auto-tag account', function () {
         $user = goalUser();
         $owner = goalUser();

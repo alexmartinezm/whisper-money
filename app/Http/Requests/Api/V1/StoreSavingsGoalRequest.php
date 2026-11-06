@@ -46,8 +46,18 @@ class StoreSavingsGoalRequest extends FormRequest
         /** @var User $user */
         $user = $this->user();
 
+        $account = app(SpaceResolver::class)->ownedForApiRequest($this, Account::query())->findOrFail((string) $value);
+
+        // A rule reads the name in the clear, so on ciphertext it would never
+        // match, and GET /api/v1/automation-rules would show it.
+        if ($account->name_iv !== null) {
+            $fail("Account {$account->id} has its name encrypted on your device, so a rule cannot match it. Pick another savings account, or leave auto_tag_account_id out and tag contributions to the goal with its label.");
+
+            return;
+        }
+
         $refusal = app(SavingsGoalWriteRules::class)->autoTagAccountRefusal(
-            app(SpaceResolver::class)->ownedForApiRequest($this, Account::query())->findOrFail((string) $value),
+            $account,
             'Pick an account of type savings from GET /api/v1/accounts.',
             'tag contributions to the goal with its label.',
             $user,
