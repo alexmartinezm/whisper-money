@@ -498,7 +498,7 @@ it('removes every label from the rows matching the filters and no others', funct
         ->and($outside->fresh()->labels)->toHaveCount(1);
 });
 
-it('refuses a removal that names no rows', function (array $removal) {
+it('refuses a write that names no rows', function (array $write) {
     $label = Label::factory()->create(['user_id' => $this->user->id]);
     $transactions = Transaction::factory()->count(2)->create([
         'user_id' => $this->user->id,
@@ -510,24 +510,35 @@ it('refuses a removal that names no rows', function (array $removal) {
     $transactions->each(fn (Transaction $transaction) => $transaction->labels()->attach($label->id));
 
     $this->actingAs($this->user)
-        ->patchJson('/transactions/bulk', $removal)
+        ->patchJson('/transactions/bulk', $write)
         ->assertUnprocessable()
         ->assertJsonValidationErrors('transaction_ids');
 
     foreach ($transactions as $transaction) {
         $fresh = $transaction->fresh();
 
-        expect($fresh->labels)->toHaveCount(1)
+        expect($fresh->labels->pluck('id')->all())->toBe([$label->id])
             ->and($fresh->category_id)->toBe($this->category->id)
             ->and($fresh->notes)->toBe('bm90ZS1jaXBoZXI=')
             ->and($fresh->notes_iv)->toBe('abcdefghijklmnop');
     }
 })->with([
-    'every label' => [['remove_all_labels' => true]],
-    'the category' => [['category_id' => null]],
-    'the notes' => [['notes' => null]],
-    'the notes iv' => [['notes_iv' => null]],
+    'removing every label' => [['remove_all_labels' => true]],
+    'clearing the category' => [['category_id' => null]],
+    'clearing the notes' => [['notes' => null]],
+    'clearing the notes iv' => [['notes_iv' => null]],
+    'setting a category' => fn (): array => ['category_id' => Category::factory()->create(['user_id' => $this->user->id])->id],
+    'setting notes' => [['notes' => 'Replaced']],
+    'setting a notes iv' => [['notes_iv' => 'ponmlkjihgfedcba']],
+    'adding a label' => fn (): array => ['label_ids' => [Label::factory()->create(['user_id' => $this->user->id])->id]],
 ]);
+
+it('still answers an empty request with nothing to update', function () {
+    $this->actingAs($this->user)
+        ->patchJson('/transactions/bulk', [])
+        ->assertBadRequest()
+        ->assertJsonPath('message', 'No update data provided.');
+});
 
 it('refuses a target that is null or empty, for a removal too', function (array $target) {
     $label = Label::factory()->create(['user_id' => $this->user->id]);
@@ -746,8 +757,8 @@ it('refuses a category type that does not exist in a bulk update', function () {
     ])->assertJsonValidationErrors('filters.category_types.0');
 });
 
-it('can update all transactions when no filters or IDs are provided', function () {
-    Transaction::factory()
+it('refuses to update all transactions when no filters or IDs are provided', function () {
+    $transactions = Transaction::factory()
         ->count(3)
         ->create([
             'user_id' => $this->user->id,
@@ -757,22 +768,13 @@ it('can update all transactions when no filters or IDs are provided', function (
 
     $newCategory = Category::factory()->create(['user_id' => $this->user->id]);
 
-    $response = $this->actingAs($this->user)->patchJson('/transactions/bulk', [
+    $this->actingAs($this->user)->patchJson('/transactions/bulk', [
         'category_id' => $newCategory->id,
-    ]);
+    ])->assertUnprocessable()
+        ->assertJsonValidationErrors('transaction_ids');
 
-    $response->assertSuccessful();
-    $response->assertJson([
-        'message' => 'Transactions updated successfully',
-        'count' => 3,
-    ]);
-
-    $allTransactions = Transaction::query()
-        ->where('user_id', $this->user->id)
-        ->get();
-
-    foreach ($allTransactions as $transaction) {
-        expect($transaction->category_id)->toBe($newCategory->id);
+    foreach ($transactions as $transaction) {
+        expect($transaction->fresh()->category_id)->toBeNull();
     }
 });
 

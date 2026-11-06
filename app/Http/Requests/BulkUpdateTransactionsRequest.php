@@ -13,6 +13,13 @@ class BulkUpdateTransactionsRequest extends FormRequest
 {
     use ValidatesUserOwnedResources;
 
+    /**
+     * The fields that change the rows.
+     *
+     * @var list<string>
+     */
+    private const array WriteFields = ['category_id', 'notes', 'notes_iv', 'label_ids', 'remove_all_labels'];
+
     public function authorize(): bool
     {
         return true;
@@ -55,28 +62,18 @@ class BulkUpdateTransactionsRequest extends FormRequest
     }
 
     /**
-     * With neither ids nor filters the controller edits every row of the user,
-     * so a removal has to name its target. The key is what counts: a select-all
-     * with no filter set sends `filters: {}`, which reads as empty.
+     * With neither ids nor filters the controller would edit every row of the
+     * user, so a write has to name its target. The key is what counts: a
+     * select-all with no filter set sends `filters: {}`, which reads as empty.
+     * A request writing nothing is the controller's 400.
      */
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator): void {
-            if ($this->removesSomething() && ! $this->hasAny(['transaction_ids', 'filters'])) {
-                $validator->errors()->add('transaction_ids', 'A bulk removal must name its transactions or its filters.');
+            if ($this->hasAny(self::WriteFields) && ! $this->hasAny(['transaction_ids', 'filters'])) {
+                $validator->errors()->add('transaction_ids', 'A bulk edit must name its transactions or its filters.');
             }
         });
-    }
-
-    /**
-     * Whether the edit takes something off the rows instead of setting it.
-     */
-    private function removesSomething(): bool
-    {
-        return $this->boolean('remove_all_labels')
-            || collect(['category_id', 'notes', 'notes_iv'])->contains(
-                fn (string $field): bool => $this->has($field) && $this->input($field) === null,
-            );
     }
 
     public function messages(): array
