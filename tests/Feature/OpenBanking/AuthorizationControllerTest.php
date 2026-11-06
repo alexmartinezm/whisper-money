@@ -2,6 +2,7 @@
 
 use App\Contracts\BankingProviderInterface;
 use App\Enums\BankingConnectionStatus;
+use App\Enums\BankingProvider;
 use App\Enums\BankingSyncTrigger;
 use App\Jobs\SyncBankingConnectionJob;
 use App\Models\Account;
@@ -1742,7 +1743,7 @@ test('a sibling only partly covered by the new session is left untouched', funct
         ['uid' => 'new-uid-2', 'iban' => 'ES0000000000000000000002'],
     ]);
 
-    $this->actingAs($user)->get('/open-banking/callback?code=test-code');
+    $this->actingAs($user)->get('/open-banking/callback?code=test-code')->assertRedirect();
 
     expect($sibling->refresh()->session_id)->toBe('other-session');
     expect($coveredAccount->refresh()->external_account_id)->toBe('old-uid-'.$sibling->id);
@@ -1773,6 +1774,28 @@ test('a connection to a different bank is never repointed even when an iban matc
     expect($otherAccount->refresh()->external_account_id)->toBe('old-uid-'.$otherBank->id);
     expect($otherCountry->refresh()->session_id)->toBe('other-country-session');
 });
+
+test('a connection through an api-key provider is never repointed even when its bank and iban match', function (BankingProvider $provider) {
+    Queue::fake();
+
+    $user = User::factory()->onboarded()->create();
+    connectionWithAccount($user, 'ES0000000000000000000001', ['status' => BankingConnectionStatus::Pending]);
+    [$apiKeyConnection, $apiKeyAccount] = connectionWithAccount($user, 'ES0000000000000000000002', [
+        'provider' => $provider,
+        'session_id' => 'api-key-session',
+    ]);
+
+    mockSharedSession([
+        ['uid' => 'new-uid-1', 'iban' => 'ES0000000000000000000001'],
+        ['uid' => 'new-uid-2', 'iban' => 'ES0000000000000000000002'],
+    ]);
+
+    $this->actingAs($user)->get('/open-banking/callback?code=test-code')->assertRedirect();
+
+    expect($apiKeyConnection->refresh()->session_id)->toBe('api-key-session');
+    expect($apiKeyAccount->refresh()->external_account_id)->toBe('old-uid-'.$apiKeyConnection->id);
+    Queue::assertNotPushed(SyncBankingConnectionJob::class, fn (SyncBankingConnectionJob $job) => $job->bankingConnection->is($apiKeyConnection));
+})->with(array_filter(BankingProvider::cases(), fn (BankingProvider $provider): bool => $provider->usesApiKey()));
 
 test('another user\'s connection to the same bank is never repointed', function () {
     Queue::fake();

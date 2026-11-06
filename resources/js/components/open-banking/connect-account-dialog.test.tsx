@@ -229,6 +229,21 @@ describe('ConnectAccountDialog', () => {
         expect(translate).toHaveBeenCalledWith('or');
     });
 
+    it('links to the existing connection from the onboarding flow too', async () => {
+        const existing = liveBbvaConnection();
+        await reachBankStep([existing], [institution('BBVA')], 'inline');
+
+        fireEvent.click(screen.getByRole('button', { name: /BBVA/ }));
+        fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+        expect(
+            screen.getByRole('link', { name: 'Manage Accounts' }),
+        ).toHaveAttribute(
+            'href',
+            expect.stringContaining(`/connections/${existing.id}/accounts`),
+        );
+    });
+
     it('names Manage Accounts without a link while the connection awaits mapping', async () => {
         await reachBankStep([
             { ...liveBbvaConnection(), status: 'awaiting_mapping' },
