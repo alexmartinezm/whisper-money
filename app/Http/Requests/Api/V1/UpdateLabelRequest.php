@@ -2,16 +2,15 @@
 
 namespace App\Http\Requests\Api\V1;
 
-use App\Http\Requests\Api\V1\Concerns\ResolvesOwnedRouteModel;
+use App\Http\Requests\Api\V1\Concerns\ResolvesRouteLabel;
 use App\Http\Requests\Api\V1\Concerns\ValidatesLabelWrites;
-use App\Models\Label;
 use App\Services\Labels\LabelWriter;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 
 class UpdateLabelRequest extends FormRequest
 {
-    use ResolvesOwnedRouteModel, ValidatesLabelWrites;
+    use ResolvesRouteLabel, ValidatesLabelWrites;
 
     /**
      * @return array<string, array<mixed>>
@@ -32,16 +31,5 @@ class UpdateLabelRequest extends FormRequest
             ...$this->unknownFieldRefusals(),
             ...LabelWriter::savingsGoalLabelErrors($this->label(), $this->sentFields(), deleting: false),
         ])];
-    }
-
-    public function label(): Label
-    {
-        /** @var Label */
-        return $this->routeModel();
-    }
-
-    protected function routeModelBinding(): array
-    {
-        return [Label::class, 'label'];
     }
 }

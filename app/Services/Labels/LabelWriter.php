@@ -7,6 +7,7 @@ use App\Enums\LabelSource;
 use App\Models\Label;
 use App\Models\Space;
 use App\Models\User;
+use App\Services\Concerns\DerivesUpdateRules;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -18,6 +19,8 @@ use Illuminate\Validation\ValidationException;
  */
 class LabelWriter
 {
+    use DerivesUpdateRules;
+
     public const string NameTakenMessage = 'A label with that name already exists.';
 
     /**
@@ -38,10 +41,7 @@ class LabelWriter
      */
     public static function updateRules(): array
     {
-        return array_map(
-            fn (array $rules): array => ['sometimes', ...array_filter($rules, fn (mixed $rule): bool => ! in_array($rule, ['required', 'sometimes'], true))],
-            self::createRules(),
-        );
+        return self::everyFieldOptional(self::createRules());
     }
 
     /**

@@ -45,8 +45,6 @@ class LabelController extends Controller
 
     /**
      * Create a label
-     *
-     * Tag transactions with it through `PUT /api/v1/transactions/{id}/labels`.
      */
     public function store(StoreLabelRequest $request): JsonResponse
     {

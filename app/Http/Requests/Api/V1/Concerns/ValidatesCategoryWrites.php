@@ -3,7 +3,6 @@
 namespace App\Http\Requests\Api\V1\Concerns;
 
 use App\Models\Category;
-use Illuminate\Contracts\Validation\Validator;
 
 /**
  * What the category create and update requests share: the CategoryWriter
@@ -28,13 +27,5 @@ trait ValidatesCategoryWrites
             'cashflow_direction' => $rules['cashflow_direction'],
             'parent_id' => ['bail', 'sometimes', 'nullable', 'string', $this->inSpace(Category::class, 'a category')],
         ];
-    }
-
-    /**
-     * @return array<int, callable(Validator): void>
-     */
-    public function after(): array
-    {
-        return [fn (Validator $validator) => $this->addRefusals($validator, $this->unknownFieldRefusals())];
     }
 }

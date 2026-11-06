@@ -7,11 +7,14 @@ use App\Mcp\Tools\CreateLabel;
 use App\Mcp\Tools\DeleteCategory;
 use App\Mcp\Tools\DeleteLabel;
 use App\Mcp\Tools\ListAccounts;
+use App\Mcp\Tools\ListAutomationRules;
 use App\Mcp\Tools\ListCategories;
 use App\Mcp\Tools\ListLabels;
+use App\Mcp\Tools\UpdateAutomationRule;
 use App\Mcp\Tools\UpdateCategory;
 use App\Mcp\Tools\UpdateLabel;
 use App\Models\Account;
+use App\Models\AutomationRule;
 use App\Models\Category;
 use App\Models\Label;
 use App\Models\Space;
@@ -107,6 +110,22 @@ it('refuses to rename or delete the label of a savings goal, like the API', func
         ->assertOk();
 
     expect($label->fresh())->name->toBe('New car')->color->toBe('red');
+});
+
+it('lets a member change a housemate\'s automation rule, and lists it', function () {
+    $member = User::factory()->create();
+    $owner = User::factory()->create();
+    $space = householdWith($member, $owner);
+    $category = Category::factory()->create(['user_id' => $owner->id, 'space_id' => $space->id]);
+    $rule = AutomationRule::factory()->create(['user_id' => $owner->id, 'space_id' => $space->id, 'action_category_id' => $category->id, 'title' => 'Theirs']);
+
+    $listed = mcpPayload(callAsMember($member, ListAutomationRules::class, ['space' => $space->id])->assertOk());
+
+    expect(collect($listed['automation_rules'])->pluck('id')->all())->toBe([$rule->id]);
+
+    callAsMember($member, UpdateAutomationRule::class, ['automation_rule_id' => $rule->id, 'space' => $space->id, 'title' => 'Renamed'])->assertOk();
+
+    expect($rule->fresh()->title)->toBe('Renamed');
 });
 
 it('caps a category icon at its column length', function () {

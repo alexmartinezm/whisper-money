@@ -1,0 +1,247 @@
+<?php
+
+namespace App\Services;
+
+use App\Http\Resources\V1\TransactionResource;
+use App\Jobs\ApplySingleAutomationRuleJob;
+use App\Models\AutomationRule;
+use App\Models\Space;
+use App\Models\Transaction;
+use App\Services\AutomationRules\RuleApplication;
+use App\Services\AutomationRules\RuleApplicationStatus;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
+
+/**
+ * Applies an existing automation rule to transactions already in the database.
+ * Rules otherwise only run on newly created transactions (see
+ * App\Listeners\ApplyAutomationRules), so the settings screen and `/api/v1`
+ * both come through here to backfill history.
+ *
+ * Resolving the matches means evaluating the rule row by row in PHP, so the id
+ * list is cached and re-used by the preview and the apply that follows it.
+ *
+ * Only the rule owner's transactions are candidates, never one still encrypted
+ * on the device or a split one, which is filed under its lines.
+ */
+class AutomationRuleApplier
+{
+    /**
+     * Match counts at or below this are applied inline; anything larger goes to
+     * the queue so the request does not hang on it.
+     */
+    public const SYNC_THRESHOLD = 100;
+
+    /**
+     * How many matching transactions a preview lists. The full count is reported
+     * separately: the sample is only there to sanity check what the rule caught
+     * before committing to it.
+     */
+    private const SAMPLE_SIZE = 20;
+
+    private const MATCHES_CACHE_TTL_MINUTES = 15;
+
+    public function __construct(private AutomationRuleService $service) {}
+
+    /**
+     * Ids of the transactions this rule matches, newest first.
+     *
+     * $space is for `/api/v1`, scoped to one space so a rule can never reach a
+     * transaction outside the space it was asked about. The settings screen
+     * matches every transaction the rule's owner has.
+     *
+     * @return array<int, string>
+     */
+    public function matchingIds(AutomationRule $rule, bool $onlyUncategorized, ?Space $space = null): array
+    {
+        $cacheKey = $this->matchesCacheKey($rule, $onlyUncategorized, $space);
+
+        $cached = Cache::get($cacheKey);
+
+        $ids = $this->withoutSplitParents($rule, is_array($cached) ? $cached : $this->evaluate($rule, $onlyUncategorized, $space));
+
+        Cache::put($cacheKey, $ids, now()->addMinutes(self::MATCHES_CACHE_TTL_MINUTES));
+
+        return $ids;
+    }
+
+    /**
+     * Preview or apply a rule over the transactions of one space. A preview
+     * changes nothing; an apply runs inline up to SYNC_THRESHOLD matches and is
+     * queued past it.
+     */
+    public function applyInSpace(AutomationRule $rule, Space $space, bool $dryRun, bool $onlyUncategorized): RuleApplication
+    {
+        $matchingIds = $this->matchingIds($rule, $onlyUncategorized, $space);
+        $total = count($matchingIds);
+
+        if ($dryRun) {
+            return new RuleApplication(RuleApplicationStatus::Preview, $rule->id, $total, $this->sample($rule, $matchingIds, $space));
+        }
+
+        if ($total > self::SYNC_THRESHOLD) {
+            $this->queue($rule, $matchingIds, $onlyUncategorized, $space);
+
+            return new RuleApplication(RuleApplicationStatus::Queued, $rule->id, $total);
+        }
+
+        $result = $this->applyNow($rule, $matchingIds, $onlyUncategorized, $space);
+
+        return new RuleApplication(RuleApplicationStatus::Done, $rule->id, $total, applied: $result['applied'], updated: $result['updated']);
+    }
+
+    /**
+     * Apply the rule's actions to the matched transactions right now.
+     *
+     * @param  array<int, string>  $transactionIds
+     * @return array{applied: int, updated: int}
+     */
+    public function applyNow(AutomationRule $rule, array $transactionIds, bool $onlyUncategorized, ?Space $space = null): array
+    {
+        $rule->loadMissing('labels');
+
+        $transactions = $this->transactions($rule, $space)
+            ->whereIn('id', $transactionIds)
+            ->with(['account.bank', 'category', 'labels'])
+            ->get();
+
+        $updated = $this->service->applyRuleActionsToTransactions($transactions, $rule, $onlyUncategorized);
+
+        $this->forgetMatches($rule, $onlyUncategorized, $space);
+
+        return ['applied' => $transactions->count(), 'updated' => $updated];
+    }
+
+    /**
+     * Hand the matched transactions to the queue, returning the job id the web
+     * client polls for progress.
+     *
+     * @param  array<int, string>  $transactionIds
+     */
+    public function queue(AutomationRule $rule, array $transactionIds, bool $onlyUncategorized, ?Space $space = null): string
+    {
+        $jobId = (string) Str::uuid();
+
+        Cache::put(
+            ApplySingleAutomationRuleJob::cacheKeyForJobId($rule->user_id, $jobId),
+            ['status' => 'pending', 'processed' => 0, 'total' => count($transactionIds), 'applied' => 0, 'updated' => 0],
+            now()->addHour(),
+        );
+
+        ApplySingleAutomationRuleJob::dispatch($rule, $jobId, $transactionIds, $onlyUncategorized);
+
+        $this->forgetMatches($rule, $onlyUncategorized, $space);
+
+        return $jobId;
+    }
+
+    private function forgetMatches(AutomationRule $rule, bool $onlyUncategorized, ?Space $space): void
+    {
+        Cache::forget($this->matchesCacheKey($rule, $onlyUncategorized, $space));
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function evaluate(AutomationRule $rule, bool $onlyUncategorized, ?Space $space): array
+    {
+        $rule->loadMissing('labels');
+
+        $ids = [];
+
+        $eagerLoads = $this->service->eagerLoadsForRuleEvaluation($rule);
+        $eagerLoads[] = 'splits';
+        if ($onlyUncategorized && $rule->action_category_id === null) {
+            $eagerLoads[] = 'labels';
+        }
+
+        $this->transactions($rule, $space)
+            ->whereDoesntHave('splits')
+            ->with(array_values(array_unique($eagerLoads)))
+            ->orderByDesc('transaction_date')
+            ->orderByDesc('created_at')
+            ->chunk(500, function ($transactions) use ($rule, $onlyUncategorized, &$ids) {
+                foreach ($transactions as $transaction) {
+                    if ($onlyUncategorized && $this->service->shouldSkipForOnlyUncategorized($rule, $transaction)) {
+                        continue;
+                    }
+
+                    if ($this->service->ruleMatches($rule, $transaction)) {
+                        $ids[] = $transaction->id;
+                    }
+                }
+            });
+
+        return $ids;
+    }
+
+    /**
+     * @param  array<int, string>  $transactionIds
+     * @return array<int, string>
+     */
+    private function withoutSplitParents(AutomationRule $rule, array $transactionIds): array
+    {
+        $transactionIds = array_values(array_unique($transactionIds));
+
+        if ($transactionIds === []) {
+            return [];
+        }
+
+        return Transaction::query()
+            ->where('user_id', $rule->user_id)
+            ->whereIn('id', $transactionIds)
+            ->whereDoesntHave('splits')
+            ->orderByDesc('transaction_date')
+            ->orderByDesc('created_at')
+            ->pluck('id')
+            ->all();
+    }
+
+    /**
+     * The first matches, to show what a preview caught.
+     *
+     * @param  array<int, string>  $matchingIds
+     * @return EloquentCollection<int, Transaction>
+     */
+    private function sample(AutomationRule $rule, array $matchingIds, Space $space): EloquentCollection
+    {
+        $ids = array_slice($matchingIds, 0, self::SAMPLE_SIZE);
+
+        if ($ids === []) {
+            return new EloquentCollection;
+        }
+
+        // Re-scoped to the rule owner's rows of the space even though the ids
+        // already come from such a match, so this stays safe to read on its own.
+        return $this->transactions($rule, $space)
+            ->whereIn('id', $ids)
+            ->with(TransactionResource::Relations)
+            ->orderByDesc('transaction_date')
+            ->orderByDesc('created_at')
+            ->get();
+    }
+
+    /**
+     * The candidate transactions a rule may touch.
+     *
+     * @return Builder<Transaction>
+     */
+    private function transactions(AutomationRule $rule, ?Space $space): Builder
+    {
+        return Transaction::query()
+            ->where('user_id', $rule->user_id)
+            ->whereNull('description_iv')
+            ->when($space !== null, fn (Builder $query) => $query->forSpace($space));
+    }
+
+    private function matchesCacheKey(AutomationRule $rule, bool $onlyUncategorized, ?Space $space): string
+    {
+        $flag = $onlyUncategorized ? '1' : '0';
+        $stamp = $rule->updated_at?->getTimestamp() ?? 0;
+        $scope = $space === null ? '' : ":space:{$space->id}";
+
+        return "automation_rule_matches:{$rule->user_id}:{$rule->id}:{$flag}:{$stamp}{$scope}";
+    }
+}

@@ -3,15 +3,14 @@
 namespace App\Http\Requests\Api\V1;
 
 use App\Http\Requests\Api\V1\Concerns\AddsRefusals;
-use App\Http\Requests\Api\V1\Concerns\ResolvesOwnedRouteModel;
-use App\Models\Label;
+use App\Http\Requests\Api\V1\Concerns\ResolvesRouteLabel;
 use App\Services\Labels\LabelWriter;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 
 class DeleteLabelRequest extends FormRequest
 {
-    use AddsRefusals, ResolvesOwnedRouteModel;
+    use AddsRefusals, ResolvesRouteLabel;
 
     /**
      * @return array<string, array<mixed>>
@@ -32,16 +31,5 @@ class DeleteLabelRequest extends FormRequest
             ...$this->unknownFieldRefusals(),
             ...LabelWriter::savingsGoalLabelErrors($this->label(), [], deleting: true),
         ])];
-    }
-
-    public function label(): Label
-    {
-        /** @var Label */
-        return $this->routeModel();
-    }
-
-    protected function routeModelBinding(): array
-    {
-        return [Label::class, 'label'];
     }
 }

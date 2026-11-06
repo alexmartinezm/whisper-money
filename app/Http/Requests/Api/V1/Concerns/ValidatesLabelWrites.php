@@ -2,8 +2,6 @@
 
 namespace App\Http\Requests\Api\V1\Concerns;
 
-use Illuminate\Contracts\Validation\Validator;
-
 /**
  * What the label create and update requests share: the LabelWriter rules the
  * MCP tools validate with too.
@@ -22,13 +20,5 @@ trait ValidatesLabelWrites
             'name' => $rules['name'],
             'color' => $rules['color'],
         ];
-    }
-
-    /**
-     * @return array<int, callable(Validator): void>
-     */
-    public function after(): array
-    {
-        return [fn (Validator $validator) => $this->addRefusals($validator, $this->unknownFieldRefusals())];
     }
 }

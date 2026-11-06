@@ -10,6 +10,7 @@ use App\Models\Category;
 use App\Models\Space;
 use App\Models\User;
 use App\Services\CategoryTree;
+use App\Services\Concerns\DerivesUpdateRules;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -29,6 +30,8 @@ use Illuminate\Validation\ValidationException;
  */
 class CategoryWriter
 {
+    use DerivesUpdateRules;
+
     public const string NameTakenMessage = 'A category with that name already exists at this level.';
 
     public function __construct(private CategoryTree $tree) {}
@@ -54,10 +57,7 @@ class CategoryWriter
      */
     public static function updateRules(): array
     {
-        return array_map(
-            fn (array $rules): array => ['sometimes', ...array_filter($rules, fn (mixed $rule): bool => ! in_array($rule, ['required', 'sometimes'], true))],
-            self::createRules(),
-        );
+        return self::everyFieldOptional(self::createRules());
     }
 
     /**

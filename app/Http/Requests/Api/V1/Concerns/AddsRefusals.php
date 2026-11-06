@@ -6,12 +6,22 @@ use Illuminate\Contracts\Validation\Validator;
 
 /**
  * For the form requests that refuse unknown body fields and run a shared
- * refusal (AccountWriteRules,
- * AccountBalanceRecorder) after their rules: its errors, keyed by field, are
- * added to the validator like any other.
+ * refusal (AccountWriteRules, AccountBalanceRecorder) after their rules: its
+ * errors, keyed by field, are added to the validator like any other. A request
+ * with more to refuse than unknown fields declares its own after().
  */
 trait AddsRefusals
 {
+    /**
+     * Refuse unknown fields.
+     *
+     * @return array<int, callable(Validator): void>
+     */
+    public function after(): array
+    {
+        return [fn (Validator $validator) => $this->addRefusals($validator, $this->unknownFieldRefusals())];
+    }
+
     /**
      * @param  array<string, string>  $refusals
      */

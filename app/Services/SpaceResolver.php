@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\AutomationRule;
 use App\Models\Category;
 use App\Models\Label;
 use App\Models\Space;
@@ -53,8 +54,10 @@ class SpaceResolver
     {
         /** @var User $user */
         $user = $request->user();
+        $space = $request->input('space');
 
-        return $this->resolve($user, $request->string('space')->toString(), 'List the valid ids with GET /api/v1/spaces.');
+        // A list or an object names no space, so it is refused like an unknown id.
+        return $this->resolve($user, is_array($space) ? 'in this format' : (string) $space, 'List the valid ids with GET /api/v1/spaces.');
     }
 
     /**
@@ -92,16 +95,16 @@ class SpaceResolver
     }
 
     /**
-     * One of the caller's own categories or labels in $space, the same way as
-     * ownedInSpace(): another member's is a ModelNotFoundException like one
-     * that does not exist.
+     * One of the caller's own categories, labels or automation rules in $space,
+     * the same way as ownedInSpace(): another member's is a
+     * ModelNotFoundException like one that does not exist.
      *
-     * @template TModel of Category|Label
+     * @template TModel of AutomationRule|Category|Label
      *
      * @param  class-string<TModel>  $model
      * @return TModel
      */
-    public function ownedInSpaceOrFail(string $model, User $user, Space $space, string $id): Category|Label
+    public function ownedInSpaceOrFail(string $model, User $user, Space $space, string $id): AutomationRule|Category|Label
     {
         return $model::query()->forSpace($space)->where('user_id', $user->id)->findOrFail($id);
     }

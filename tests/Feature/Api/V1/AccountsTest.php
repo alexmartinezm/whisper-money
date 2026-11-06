@@ -400,6 +400,22 @@ describe('update', function () {
     });
 });
 
+describe('malformed input', function () {
+    it('answers a list where a type or a space goes with a 422, not a 500', function () {
+        $headers = accountsWriter(User::factory()->create());
+
+        withHeaders($headers)
+            ->postJson('/api/v1/accounts', ['name' => 'Main', 'type' => ['checking'], 'currency_code' => 'EUR'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('type');
+
+        withHeaders($headers)
+            ->postJson('/api/v1/accounts', ['name' => 'Main', 'type' => 'checking', 'currency_code' => 'EUR', 'space' => ['anything']])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('space');
+    });
+});
+
 describe('encrypted names', function () {
     it('answers a name still encrypted on the device as empty, never as ciphertext', function () {
         $user = User::factory()->create();

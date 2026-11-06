@@ -29,7 +29,9 @@ trait ValidatesAccountWrites
      */
     protected function requestedType(): ?AccountType
     {
-        return AccountType::tryFrom($this->string('type')->toString());
+        $type = $this->input('type');
+
+        return is_string($type) ? AccountType::tryFrom($type) : null;
     }
 
     /**

@@ -231,3 +231,38 @@ it('lets a read-only token list rules', function () {
         ->assertOk()
         ->assertSee('Readable');
 });
+
+it('refuses conditions with more nodes than the engines should run on every transaction', function () {
+    $user = User::factory()->create();
+    $category = Category::factory()->create(['user_id' => $user->id]);
+
+    callAutomationRuleTool($user, CreateAutomationRule::class, [
+        'title' => 'Refused',
+        'priority' => 1,
+        'rules_json' => ['or' => array_map(fn (int $index): array => ['in' => ["shop {$index}", ['var' => 'description']]], range(1, 300))],
+        'action_category_id' => $category->id,
+    ])->assertHasErrors(['500 JsonLogic nodes']);
+
+    expect(AutomationRule::query()->where('user_id', $user->id)->count())->toBe(0);
+});
+
+it('caps the note and the labels a rule applies', function () {
+    $user = User::factory()->create();
+    $category = Category::factory()->create(['user_id' => $user->id]);
+    $rule = AutomationRule::factory()->create(['user_id' => $user->id, 'action_category_id' => $category->id]);
+
+    callAutomationRuleTool($user, UpdateAutomationRule::class, ['automation_rule_id' => $rule->id, 'action_note' => str_repeat('x', 10_001)])
+        ->assertHasErrors(['action note']);
+    callAutomationRuleTool($user, UpdateAutomationRule::class, ['automation_rule_id' => $rule->id, 'action_label_ids' => array_map(fn (int $index): string => (string) Str::uuid(), range(1, 51))])
+        ->assertHasErrors(['action label ids']);
+});
+
+it('stores a new note as plain text on a rule whose note was encrypted', function () {
+    $user = User::factory()->create();
+    $category = Category::factory()->create(['user_id' => $user->id]);
+    $rule = AutomationRule::factory()->create(['user_id' => $user->id, 'action_category_id' => $category->id, 'action_note' => 'bm90ZQ==', 'action_note_iv' => 'abcdefghijklmnop']);
+
+    callAutomationRuleTool($user, UpdateAutomationRule::class, ['automation_rule_id' => $rule->id, 'action_note' => 'Plain'])->assertOk();
+
+    expect($rule->fresh())->action_note->toBe('Plain')->action_note_iv->toBeNull();
+});
