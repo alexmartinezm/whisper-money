@@ -8,6 +8,9 @@ use Illuminate\Support\Facades\Log;
 
 class ExchangeRateService
 {
+    /** How long one {@see self::convertManyOrNull()} keeps asking the provider. */
+    private const PROVIDER_BUDGET_SECONDS = 5;
+
     /** @var array<string, array<string, float>> */
     private array $ratesCache = [];
 
@@ -74,6 +77,50 @@ class ExchangeRateService
         }
 
         return $this->convert($source, $target, $amountInCents, $date);
+    }
+
+    /**
+     * {@see self::convertOrNull()} over many amounts, in their order, for a
+     * response someone is waiting on.
+     *
+     * Rates the table holds are read in one query and always answer, so a
+     * provider failure never blanks a day that has one. The provider is asked
+     * one date at a time for the rest, and stops being asked at its first
+     * failure or once the budget is spent: the remaining dates answer null, and
+     * the next request picks them up. An outage therefore costs one bounded
+     * attempt ({@see CurrencyConversionService::getRatesForCurrency()}), not
+     * one per date.
+     *
+     * @param  list<array{from: string, amount: int, date: string}>  $items
+     * @return list<?int>
+     */
+    public function convertManyOrNull(array $items, string $target): array
+    {
+        // Only amounts in another currency need a rate, so a reader who keeps
+        // everything in one currency never reads the rates table here.
+        $this->preloadRates($target, array_column(array_filter(
+            $items,
+            fn (array $item): bool => strcasecmp($item['from'], $target) !== 0,
+        ), 'date'));
+
+        $deadline = now()->addSeconds(self::PROVIDER_BUDGET_SECONDS);
+        $mayAskProvider = true;
+
+        return array_map(function (array $item) use ($target, $deadline, &$mayAskProvider): ?int {
+            $needsProvider = strcasecmp($item['from'], $target) !== 0 && ! $this->holdsRates($target, $item['date']);
+
+            if ($needsProvider && ! $mayAskProvider) {
+                return null;
+            }
+
+            $converted = $this->convertOrNull($item['from'], $target, $item['amount'], $item['date']);
+
+            if ($needsProvider) {
+                $mayAskProvider = ! $this->currencyApi->lastFetchFailed() && now()->lt($deadline);
+            }
+
+            return $converted;
+        }, $items);
     }
 
     /**
@@ -152,6 +199,11 @@ class ExchangeRateService
             ->each(function (string $date) use ($baseCurrency): void {
                 $this->databaseMissCache[$this->cacheKey($baseCurrency, $date)] = true;
             });
+    }
+
+    private function holdsRates(string $baseCurrency, string $date): bool
+    {
+        return array_key_exists($this->cacheKey($baseCurrency, $this->normalizeDate($date)), $this->ratesCache);
     }
 
     private function normalizeDate(string $date): string

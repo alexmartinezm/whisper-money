@@ -20,22 +20,12 @@ class ConvertedAmountsController extends Controller
 
     public function __invoke(ConvertedAmountsRequest $request): JsonResponse
     {
-        $target = $request->user()->currency_code;
-        $items = $request->items();
-
-        $this->exchangeRateService->preloadRates($target, array_column($items, 'date'));
-
         return response()->json([
             // In the order asked, null where the day holds no rate: the table
             // leaves that day's total out rather than print a wrong figure.
-            'amounts' => array_map(
-                fn (array $item): ?int => $this->exchangeRateService->convertOrNull(
-                    $item['from'],
-                    $target,
-                    $item['amount'],
-                    $item['date'],
-                ),
-                $items,
+            'amounts' => $this->exchangeRateService->convertManyOrNull(
+                $request->items(),
+                $request->user()->currency_code,
             ),
         ]);
     }

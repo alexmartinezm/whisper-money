@@ -1,7 +1,10 @@
 import { useInMemoryDaySummaries } from '@/hooks/use-day-summaries';
 import { reloadPage } from '@/lib/leave-page';
 import { createTransactionCategoryFilter } from '@/lib/transaction-category-filter';
-import { createRowTotalAmount } from '@/lib/transaction-day-groups';
+import {
+    createRowTotalAmount,
+    isSortedByDate,
+} from '@/lib/transaction-day-groups';
 import { type Category } from '@/types/category';
 import {
     type DecryptedTransaction,
@@ -14,6 +17,8 @@ import { __ } from '@/utils/i18n';
 import { type SortingState } from '@tanstack/react-table';
 import { isWithinInterval, parseISO } from 'date-fns';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+
+const NO_ROWS: DecryptedTransaction[] = [];
 
 /** The rows as the table edits them: text ready to read, label ids set. */
 function toDecryptedRows(
@@ -291,10 +296,12 @@ export function useInMemoryTransactionSource({
 
     // Over every row the filters keep, not only the drawn slice, so a day cut
     // by "load more" still says what it holds in full.
-    const daySummaryOf = useInMemoryDaySummaries(
-        filteredTransactions,
+    const daySummaryOf = useInMemoryDaySummaries(filteredTransactions, {
+        // The slice bounds the days, and a list not sorted by date has no
+        // headers to fill at all.
+        drawn: isSortedByDate(sorting) ? displayedTransactions : NO_ROWS,
         rowTotalAmount,
-    );
+    });
 
     const loadMore = useCallback(() => {
         if (displayedCount < sortedTransactions.length && !isLoadingMore) {

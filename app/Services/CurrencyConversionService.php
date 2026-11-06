@@ -30,6 +30,8 @@ class CurrencyConversionService
     /** @var array<string, array<string, float>> Keyed by "{currency}:{date}" */
     private array $rateCache = [];
 
+    private bool $lastFetchFailed = false;
+
     /**
      * Convert a quantity from one currency to another on a given date.
      *
@@ -72,6 +74,7 @@ class CurrencyConversionService
      */
     public function getRatesForCurrency(string $currency, string $date): array
     {
+        $this->lastFetchFailed = false;
         $currency = strtolower($currency);
         $cacheKey = "{$currency}:{$date}";
 
@@ -91,6 +94,17 @@ class CurrencyConversionService
         $this->rateCache[$cacheKey] = $rates;
 
         return $rates;
+    }
+
+    /**
+     * Whether the last {@see self::getRatesForCurrency()} came back empty
+     * because the sources failed, rather than because they hold no release
+     * for that date. A caller with many dates to fetch stops at the first one:
+     * the rest would only wait out the same failure.
+     */
+    public function lastFetchFailed(): bool
+    {
+        return $this->lastFetchFailed;
     }
 
     /**
@@ -125,11 +139,12 @@ class CurrencyConversionService
     /**
      * Fetch rates from CDN with fallback.
      *
-     * A missing release (404) walks back to earlier historical dates, but an
-     * unreachable source (connection refused or timeout) aborts the walk: the
-     * same timeout would repeat for every candidate date and risk exhausting
-     * the request's execution time. Failures degrade to an empty rate map
-     * rather than throwing, so a slow CDN never crashes the calling endpoint.
+     * A missing release (404) walks back to earlier historical dates, but a
+     * failing source (connection refused, timeout or a 5xx) aborts the walk:
+     * the same failure would repeat for every candidate date and risk
+     * exhausting the request's execution time. Failures degrade to an empty
+     * rate map rather than throwing, so a slow CDN never crashes the calling
+     * endpoint. One call costs at most both sources of one date.
      *
      * @return array<string, float>
      */
@@ -164,6 +179,8 @@ class CurrencyConversionService
                     return $response->json($currency) ?? [];
                 }
 
+                $sourceUnreachable = $sourceUnreachable || $response->serverError();
+
                 Log::warning('Currency rate source returned an error', [
                     'currency' => $currency,
                     'date' => $candidateDate,
@@ -180,6 +197,8 @@ class CurrencyConversionService
             'currency' => $currency,
             'date' => $date,
         ]);
+
+        $this->lastFetchFailed = $sourceUnreachable;
 
         return [];
     }

@@ -2,6 +2,10 @@
 
 use App\Models\ExchangeRate;
 use App\Models\User;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Http;
 
 use function Pest\Laravel\actingAs;
 use function Pest\Laravel\postJson;
@@ -53,6 +57,90 @@ test('it hands back amounts already in the user currency untouched', function ()
         ->assertExactJson(['amounts' => [12000]]);
 
     expect(ExchangeRate::query()->count())->toBe(0);
+});
+
+test('a provider outage costs one attempt, however many days are missing a rate', function () {
+    ExchangeRate::factory()->create([
+        'base_currency' => 'eur',
+        'date' => '2025-11-09',
+        'rates' => ['eur' => 1.0, 'usd' => 2.0],
+    ]);
+    $calls = 0;
+    Http::fake(function () use (&$calls) {
+        $calls++;
+
+        throw new ConnectionException('cURL error 28: Operation timed out');
+    });
+
+    actingAs(User::factory()->onboarded()->create(['currency_code' => 'EUR']))
+        ->postJson('/api/converted-amounts', ['items' => [
+            ['from' => 'USD', 'amount' => 1000, 'date' => '2025-11-12'],
+            ['from' => 'USD', 'amount' => 1000, 'date' => '2025-11-11'],
+            ['from' => 'USD', 'amount' => 1000, 'date' => '2025-11-10'],
+            ['from' => 'USD', 'amount' => 1000, 'date' => '2025-11-09'],
+            ['from' => 'EUR', 'amount' => 1000, 'date' => '2025-11-12'],
+        ]])
+        ->assertOk()
+        // A day with a rate and an amount in the user's currency still answer.
+        ->assertExactJson(['amounts' => [null, null, null, 500, 1000]]);
+
+    // The two sources of the first day, and nothing after.
+    expect($calls)->toBe(2);
+});
+
+test('a provider answering with server errors counts as an outage too', function () {
+    $calls = 0;
+    Http::fake(function () use (&$calls) {
+        $calls++;
+
+        return Http::response('Server Error', 503);
+    });
+
+    actingAs(User::factory()->onboarded()->create(['currency_code' => 'EUR']))
+        ->postJson('/api/converted-amounts', ['items' => [
+            ['from' => 'USD', 'amount' => 1000, 'date' => '2025-11-12'],
+            ['from' => 'USD', 'amount' => 1000, 'date' => '2025-11-11'],
+        ]])
+        ->assertOk()
+        ->assertExactJson(['amounts' => [null, null]]);
+
+    expect($calls)->toBe(2);
+});
+
+test('a day the provider has no release for does not stop the days after it', function () {
+    Http::fake(fn (Request $request) => str_contains($request->url(), '@2025-11-12') || str_contains($request->url(), 'v1/2025-11-12')
+        ? Http::response(['eur' => ['usd' => 2.0]])
+        : Http::response('Not Found', 404));
+
+    actingAs(User::factory()->onboarded()->create(['currency_code' => 'EUR']))
+        ->postJson('/api/converted-amounts', ['items' => [
+            ['from' => 'USD', 'amount' => 1000, 'date' => '2021-01-05'],
+            ['from' => 'USD', 'amount' => 1000, 'date' => '2025-11-12'],
+        ]])
+        ->assertOk()
+        ->assertExactJson(['amounts' => [null, 500]]);
+});
+
+test('it stops asking a slow provider once the budget is spent', function () {
+    $calls = 0;
+    Http::fake(function () use (&$calls) {
+        $calls++;
+        Carbon::setTestNow(now()->addSeconds(3));
+
+        return Http::response(['eur' => ['usd' => 2.0]]);
+    });
+
+    actingAs(User::factory()->onboarded()->create(['currency_code' => 'EUR']))
+        ->postJson('/api/converted-amounts', ['items' => [
+            ['from' => 'USD', 'amount' => 1000, 'date' => '2025-11-12'],
+            ['from' => 'USD', 'amount' => 1000, 'date' => '2025-11-11'],
+            ['from' => 'USD', 'amount' => 1000, 'date' => '2025-11-10'],
+            ['from' => 'USD', 'amount' => 1000, 'date' => '2025-11-09'],
+        ]])
+        ->assertOk()
+        ->assertExactJson(['amounts' => [500, 500, null, null]]);
+
+    expect($calls)->toBe(2);
 });
 
 test('it allows thirty requests a minute, whatever else the user calls', function () {

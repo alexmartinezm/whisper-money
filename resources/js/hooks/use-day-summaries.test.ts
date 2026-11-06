@@ -10,9 +10,15 @@ vi.mock('@inertiajs/react', () => ({
     usePage: () => ({ props: { auth: { user: { currency_code: 'EUR' } } } }),
 }));
 
+const askedFor = vi.hoisted(() => ({ current: [] as Transaction[] }));
+
 vi.mock('@/hooks/use-amounts-in-user-currency', () => ({
-    useAmountsInUserCurrency: () => (transaction: Transaction) =>
-        transaction.currency_code === 'EUR' ? transaction.amount : null,
+    useAmountsInUserCurrency: (amounts: Transaction[]) => {
+        askedFor.current = amounts;
+
+        return (transaction: Transaction) =>
+            transaction.currency_code === 'EUR' ? transaction.amount : null;
+    },
 }));
 
 function transaction(
@@ -41,6 +47,27 @@ describe('useInMemoryDaySummaries', () => {
             count: 1,
             total: { status: 'ready', amount: 300 },
         });
+    });
+
+    it('asks for the rates of the drawn days only, over all their rows', () => {
+        const rows = [
+            transaction('a', '2026-10-26', -1000, 'USD'),
+            transaction('b', '2026-10-26', -500, 'USD'),
+            transaction('c', '2026-10-25', 300, 'USD'),
+            transaction('d', '2026-10-24', 300, 'USD'),
+        ];
+
+        renderHook(() =>
+            useInMemoryDaySummaries(rows, { drawn: rows.slice(0, 1) }),
+        );
+
+        expect(askedFor.current).toEqual([
+            {
+                amount: -1500,
+                currency_code: 'USD',
+                transaction_date: '2026-10-26',
+            },
+        ]);
     });
 
     it('leaves a day total out when one of its rows has no rate', () => {

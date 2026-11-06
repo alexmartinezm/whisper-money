@@ -9,6 +9,8 @@ use App\Models\Label;
 use App\Models\Transaction;
 use App\Models\TransactionSplit;
 use App\Models\User;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Facades\Http;
 
 use function Pest\Laravel\actingAs;
 
@@ -146,6 +148,35 @@ function daySplitTransaction(string $date, array $lines, string $currency = 'EUR
 
     return $transaction;
 }
+
+test('a provider outage costs the page one attempt and keeps the days that have a rate', function () {
+    ExchangeRate::factory()->create([
+        'base_currency' => 'eur',
+        'date' => '2025-11-09',
+        'rates' => ['eur' => 1.0, 'usd' => 2.0],
+    ]);
+    $calls = 0;
+    Http::fake(function () use (&$calls) {
+        $calls++;
+
+        throw new ConnectionException('cURL error 28: Operation timed out');
+    });
+
+    dayTransaction('2025-11-12', -1000, 'USD');
+    dayTransaction('2025-11-11', -1000, 'USD');
+    dayTransaction('2025-11-10', -1000, 'USD');
+    dayTransaction('2025-11-10', -700);
+    dayTransaction('2025-11-09', -1000, 'USD');
+    dayTransaction('2025-11-08', -250);
+
+    expect(dayTotalsFor())->toBe([
+        '2025-11-08' => ['count' => 1, 'total' => -250],
+        '2025-11-09' => ['count' => 1, 'total' => -500],
+        '2025-11-10' => ['count' => 2, 'total' => null],
+        '2025-11-11' => ['count' => 1, 'total' => null],
+        '2025-11-12' => ['count' => 1, 'total' => null],
+    ])->and($calls)->toBe(2);
+});
 
 test('without a filter a split transaction stands at its own amount and counts once', function () {
     $groceries = Category::factory()->create(['user_id' => $this->user->id]);

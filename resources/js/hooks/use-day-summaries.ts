@@ -34,19 +34,29 @@ function groupByDate<T extends Transaction>(
  * Day summaries for a list held whole in memory, which may draw only part of
  * it: each day counts and adds up every row of the list, drawn or not, and
  * converts each currency's sum once, as the server does for /transactions.
+ *
+ * Only the days with a header need a figure, so only those ask for a rate: a
+ * long history must not turn into a provider call per day nobody looks at.
  */
 export function useInMemoryDaySummaries(
     transactions: Transaction[],
-    rowTotalAmount?: RowTotalAmount,
+    {
+        drawn = transactions,
+        rowTotalAmount,
+    }: {
+        /** The rows on screen, whose days draw a header. */
+        drawn?: Transaction[];
+        rowTotalAmount?: RowTotalAmount;
+    } = {},
 ): DaySummaryOf {
     const byDate = useMemo(() => groupByDate(transactions), [transactions]);
-    const daySums = useMemo(
-        () =>
-            [...byDate.values()].flatMap((day) =>
-                sumPerCurrency(day, rowTotalAmount),
-            ),
-        [byDate, rowTotalAmount],
-    );
+    const daySums = useMemo(() => {
+        const drawnDates = new Set(drawn.map((row) => row.transaction_date));
+
+        return [...byDate.entries()]
+            .filter(([date]) => drawnDates.has(date))
+            .flatMap(([, day]) => sumPerCurrency(day, rowTotalAmount));
+    }, [byDate, drawn, rowTotalAmount]);
     const amountInUserCurrency = useAmountsInUserCurrency(daySums);
 
     return useCallback(

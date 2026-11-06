@@ -4,10 +4,23 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useInMemoryTransactionSource } from './use-in-memory-transaction-source';
 
+const drawnRows = vi.hoisted(() => ({ current: [] as Transaction[] }));
+
 vi.mock('@/hooks/use-day-summaries', () => ({
     useInMemoryDaySummaries:
-        (rows: Transaction[], rowTotalAmount: (row: Transaction) => number) =>
+        (
+            rows: Transaction[],
+            {
+                drawn,
+                rowTotalAmount,
+            }: {
+                drawn: Transaction[];
+                rowTotalAmount: (row: Transaction) => number;
+            },
+        ) =>
         (date: string) => {
+            drawnRows.current = drawn;
+
             const day = rows.filter((row) => row.transaction_date === date);
 
             return {
@@ -186,6 +199,28 @@ describe('useInMemoryTransactionSource', () => {
 
         expect(result.current.rows).toHaveLength(1);
         expect(result.current.daySummaryOf('2026-10-01').count).toBe(3);
+    });
+
+    it('hands the day summaries only the rows on screen, none without day headers', () => {
+        const { result } = renderHook(() =>
+            useInMemoryTransactionSource({
+                transactions: ROWS,
+                categories: NO_CATEGORIES,
+                pageSize: 1,
+            }),
+        );
+
+        result.current.daySummaryOf('2026-10-03');
+        expect(drawnRows.current.map((row) => row.id)).toEqual(
+            result.current.rows.map((row) => row.id),
+        );
+
+        act(() =>
+            result.current.onSortingChange([{ id: 'amount', desc: true }]),
+        );
+
+        result.current.daySummaryOf('2026-10-03');
+        expect(drawnRows.current).toEqual([]);
     });
 
     describe('a split transaction', () => {

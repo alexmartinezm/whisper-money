@@ -42,8 +42,9 @@ class TransactionDayTotals
      * figure that skipped it would be wrong.
      *
      * A rate the table does not hold yet is fetched from the provider once and
-     * stored, as every other conversion does; an unreachable provider answers
-     * with no rate, so the day shows no total rather than holding up the page.
+     * stored, as every other conversion does. A failing provider costs the page
+     * one bounded attempt, not one per day ({@see ExchangeRateService::convertManyOrNull()}):
+     * the days it leaves without a rate show no total, the others keep theirs.
      *
      * @param  Builder<Transaction>  $filtered  The list's query with its filters, without order or eager loads
      * @param  Collection<int, string>  $dates  Days as `Y-m-d`
@@ -69,17 +70,20 @@ class TransactionDayTotals
 
         $this->narrowSplitTransactions($groups, $listed, $filters);
 
-        // Only days holding another currency need a rate, so a reader who
-        // keeps everything in one currency never reads the rates table here.
-        $this->exchangeRateService->preloadRates($currency, $groups
-            ->reject(fn (stdClass $group): bool => strcasecmp($group->currency_code, $currency) === 0)
-            ->map(fn (stdClass $group): string => $this->dayOf($group)));
+        $converted = $this->exchangeRateService->convertManyOrNull($groups
+            ->map(fn (stdClass $group): array => [
+                'from' => $group->currency_code,
+                'amount' => (int) $group->amount_sum,
+                'date' => $this->dayOf($group),
+            ])
+            ->all(), $currency);
 
         return $groups
-            ->groupBy(fn (stdClass $group): string => $this->dayOf($group))
-            ->map(fn (Collection $day, string $date): array => [
-                'count' => (int) $day->sum('transactions_count'),
-                'total' => $this->convertedTotal($day, $currency, $date),
+            ->zip($converted)
+            ->groupBy(fn (Collection $group): string => $this->dayOf($group->first()))
+            ->map(fn (Collection $day): array => [
+                'count' => $day->sum(fn (Collection $group): int => (int) $group->first()->transactions_count),
+                'total' => $this->addedUp($day->map(fn (Collection $group): ?int => $group->last())),
             ])
             ->all();
     }
@@ -113,23 +117,13 @@ class TransactionDayTotals
     }
 
     /**
-     * @param  Collection<int, stdClass>  $day
+     * A day's converted sums added up, or null when any of them has no rate.
+     *
+     * @param  Collection<int, ?int>  $amounts
      */
-    private function convertedTotal(Collection $day, string $currency, string $date): ?int
+    private function addedUp(Collection $amounts): ?int
     {
-        $total = 0;
-
-        foreach ($day as $group) {
-            $converted = $this->exchangeRateService->convertOrNull($group->currency_code, $currency, (int) $group->amount_sum, $date);
-
-            if ($converted === null) {
-                return null;
-            }
-
-            $total += $converted;
-        }
-
-        return $total;
+        return $amounts->containsStrict(null) ? null : (int) $amounts->sum();
     }
 
     /**
