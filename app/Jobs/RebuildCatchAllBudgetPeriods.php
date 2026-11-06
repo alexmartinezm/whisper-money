@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Models\BudgetPeriod;
 use App\Services\BudgetTransactionService;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -13,7 +14,7 @@ use Throwable;
 
 /**
  * Re-derive catch-all periods after what the other budgets claim there changed:
- * a budget created, deleted or archived.
+ * a budget created, deleted, archived or tracking something else.
  *
  * The catch-all keeps the rows it absorbed until something re-derives them, so
  * without this a new budget would count those expenses alongside it, and a
@@ -21,7 +22,9 @@ use Throwable;
  *
  * Each period comes claimed with a reconciliation token, like any backfill
  * ({@see AssignHistoricalTransactionsToBudget}): a run that lost its token to a
- * newer edit leaves that period, and its flag, to whoever holds it now.
+ * newer edit leaves that period, and its flag, to whoever holds it now. A null
+ * token is a period whose first backfill was pending at claim time: it stays
+ * that backfill's to flag, and this only visits it afterwards.
  */
 class RebuildCatchAllBudgetPeriods implements ShouldQueue
 {
@@ -37,12 +40,12 @@ class RebuildCatchAllBudgetPeriods implements ShouldQueue
     public int $backoff = 10;
 
     /**
-     * @param  array<string, string>  $reconciliationTokens  by period id, the catch-all periods this run claimed
-     * @param  array<int, string>  $awaitPeriodIds  periods of the budget being created, whose backfill goes first
+     * @param  array<string, ?string>  $reconciliationTokens  by period id, the catch-all periods to rebuild
      */
     public function __construct(
         public array $reconciliationTokens,
-        public array $awaitPeriodIds = [],
+        public string $userId,
+        public string $spaceId,
     ) {}
 
     public function retryUntil(): Carbon
@@ -52,9 +55,7 @@ class RebuildCatchAllBudgetPeriods implements ShouldQueue
 
     public function handle(BudgetTransactionService $service): void
     {
-        // A closed period only gives up what another budget holds, so the new
-        // budget has to be holding it by now.
-        if (BudgetPeriod::query()->whereKey($this->awaitPeriodIds)->where('processing_historical', true)->exists()) {
+        if ($this->isWaitingOnBackfill()) {
             $this->release($this->backoff);
 
             return;
@@ -73,39 +74,62 @@ class RebuildCatchAllBudgetPeriods implements ShouldQueue
      */
     public function failed(?Throwable $exception): void
     {
-        foreach ($this->reconciliationTokens as $periodId => $token) {
-            $this->handBack($periodId, $token);
-        }
+        $handedBack = collect($this->reconciliationTokens)
+            ->filter(fn (?string $token, string $periodId): bool => $token !== null && $this->handBack($periodId, $token))
+            ->keys();
 
-        Log::error('Catch-all budget rebuild failed', [
-            'budget_period_ids' => array_keys($this->reconciliationTokens),
+        Log::error('Catch-all budget rebuild gave up: run budgets:rebuild-catch-all to heal these periods', [
+            'user_id' => $this->userId,
+            'space_id' => $this->spaceId,
+            'stale_period_ids' => $handedBack->all(),
+            'possibly_stale_period_ids' => array_keys(array_filter($this->reconciliationTokens, fn (?string $token): bool => $token === null)),
             'exception' => $exception?->getMessage(),
         ]);
+    }
+
+    /**
+     * The catch-all gives up what other budgets hold, so whatever is writing
+     * them, for this user and space, goes first. That covers runs queued by an
+     * earlier edit whose own rebuild this one superseded. Periods claimed by
+     * another rebuild are not waited on: two rebuilds would wait on each other.
+     */
+    private function isWaitingOnBackfill(): bool
+    {
+        return BudgetPeriod::query()
+            ->where('processing_historical', true)
+            ->whereHas('budget', fn (Builder $budget) => $budget->where('user_id', $this->userId)->where('space_id', $this->spaceId))
+            ->where(fn (Builder $periods) => $periods
+                ->whereNull('reconciliation_token')
+                ->orWhereHas('budget', fn (Builder $budget) => $budget->where('is_catch_all', false)))
+            ->exists();
     }
 
     /**
      * The row lock is held across the whole period, which also blocks a
      * concurrent edit from stamping a new token mid-run.
      */
-    private function rebuild(BudgetTransactionService $service, string $periodId, string $token): void
+    private function rebuild(BudgetTransactionService $service, string $periodId, ?string $token): void
     {
         DB::transaction(function () use ($service, $periodId, $token): void {
             $period = BudgetPeriod::query()->whereKey($periodId)->lockForUpdate()->first();
 
-            if ($period?->reconciliation_token !== $token) {
+            if ($period === null || ($token !== null && $period->reconciliation_token !== $token)) {
                 return;
             }
 
             $service->rebuildCatchAllPeriod($period);
-            $this->handBack($periodId, $token);
+
+            if ($token !== null) {
+                $this->handBack($periodId, $token);
+            }
         });
     }
 
-    private function handBack(string $periodId, string $token): void
+    private function handBack(string $periodId, string $token): bool
     {
-        BudgetPeriod::query()
+        return BudgetPeriod::query()
             ->whereKey($periodId)
             ->where('reconciliation_token', $token)
-            ->update(['processing_historical' => false, 'reconciliation_token' => null]);
+            ->update(['processing_historical' => false, 'reconciliation_token' => null]) === 1;
     }
 }

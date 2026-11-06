@@ -2,6 +2,7 @@
 
 use App\Enums\CategoryType;
 use App\Enums\RolloverType;
+use App\Jobs\AssignHistoricalTransactionsToBudget;
 use App\Jobs\RebuildCatchAllBudgetPeriods;
 use App\Mcp\Servers\WhisperMoneyServer;
 use App\Mcp\Tools\DeleteBudget;
@@ -17,8 +18,11 @@ use App\Models\User;
 use App\Services\BudgetManagementService;
 use App\Services\BudgetTransactionService;
 use Carbon\CarbonImmutable;
+use Illuminate\Queue\Events\JobProcessing;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Queue;
 
@@ -126,6 +130,29 @@ function budgetTransactionIds(Budget $budget): array
         ->all();
 }
 
+/**
+ * @param  array<string, mixed>  $changes
+ * @return array<string, mixed>
+ */
+function rebuildChanges(array $changes = []): array
+{
+    return [
+        'released_double_count' => 0,
+        'reduced_double_count' => 0,
+        'released_other' => 0,
+        'adjusted' => 0,
+        'absorbed' => 0,
+        'spent_change' => 0,
+        'left_alone' => [],
+        ...$changes,
+    ];
+}
+
+function switchTracking(User $user, Budget $budget, Category $category): void
+{
+    app(BudgetManagementService::class)->update($user, $user->personalSpace, $budget->id, ['category_ids' => [$category->id]], CarbonImmutable::today());
+}
+
 function snapshotAmount(BudgetPeriod $period, Transaction $transaction): ?int
 {
     return BudgetTransaction::query()
@@ -164,14 +191,14 @@ test('a catch-all budget queues no rebuild, nor does a budget with no catch-all 
     Queue::assertNotPushed(RebuildCatchAllBudgetPeriods::class);
 });
 
-test('a new budget claims the catch-all periods it overlaps and makes the rebuild wait for its backfill', function () {
+test('a new budget claims the catch-all periods it overlaps', function () {
     Queue::fake();
     $catchAll = Budget::factory()->monthly()->catchAll()->create(['user_id' => $this->user->id]);
     $october = BudgetPeriod::factory()->create(['budget_id' => $catchAll->id, 'start_date' => '2026-10-01', 'end_date' => '2026-10-31']);
     $september = BudgetPeriod::factory()->create(['budget_id' => $catchAll->id, 'start_date' => '2026-09-01', 'end_date' => '2026-09-30']);
     $august = BudgetPeriod::factory()->create(['budget_id' => $catchAll->id, 'start_date' => '2026-08-01', 'end_date' => '2026-08-31']);
 
-    $budget = createBudget($this->user, 'monthly', categoryIds: [$this->category->id]);
+    createBudget($this->user, 'monthly', categoryIds: [$this->category->id]);
 
     expect($october->fresh()->processing_historical)->toBeTrue()
         ->and($september->fresh()->processing_historical)->toBeTrue()
@@ -182,8 +209,7 @@ test('a new budget claims the catch-all periods it overlaps and makes the rebuil
         $september->id => $september->fresh()->reconciliation_token,
     ];
 
-    Queue::assertPushed(RebuildCatchAllBudgetPeriods::class, fn (RebuildCatchAllBudgetPeriods $job): bool => collect($job->reconciliationTokens)->sortKeys()->all() === collect($tokens)->sortKeys()->all()
-        && collect($job->awaitPeriodIds)->sort()->values()->all() === $budget->periods()->pluck('id')->sort()->values()->all());
+    Queue::assertPushed(RebuildCatchAllBudgetPeriods::class, fn (RebuildCatchAllBudgetPeriods $job): bool => collect($job->reconciliationTokens)->sortKeys()->all() === collect($tokens)->sortKeys()->all());
 });
 
 test('a new budget also frees the closed catch-all period its backfill reaches, and leaves the rest of it alone', function () {
@@ -245,21 +271,25 @@ test('archiving a budget freezes what it holds and hands the catch-all everythin
     $sameDay = expense($this->user, $this->category, '2026-10-15');
     $scheduled = expense($this->user, $this->category, '2026-10-20');
     $held = [$before->id, $sameDay->id, $scheduled->id];
+    // A budget tracks it, so no assignment would ever hand it to the catch-all:
+    // only the rebuild the archive queues can.
+    $neverHeld = expense($this->user, $this->category, '2026-10-06');
+    BudgetTransaction::query()->where('transaction_id', $neverHeld->id)->delete();
 
     $this->actingAs($this->user)->post(route('budgets.archive', $budget))->assertRedirect(route('budgets.show', $budget));
 
     // Everything it counted stays with it and only there, unlike upstream,
     // which drops what is dated from the archive day on.
     expect(budgetTransactionIds($budget))->toEqualCanonicalizing($held)
-        ->and(periodTransactionIds($current))->toBe([])
-        ->and($this->rebuilder->rebuildCatchAllPeriod($current))->toBe(['released' => 0, 'adjusted' => 0, 'absorbed' => 0, 'spent_change' => 0]);
+        ->and(periodTransactionIds($current))->toBe([$neverHeld->id])
+        ->and($this->rebuilder->rebuildCatchAllPeriod($current))->toBe(rebuildChanges());
 
     // And it takes in nothing more, dated before its archive day or not.
     $late = expense($this->user, $this->category, '2026-10-01');
     $after = expense($this->user, $this->category, '2026-10-16');
 
     expect(budgetTransactionIds($budget))->toEqualCanonicalizing($held)
-        ->and(periodTransactionIds($current))->toEqualCanonicalizing([$late->id, $after->id]);
+        ->and(periodTransactionIds($current))->toEqualCanonicalizing([$neverHeld->id, $late->id, $after->id]);
 
     Mail::assertNothingSent();
 });
@@ -360,7 +390,7 @@ test('a closed period is judged by the rows other budgets hold, not by what they
 
     // The double count goes, what only the catch-all counted stays although the
     // budget tracks that category now, and a closed period absorbs nothing.
-    expect($changes)->toBe(['released' => 1, 'adjusted' => 0, 'absorbed' => 0, 'spent_change' => -1000])
+    expect($changes)->toBe(rebuildChanges(['released_double_count' => 1, 'spent_change' => -1000]))
         ->and(periodTransactionIds($september))->toBe([$trackedOnlyNow->id])
         ->and(periodTransactionIds(periodOn($budget, '2026-09-10')))->toBe([$heldThen->id]);
 });
@@ -411,7 +441,7 @@ test('a rebuild leaves an archived catch-all as it is', function () {
     $transaction = expense($this->user, $this->category, '2026-10-05');
     doubleCount($period, $transaction, 1000);
 
-    expect($this->rebuilder->rebuildCatchAllPeriod($period)['released'])->toBe(0)
+    expect($this->rebuilder->rebuildCatchAllPeriod($period))->toBe(rebuildChanges())
         ->and(periodTransactionIds($period))->toBe([$transaction->id]);
 });
 
@@ -420,7 +450,8 @@ describe('the rebuild job', function () {
         $this->catchAll = Budget::factory()->monthly()->catchAll()->create(['user_id' => $this->user->id, 'space_id' => $this->user->personalSpace->id]);
         $this->claimed = BudgetPeriod::factory()->create(['budget_id' => $this->catchAll->id, 'start_date' => '2026-10-01', 'end_date' => '2026-10-31', 'processing_historical' => true, 'reconciliation_token' => 'ours']);
         $this->superseded = BudgetPeriod::factory()->create(['budget_id' => $this->catchAll->id, 'start_date' => '2026-11-01', 'end_date' => '2026-11-30', 'processing_historical' => true, 'reconciliation_token' => 'newer']);
-        $this->job = fn () => new RebuildCatchAllBudgetPeriods([$this->claimed->id => 'ours', $this->superseded->id => 'overtaken']);
+        $this->jobFor = fn (array $tokens) => new RebuildCatchAllBudgetPeriods($tokens, $this->user->id, $this->user->personalSpace->id);
+        $this->job = fn () => ($this->jobFor)([$this->claimed->id => 'ours', $this->superseded->id => 'overtaken']);
     });
 
     test('it reconciles the periods it still holds and hands them back', function () {
@@ -454,12 +485,13 @@ describe('the rebuild job', function () {
             ->and($this->superseded->fresh()->reconciliation_token)->toBe('newer');
     });
 
-    test('it steps aside while the backfill it depends on is running', function () {
-        $backfilling = BudgetPeriod::factory()->create(['start_date' => '2026-10-01', 'end_date' => '2026-10-31', 'processing_historical' => true]);
+    test('it steps aside while another budget of the user and space is being backfilled', function () {
+        $other = Budget::factory()->monthly()->create(['user_id' => $this->user->id, 'space_id' => $this->user->personalSpace->id]);
+        $backfilling = BudgetPeriod::factory()->create(['budget_id' => $other->id, 'start_date' => '2026-10-01', 'end_date' => '2026-10-31', 'processing_historical' => true]);
         $missing = expense($this->user, $this->category, '2026-10-05');
         BudgetTransaction::query()->delete();
 
-        $job = (new RebuildCatchAllBudgetPeriods([$this->claimed->id => 'ours'], [$backfilling->id]))->withFakeQueueInteractions();
+        $job = ($this->jobFor)([$this->claimed->id => 'ours'])->withFakeQueueInteractions();
         $job->handle($this->rebuilder);
 
         $job->assertReleased(delay: 10);
@@ -467,11 +499,45 @@ describe('the rebuild job', function () {
             ->and($this->claimed->fresh()->reconciliation_token)->toBe('ours');
 
         $backfilling->update(['processing_historical' => false]);
-        $job = (new RebuildCatchAllBudgetPeriods([$this->claimed->id => 'ours'], [$backfilling->id]))->withFakeQueueInteractions();
+        $job = ($this->jobFor)([$this->claimed->id => 'ours'])->withFakeQueueInteractions();
         $job->handle($this->rebuilder);
 
         $job->assertNotReleased();
         expect(periodTransactionIds($this->claimed))->toBe([$missing->id]);
+    });
+
+    test('it does not wait on other rebuilds, on other users or on other spaces', function () {
+        // $this->superseded stands for a period another rebuild has claimed.
+        $stranger = User::factory()->create();
+        BudgetPeriod::factory()->create(['start_date' => '2026-10-01', 'end_date' => '2026-10-31', 'processing_historical' => true, 'budget_id' => Budget::factory()->create(['user_id' => $stranger->id])->id]);
+
+        $job = ($this->jobFor)([$this->claimed->id => 'ours'])->withFakeQueueInteractions();
+        $job->handle($this->rebuilder);
+
+        $job->assertNotReleased();
+        expect($this->claimed->fresh()->reconciliation_token)->toBeNull();
+    });
+
+    test('giving up says which periods stayed stale and how to heal them', function () {
+        Log::spy();
+
+        ($this->job)()->failed(new RuntimeException('boom'));
+
+        Log::shouldHaveReceived('error')->once()->withArgs(fn (string $message, array $context): bool => str_contains($message, 'budgets:rebuild-catch-all')
+            && $context['stale_period_ids'] === [$this->claimed->id]);
+    });
+
+    test('what a rebuild gave up on is healed by the command', function () {
+        $transaction = expense($this->user, $this->category, '2026-10-05');
+        $budget = Budget::factory()->monthly()->forCategories($this->category)->create(['user_id' => $this->user->id, 'space_id' => $this->user->personalSpace->id]);
+        $period = BudgetPeriod::factory()->create(['budget_id' => $budget->id, 'start_date' => '2026-10-01', 'end_date' => '2026-10-31']);
+        doubleCount($period, $transaction, 1000);
+        doubleCount($this->claimed, $transaction, 1000);
+
+        ($this->job)()->failed(new RuntimeException('boom'));
+        $this->artisan('budgets:rebuild-catch-all')->assertSuccessful();
+
+        expect(periodTransactionIds($this->claimed))->toBe([]);
     });
 
     test('it keeps retrying for a while rather than counting tries', function () {
@@ -511,8 +577,8 @@ test('the rebuild command heals double counts, on closed periods only by what is
     $world = driftedCatchAll($this);
 
     $this->artisan('budgets:rebuild-catch-all')
-        ->expectsOutputToContain('Running periods: 1 transaction(s) were released, 0 were adjusted, 1 were absorbed')
-        ->expectsOutputToContain('Closed periods: 1 transaction(s) were released, 1 were reduced; a closed period absorbs nothing')
+        ->expectsOutputToContain('Running periods: 1 proved double count(s) were released, 0 were reduced; 0 row(s) were released for another reason, 0 were adjusted, 1 were absorbed')
+        ->expectsOutputToContain('Closed periods: 1 proved double count(s) were released, 1 were reduced; a closed period absorbs nothing')
         ->assertSuccessful();
 
     expect(periodTransactionIds($world['september']))->toEqualCanonicalizing([$world['closedSplit']->id, $world['closedOwn']->id])
@@ -525,8 +591,8 @@ test('the rebuild command heals double counts, on closed periods only by what is
 
     // Nothing left to do, so a second run changes nothing.
     $this->artisan('budgets:rebuild-catch-all')
-        ->expectsOutputToContain('Running periods: 0 transaction(s) were released, 0 were adjusted, 0 were absorbed')
-        ->expectsOutputToContain('Closed periods: 0 transaction(s) were released, 0 were reduced')
+        ->expectsOutputToContain('Running periods: 0 proved double count(s) were released, 0 were reduced; 0 row(s) were released for another reason, 0 were adjusted, 0 were absorbed')
+        ->expectsOutputToContain('Closed periods: 0 proved double count(s) were released, 0 were reduced')
         ->assertSuccessful();
 });
 
@@ -545,8 +611,8 @@ test('the dry run writes nothing and reports exactly what the real run then does
 
     $this->artisan('budgets:rebuild-catch-all', ['--dry-run' => true])
         ->expectsOutputToContain('DRY RUN')
-        ->expectsOutputToContain('Running periods: 1 transaction(s) would be released, 0 would be adjusted, 1 would be absorbed')
-        ->expectsOutputToContain('Closed periods: 1 transaction(s) would be released, 1 would be reduced')
+        ->expectsOutputToContain('Running periods: 1 proved double count(s) would be released, 0 would be reduced; 0 row(s) would be released for another reason, 0 would be adjusted, 1 would be absorbed')
+        ->expectsOutputToContain('Closed periods: 1 proved double count(s) would be released, 1 would be reduced')
         ->assertSuccessful();
 
     $writes = array_values(array_filter($statements, fn (string $sql): bool => preg_match('/^\s*(insert|update|delete|replace|truncate)\b/i', $sql) === 1));
@@ -560,8 +626,8 @@ test('the dry run writes nothing and reports exactly what the real run then does
     $real = collect([$world['september'], $world['october']])->map(fn (BudgetPeriod $period): array => $this->rebuilder->rebuildCatchAllPeriod($period->fresh()))->all();
 
     expect($real)->toBe($drift)
-        ->and($real[0])->toBe(['released' => 1, 'adjusted' => 1, 'absorbed' => 0, 'spent_change' => -4000])
-        ->and($real[1])->toBe(['released' => 1, 'adjusted' => 0, 'absorbed' => 1, 'spent_change' => -3500]);
+        ->and($real[0])->toBe(rebuildChanges(['released_double_count' => 1, 'reduced_double_count' => 1, 'spent_change' => -4000]))
+        ->and($real[1])->toBe(rebuildChanges(['released_double_count' => 1, 'absorbed' => 1, 'spent_change' => -3500]));
 });
 
 test('the rebuild command can be narrowed to one user', function () {
@@ -605,4 +671,324 @@ test('healing a closed carry-over period is reported, and only the nightly close
     $this->artisan('budgets:generate-periods')->assertSuccessful();
 
     expect($october->fresh()->carried_over_amount)->toBe(100000);
+});
+
+describe('a live budget whose covering period has ended', function () {
+    test('claims only what it holds: the catch-all keeps what it tracks today but never counted', function () {
+        $catchAll = createBudget($this->user, 'yearly', isCatchAll: true);
+        $current = $catchAll->getCurrentPeriod();
+        $budget = createBudget($this->user, 'monthly', categoryIds: [$this->category->id]);
+        $onlyInCatchAll = expense($this->user, $this->other, '2026-09-05');
+
+        // Through the tracking-change reconcile, on the sync queue.
+        switchTracking($this->user, $budget, $this->other);
+
+        expect(periodTransactionIds($current))->toBe([$onlyInCatchAll->id])
+            ->and(budgetTransactionIds($budget))->toBe([])
+            ->and($current->fresh()->processing_historical)->toBeFalse();
+
+        // And through the rebuild, which has nothing to report about it.
+        expect($this->rebuilder->rebuildCatchAllPeriod($current))->toBe(rebuildChanges());
+    });
+
+    test('claims only what it holds on a different cadence or start day', function (string $periodType, int $startDay, string $start, string $end) {
+        $space = $this->user->personalSpace;
+        $catchAll = Budget::factory()->monthly()->catchAll()->create(['user_id' => $this->user->id, 'space_id' => $space->id]);
+        $current = BudgetPeriod::factory()->create(['budget_id' => $catchAll->id, 'start_date' => '2026-10-01', 'end_date' => '2026-10-31']);
+        $budget = Budget::factory()->forCategories($this->category)->create(['user_id' => $this->user->id, 'space_id' => $space->id, 'period_type' => $periodType, 'period_start_day' => $startDay]);
+        BudgetPeriod::factory()->create(['budget_id' => $budget->id, 'start_date' => $start, 'end_date' => $end]);
+        $transaction = expense($this->user, $this->other, '2026-10-03');
+
+        expect(periodTransactionIds($current))->toBe([$transaction->id]);
+
+        switchTracking($this->user, $budget, $this->other);
+
+        expect(periodTransactionIds($current))->toBe([$transaction->id])
+            ->and($this->rebuilder->rebuildCatchAllPeriod($current))->toBe(rebuildChanges());
+    })->with([
+        'weekly' => ['weekly', 1, '2026-09-28', '2026-10-04'],
+        'monthly from the 10th' => ['monthly', 10, '2026-09-10', '2026-10-09'],
+    ]);
+
+    test('still takes a late expense on its own, and the catch-all does not count it too', function () {
+        $catchAll = createBudget($this->user, 'yearly', isCatchAll: true);
+        $budget = createBudget($this->user, 'monthly', categoryIds: [$this->category->id]);
+
+        // A single assignment writes into the closed period, so here the budget
+        // holds what it claims and the catch-all has to stay out.
+        $late = expense($this->user, $this->category, '2026-09-05');
+
+        expect(periodTransactionIds(periodOn($budget, '2026-09-10')))->toBe([$late->id])
+            ->and(periodTransactionIds($catchAll->getCurrentPeriod()))->toBe([]);
+    });
+
+    test('a first catch-all backfill absorbs what it tracks today but does not hold', function () {
+        $budget = createBudget($this->user, 'monthly', categoryIds: [$this->category->id]);
+        $transaction = expense($this->user, $this->other, '2026-09-05');
+        switchTracking($this->user, $budget, $this->other);
+
+        $catchAll = createBudget($this->user, 'monthly', isCatchAll: true);
+
+        expect(periodTransactionIds(periodOn($catchAll, '2026-09-10')))->toBe([$transaction->id]);
+    });
+});
+
+describe('a split transaction in a closed period', function () {
+    beforeEach(function () {
+        $this->catchAll = createBudget($this->user, 'monthly', isCatchAll: true);
+        $this->september = periodOn($this->catchAll, '2026-09-10');
+        $this->holder = createBudget($this->user, 'monthly', categoryIds: [$this->category->id]);
+        $this->third = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Expense]);
+    });
+
+    test('is not touched when the holder moved on: its row no longer says which line it counts', function () {
+        $transaction = splitInto(expense($this->user, $this->category, '2026-09-05', -10000), [[$this->category, -3000], [$this->other, -7000]]);
+
+        expect(snapshotAmount($this->september, $transaction))->toBe(7000);
+
+        switchTracking($this->user, $this->holder, $this->other);
+
+        expect($this->rebuilder->rebuildCatchAllPeriod($this->september->fresh()))->toBe(rebuildChanges(['left_alone' => [[
+            'transaction_id' => $transaction->id,
+            'transaction_date' => '2026-09-05',
+            'amount' => 7000,
+            'reason' => BudgetTransactionService::HOLDER_ROW_UNEXPLAINED,
+        ]]]))
+            ->and(snapshotAmount($this->september, $transaction))->toBe(7000)
+            ->and(snapshotAmount(periodOn($this->holder, '2026-09-10'), $transaction))->toBe(3000);
+    });
+
+    test('keeps even a real double count when the holder moved on, and lists it', function () {
+        $transaction = splitInto(expense($this->user, $this->category, '2026-09-05', -10000), [[$this->category, -3000], [$this->other, -7000]]);
+        doubleCount($this->september, $transaction, 10000);
+
+        switchTracking($this->user, $this->holder, $this->other);
+
+        $this->artisan('budgets:rebuild-catch-all', ['--dry-run' => true])
+            ->expectsOutputToContain('1 row(s) left alone')
+            ->expectsOutputToContain($transaction->id)
+            ->assertSuccessful();
+
+        $this->artisan('budgets:rebuild-catch-all')->assertSuccessful();
+
+        expect(snapshotAmount($this->september, $transaction))->toBe(10000);
+    });
+
+    test('loses exactly the lines every holder is proved to count', function () {
+        $second = createBudget($this->user, 'monthly', categoryIds: [$this->other->id]);
+        $transaction = splitInto(expense($this->user, $this->category, '2026-09-05', -10000), [[$this->category, -3000], [$this->other, -5000], [$this->third, -2000]]);
+        doubleCount($this->september, $transaction, 10000);
+
+        expect(snapshotAmount(periodOn($second, '2026-09-10'), $transaction))->toBe(5000)
+            ->and($this->rebuilder->rebuildCatchAllPeriod($this->september->fresh()))->toBe(rebuildChanges(['reduced_double_count' => 1, 'spent_change' => -8000]))
+            ->and(snapshotAmount($this->september, $transaction))->toBe(2000);
+    });
+
+    test('is not touched when nothing overlaps', function () {
+        $transaction = splitInto(expense($this->user, $this->category, '2026-09-05', -10000), [[$this->category, -3000], [$this->other, -7000]]);
+
+        expect($this->rebuilder->rebuildCatchAllPeriod($this->september->fresh()))->toBe(rebuildChanges())
+            ->and(snapshotAmount($this->september, $transaction))->toBe(7000);
+    });
+
+    test('never grows, even when the lines nobody holds add up to more than it counted', function () {
+        $transaction = splitInto(expense($this->user, $this->category, '2026-09-05', -10000), [[$this->category, -3000], [$this->other, -7000]]);
+        doubleCount($this->september, $transaction, 2000);
+
+        expect($this->rebuilder->rebuildCatchAllPeriod($this->september->fresh()))->toBe(rebuildChanges())
+            ->and(snapshotAmount($this->september, $transaction))->toBe(2000);
+    });
+
+    test('is left alone in a running period too when a frozen row cannot be read', function () {
+        $transaction = splitInto(expense($this->user, $this->category, '2026-10-05', -10000), [[$this->category, -3000], [$this->other, -7000]]);
+        $holderRow = BudgetTransaction::query()->where('transaction_id', $transaction->id)->where('budget_period_id', $this->holder->getCurrentPeriod()->id)->sole();
+        $this->holder->update(['archived_at' => now()]);
+        $this->holder->categories()->sync([$this->other->id]);
+        doubleCount($this->catchAll->getCurrentPeriod(), $transaction, 10000);
+
+        $changes = $this->rebuilder->rebuildCatchAllPeriod($this->catchAll->getCurrentPeriod());
+
+        expect(array_column($changes['left_alone'], 'reason'))->toBe([BudgetTransactionService::HOLDER_ROW_UNEXPLAINED])
+            ->and(snapshotAmount($this->catchAll->getCurrentPeriod(), $transaction))->toBe(10000)
+            ->and($holderRow->fresh()->amount)->toBe(3000);
+    });
+});
+
+test('an unsplit transaction stays when the row elsewhere holds only part of it', function () {
+    $catchAll = createBudget($this->user, 'monthly', isCatchAll: true);
+    $september = periodOn($catchAll, '2026-09-10');
+    $budget = createBudget($this->user, 'monthly', categoryIds: [$this->category->id]);
+    $transaction = expense($this->user, $this->category, '2026-09-05', -1000);
+    doubleCount($september, $transaction, 1000);
+    BudgetTransaction::query()->where('transaction_id', $transaction->id)->where('budget_period_id', periodOn($budget, '2026-09-10')->id)->update(['amount' => 300]);
+    switchTracking($this->user, $budget, $this->other);
+
+    expect(array_column($this->rebuilder->rebuildCatchAllPeriod($september->fresh())['left_alone'], 'reason'))
+        ->toBe([BudgetTransactionService::HOLDER_ROW_UNEXPLAINED])
+        ->and(snapshotAmount($september, $transaction))->toBe(1000);
+});
+
+test('a new budget leaves a pending first backfill alone, so a closed catch-all period does not stay empty', function () {
+    $transaction = expense($this->user, $this->other, '2026-09-05');
+    $claimed = expense($this->user, $this->category, '2026-09-06');
+
+    Queue::fake();
+    $catchAll = createBudget($this->user, 'monthly', isCatchAll: true);
+    $september = periodOn($catchAll, '2026-09-10');
+    $october = periodOn($catchAll, '2026-10-10');
+    $budget = createBudget($this->user, 'monthly', categoryIds: [$this->category->id]);
+
+    expect($september->fresh()->reconciliation_token)->toBeNull()
+        ->and($october->fresh()->reconciliation_token)->toBeNull();
+
+    $rebuild = Queue::pushed(RebuildCatchAllBudgetPeriods::class)->sole()->withFakeQueueInteractions();
+    $rebuild->handle($this->rebuilder);
+    $rebuild->assertReleased();
+
+    Queue::pushed(AssignHistoricalTransactionsToBudget::class)->each(fn (AssignHistoricalTransactionsToBudget $job) => $job->handle($this->rebuilder));
+
+    expect(periodTransactionIds($september->fresh()))->toEqualCanonicalizing([$transaction->id, $claimed->id])
+        ->and($september->fresh()->processing_historical)->toBeFalse();
+
+    $rebuild = Queue::pushed(RebuildCatchAllBudgetPeriods::class)->sole()->withFakeQueueInteractions();
+    $rebuild->handle($this->rebuilder);
+
+    $rebuild->assertNotReleased();
+    expect(periodTransactionIds($september->fresh()))->toBe([$transaction->id])
+        ->and(budgetTransactionIds($budget))->toBe([$claimed->id]);
+});
+
+test('a rebuild waits for a first backfill even when the new budget has finished its own', function () {
+    expense($this->user, $this->other, '2026-09-05');
+
+    Queue::fake();
+    $catchAll = createBudget($this->user, 'monthly', isCatchAll: true);
+    $budget = createBudget($this->user, 'monthly', categoryIds: [$this->category->id]);
+
+    Queue::pushed(AssignHistoricalTransactionsToBudget::class, fn (AssignHistoricalTransactionsToBudget $job): bool => $job->budget->is($budget))
+        ->each(fn (AssignHistoricalTransactionsToBudget $job) => $job->handle($this->rebuilder));
+
+    expect(periodOn($catchAll, '2026-09-10')->processing_historical)->toBeTrue();
+
+    $rebuild = Queue::pushed(RebuildCatchAllBudgetPeriods::class)->sole()->withFakeQueueInteractions();
+    $rebuild->handle($this->rebuilder);
+
+    $rebuild->assertReleased();
+});
+
+test('the rebuild that survives a second claim waits for the first budget too', function () {
+    $catchAll = createBudget($this->user, 'monthly', isCatchAll: true);
+    $october = $catchAll->getCurrentPeriod();
+    $first = expense($this->user, $this->category, '2026-10-05');
+    $second = expense($this->user, $this->other, '2026-10-06');
+
+    Queue::fake();
+    $firstBudget = createBudget($this->user, 'monthly', categoryIds: [$this->category->id]);
+    $secondBudget = createBudget($this->user, 'monthly', categoryIds: [$this->other->id]);
+
+    $rebuilds = Queue::pushed(RebuildCatchAllBudgetPeriods::class)->values();
+    expect($rebuilds)->toHaveCount(2);
+
+    $survivor = $rebuilds->last();
+    $firstPeriods = $firstBudget->periods()->get();
+
+    // Only the second budget's backfill has landed.
+    Queue::pushed(AssignHistoricalTransactionsToBudget::class, fn (AssignHistoricalTransactionsToBudget $job): bool => $job->budget->is($secondBudget))
+        ->each(fn (AssignHistoricalTransactionsToBudget $job) => $job->handle($this->rebuilder));
+
+    $waiting = (clone $survivor)->withFakeQueueInteractions();
+    $waiting->handle($this->rebuilder);
+    $waiting->assertReleased();
+
+    Queue::pushed(AssignHistoricalTransactionsToBudget::class, fn (AssignHistoricalTransactionsToBudget $job): bool => $job->budget->is($firstBudget))
+        ->each(fn (AssignHistoricalTransactionsToBudget $job) => $job->handle($this->rebuilder));
+
+    $running = (clone $survivor)->withFakeQueueInteractions();
+    $running->handle($this->rebuilder);
+
+    $running->assertNotReleased();
+    expect($firstPeriods)->toHaveCount(2)
+        ->and(periodTransactionIds($october))->toBe([])
+        ->and($october->fresh()->processing_historical)->toBeFalse()
+        ->and(budgetTransactionIds($firstBudget))->toBe([$first->id])
+        ->and(budgetTransactionIds($secondBudget))->toBe([$second->id]);
+});
+
+test('a failed backfill costs the catch-all nothing', function (string $date, array $leftAlone) {
+    $catchAll = createBudget($this->user, 'yearly', isCatchAll: true);
+    $current = $catchAll->getCurrentPeriod();
+    $transaction = expense($this->user, $this->category, $date);
+
+    Queue::fake();
+    $budget = createBudget($this->user, 'monthly', categoryIds: [$this->category->id]);
+
+    // Out of tries with nothing written: the flag clears and the budget is empty.
+    Queue::pushed(AssignHistoricalTransactionsToBudget::class)->each(fn (AssignHistoricalTransactionsToBudget $job) => $job->failed(new RuntimeException('boom')));
+    Queue::pushed(RebuildCatchAllBudgetPeriods::class)->sole()->handle($this->rebuilder);
+
+    expect(budgetTransactionIds($budget))->toBe([])
+        ->and(periodTransactionIds($current))->toBe([$transaction->id])
+        ->and($current->fresh()->processing_historical)->toBeFalse();
+
+    expect(array_column($this->rebuilder->catchAllDrift($current->fresh())['left_alone'], 'reason'))->toBe($leftAlone);
+})->with([
+    'its period is still running' => ['2026-10-05', [BudgetTransactionService::CLAIMED_NOT_HELD]],
+    'its period has ended' => ['2026-09-05', []],
+]);
+
+test('the sync queue runs the rebuild after the backfills it depends on', function () {
+    $ran = [];
+    Queue::before(function (JobProcessing $event) use (&$ran): void {
+        $ran[] = class_basename($event->job->resolveName());
+    });
+
+    $catchAll = createBudget($this->user, 'monthly', isCatchAll: true);
+    $september = periodOn($catchAll, '2026-09-10');
+    $transaction = expense($this->user, $this->category, '2026-09-05');
+    $ran = [];
+
+    $budget = createBudget($this->user, 'monthly', categoryIds: [$this->category->id]);
+
+    expect($ran)->toBe(['AssignHistoricalTransactionsToBudget', 'AssignHistoricalTransactionsToBudget', 'RebuildCatchAllBudgetPeriods'])
+        ->and(periodTransactionIds($september))->toBe([])
+        ->and(budgetTransactionIds($budget))->toBe([$transaction->id])
+        ->and($september->fresh()->processing_historical)->toBeFalse();
+});
+
+test('the command tells a proved double count from any other release and lists what it left alone', function () {
+    $catchAll = createBudget($this->user, 'yearly', isCatchAll: true);
+    $current = $catchAll->getCurrentPeriod();
+    $budget = createBudget($this->user, 'monthly', categoryIds: [$this->category->id]);
+    $doubleCounted = expense($this->user, $this->category, '2026-10-05');
+    doubleCount($current, $doubleCounted, 1000);
+
+    $income = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Income]);
+    $noLongerAnExpense = expense($this->user, $this->other, '2026-10-06');
+    // Recategorised by a mass update: no event, so nothing reassigned it.
+    Transaction::query()->whereKey($noLongerAnExpense->id)->update(['category_id' => $income->id]);
+
+    $unheld = expense($this->user, $this->category, '2026-10-07', -700);
+    BudgetTransaction::query()->where('transaction_id', $unheld->id)->delete();
+    doubleCount($current, $unheld, 700);
+
+    Artisan::call('budgets:rebuild-catch-all', ['--dry-run' => true]);
+
+    expect(Artisan::output())
+        ->toContain('Running periods: 1 proved double count(s) would be released, 0 would be reduced; 1 row(s) would be released for another reason')
+        ->toContain('1 row(s) left alone')
+        ->toContain('a budget tracks it today but holds no row for it')
+        ->toContain($unheld->id);
+
+    expect($this->rebuilder->rebuildCatchAllPeriod($current))->toBe(rebuildChanges([
+        'released_double_count' => 1,
+        'released_other' => 1,
+        'spent_change' => -2000,
+        'left_alone' => [[
+            'transaction_id' => $unheld->id,
+            'transaction_date' => '2026-10-07',
+            'amount' => 700,
+            'reason' => BudgetTransactionService::CLAIMED_NOT_HELD,
+        ]],
+    ]))->and(periodTransactionIds($current))->toBe([$unheld->id])
+        ->and(budgetTransactionIds($budget))->toBe([$doubleCounted->id]);
 });

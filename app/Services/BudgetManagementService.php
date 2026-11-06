@@ -89,7 +89,7 @@ class BudgetManagementService
 
         AssignHistoricalTransactionsToBudget::dispatch($result['budget'], $result['period'])->afterCommit();
         AssignHistoricalTransactionsToBudget::dispatch($result['budget'], $result['previousPeriod'])->afterCommit();
-        $this->rebuildCatchAllAround($result['budget'], [$result['period']->id, $result['previousPeriod']->id]);
+        $this->rebuildCatchAllAround($result['budget']);
 
         return [
             'budget' => $result['budget']->load(['categories', 'labels']),
@@ -134,6 +134,19 @@ class BudgetManagementService
 
         foreach ($result['reconciliation_periods'] as $period) {
             $reconciliationBudget = $period->budget()->firstOrFail();
+
+            // After the budget's own run: the catch-all gives up what that run
+            // writes, so it has to wait for it, which only the rebuild does.
+            if ($reconciliationBudget->is_catch_all) {
+                RebuildCatchAllBudgetPeriods::dispatch(
+                    [$period->id => $period->reconciliation_token],
+                    $reconciliationBudget->user_id,
+                    $reconciliationBudget->space_id,
+                )->afterCommit();
+
+                continue;
+            }
+
             AssignHistoricalTransactionsToBudget::dispatch(
                 $reconciliationBudget,
                 $period,
@@ -365,9 +378,12 @@ class BudgetManagementService
      * budget counts what the catch-all already absorbed, and what a deleted or
      * archived one lets go of is counted nowhere.
      *
-     * @param  array<int, string>  $awaitPeriodIds  periods whose backfill the rebuild has to wait for
+     * A period whose first backfill is still pending keeps it: claiming the
+     * period would supersede that backfill, and a closed period that was never
+     * filled would stay empty, since healing it absorbs nothing. The rebuild
+     * visits it unclaimed, after waiting for the backfill to finish.
      */
-    private function rebuildCatchAllAround(Budget $budget, array $awaitPeriodIds = []): void
+    private function rebuildCatchAllAround(Budget $budget): void
     {
         $from = $budget->periods()->min('start_date');
         $to = $budget->periods()->max('end_date');
@@ -382,12 +398,12 @@ class BudgetManagementService
             ->lockForUpdate()
             ->get()
             ->mapWithKeys(fn (BudgetPeriod $period): array => [
-                $period->id => $this->claimForReconciliation($period)->reconciliation_token,
+                $period->id => $period->awaitsFirstBackfill() ? null : $this->claimForReconciliation($period)->reconciliation_token,
             ])
             ->all(), attempts: 5);
 
         if ($tokens !== []) {
-            RebuildCatchAllBudgetPeriods::dispatch($tokens, $awaitPeriodIds)->afterCommit();
+            RebuildCatchAllBudgetPeriods::dispatch($tokens, $budget->user_id, $budget->space_id)->afterCommit();
         }
     }
 

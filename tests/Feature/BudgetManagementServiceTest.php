@@ -2,6 +2,7 @@
 
 use App\Enums\RolloverType;
 use App\Jobs\AssignHistoricalTransactionsToBudget;
+use App\Jobs\RebuildCatchAllBudgetPeriods;
 use App\Models\Account;
 use App\Models\Budget;
 use App\Models\BudgetPeriod;
@@ -235,6 +236,7 @@ it('does not reconcile active periods when submitted tracking is unchanged', fun
 });
 
 it('reconciles the active catch-all period without touching closed catch-all periods', function () {
+    $this->travelTo(CarbonImmutable::parse('2026-08-15'));
     Queue::fake();
     $user = User::factory()->create();
     $space = $user->personalSpace;
@@ -310,18 +312,21 @@ it('reconciles the active catch-all period without touching closed catch-all per
     expect($current->fresh()->processing_historical)->toBeTrue()
         ->and($currentCatchAllPeriod->fresh()->processing_historical)->toBeTrue()
         ->and($closedCatchAllPeriod->fresh()->processing_historical)->toBeFalse();
-    Queue::assertPushed(AssignHistoricalTransactionsToBudget::class, 2);
+    Queue::assertPushed(AssignHistoricalTransactionsToBudget::class, 1);
     Queue::assertPushed(
         AssignHistoricalTransactionsToBudget::class,
-        fn (AssignHistoricalTransactionsToBudget $job): bool => $job->period->is($currentCatchAllPeriod)
-            && $job->budget->is($catchAll),
+        fn (AssignHistoricalTransactionsToBudget $job): bool => $job->period->is($current->fresh()),
+    );
+    Queue::assertPushed(
+        RebuildCatchAllBudgetPeriods::class,
+        fn (RebuildCatchAllBudgetPeriods $job): bool => array_keys($job->reconciliationTokens) === [$currentCatchAllPeriod->id],
     );
 
     $current = $current->fresh();
     $currentCatchAllPeriod = $currentCatchAllPeriod->fresh();
     (new AssignHistoricalTransactionsToBudget($budget->fresh(), $current, $current->reconciliation_token))
         ->handle(app(BudgetTransactionService::class));
-    (new AssignHistoricalTransactionsToBudget($catchAll->fresh(), $currentCatchAllPeriod, $currentCatchAllPeriod->reconciliation_token))
+    (new RebuildCatchAllBudgetPeriods([$currentCatchAllPeriod->id => $currentCatchAllPeriod->reconciliation_token], $user->id, $space->id))
         ->handle(app(BudgetTransactionService::class));
 
     expect($current->budgetTransactions()->where('transaction_id', $oldCategoryTransaction->id)->exists())->toBeFalse()

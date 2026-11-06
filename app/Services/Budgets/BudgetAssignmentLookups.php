@@ -70,17 +70,21 @@ class BudgetAssignmentLookups
     }
 
     /**
-     * The budgets that take a transaction away from a catch-all: the live ones
-     * sharing its owner and space with a period covering the transaction's
-     * date, and the archived ones still holding the transaction. Each comes
-     * with its categories and labels loaded.
+     * The budgets that take a transaction away from a catch-all as it is being
+     * assigned on its own: the live ones sharing its owner and space with a
+     * period covering the transaction's date, and the archived ones still
+     * holding the transaction. Each comes with its categories and labels loaded.
+     *
+     * A closed period counts here because the same assignment writes to it, see
+     * {@see self::periodsCovering()}: the budget is about to hold what it claims.
+     * A backfill writes one period only, so it reads
+     * {@see self::runningClaimants()} and the rows other budgets hold instead.
      *
      * Judged by the transaction's date and not by whether a budget overlaps the
      * catch-all period, as upstream does: only a budget that can actually take
      * this transaction displaces the catch-all. A budget created later, or one
      * whose periods stop short, would otherwise drop the expense out of every
-     * budget there is. Backfills and single assignments both read this, so they
-     * cannot disagree.
+     * budget there is.
      *
      * An archived budget stopped taking anything in but keeps what it counted,
      * so it claims exactly that: anything else it used to track is the
@@ -92,15 +96,8 @@ class BudgetAssignmentLookups
     {
         $date = $transaction->transaction_date->toDateString();
 
-        return Budget::query()
-            ->where('user_id', $catchAll->user_id)
-            ->where('space_id', $catchAll->space_id)
-            ->where('is_catch_all', false)
+        return $this->otherBudgets($catchAll)
             ->where(fn (Builder $claimants) => $claimants
-                // Compared as plain dates: a Carbon binding serializes with a
-                // time ("Y-m-d H:i:s"), which sorts after a stored date-only
-                // end_date on any driver that compares them as strings, so the
-                // period's own last day would never match.
                 ->where(fn (Builder $live) => $live
                     ->whereNull('archived_at')
                     ->whereHas('periods', fn ($query) => $query
@@ -110,38 +107,67 @@ class BudgetAssignmentLookups
                     ->whereNotNull('archived_at')
                     ->whereHas('periods.budgetTransactions', fn ($query) => $query
                         ->where('transaction_id', $transaction->id))))
-            ->with(['categories:id', 'labels:id'])
             ->get();
     }
 
     /**
-     * The budgets, other than catch-alls, already counting each transaction,
-     * whatever they track today: a closed period keeps the rows of the tracking
-     * it ran on. Deleted budgets count nothing any more, so they are left out.
+     * The live budgets with a period still running that covers the
+     * transaction's date. Only those can be expected to hold what they track
+     * today: a closed period keeps the rows of the tracking it ran on, so it
+     * claims what it holds and nothing else.
      *
-     * With $onlyEndedPeriods the rows of periods still running do not count:
-     * those are re-derived from what their budget tracks, so a pending tracking
-     * change may be about to drop them and they cannot vouch for anything.
+     * @return Collection<int, Budget>
+     */
+    public function runningClaimants(Budget $catchAll, Transaction $transaction): Collection
+    {
+        $date = $transaction->transaction_date->toDateString();
+
+        return $this->otherBudgets($catchAll)
+            ->whereNull('archived_at')
+            ->whereHas('periods', fn ($query) => $query
+                ->where('start_date', '<=', $date)
+                ->where('end_date', '>=', $date)
+                ->where('end_date', '>=', today()->toDateString()))
+            ->get();
+    }
+
+    /**
+     * The rows other budgets hold for each transaction, whatever those budgets
+     * track today, with each row's period and budget loaded. Deleted budgets
+     * count nothing any more, so they are left out.
      *
      * @param  array<int, string>  $transactionIds
-     * @return SupportCollection<string, SupportCollection<int, Budget>> keyed by transaction id
+     * @return SupportCollection<string, SupportCollection<int, BudgetTransaction>> keyed by transaction id
      */
-    public function catchAllHolders(Budget $catchAll, array $transactionIds, bool $onlyEndedPeriods): SupportCollection
+    public function rowsHeldElsewhere(Budget $catchAll, array $transactionIds): SupportCollection
     {
         return BudgetTransaction::query()
             ->whereIn('transaction_id', $transactionIds)
-            ->when($onlyEndedPeriods, fn ($query) => $query->whereHas('budgetPeriod', fn ($periods) => $periods
-                ->where('end_date', '<', today()->toDateString())))
             ->whereHas('budgetPeriod.budget', fn ($query) => $query
                 ->where('user_id', $catchAll->user_id)
                 ->where('space_id', $catchAll->space_id)
                 ->where('is_catch_all', false))
             ->with(['budgetPeriod.budget.categories:id', 'budgetPeriod.budget.labels:id'])
             ->get()
-            ->groupBy('transaction_id')
-            ->map(fn (SupportCollection $rows): SupportCollection => $rows
-                ->map(fn (BudgetTransaction $row): Budget => $row->budgetPeriod->budget)
-                ->unique('id')
-                ->values());
+            ->groupBy('transaction_id');
+    }
+
+    /**
+     * The budgets, other than catch-alls, sharing a catch-all's owner and space.
+     *
+     * Dates in the queries built on this are compared as plain strings: a
+     * Carbon binding serializes with a time ("Y-m-d H:i:s"), which sorts after a
+     * stored date-only end_date on any driver that compares them as strings, so
+     * the period's own last day would never match.
+     *
+     * @return Builder<Budget>
+     */
+    private function otherBudgets(Budget $catchAll): Builder
+    {
+        return Budget::query()
+            ->where('user_id', $catchAll->user_id)
+            ->where('space_id', $catchAll->space_id)
+            ->where('is_catch_all', false)
+            ->with(['categories:id', 'labels:id']);
     }
 }

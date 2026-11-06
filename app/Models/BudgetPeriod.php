@@ -206,6 +206,14 @@ class BudgetPeriod extends Model
         return $this->end_date->lt(today());
     }
 
+    /**
+     * Created flagged and not yet backfilled: every later run stamps a token.
+     */
+    public function awaitsFirstBackfill(): bool
+    {
+        return $this->processing_historical && $this->reconciliation_token === null;
+    }
+
     /** @return HasMany<BudgetTransaction, $this> */
     public function budgetTransactions(): HasMany
     {

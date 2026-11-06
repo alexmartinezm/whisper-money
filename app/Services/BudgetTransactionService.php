@@ -17,11 +17,22 @@ use Illuminate\Support\Collection as SupportCollection;
 use Illuminate\Support\Facades\DB;
 
 /**
- * @phpstan-type CatchAllChanges array{released: int, adjusted: int, absorbed: int, spent_change: int}
+ * @phpstan-type LeftAlone array{transaction_id: string, transaction_date: string, amount: int, reason: string}
+ * @phpstan-type CatchAllChanges array{released_double_count: int, reduced_double_count: int, released_other: int, adjusted: int, absorbed: int, spent_change: int, left_alone: array<int, LeftAlone>}
+ * @phpstan-type CatchAllVerdict array{amount: int, reason: ?string}
  * @phpstan-type SnapshotChanges array{rows: array<int, array{transaction_id: string, budget_period_id: string, amount: int}>, released_ids: array<int, string>, absorbed: int, adjusted: int, spent_change: int}
  */
 class BudgetTransactionService
 {
+    /** Another budget's row proves the catch-all counts this as well. */
+    public const string DOUBLE_COUNT = 'double_count';
+
+    /** A budget tracks this today but holds no row for it, so taking it out of the catch-all could leave it counted nowhere. */
+    public const string CLAIMED_NOT_HELD = 'claimed_not_held';
+
+    /** A budget's row does not match what that budget tracks today, so nothing proves which part of the transaction it counts. */
+    public const string HOLDER_ROW_UNEXPLAINED = 'holder_row_unexplained';
+
     public function __construct(
         private readonly CategoryTree $tree = new CategoryTree,
         private readonly EffectiveTransactionPostings $postings = new EffectiveTransactionPostings,
@@ -177,11 +188,10 @@ class BudgetTransactionService
      * silently, like every historical assignment. Runs under the period's row
      * lock, the one every other reconciliation of the period takes.
      *
-     * A period still running is re-derived whole. A closed one keeps the figure
-     * it ran on, so all it can lose is what another budget counts as well: it
-     * absorbs nothing, and what it holds is judged by the rows of the other
-     * budgets rather than by what they track today, which may not be what they
-     * tracked back then.
+     * A period still running is re-derived, except that it only gives up a row
+     * another budget's row accounts for. A closed one keeps the figure it ran on:
+     * it absorbs nothing and loses only a proved double count. What cannot be
+     * proved stays as it is and comes back in `left_alone`.
      *
      * @return CatchAllChanges
      */
@@ -209,7 +219,15 @@ class BudgetTransactionService
      */
     private function reconcileCatchAllPeriod(BudgetPeriod $period, bool $write): array
     {
-        $totals = ['released' => 0, 'adjusted' => 0, 'absorbed' => 0, 'spent_change' => 0];
+        $totals = [
+            'released_double_count' => 0,
+            'reduced_double_count' => 0,
+            'released_other' => 0,
+            'adjusted' => 0,
+            'absorbed' => 0,
+            'spent_change' => 0,
+            'left_alone' => [],
+        ];
         $catchAll = $this->budgetOfPeriod($period);
 
         if (! $catchAll?->is_catch_all || $catchAll->isArchived()) {
@@ -217,24 +235,57 @@ class BudgetTransactionService
         }
 
         $lookups = new BudgetAssignmentLookups($this->tree);
-        $frozenPeriod = $period->hasEnded() ? $period : null;
+        $frozen = $period->hasEnded();
 
         $this->transactionsOfPeriod($catchAll, $period)
-            ->when($frozenPeriod !== null, fn (Builder $query) => $query
+            ->when($frozen, fn (Builder $query) => $query
                 ->whereHas('budgetTransactions', fn (Builder $rows) => $rows->where('budget_period_id', $period->id))
                 ->whereHas('budgetTransactions.budgetPeriod.budget', fn (Builder $budgets) => $budgets->where('is_catch_all', false)))
-            ->chunkById(500, function (Collection $transactions) use ($period, $catchAll, $lookups, $frozenPeriod, $write, &$totals): void {
-                $changes = $this->snapshotChanges($period, $this->wantedAmounts($transactions, $catchAll, $lookups, $frozenPeriod));
+            ->chunkById(500, function (Collection $transactions) use ($period, $catchAll, $lookups, $frozen, $write, &$totals): void {
+                $verdicts = $this->catchAllVerdicts($transactions, $period, $catchAll, $lookups, $frozen);
+                $changes = $this->snapshotChanges($period, $verdicts->map(fn (array $verdict): int => $verdict['amount']));
 
                 if ($write) {
                     $this->writeSnapshots($period, $changes);
                 }
 
-                $totals['released'] += count($changes['released_ids']);
-                $totals['adjusted'] += $changes['adjusted'];
-                $totals['absorbed'] += $changes['absorbed'];
-                $totals['spent_change'] += $changes['spent_change'];
+                $totals = $this->addCatchAllChanges($totals, $changes, $verdicts, $transactions);
             });
+
+        return $totals;
+    }
+
+    /**
+     * @param  CatchAllChanges  $totals
+     * @param  SnapshotChanges  $changes
+     * @param  SupportCollection<string, CatchAllVerdict>  $verdicts
+     * @param  Collection<int, Transaction>  $transactions
+     * @return CatchAllChanges
+     */
+    private function addCatchAllChanges(array $totals, array $changes, SupportCollection $verdicts, Collection $transactions): array
+    {
+        $doubleCounted = $verdicts->where('reason', self::DOUBLE_COUNT)->keys()->all();
+        $reduced = count(array_intersect(array_column($changes['rows'], 'transaction_id'), $doubleCounted));
+
+        $totals['released_double_count'] += count(array_intersect($changes['released_ids'], $doubleCounted));
+        $totals['reduced_double_count'] += $reduced;
+        $totals['released_other'] += count(array_diff($changes['released_ids'], $doubleCounted));
+        $totals['adjusted'] += $changes['adjusted'] - $reduced;
+        $totals['absorbed'] += $changes['absorbed'];
+        $totals['spent_change'] += $changes['spent_change'];
+
+        foreach ($transactions as $transaction) {
+            $verdict = $verdicts->get($transaction->id);
+
+            if ($verdict['reason'] !== null && $verdict['reason'] !== self::DOUBLE_COUNT) {
+                $totals['left_alone'][] = [
+                    'transaction_id' => $transaction->id,
+                    'transaction_date' => $transaction->transaction_date->toDateString(),
+                    'amount' => $verdict['amount'],
+                    'reason' => $verdict['reason'],
+                ];
+            }
+        }
 
         return $totals;
     }
@@ -273,41 +324,141 @@ class BudgetTransactionService
      */
     private function recordSnapshots(Collection $transactions, BudgetPeriod $period, Budget $budget, BudgetAssignmentLookups $lookups): int
     {
-        $changes = $this->snapshotChanges($period, $this->wantedAmounts($transactions, $budget, $lookups));
+        $wantedAmounts = $budget->is_catch_all
+            ? $this->catchAllVerdicts($transactions, $period, $budget, $lookups, frozen: false)
+                ->map(fn (array $verdict): int => $verdict['amount'])
+            : $transactions->mapWithKeys(fn (Transaction $transaction): array => [
+                $transaction->id => $this->amountForBudget($transaction, $budget, $lookups),
+            ]);
+
+        $changes = $this->snapshotChanges($period, $wantedAmounts);
         $this->writeSnapshots($period, $changes);
 
         return $changes['absorbed'];
     }
 
     /**
-     * What each transaction should contribute to a budget. On a catch-all that
-     * takes off what another budget already counts, whatever it tracks today,
-     * and with $frozenPeriod it starts from what that closed period holds
-     * instead of working out what it would hold now.
+     * What a catch-all period should hold of each transaction, and why when that
+     * is not simply what it holds or would absorb. `$frozen` is a closed period
+     * being healed, as opposed to a period running or backfilled for the first
+     * time, which is written whole.
      *
      * @param  Collection<int, Transaction>  $transactions
-     * @return SupportCollection<string, int> keyed by transaction id
+     * @return SupportCollection<string, CatchAllVerdict> keyed by transaction id
      */
-    private function wantedAmounts(Collection $transactions, Budget $budget, BudgetAssignmentLookups $lookups, ?BudgetPeriod $frozenPeriod = null): SupportCollection
+    private function catchAllVerdicts(Collection $transactions, BudgetPeriod $period, Budget $catchAll, BudgetAssignmentLookups $lookups, bool $frozen): SupportCollection
     {
-        $holders = $budget->is_catch_all
-            ? $lookups->catchAllHolders($budget, $transactions->modelKeys(), onlyEndedPeriods: $frozenPeriod === null)
-            : collect();
-        $frozenAmounts = $frozenPeriod?->budgetTransactions()
+        $held = $lookups->rowsHeldElsewhere($catchAll, $transactions->modelKeys());
+        $existingAmounts = $period->budgetTransactions()
             ->whereIn('transaction_id', $transactions->modelKeys())
             ->pluck('amount', 'transaction_id');
 
-        return $transactions->mapWithKeys(function (Transaction $transaction) use ($budget, $lookups, $holders, $frozenAmounts): array {
-            $amount = $frozenAmounts?->get($transaction->id) ?? $this->amountForBudget($transaction, $budget, $lookups);
-            $transactionHolders = $holders->get($transaction->id);
+        return $transactions->mapWithKeys(function (Transaction $transaction) use ($catchAll, $lookups, $frozen, $held, $existingAmounts): array {
+            $existing = $existingAmounts->get($transaction->id);
+            ['holders' => $holders, 'doubt' => $doubt] = $this->readHolders($transaction, $held->get($transaction->id, collect()), $lookups, $frozen);
 
-            if ($transactionHolders !== null) {
-                $unheld = $this->unheldAmount($transaction, $budget, $transactionHolders, $lookups);
-                $amount = abs($unheld) < abs($amount) ? $unheld : $amount;
+            if ($doubt) {
+                return [$transaction->id => ['amount' => (int) $existing, 'reason' => self::HOLDER_ROW_UNEXPLAINED]];
             }
 
-            return [$transaction->id => $amount];
+            $proved = $this->amountOutside($transaction, $catchAll, $holders, $holders, $lookups);
+
+            return [$transaction->id => $frozen
+                ? $this->frozenVerdict((int) $existing, $proved, $holders)
+                : $this->runningVerdict($transaction, $catchAll, $existing, $proved, $holders, $lookups)];
         });
+    }
+
+    /**
+     * Which budgets a transaction's rows prove are counting it, and whether a
+     * row stands unexplained.
+     *
+     * A row explains itself when it is what its budget would write today, which
+     * also tells which split lines it covers. Failing that, a row that can no
+     * longer change (a closed period, an archived budget) still proves a budget
+     * counts all of an unsplit transaction when it holds the whole of it. Any
+     * other frozen row leaves the transaction in doubt. A row in a running period
+     * proves nothing by itself: that period is re-derived from what its budget
+     * tracks, so a pending tracking change may be about to drop it. Only a
+     * frozen catch-all period, which will not be looked at again, treats that as
+     * doubt rather than ignoring it.
+     *
+     * @param  SupportCollection<int, BudgetTransaction>  $rows
+     * @return array{holders: SupportCollection<int, Budget>, doubt: bool}
+     */
+    private function readHolders(Transaction $transaction, SupportCollection $rows, BudgetAssignmentLookups $lookups, bool $frozen): array
+    {
+        $holders = collect();
+        $doubt = false;
+
+        foreach ($rows as $row) {
+            $budget = $row->budgetPeriod->budget;
+            $rowIsFrozen = $row->budgetPeriod->hasEnded() || $budget->isArchived();
+            $wholeTransaction = $transaction->splits->isEmpty() && $row->amount === -$this->ownedAmount($transaction, $transaction->amount);
+
+            if ($row->amount === $this->amountForBudget($transaction, $budget, $lookups) || ($rowIsFrozen && $wholeTransaction)) {
+                $holders->push($budget);
+            } elseif ($rowIsFrozen || $frozen) {
+                $doubt = true;
+            }
+        }
+
+        return ['holders' => $holders, 'doubt' => $doubt];
+    }
+
+    /**
+     * A closed period keeps its figure unless the rows prove part of it is
+     * counted twice. Never grows.
+     *
+     * @param  SupportCollection<int, Budget>  $holders
+     * @return CatchAllVerdict
+     */
+    private function frozenVerdict(int $existing, int $proved, SupportCollection $holders): array
+    {
+        return $holders->isNotEmpty() && abs($proved) < abs($existing)
+            ? ['amount' => $proved, 'reason' => self::DOUBLE_COUNT]
+            : ['amount' => $existing, 'reason' => null];
+    }
+
+    /**
+     * A period written whole: it takes what nothing claims, but gives up a row
+     * only as far as other rows account for it. A claim by tracking alone keeps
+     * an expense from being absorbed, and never takes one away: if the budget
+     * has not got it (a backfill that failed, a period generated later), the
+     * catch-all may be the only thing counting it.
+     *
+     * @param  SupportCollection<int, Budget>  $holders
+     * @return CatchAllVerdict
+     */
+    private function runningVerdict(Transaction $transaction, Budget $catchAll, ?int $existing, int $proved, SupportCollection $holders, BudgetAssignmentLookups $lookups): array
+    {
+        $claimants = $holders->merge($lookups->runningClaimants($catchAll, $transaction))->unique('id');
+        $wanted = $this->amountOutside($transaction, $catchAll, $claimants, $holders, $lookups);
+
+        if ($existing === null || abs($wanted) >= abs($existing)) {
+            return ['amount' => $wanted, 'reason' => null];
+        }
+
+        if ($wanted !== $proved) {
+            return ['amount' => $existing, 'reason' => self::CLAIMED_NOT_HELD];
+        }
+
+        return ['amount' => $wanted, 'reason' => $holders->isNotEmpty() ? self::DOUBLE_COUNT : null];
+    }
+
+    /**
+     * What is left for a catch-all outside $claimants. A budget proved to hold an
+     * unsplit transaction holds all of it, whatever it tracks today; anything
+     * else is read line by line.
+     *
+     * @param  SupportCollection<int, Budget>  $claimants
+     * @param  SupportCollection<int, Budget>  $holders  those of them proved by a row
+     */
+    private function amountOutside(Transaction $transaction, Budget $catchAll, SupportCollection $claimants, SupportCollection $holders, BudgetAssignmentLookups $lookups): int
+    {
+        return $holders->isNotEmpty() && $transaction->splits->isEmpty()
+            ? 0
+            : $this->unclaimedAmount($transaction, $catchAll, $claimants, $lookups);
     }
 
     /**
@@ -377,9 +528,7 @@ class BudgetTransactionService
             $claimants = $lookups->catchAllClaimants($budget, $transaction);
 
             // An archived claimant holds this transaction, see catchAllClaimants().
-            return $claimants->contains(fn (Budget $other): bool => $other->isArchived())
-                ? $this->unheldAmount($transaction, $budget, $claimants, $lookups)
-                : $this->unclaimedAmount($transaction, $budget, $claimants, $lookups);
+            return $this->amountOutside($transaction, $budget, $claimants, $claimants->filter(fn (Budget $other): bool => $other->isArchived()), $lookups);
         }
 
         $budgetCategoryIds = $lookups->expand(
@@ -391,22 +540,6 @@ class BudgetTransactionService
         return -$this->postings->forTransaction($transaction)
             ->whereIn('categoryId', $budgetCategoryIds)
             ->sum(fn ($posting): int => $this->ownedAmount($transaction, $posting->amount));
-    }
-
-    /**
-     * What is left for a catch-all once budgets already counting a transaction
-     * have had theirs. An unsplit transaction is one posting, so a budget
-     * holding it holds all of it, even if it has moved on to other categories
-     * since; a split one is read line by line, as {@see self::unclaimedAmount()}
-     * does.
-     *
-     * @param  SupportCollection<int, Budget>  $holders
-     */
-    private function unheldAmount(Transaction $transaction, Budget $catchAll, SupportCollection $holders, BudgetAssignmentLookups $lookups): int
-    {
-        return $transaction->splits->isEmpty()
-            ? 0
-            : $this->unclaimedAmount($transaction, $catchAll, $holders, $lookups);
     }
 
     /**
