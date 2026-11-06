@@ -29,7 +29,7 @@ export function describeActiveFilters(
     return [
         filters.searchText ? `“${filters.searchText}”` : null,
         rangeChip(filters.dateFrom, filters.dateTo, date),
-        rangeChip(filters.amountMin, filters.amountMax, String),
+        amountChip(filters),
         ...filters.categoryTypes.map(getCategoryTypeLabel),
         ...namesOf(filters.categoryIds, categories),
         ...namesOf(filters.accountIds, accounts),
@@ -47,6 +47,21 @@ export function describeActiveFilters(
               })
             : null,
     ].filter((chip): chip is string => chip !== null);
+}
+
+/** A side with no sizes reads as the side, not as its pinned zero bound. */
+function amountChip({
+    amountMin,
+    amountMax,
+}: Pick<TransactionFilters, 'amountMin' | 'amountMax'>): string | null {
+    if (amountMin === 0 && amountMax === null) {
+        return __('Income');
+    }
+    if (amountMin === null && amountMax === 0) {
+        return __('Expenses');
+    }
+
+    return rangeChip(amountMin, amountMax, String);
 }
 
 function rangeChip<T>(
