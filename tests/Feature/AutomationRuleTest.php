@@ -4,6 +4,15 @@ use App\Models\AutomationRule;
 use App\Models\Category;
 use App\Models\Label;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
+
+/**
+ * The conditions as the column holds them, past the model's array cast.
+ */
+function storedRulesJson(AutomationRule $rule): mixed
+{
+    return json_decode((string) DB::table('automation_rules')->where('id', $rule->id)->value('rules_json'), true);
+}
 
 test('user can view their automation rules', function () {
     $user = User::factory()->create();
@@ -496,3 +505,54 @@ test('a generated title is truncated to fit the column instead of failing the wr
 
     expect(mb_strlen($rule->refresh()->title))->toBe(AutomationRule::MAX_TITLE_LENGTH);
 });
+
+test('creating a rule from the web stores its conditions as an object', function () {
+    $user = User::factory()->create();
+    $category = Category::factory()->create(['user_id' => $user->id]);
+    $conditions = ['in' => ['grocery', ['var' => 'description']]];
+
+    $this->actingAs($user)
+        ->from(route('automation-rules.index'))
+        ->post(route('automation-rules.store'), [
+            'title' => 'Grocery Rule',
+            'priority' => 10,
+            'rules_json' => json_encode($conditions),
+            'action_category_id' => $category->id,
+        ])
+        ->assertRedirect(route('automation-rules.index'));
+
+    $rule = AutomationRule::query()->where('user_id', $user->id)->sole();
+
+    expect(storedRulesJson($rule))->toBe($conditions)
+        ->and($rule->rules_json)->toBe($conditions);
+});
+
+test('editing a rule from the web stores its conditions as an object', function (array|string $before) {
+    $user = User::factory()->create();
+    $category = Category::factory()->create(['user_id' => $user->id]);
+    $rule = AutomationRule::factory()->create([
+        'user_id' => $user->id,
+        'action_category_id' => $category->id,
+        'rules_json' => $before,
+    ]);
+    $conditions = ['or' => [
+        ['in' => ['grocery', ['var' => 'description']]],
+        ['in' => ['market', ['var' => 'description']]],
+    ]];
+
+    $this->actingAs($user)
+        ->from(route('automation-rules.index'))
+        ->patch(route('automation-rules.update', $rule), [
+            'title' => $rule->title,
+            'priority' => $rule->priority,
+            'rules_json' => json_encode($conditions),
+            'action_category_id' => $category->id,
+        ])
+        ->assertRedirect(route('automation-rules.index'));
+
+    expect(storedRulesJson($rule))->toBe($conditions)
+        ->and($rule->refresh()->rules_json)->toBe($conditions);
+})->with([
+    'stored as an object' => [['in' => ['old', ['var' => 'description']]]],
+    'stored double-encoded' => [json_encode(['in' => ['old', ['var' => 'description']]])],
+]);
