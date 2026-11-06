@@ -53,4 +53,27 @@ enum BudgetPeriodType: string
             self::Monthly, self::Yearly, self::Quarterly => ['min:1', 'max:31'],
         };
     }
+
+    /**
+     * Whether a budget of this cadence, created by the MCP tools or the public
+     * API, may start on $day. Null is always fine: a weekly or biweekly budget
+     * reads it as Sunday, and storedStartDay() fills in a calendar one.
+     */
+    public function acceptsStartDay(?int $day): bool
+    {
+        return match ($this) {
+            self::Monthly => $day === null || ($day >= 1 && $day <= 31),
+            self::Weekly, self::Biweekly => $day === null || ($day >= 0 && $day <= 6),
+            self::Quarterly, self::Yearly => $day === null || $day === 1,
+        };
+    }
+
+    /**
+     * What goes in `period_start_day` for an accepted $day: a period that
+     * follows the calendar always stores 1.
+     */
+    public function storedStartDay(?int $day): ?int
+    {
+        return $day ?? ($this->followsCalendar() ? 1 : null);
+    }
 }
