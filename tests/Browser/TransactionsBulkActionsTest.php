@@ -42,8 +42,8 @@ it('changes the category of every selected row', function () {
     $page->assertSee('Weekly groceries market')
         ->click('tr:has-text("Weekly groceries market") [aria-label="Select row"]')
         ->click('tr:has-text("Coffee subscription") [aria-label="Select row"]')
-        ->assertSee('2 transactions')
-        ->click('Change category')
+        ->assertSeeIn('[data-testid="bulk-selected-count"]', '2')
+        ->click('[data-testid="bulk-category-trigger"]')
         ->click('[cmdk-item]:has-text("Utilities")')
         ->assertSee('Updated 2 transactions');
 
@@ -66,10 +66,10 @@ it('extends the selection to every row matching the filters', function () {
 
     $page->assertSee('Weekly groceries market')
         ->click('tr:has-text("Weekly groceries market") [aria-label="Select row"]')
-        ->assertSee('1 transaction')
+        ->assertSeeIn('[data-testid="bulk-selected-count"]', '1')
         ->click('[data-testid="bulk-select-all"]')
         ->assertSee('All matching filters')
-        ->click('Change category')
+        ->click('[data-testid="bulk-category-trigger"]')
         ->click('[cmdk-item]:has-text("Utilities")')
         ->assertSee('Updated 8 transactions')
         ->assertNoJavascriptErrors();
@@ -86,7 +86,7 @@ it('adds a label to the selection and clears it from the rows without a reload',
     $page->assertSee('Weekly groceries market')
         ->click('tr:has-text("Weekly groceries market") [aria-label="Select row"]')
         ->click('tr:has-text("Coffee subscription") [aria-label="Select row"]')
-        ->click('[data-testid="label-combobox-trigger"]')
+        ->click('[data-testid="bulk-labels-trigger"]')
         ->click('[data-testid="label-option"][data-label-name="Holiday"]')
         ->assertSee('Updated 2 transactions');
 
@@ -99,7 +99,7 @@ it('adds a label to the selection and clears it from the rows without a reload',
     // starts by ticking the same two rows again.
     $page->click('tr:has-text("Weekly groceries market") [aria-label="Select row"]')
         ->click('tr:has-text("Coffee subscription") [aria-label="Select row"]')
-        ->click('[data-testid="label-combobox-trigger"]')
+        ->click('[data-testid="bulk-labels-trigger"]')
         ->click('[cmdk-item]:has-text("Remove all labels")')
         ->assertSee('Updated 2 transactions');
 
@@ -120,12 +120,11 @@ it('deletes the selected rows through the confirmation dialog', function () {
     $page->assertSee('Weekly groceries market')
         ->click('tr:has-text("Weekly groceries market") [aria-label="Select row"]')
         ->click('tr:has-text("Coffee subscription") [aria-label="Select row"]')
-        ->click('[data-test="bulk-actions-bar"] [aria-label="More actions"]')
-        ->click('[role="menuitem"]:has-text("Delete")')
+        ->click('[data-test="bulk-actions-bar"] button:has-text("Delete")')
         ->assertSee('Delete Transactions')
         // The dialog asks for the sentence back before it will delete anything.
         ->fill('input[placeholder="Delete 2 Transactions"]', 'Delete 2 Transactions')
-        ->click('button:has-text("Delete")')
+        ->click('[role="dialog"] button:has-text("Delete")')
         ->assertDontSee('Weekly groceries market')
         ->assertDontSee('Coffee subscription')
         ->assertSee('Monthly train pass')
@@ -145,8 +144,7 @@ it('runs the automation rules again over the selection', function () {
     $page->assertSee('Weekly groceries market')
         ->click('tr:has-text("Weekly groceries market") [aria-label="Select row"]')
         ->click('tr:has-text("Monthly train pass") [aria-label="Select row"]')
-        ->click('[data-test="bulk-actions-bar"] [aria-label="More actions"]')
-        ->click('[role="menuitem"]:has-text("Re-evaluate rules")')
+        ->click('[data-test="bulk-actions-bar"] button:has-text("Re-evaluate rules")')
         ->assertSee('Re-evaluation complete!')
         ->assertSeeIn('tr:has-text("Weekly groceries market")', 'Utilities')
         ->assertNoJavascriptErrors();
@@ -156,6 +154,36 @@ it('runs the automation rules again over the selection', function () {
         // Selected too, but no rule matches it, so its category is left alone.
         ->and($this->fixture->movementNamed('Monthly train pass')->category_id)
         ->toBe($this->fixture->transport->id);
+});
+
+it('drives the selection from the keyboard', function () {
+    $page = visit('/transactions');
+
+    $page->assertSee('Weekly groceries market')
+        ->click('tr:has-text("Weekly groceries market") [aria-label="Select row"]')
+        ->click('tr:has-text("Coffee subscription") [aria-label="Select row"]')
+        ->keys('tr:has-text("Coffee subscription") [aria-label="Select row"]', 'c')
+        ->click('[cmdk-item]:has-text("Utilities")')
+        ->assertSee('Updated 2 transactions');
+
+    expect($this->fixture->movementNamed('Coffee subscription')->category_id)
+        ->toBe($this->fixture->utilities->id);
+
+    // Backspace opens the confirmation, it never deletes on its own; Escape
+    // closes the dialog first and only then clears the selection.
+    $trainPass = 'tr:has-text("Monthly train pass") [aria-label="Select row"]';
+
+    $page->click($trainPass)
+        ->keys($trainPass, 'Backspace')
+        ->assertSee('Delete Transactions')
+        ->keys('[role="dialog"]', 'Escape')
+        ->assertDontSee('Delete Transactions')
+        ->assertPresent('[data-test="bulk-actions-bar"]')
+        ->keys($trainPass, 'Escape')
+        ->assertMissing('[data-test="bulk-actions-bar"]')
+        ->assertNoJavascriptErrors();
+
+    expect($this->fixture->movementNamed('Monthly train pass'))->not->toBeNull();
 });
 
 it('runs the automation rules again for a single row from its actions menu', function () {
@@ -171,4 +199,127 @@ it('runs the automation rules again for a single row from its actions menu', fun
 
     expect($this->fixture->movementNamed('Weekly groceries market')->category_id)
         ->toBe($this->fixture->utilities->id);
+});
+
+/**
+ * On the phone the list is drawn as a compact list. Once a row is ticked (from
+ * its category circle or a long press) taps toggle rows, and the compact bar takes
+ * over until the selection is empty again.
+ */
+function visitTransactionsOnAPhone(): mixed
+{
+    return visit('/transactions')
+        ->on()
+        ->iPhone14Pro()
+        ->navigate('/transactions');
+}
+
+/**
+ * Waits out the phone drawer's half-second slide in. A tap aimed at one of its
+ * items while it is still moving can land on the overlay instead, which closes
+ * the drawer and lets the click fall through to whatever row is underneath.
+ */
+function waitForDrawerToSettle(mixed $page): void
+{
+    $page->script(<<<'JS'
+        Promise.allSettled(
+            document.getAnimations()
+                .filter((animation) => animation.effect?.target?.closest?.('[data-vaul-drawer], [data-vaul-overlay]'))
+                .map((animation) => animation.finished),
+        )
+    JS);
+}
+
+it('selects a row from its category circle and then by tapping rows on a phone', function () {
+    $page = visitTransactionsOnAPhone();
+
+    $page->assertSee('Weekly groceries market')
+        ->assertMissing('[data-test="mobile-bulk-actions-bar"]')
+        ->assertMissing('[aria-label="Select row"]')
+        ->click('[aria-label="Select Weekly groceries market"]')
+        ->assertSeeIn('[data-testid="bulk-selected-count"]', '1 selected')
+        // The bar takes the bottom nav's place rather than sitting over it.
+        ->assertMissing('[data-test="mobile-nav"]')
+        ->click('[data-testid="transaction-list-row"]:has-text("Coffee subscription")')
+        ->assertSeeIn('[data-testid="bulk-selected-count"]', '2 selected')
+        // A tap toggles the row; it does not open the edit dialog.
+        ->assertDontSee('Edit Transaction')
+        ->click('[data-testid="bulk-category-trigger"]')
+        ->assertSee('Change category');
+
+    waitForDrawerToSettle($page);
+
+    $page->click('[data-vaul-drawer] [cmdk-item]:has-text("Utilities")')
+        ->assertSee('Updated 2 transactions')
+        // A bulk change that went through empties the selection.
+        ->assertMissing('[data-test="mobile-bulk-actions-bar"]')
+        ->assertVisible('[data-test="mobile-nav"]')
+        ->assertNoJavascriptErrors();
+
+    expect($this->fixture->movementNamed('Weekly groceries market')->category_id)
+        ->toBe($this->fixture->utilities->id)
+        ->and($this->fixture->movementNamed('Monthly train pass')->category_id)
+        ->toBe($this->fixture->transport->id);
+});
+
+it('ticks a row on a long press and clears the selection from the menu on a phone', function () {
+    $page = visitTransactionsOnAPhone();
+
+    $page->assertSee('Weekly groceries market');
+
+    $page->script(<<<'JS'
+        (async () => {
+            const row = [...document.querySelectorAll('[data-testid="transaction-list-row"]')]
+                .find((row) => row.textContent.includes('Weekly groceries market'));
+            const { x, y } = row.getBoundingClientRect();
+            const init = { bubbles: true, pointerType: 'touch', clientX: x + 20, clientY: y + 10 };
+            row.dispatchEvent(new PointerEvent('pointerdown', init));
+            await new Promise((resolve) => setTimeout(resolve, 600));
+            row.dispatchEvent(new PointerEvent('pointerup', init));
+        })()
+    JS);
+
+    $page->assertSeeIn('[data-testid="bulk-selected-count"]', '1 selected')
+        ->click('[data-testid="bulk-more-actions"]')
+        ->assertSee('Delete 1')
+        ->click('[role="menuitem"]:has-text("Select all visible")')
+        ->assertSeeIn('[data-testid="bulk-selected-count"]', '8 selected')
+        // Radix keeps the menu mounted through its exit animation. Pressing ⋯
+        // before it is gone reopens the menu, and the leaving menu's
+        // outside-press handler then closes it again.
+        ->assertNotPresent('[role="menu"]')
+        ->click('[data-testid="bulk-more-actions"]')
+        ->click('[role="menuitem"]:has-text("Clear selection")')
+        ->assertMissing('[data-test="mobile-bulk-actions-bar"]')
+        ->assertNoJavascriptErrors();
+});
+
+it('shrinks the bar to icons on one row when the content column is narrow', function () {
+    $page = visit('/transactions')->resize(900, 800);
+
+    // Beside the sidebar there is no room for the table, so it is the compact list.
+    $page->assertSee('Weekly groceries market')
+        ->assertPresent('[data-testid="transaction-list-layout"][data-layout="list"]')
+        ->click('[aria-label="Select Weekly groceries market"]')
+        ->assertPresent('[data-test="bulk-actions-bar"][data-compact]')
+        ->assertSeeIn('[data-testid="bulk-selected-count"]', '1')
+        ->assertVisible('[data-testid="bulk-select-all"]')
+        ->assertVisible('[aria-label="Re-evaluate rules"]')
+        ->assertVisible('[aria-label="Delete"]')
+        ->assertVisible('[aria-label="Clear selection"]')
+        // One row, and inside the viewport rather than spilling off its edge.
+        ->assertScript(<<<'JS'
+            (() => {
+                const bar = document.querySelector('[data-test="bulk-actions-bar"]').getBoundingClientRect();
+
+                return bar.height < 60 && bar.left >= 0 && bar.right <= window.innerWidth;
+            })()
+        JS)
+        ->click('[data-testid="bulk-labels-trigger"]')
+        ->assertPresent('[cmdk-input]')
+        ->assertNoJavascriptErrors();
+
+    $page->resize(1600, 900)
+        ->assertMissing('[data-test="bulk-actions-bar"][data-compact]')
+        ->assertSeeIn('[data-test="bulk-actions-bar"]', 'Re-evaluate rules');
 });
