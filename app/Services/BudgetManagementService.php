@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\BudgetExpenseType;
 use App\Jobs\AssignHistoricalTransactionsToBudget;
+use App\Jobs\RebuildCatchAllBudgetPeriods;
 use App\Models\Budget;
 use App\Models\BudgetPeriod;
 use App\Models\Category;
@@ -17,6 +18,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -87,6 +89,7 @@ class BudgetManagementService
 
         AssignHistoricalTransactionsToBudget::dispatch($result['budget'], $result['period'])->afterCommit();
         AssignHistoricalTransactionsToBudget::dispatch($result['budget'], $result['previousPeriod'])->afterCommit();
+        $this->rebuildCatchAllAround($result['budget']);
 
         return [
             'budget' => $result['budget']->load(['categories', 'labels']),
@@ -131,6 +134,19 @@ class BudgetManagementService
 
         foreach ($result['reconciliation_periods'] as $period) {
             $reconciliationBudget = $period->budget()->firstOrFail();
+
+            // After the budget's own run: the catch-all gives up what that run
+            // writes, so it has to wait for it, which only the rebuild does.
+            if ($reconciliationBudget->is_catch_all) {
+                RebuildCatchAllBudgetPeriods::dispatch(
+                    [$period->id => $period->reconciliation_token],
+                    $reconciliationBudget->user_id,
+                    $reconciliationBudget->space_id,
+                )->afterCommit();
+
+                continue;
+            }
+
             AssignHistoricalTransactionsToBudget::dispatch(
                 $reconciliationBudget,
                 $period,
@@ -246,10 +262,7 @@ class BudgetManagementService
         }
 
         $catchAllPeriod = $this->periodCovering(
-            BudgetPeriod::query()->whereHas('budget', fn ($query) => $query
-                ->where('user_id', $user->id)
-                ->where('space_id', $space->id)
-                ->where('is_catch_all', true)),
+            BudgetPeriod::query()->ofRunningCatchAll($user->id, $space->id),
             $applicationDate,
         );
         if ($catchAllPeriod !== null) {
@@ -357,6 +370,41 @@ class BudgetManagementService
         ]);
 
         return $period;
+    }
+
+    /**
+     * Re-derive the user's catch-all periods over the stretch a budget's periods
+     * cover, once what that budget claims there has changed. Without this a new
+     * budget counts what the catch-all already absorbed, and what a deleted or
+     * archived one lets go of is counted nowhere.
+     *
+     * A period whose first backfill is still pending keeps it: claiming the
+     * period would supersede that backfill, and a closed period that was never
+     * filled would stay empty, since healing it absorbs nothing. The rebuild
+     * visits it unclaimed, after waiting for the backfill to finish.
+     */
+    private function rebuildCatchAllAround(Budget $budget): void
+    {
+        $from = $budget->periods()->min('start_date');
+        $to = $budget->periods()->max('end_date');
+
+        if ($budget->is_catch_all || $from === null || $to === null) {
+            return;
+        }
+
+        $tokens = DB::transaction(fn (): array => BudgetPeriod::query()
+            ->ofRunningCatchAll($budget->user_id, $budget->space_id)
+            ->overlapping(Carbon::parse($from), Carbon::parse($to))
+            ->lockForUpdate()
+            ->get()
+            ->mapWithKeys(fn (BudgetPeriod $period): array => [
+                $period->id => $period->awaitsFirstBackfill() ? null : $this->claimForReconciliation($period)->reconciliation_token,
+            ])
+            ->all(), attempts: 5);
+
+        if ($tokens !== []) {
+            RebuildCatchAllBudgetPeriods::dispatch($tokens, $budget->user_id, $budget->space_id)->afterCommit();
+        }
     }
 
     public function updateNextPeriodAllocation(
@@ -498,8 +546,8 @@ class BudgetManagementService
 
     /**
      * Freeze a budget: it keeps every figure it has already counted and stops
-     * taking in anything new. One-way, which is why the record stays reachable
-     * instead of being deleted.
+     * taking in anything new, which is the catch-all's from here on. One-way,
+     * which is why the record stays reachable instead of being deleted.
      */
     public function archive(Budget $budget): Budget
     {
@@ -510,6 +558,7 @@ class BudgetManagementService
             // frozen budget's figures are pinned to.
             if (! $locked->isArchived()) {
                 $locked->forceFill(['archived_at' => now()])->save();
+                $this->rebuildCatchAllAround($locked);
             }
 
             return $locked;
@@ -523,6 +572,7 @@ class BudgetManagementService
             $budget = $this->ownedBudget($user, $space, $budgetId, lock: true);
             $id = $budget->id;
             $budget->delete();
+            $this->rebuildCatchAllAround($budget);
 
             return $id;
         }, attempts: 5);

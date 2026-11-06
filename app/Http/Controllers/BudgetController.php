@@ -472,10 +472,11 @@ class BudgetController extends Controller
 
     /**
      * Archiving records the day it happened and is one-way: the budget turns
-     * read-only, stops absorbing transactions and stops claiming its categories
-     * away from the catch-all, and no further periods are generated for it. The
-     * periods it already has keep their figures, which is why the budget stays
-     * reachable instead of being deleted.
+     * read-only, stops absorbing transactions and, for anything it does not
+     * already hold, stops claiming its categories away from the catch-all, and
+     * no further periods are generated for it. The periods it already has keep
+     * their figures, which is why the budget stays reachable instead of being
+     * deleted.
      *
      * The periods `GenerateBudgetPeriods` had already run ahead are left behind
      * on purpose: `show()` only navigates to periods that have started, so they
