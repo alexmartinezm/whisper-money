@@ -386,6 +386,16 @@ describe('spending by category', function () {
             ->assertJsonValidationErrors('parent_category_id');
     });
 
+    it('drills into a parent category sent in upper case as into the same id in lower case', function () {
+        ['user' => $user, 'food' => $food] = analyticsBook();
+        $headers = apiV1Bearer($user);
+        $url = '/api/v1/analytics/spending-by-category'.OCTOBER.'&parent_category_id=';
+
+        $lower = withHeaders($headers)->getJson($url.$food->id)->assertOk()->assertJsonPath('data.total', 15_345);
+
+        expect(withHeaders($headers)->getJson($url.strtoupper($food->id))->assertOk()->json('data'))->toBe($lower->json('data'));
+    });
+
     it('refuses a parent category that is not the user\'s', function () {
         withHeaders(apiV1Bearer(User::factory()->create()))
             ->getJson('/api/v1/analytics/spending-by-category'.OCTOBER.'&parent_category_id='.Category::factory()->create()->id)

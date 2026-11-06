@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Api\V1;
 
+use App\Models\Category;
 use Illuminate\Validation\Rule;
 
 class SpendingByCategoryRequest extends AnalyticsRangeRequest
@@ -27,8 +28,13 @@ class SpendingByCategoryRequest extends AnalyticsRangeRequest
         ];
     }
 
+    /**
+     * The category as stored: `exists` ignores case, the roll-up does not.
+     */
     public function parentCategoryId(): ?string
     {
-        return $this->validated('parent_category_id');
+        $sent = $this->validated('parent_category_id');
+
+        return $sent === null ? null : Category::query()->whereKey($sent)->value('id');
     }
 }
