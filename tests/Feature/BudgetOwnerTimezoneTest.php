@@ -98,7 +98,8 @@ describe('the current period', function () {
         $budget = octoberAndNovemberBudget($timezone);
 
         expect($budget->getCurrentPeriod()->start_date->toDateString())->toBe($expectedStart)
-            ->and(Budget::query()->with('currentPeriods')->find($budget->id)->currentPeriods->first()->start_date->toDateString())->toBe($expectedStart);
+            ->and(Budget::query()->with('currentPeriods')->find($budget->id)->currentPeriods->first()->start_date->toDateString())->toBe($expectedStart)
+            ->and($budget->fresh()->currentPeriods->first()->start_date->toDateString())->toBe($expectedStart);
     })->with([
         'Buenos Aires at 2026-11-01 00:30 UTC' => ['America/Argentina/Buenos_Aires', '2026-11-01 00:30:00', '2026-10-01'],
         'UTC at 2026-11-01 00:30 UTC' => ['UTC', '2026-11-01 00:30:00', '2026-11-01'],
@@ -331,6 +332,31 @@ describe('on both sides of UTC', function () {
         'Los Angeles, the period\'s first day' => ['America/Los_Angeles', '2026-11-01 00:30:00', 25_000],
         'Auckland, a day past it' => ['Pacific/Auckland', '2026-10-31 12:00:00', 10_000],
     ]);
+
+    it('answers an MCP write with the owner\'s period in progress', function () {
+        Carbon::setTestNow(Carbon::parse('2026-10-31 12:00:00'));
+        $budget = octoberAndNovemberBudget('Pacific/Auckland');
+
+        $updated = mcpPayload(mcpWriter($budget->user)
+            ->tool(UpdateBudget::class, ['budget_id' => $budget->id, 'name' => 'Renamed'])
+            ->assertOk());
+
+        expect($updated['budget']['current_period']['start_date'])->toBe('2026-11-01');
+    });
+
+    it('plans the period after the owner\'s on the web', function () {
+        // Already November in Auckland, so November is running, not being planned.
+        Carbon::setTestNow(Carbon::parse('2026-10-31 12:00:00'));
+        $budget = octoberAndNovemberBudget('Pacific/Auckland');
+        $november = $budget->periods()->where('start_date', '2026-11-01')->sole();
+        $this->withoutMiddleware(ValidateCsrfToken::class);
+
+        $this->actingAs($budget->user)
+            ->patch(route('budgets.periods.update', [$budget, $november]), ['allocated_amount' => 25_000])
+            ->assertNotFound();
+
+        expect($november->fresh()->allocated_amount)->toBe(10_000);
+    });
 
     it('refuses a one-off on the month that is over for the owner, on the API and MCP', function (string $surface) {
         Carbon::setTestNow(Carbon::parse('2026-10-31 12:00:00'));

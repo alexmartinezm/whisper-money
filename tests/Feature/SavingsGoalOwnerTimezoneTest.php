@@ -107,6 +107,48 @@ describe('the month in progress', function () {
     });
 });
 
+describe('the owner\'s calendar', function () {
+    it('reads an archive on it, on either side of UTC', function (string $timezone, string $archivedAt, string $inMonth, string $notInMonth) {
+        $goal = timezoneGoal($timezone);
+
+        $goal->archived_at = Carbon::parse($archivedAt);
+
+        expect($goal->wasArchivedIn(Carbon::parse($inMonth)))->toBeTrue()
+            ->and($goal->wasArchivedIn(Carbon::parse($notInMonth)))->toBeFalse();
+    })->with([
+        'Auckland, already November' => ['Pacific/Auckland', '2026-10-31 12:00:00', '2026-11-01', '2026-10-01'],
+        'Los Angeles, still October' => ['America/Los_Angeles', '2026-11-01 02:00:00', '2026-10-01', '2026-11-01'],
+    ]);
+
+    it('tags what came in since the owner\'s month began when an auto-tag goal is created', function () {
+        Carbon::setTestNow(Carbon::parse('2026-11-01 01:00:00'));
+        $user = User::factory()->create(['onboarded_at' => now(), 'currency_code' => 'EUR', 'timezone' => 'America/Los_Angeles']);
+        $account = Account::factory()->create(['user_id' => $user->id, 'type' => AccountType::Savings, 'currency_code' => 'EUR']);
+        $transfer = Transaction::factory()->plaintext()->create([
+            'user_id' => $user->id,
+            'account_id' => $account->id,
+            'amount' => 5_000,
+            'transaction_date' => '2026-10-20',
+        ]);
+
+        $goal = app(SavingsGoalService::class)->createFromInput($user, [
+            'kind' => 'monthly',
+            'name' => 'Emergency fund',
+            'monthly_target_type' => 'amount',
+            'monthly_target_amount' => 30000,
+            'auto_tag_account_id' => $account->id,
+        ]);
+
+        expect($transfer->labels()->pluck('labels.id')->all())->toBe([$goal->label_id]);
+    });
+
+    it('keeps the owner off a serialized goal', function () {
+        $goal = timezoneGoal('Pacific/Auckland');
+
+        expect($goal->load('user')->toArray())->not->toHaveKey('user');
+    });
+});
+
 describe('a closed month', function () {
     it('keeps its target when the goal is edited after it is over for the owner', function () {
         $goal = timezoneGoal('Pacific/Auckland');
@@ -174,6 +216,14 @@ describe('the budgets page', function () {
 
         $this->actingAs($goal->user)->get('/budgets')
             ->assertInertia(fn ($page) => $page->where('monthlySavingsLastMonth.month', $expected));
+
+        $dashboard = $this->actingAs($goal->user)->withoutVite()->get(route('dashboard'), [
+            'X-Inertia' => 'true',
+            'X-Inertia-Partial-Component' => 'dashboard',
+            'X-Inertia-Partial-Data' => 'monthlySavingsLastMonth',
+        ])->assertOk();
+
+        expect($dashboard->json('props.monthlySavingsLastMonth.month'))->toBe($expected);
     })->with([
         'Buenos Aires' => ['America/Argentina/Buenos_Aires', '2026-09'],
         'UTC' => ['UTC', '2026-10'],
