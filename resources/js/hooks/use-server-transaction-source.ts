@@ -256,6 +256,9 @@ export function useServerTransactionSource({
     const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const summaryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const summaryReloadRef = useRef<CancelToken | null>(null);
+    // The visit on its way, if any: a later one supersedes it, and the earlier
+    // one's onFinish must not read as the later one's.
+    const navigatingRef = useRef<object | null>(null);
 
     // Whatever replaces the rows brings its own summary, or asks for one.
     const cancelSummaryRefresh = useCallback(() => {
@@ -277,13 +280,21 @@ export function useServerTransactionSource({
 
             const doNavigate = () => {
                 const params = clientFiltersToQueryParams(newFilters);
+                const navigation = {};
+                navigatingRef.current = navigation;
+                cancelSummaryRefresh();
                 setIsNavigating(true);
                 setQueryKey((key) => key + 1);
                 router.visit(transactionsIndex({ query: params }).url, {
                     preserveScroll: true,
                     preserveState: true,
                     onSuccess: (page) => replaceLoadedRows(page.props),
-                    onFinish: () => setIsNavigating(false),
+                    onFinish: () => {
+                        if (navigatingRef.current === navigation) {
+                            navigatingRef.current = null;
+                        }
+                        setIsNavigating(false);
+                    },
                 });
             };
 
@@ -293,7 +304,7 @@ export function useServerTransactionSource({
                 doNavigate();
             }
         },
-        [replaceLoadedRows],
+        [replaceLoadedRows, cancelSummaryRefresh],
     );
 
     const onFiltersChange = useCallback(
@@ -329,10 +340,13 @@ export function useServerTransactionSource({
 
     // Async, so it never cancels a visit the user started meanwhile. Without
     // a filter the server sends no summary, so there is nothing to ask for.
+    // Nor during a visit: a reload targets the URL still in the bar, so its
+    // answer would land an old summary and URL on the new list, and the visit
+    // brings its own summary anyway.
     const refreshSummary = useCallback(() => {
         cancelSummaryRefresh();
 
-        if (!hasActiveFilters(filters)) {
+        if (navigatingRef.current || !hasActiveFilters(filters)) {
             return;
         }
 

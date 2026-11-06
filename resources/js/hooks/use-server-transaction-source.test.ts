@@ -356,6 +356,63 @@ describe('useServerTransactionSource', () => {
             expect(reload).toHaveBeenCalledOnce();
         });
 
+        it('asks nothing while a visit is on its way, which brings its own summary', () => {
+            const { result } = renderSource(null, FILTERED);
+
+            act(() =>
+                result.current.onFiltersChange({
+                    ...result.current.filters,
+                    categoryIds: ['home'],
+                }),
+            );
+            act(() => result.current.refreshSummary());
+            act(() => vi.advanceTimersByTime(500));
+
+            expect(reload).not.toHaveBeenCalled();
+
+            act(() => visit.mock.calls[0][1].onFinish());
+            act(() => result.current.refreshSummary());
+            act(() => vi.advanceTimersByTime(500));
+
+            expect(reload).toHaveBeenCalledOnce();
+        });
+
+        it('still counts as on its way when an earlier visit it replaced finishes', () => {
+            const { result } = renderSource(null, FILTERED);
+            const moveTo = (categoryIds: string[]) =>
+                act(() =>
+                    result.current.onFiltersChange({
+                        ...result.current.filters,
+                        categoryIds,
+                    }),
+                );
+
+            moveTo(['home']);
+            moveTo(['fuel']);
+            act(() => visit.mock.calls[0][1].onFinish());
+            act(() => result.current.refreshSummary());
+            act(() => vi.advanceTimersByTime(500));
+
+            expect(reload).not.toHaveBeenCalled();
+        });
+
+        it('drops a refresh armed before a debounced search visits', () => {
+            const { result } = renderSource(null, FILTERED);
+
+            act(() =>
+                result.current.onFiltersChange({
+                    ...result.current.filters,
+                    searchText: 'cof',
+                }),
+            );
+            act(() => vi.advanceTimersByTime(100));
+            act(() => result.current.refreshSummary());
+            act(() => vi.advanceTimersByTime(1000));
+
+            expect(visit).toHaveBeenCalledOnce();
+            expect(reload).not.toHaveBeenCalled();
+        });
+
         it('forgets a pending refresh when the rows reload with their summary', () => {
             const { result } = renderSource(null, FILTERED);
 
