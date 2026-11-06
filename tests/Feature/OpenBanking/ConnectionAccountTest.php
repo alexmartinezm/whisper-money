@@ -47,6 +47,24 @@ test('index renders the manage page with synced and available accounts', functio
         );
 });
 
+test('index tells the page which synced accounts have lost their bank link', function () {
+    $user = onboardedUser();
+    $connection = BankingConnection::factory()->create(['user_id' => $user->id]);
+
+    Account::factory()->for($user)->create([
+        'banking_connection_id' => $connection->id,
+        'external_account_id' => null,
+    ]);
+
+    $this->actingAs($user)
+        ->get(route('open-banking.connection-accounts.index', $connection))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('syncedAccounts', 1)
+            ->where('syncedAccounts.0.external_account_id', null)
+        );
+});
+
 test('refresh discovers bank accounts that are not yet synced', function () {
     $user = onboardedUser();
     $connection = BankingConnection::factory()->create(['user_id' => $user->id]);
@@ -81,6 +99,30 @@ test('refresh discovers bank accounts that are not yet synced', function () {
             ->where('discoveredAccounts.0.name', 'Savings')
             ->where('discoveredAccounts.0.iban', 'ES9999999999999999999999')
         );
+});
+
+test('refresh does not offer an account a sibling connection on the same session already syncs', function () {
+    $user = onboardedUser();
+    $connection = BankingConnection::factory()->create(['user_id' => $user->id, 'session_id' => 'shared-session']);
+    $sibling = BankingConnection::factory()->create(['user_id' => $user->id, 'session_id' => 'shared-session']);
+
+    Account::factory()->for($user)->create([
+        'banking_connection_id' => $sibling->id,
+        'external_account_id' => 'sibling-uid',
+    ]);
+
+    $this->mock(BankingProviderInterface::class, function ($mock) {
+        $mock->shouldReceive('getSession')->andReturn([
+            'status' => 'AUTHORIZED',
+            'accounts' => [['uid' => 'sibling-uid']],
+        ]);
+        $mock->shouldNotReceive('getAccount');
+    });
+
+    $this->actingAs($user)
+        ->get(route('open-banking.connection-accounts.index', [$connection, 'refresh' => 1]))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->has('discoveredAccounts', 0));
 });
 
 test('map create adds a new synced account and dispatches a sync', function () {

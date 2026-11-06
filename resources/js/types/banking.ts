@@ -23,6 +23,8 @@ export interface BankingConnection {
     can_sync_manually?: boolean;
     /** Whether the automatic sync is backing off; Sync Now may still work. */
     is_rate_limited?: boolean;
+    /** A reconnect used a login that does not cover these accounts. */
+    failed_on_wrong_login?: boolean;
     created_at: string;
     updated_at: string;
 }

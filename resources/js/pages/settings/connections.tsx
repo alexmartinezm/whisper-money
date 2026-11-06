@@ -194,15 +194,28 @@ export default function ConnectionsPage({ connections }: Props) {
         return (
             connection.status === 'error' &&
             connection.provider === 'enablebanking' &&
-            (connection.error_message?.includes('Authentication failed') ??
-                false)
+            (connection.failed_on_wrong_login === true ||
+                (connection.error_message?.includes('Authentication failed') ??
+                    false))
         );
+    }
+
+    /**
+     * A pending connection that already has accounts is a re-authorization
+     * the user left at the bank. No callback ever comes for it, so the way
+     * out is starting the authorization again.
+     */
+    function isAbandonedReauthorization(
+        connection: BankingConnection,
+    ): boolean {
+        return connection.status === 'pending' && connection.accounts_count > 0;
     }
 
     function canReconnect(connection: BankingConnection): boolean {
         return (
             connection.provider === 'enablebanking' &&
             (connection.status === 'expired' ||
+                isAbandonedReauthorization(connection) ||
                 isExpiringSoon(connection) ||
                 isEnableBankingAuthError(connection))
         );
@@ -302,7 +315,10 @@ export default function ConnectionsPage({ connections }: Props) {
                                             <ConnectionStatusBadge
                                                 connection={connection}
                                             />
-                                            {connection.status === 'expired' &&
+                                            {(connection.status === 'expired' ||
+                                                isAbandonedReauthorization(
+                                                    connection,
+                                                )) &&
                                                 canReconnect(connection) && (
                                                     <ReconnectButton
                                                         reconnecting={
@@ -522,10 +538,10 @@ export default function ConnectionsPage({ connections }: Props) {
                                                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive dark:text-destructive-foreground" />
                                                     <div className="space-y-2">
                                                         <p className="text-sm text-destructive dark:text-foreground">
-                                                            {connection.error_message ??
-                                                                __(
+                                                            {__(
+                                                                connection.error_message ??
                                                                     'An unexpected error occurred during sync.',
-                                                                )}
+                                                            )}
                                                         </p>
                                                         {connection.is_beta && (
                                                             <p className="text-sm text-muted-foreground">

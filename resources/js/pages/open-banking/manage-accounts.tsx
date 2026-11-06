@@ -282,7 +282,10 @@ function SyncedAccountCard({
                             <AccountName account={account} />
                         </CardTitle>
                         <CardDescription>
-                            {account.currency_code} &middot; {__('Syncing')}
+                            {account.currency_code} &middot;{' '}
+                            {account.external_account_id
+                                ? __('Syncing')
+                                : __('Not syncing')}
                         </CardDescription>
                     </div>
                 </div>
