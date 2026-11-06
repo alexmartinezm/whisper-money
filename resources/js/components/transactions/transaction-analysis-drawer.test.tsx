@@ -48,6 +48,7 @@ const filters: TransactionFilters = {
     amountMin: null,
     amountMax: null,
     categoryIds: [],
+    categoryTypes: [],
     accountIds: [],
     labelIds: ['label-1'],
     creditorName: '',
@@ -1007,5 +1008,43 @@ describe('TransactionAnalysisDrawer breakdowns', () => {
         expect(screen.getByText('Spending by account')).toBeInTheDocument();
         expect(screen.getByText('Visa')).toBeInTheDocument();
         expect(screen.getByText('Amex')).toBeInTheDocument();
+    });
+});
+
+describe('TransactionAnalysisDrawer scope', () => {
+    function askedQuery(drawerFilters: TransactionFilters): URLSearchParams {
+        axiosGet.mockResolvedValue({ data: { data: [] } });
+
+        render(
+            <TransactionAnalysisDrawer
+                open
+                onOpenChange={() => {}}
+                filters={drawerFilters}
+            />,
+        );
+
+        const url = vi.mocked(global.fetch).mock.calls[0][0] as string;
+
+        return new URLSearchParams(url.split('?')[1]);
+    }
+
+    it('analyses the same rows an AI-only list shows', () => {
+        expect(
+            askedQuery({ ...filters, aiCategorizedOnly: true }).get(
+                'category_source',
+            ),
+        ).toBe('ai');
+    });
+
+    it('asks nothing about the source of a list that is not AI-only', () => {
+        expect(askedQuery(filters).has('category_source')).toBe(false);
+    });
+
+    it('carries the category types, so the drawer narrows the same lines', () => {
+        expect(
+            askedQuery({ ...filters, categoryTypes: ['savings'] }).get(
+                'category_types',
+            ),
+        ).toBe('savings');
     });
 });

@@ -11,6 +11,7 @@ import {
     TransactionDescription,
 } from '@/components/transactions/transaction-description';
 import { AmountDisplay } from '@/components/ui/amount-display';
+import { COMPACT_LIST_MUTED_TEXT, LIST_ROW } from '@/lib/compact-list-style';
 import { resolveTransactionLabels } from '@/lib/transaction-labels';
 import { cn } from '@/lib/utils';
 import { type CreditCardPayment } from '@/types/account';
@@ -93,7 +94,8 @@ export function TransactionListRow({
             data-selected={selected || undefined}
             data-new={isNew || undefined}
             className={cn(
-                'flex cursor-pointer items-start gap-3 border-b border-neutral-100 px-4 py-3 transition-colors select-none dark:border-neutral-800',
+                LIST_ROW,
+                'cursor-pointer leading-[1.4] transition-colors select-none',
                 isNew && 'border-l-2 border-l-blue-500 dark:border-l-blue-500',
                 selected
                     ? 'bg-primary/5 dark:bg-primary/10'
@@ -148,11 +150,19 @@ export function TransactionListRow({
                         showSign
                         weight="medium"
                         monospace
-                        className="shrink-0 text-[15px]"
+                        // Cancels the px-1 `positive-highlight` gives every
+                        // amount for its income pill, so the figure lines up
+                        // with the row's edge; drop it with that variant.
+                        className="-mr-1 shrink-0 text-[15px]"
                     />
                 </div>
 
-                <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[13px] whitespace-nowrap text-muted-foreground">
+                <div
+                    className={cn(
+                        'flex min-w-0 items-center gap-1.5 overflow-hidden text-[13px] whitespace-nowrap',
+                        COMPACT_LIST_MUTED_TEXT,
+                    )}
+                >
                     {splitLines.length > 0 ? (
                         <span className="shrink-0 font-medium">
                             {__('Split')} · {splitLines.length}
@@ -206,7 +216,12 @@ export function TransactionListRow({
                 )}
 
                 {transaction.notes && (
-                    <span className="truncate text-[13px] text-muted-foreground">
+                    <span
+                        className={cn(
+                            'truncate text-[13px]',
+                            COMPACT_LIST_MUTED_TEXT,
+                        )}
+                    >
                         {transaction.notes_iv
                             ? ENCRYPTED_PLACEHOLDER
                             : transaction.notes}
@@ -230,7 +245,12 @@ function SplitLines({
     currencyCode: string;
 }) {
     return (
-        <div className="flex flex-col gap-0.5 pt-0.5 text-[13px] text-muted-foreground">
+        <div
+            className={cn(
+                'flex flex-col gap-0.5 pt-0.5 text-[13px]',
+                COMPACT_LIST_MUTED_TEXT,
+            )}
+        >
             {lines.map((line) => {
                 const name = line.isRest
                     ? __('Rest')

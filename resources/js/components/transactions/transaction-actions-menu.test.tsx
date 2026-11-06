@@ -71,6 +71,7 @@ const emptyFilters: TransactionFilters = {
     amountMin: null,
     amountMax: null,
     categoryIds: [],
+    categoryTypes: [],
     accountIds: [],
     labelIds: [],
     creditorName: '',
@@ -85,6 +86,7 @@ function renderMenu(
     hasTransactionalAccounts = true,
     onTransactionSaved?: () => void,
     onLabelCreated?: (label: unknown) => void,
+    showAnalysis = true,
 ) {
     return render(
         <TransactionActionsMenu
@@ -92,6 +94,7 @@ function renderMenu(
             hasTransactionalAccounts={hasTransactionalAccounts}
             onTransactionSaved={onTransactionSaved}
             onLabelCreated={onLabelCreated}
+            showAnalysis={showAnalysis}
             filters={filters}
             onReEvaluateComplete={onReEvaluateComplete}
         />,
@@ -123,6 +126,27 @@ beforeEach(() => {
 });
 
 describe('TransactionActionsMenu analysis button', () => {
+    it('is left out unless the page asks for it, as /transactions does', () => {
+        const { container } = renderMenu(
+            { ...emptyFilters, labelIds: ['label-1'] },
+            [],
+            undefined,
+            true,
+            undefined,
+            undefined,
+            false,
+        );
+
+        expect(
+            screen.queryByRole('button', { name: 'Analysis' }),
+        ).not.toBeInTheDocument();
+        expect(actionBarLabels(container)).toEqual([
+            'Add transaction',
+            'Categorize',
+            'More actions',
+        ]);
+    });
+
     it('is disabled when no filter is applied', () => {
         renderMenu(emptyFilters);
 
@@ -184,6 +208,7 @@ describe('TransactionActionsMenu analysis button', () => {
             <TransactionActionsMenu
                 transactions={[]}
                 hasTransactionalAccounts
+                showAnalysis
                 filters={{ ...emptyFilters, labelIds: ['label-1'] }}
             />,
         );

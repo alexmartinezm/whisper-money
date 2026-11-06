@@ -154,9 +154,12 @@ export function useTransactionRowEditing({
     );
 
     const openAutomateDialog = useCallback(
-        (transaction: DecryptedTransaction) => {
+        (
+            transaction: DecryptedTransaction,
+            source: 'row_menu' | 'edit_dialog' = 'row_menu',
+        ) => {
             captureEvent('automation_rule_toast_automatize_clicked', {
-                source: 'row_menu',
+                source,
             });
             setAutomateCandidate({
                 transaction,
@@ -173,15 +176,26 @@ export function useTransactionRowEditing({
             onDuplicate: setDuplicateTransaction,
             onReEvaluateRules: handleReEvaluateRules,
             onDelete: setDeleteTransaction,
-            onAutomate: openAutomateDialog,
+            onAutomate: (transaction) => openAutomateDialog(transaction),
         }),
         [handleReEvaluateRules, openAutomateDialog],
+    );
+
+    /** The same actions, offered from the edit dialog's own menu. */
+    const dialogRowActions = useMemo<TransactionRowActionHandlers>(
+        () => ({
+            ...rowActions,
+            onAutomate: (transaction) =>
+                openAutomateDialog(transaction, 'edit_dialog'),
+        }),
+        [rowActions, openAutomateDialog],
     );
 
     return {
         labels,
         handleLabelCreated,
         rowActions,
+        dialogRowActions,
         updateTransaction,
         handleCategorized,
         editTransaction,

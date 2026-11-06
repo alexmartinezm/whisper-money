@@ -7,6 +7,7 @@ use App\Models\Category;
 use App\Models\Label;
 use App\Models\SavingsGoal;
 use App\Models\Transaction;
+use App\Models\TransactionSplit;
 use App\Models\User;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -224,6 +225,33 @@ test('the goal page stats include the starting amount', function () {
             // The pace only counts the contribution, not the starting balance:
             // 25000 cents over the elapsed window, nowhere near 125000/day.
             ->where('stats.rate_per_day', fn ($rate) => $rate > 0 && $rate <= 2500.0)
+        );
+});
+
+test('the goal page sends a split contribution with its lines, which its list filters on', function () {
+    $user = onboardedSavingsUser();
+    $goal = SavingsGoal::factory()->create(['user_id' => $user->id]);
+    $category = Category::factory()->create(['user_id' => $user->id]);
+    $contribution = Transaction::factory()->plaintext()->create([
+        'user_id' => $user->id,
+        'account_id' => savingsGoalAccount($user)->id,
+        'category_id' => null,
+        'amount' => -10000,
+    ]);
+    $contribution->labels()->attach($goal->label_id);
+    TransactionSplit::factory()->create([
+        'transaction_id' => $contribution->id,
+        'category_id' => $category->id,
+        'amount' => -10000,
+        'position' => 0,
+    ]);
+
+    $this->actingAs($user)
+        ->get("/savings-goals/{$goal->id}")
+        ->assertInertia(fn ($page) => $page
+            ->has('transactions', 1)
+            ->where('transactions.0.splits.0.category_id', $category->id)
+            ->where('transactions.0.splits.0.category.id', $category->id)
         );
 });
 

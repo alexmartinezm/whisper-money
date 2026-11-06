@@ -1,7 +1,6 @@
 import { useTransactionDayHeaders } from '@/components/transactions/transaction-day-header';
 import { TransactionListRow } from '@/components/transactions/transaction-list-row';
 import { TransactionRowContextMenuContent } from '@/components/transactions/transaction-row-context-menu';
-import { TransactionSortMenu } from '@/components/transactions/transaction-sort-menu';
 import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu';
 import {
     DataTable,
@@ -10,12 +9,15 @@ import {
     useGroupedRowVirtualizer,
 } from '@/components/ui/data-table';
 import { useElementWidth } from '@/hooks/use-element-width';
+import { useIsMobile } from '@/hooks/use-mobile';
 import {
     type RowSelectionMode,
     useLongPressSelect,
 } from '@/hooks/use-mobile-selection-mode';
+import { PHONE_FRAME, PHONE_INSET } from '@/lib/compact-list-style';
 import { type DaySummaryOf } from '@/lib/transaction-day-groups';
 import { type TransactionRowActionHandlers } from '@/lib/transaction-row-actions';
+import { cn } from '@/lib/utils';
 import { type CreditCardPayment } from '@/types/account';
 import { type Category } from '@/types/category';
 import { type Label } from '@/types/label';
@@ -24,7 +26,6 @@ import {
     type ColumnDef,
     type Row,
     type RowSelectionState,
-    type SortingState,
     type Table,
 } from '@tanstack/react-table';
 import { VirtualItem, Virtualizer } from '@tanstack/react-virtual';
@@ -36,6 +37,16 @@ import { Fragment, type MouseEvent, useRef } from 'react';
  * takes its share, so a 1024px window with it open already gets the list.
  */
 const LIST_LAYOUT_BELOW_PX = 56 * 16; // 56rem at the 16px root size the app keeps
+
+/**
+ * Each row draws its hairline below; inside a frame the last one would sit on
+ * the frame's border and double it. On a phone the frame has no bottom border,
+ * so the last row keeps its own: the md-only twin.
+ */
+const LAST_ROW_ON_FRAME =
+    '[&>div>div:last-child_[data-testid=transaction-list-row]]:border-b-0';
+const MD_LAST_ROW_ON_FRAME =
+    'md:[&>div>div:last-child_[data-testid=transaction-list-row]]:border-b-0';
 
 /** What a row of the compact list shows beyond the transaction itself. */
 export interface TransactionListRowOptions {
@@ -63,14 +74,18 @@ interface ResponsiveTransactionTableProps {
     maxHeight?: number;
     topRow?: React.ReactNode;
     /** The table's state, handed in because the compiler memoizes past reads off it. */
-    sorting: SortingState;
     rowSelection: RowSelectionState;
     /** What each day header says about its whole day, loaded rows or not. */
     daySummaryOf: DaySummaryOf;
-    isGroupedByDay: boolean;
     selectionMode: RowSelectionMode;
     listRow: TransactionListRowOptions;
     rowActions: TransactionRowActionHandlers;
+    /**
+     * Keep the compact list's plain frame on a phone, for a list inside a
+     * card. Otherwise it sits 16px from the screen's edges there, open at the
+     * bottom (see `PHONE_FRAME`).
+     */
+    framedOnPhone?: boolean;
 }
 
 /**
@@ -85,13 +100,12 @@ export function ResponsiveTransactionTable({
     renderRow,
     maxHeight,
     topRow,
-    sorting,
     rowSelection,
     daySummaryOf,
-    isGroupedByDay,
     selectionMode,
     listRow,
     rowActions,
+    framedOnPhone = false,
 }: ResponsiveTransactionTableProps) {
     const [containerRef, width] = useElementWidth<HTMLDivElement>();
     const layout =
@@ -102,7 +116,6 @@ export function ResponsiveTransactionTable({
         table,
         rowSelection,
         daySummaryOf,
-        isGroupedByDay,
         layout,
         selectionActive,
     });
@@ -119,7 +132,6 @@ export function ResponsiveTransactionTable({
             {width === null ? null : layout === 'list' ? (
                 <TransactionCompactList
                     table={table}
-                    sorting={sorting}
                     rowSelection={rowSelection}
                     selectionActive={selectionActive}
                     selectionMode={selectionMode}
@@ -128,6 +140,7 @@ export function ResponsiveTransactionTable({
                     topRow={topRow}
                     listRow={listRow}
                     rowActions={rowActions}
+                    framedOnPhone={framedOnPhone}
                     {...dayHeaders}
                 />
             ) : (
@@ -147,7 +160,6 @@ export function ResponsiveTransactionTable({
 
 function TransactionCompactList({
     table,
-    sorting,
     rowSelection,
     selectionActive,
     selectionMode,
@@ -156,12 +168,12 @@ function TransactionCompactList({
     topRow,
     listRow,
     rowActions,
+    framedOnPhone,
     groupRowsBy,
     renderGroupHeader,
 }: Pick<
     ResponsiveTransactionTableProps,
     | 'table'
-    | 'sorting'
     | 'rowSelection'
     | 'selectionMode'
     | 'emptyMessage'
@@ -169,9 +181,10 @@ function TransactionCompactList({
     | 'topRow'
     | 'listRow'
     | 'rowActions'
+    | 'framedOnPhone'
 > & {
     selectionActive: boolean;
-    groupRowsBy?: (transaction: DecryptedTransaction) => string;
+    groupRowsBy: (transaction: DecryptedTransaction) => string;
     renderGroupHeader: (
         group: DataTableRowGroup<DecryptedTransaction>,
         measureProps: DataTableMeasureProps,
@@ -183,6 +196,11 @@ function TransactionCompactList({
 
     const scrollRef = useRef<HTMLDivElement>(null);
     const rows = table.getRowModel().rows;
+    // On a phone a box of its own height would leave only a 16px gutter to
+    // scroll the page by: nearly every swipe would scroll the list instead.
+    // There the list grows with the page, as /transactions does everywhere.
+    const isPhone = useIsMobile();
+    const boxHeight = isPhone && !framedOnPhone ? undefined : maxHeight;
     const { items, rowVirtualizer, virtualRows, paddingTop, paddingBottom } =
         useGroupedRowVirtualizer({
             rows,
@@ -190,7 +208,7 @@ function TransactionCompactList({
             scrollRef,
             // Without a height of its own the list grows with the page, which
             // scrolls instead.
-            scrollsWithWindow: !maxHeight,
+            scrollsWithWindow: !boxHeight,
             estimateSize: { group: 33, row: 68 },
         });
 
@@ -199,23 +217,39 @@ function TransactionCompactList({
             className="flex flex-col gap-2"
             data-testid="transaction-compact-list"
         >
-            <div className="flex justify-end">
-                <TransactionSortMenu table={table} sorting={sorting} />
-            </div>
             {topRow && (
-                <div className="overflow-hidden rounded-md border">
+                <div
+                    className={cn(
+                        'overflow-hidden rounded-md border',
+                        !framedOnPhone && PHONE_INSET,
+                    )}
+                >
                     {topRow}
                 </div>
             )}
             <div
                 ref={scrollRef}
-                // Each row draws its hairline below; the last one would sit
-                // on the frame's border and double it.
-                className="overflow-hidden rounded-md border [&>div>div:last-child_[data-testid=transaction-list-row]]:border-b-0"
-                style={maxHeight ? { maxHeight, overflowY: 'auto' } : undefined}
+                className={cn(
+                    'overflow-hidden rounded-md border',
+                    framedOnPhone
+                        ? LAST_ROW_ON_FRAME
+                        : [PHONE_FRAME, MD_LAST_ROW_ON_FRAME],
+                )}
+                data-testid="transaction-compact-list-rows"
+                style={
+                    boxHeight
+                        ? { maxHeight: boxHeight, overflowY: 'auto' }
+                        : undefined
+                }
             >
                 {rows.length === 0 ? (
-                    <div className="p-6 text-center text-sm text-muted-foreground">
+                    <div
+                        className={cn(
+                            'p-6 text-center text-sm text-muted-foreground',
+                            // No row draws the closing hairline here.
+                            !framedOnPhone && 'max-md:border-b',
+                        )}
+                    >
                         {emptyMessage}
                     </div>
                 ) : (
