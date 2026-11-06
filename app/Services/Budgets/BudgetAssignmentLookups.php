@@ -4,9 +4,12 @@ namespace App\Services\Budgets;
 
 use App\Models\Budget;
 use App\Models\BudgetPeriod;
+use App\Models\BudgetTransaction;
 use App\Models\Transaction;
 use App\Services\CategoryTree;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Collection as SupportCollection;
 
 /**
  * What assigning transactions to budgets reads over and over. Each user's
@@ -67,14 +70,21 @@ class BudgetAssignmentLookups
     }
 
     /**
-     * The live budgets, other than catch-alls, that share the catch-all's
-     * owner and space and have a period covering the transaction's date: the
-     * ones that can take a transaction away from it. Each comes with its
-     * categories and labels loaded.
+     * The budgets that take a transaction away from a catch-all: the live ones
+     * sharing its owner and space with a period covering the transaction's
+     * date, and the archived ones still holding the transaction. Each comes
+     * with its categories and labels loaded.
      *
-     * Only a budget that can actually take this transaction displaces the
-     * catch-all: a budget created later, or one whose periods stop short,
-     * would otherwise drop the expense out of every budget there is.
+     * Judged by the transaction's date and not by whether a budget overlaps the
+     * catch-all period, as upstream does: only a budget that can actually take
+     * this transaction displaces the catch-all. A budget created later, or one
+     * whose periods stop short, would otherwise drop the expense out of every
+     * budget there is. Backfills and single assignments both read this, so they
+     * cannot disagree.
+     *
+     * An archived budget stopped taking anything in but keeps what it counted,
+     * so it claims exactly that: anything else it used to track is the
+     * catch-all's, and what it holds must not be counted a second time.
      *
      * @return Collection<int, Budget>
      */
@@ -83,18 +93,55 @@ class BudgetAssignmentLookups
         $date = $transaction->transaction_date->toDateString();
 
         return Budget::query()
-            ->notArchived()
             ->where('user_id', $catchAll->user_id)
             ->where('space_id', $catchAll->space_id)
             ->where('is_catch_all', false)
-            // Compared as plain dates: a Carbon binding serializes with a time
-            // ("Y-m-d H:i:s"), which sorts after a stored date-only end_date on
-            // any driver that compares them as strings, so the period's own last
-            // day would never match.
-            ->whereHas('periods', fn ($query) => $query
-                ->where('start_date', '<=', $date)
-                ->where('end_date', '>=', $date))
+            ->where(fn (Builder $claimants) => $claimants
+                // Compared as plain dates: a Carbon binding serializes with a
+                // time ("Y-m-d H:i:s"), which sorts after a stored date-only
+                // end_date on any driver that compares them as strings, so the
+                // period's own last day would never match.
+                ->where(fn (Builder $live) => $live
+                    ->whereNull('archived_at')
+                    ->whereHas('periods', fn ($query) => $query
+                        ->where('start_date', '<=', $date)
+                        ->where('end_date', '>=', $date)))
+                ->orWhere(fn (Builder $archived) => $archived
+                    ->whereNotNull('archived_at')
+                    ->whereHas('periods.budgetTransactions', fn ($query) => $query
+                        ->where('transaction_id', $transaction->id))))
             ->with(['categories:id', 'labels:id'])
             ->get();
+    }
+
+    /**
+     * The budgets, other than catch-alls, already counting each transaction,
+     * whatever they track today: a closed period keeps the rows of the tracking
+     * it ran on. Deleted budgets count nothing any more, so they are left out.
+     *
+     * With $onlyEndedPeriods the rows of periods still running do not count:
+     * those are re-derived from what their budget tracks, so a pending tracking
+     * change may be about to drop them and they cannot vouch for anything.
+     *
+     * @param  array<int, string>  $transactionIds
+     * @return SupportCollection<string, SupportCollection<int, Budget>> keyed by transaction id
+     */
+    public function catchAllHolders(Budget $catchAll, array $transactionIds, bool $onlyEndedPeriods): SupportCollection
+    {
+        return BudgetTransaction::query()
+            ->whereIn('transaction_id', $transactionIds)
+            ->when($onlyEndedPeriods, fn ($query) => $query->whereHas('budgetPeriod', fn ($periods) => $periods
+                ->where('end_date', '<', today()->toDateString())))
+            ->whereHas('budgetPeriod.budget', fn ($query) => $query
+                ->where('user_id', $catchAll->user_id)
+                ->where('space_id', $catchAll->space_id)
+                ->where('is_catch_all', false))
+            ->with(['budgetPeriod.budget.categories:id', 'budgetPeriod.budget.labels:id'])
+            ->get()
+            ->groupBy('transaction_id')
+            ->map(fn (SupportCollection $rows): SupportCollection => $rows
+                ->map(fn (BudgetTransaction $row): Budget => $row->budgetPeriod->budget)
+                ->unique('id')
+                ->values());
     }
 }
