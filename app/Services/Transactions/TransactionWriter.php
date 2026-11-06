@@ -47,6 +47,10 @@ class TransactionWriter
         $currencyCode = self::filledOrNull($fields['currency_code'] ?? null);
 
         [$transaction, $balanceUpdated] = DB::transaction(function () use ($user, $space, $account, $fields, $labelIds, $updateBalance, $categoryId, $currencyCode): array {
+            if ($updateBalance) {
+                $this->lockBalanceAccounts([$account->id]);
+            }
+
             $transaction = new Transaction([
                 'user_id' => $user->id,
                 'space_id' => $space->id,
@@ -92,6 +96,10 @@ class TransactionWriter
     {
         return DB::transaction(function () use ($transaction, $changes, $updateBalance): WrittenTransaction {
             $locked = Transaction::query()->whereKey($transaction->id)->lockForUpdate()->firstOrFail();
+
+            if ($updateBalance) {
+                $this->lockBalanceAccounts([$locked->account_id, $changes['account_id'] ?? $locked->account_id]);
+            }
 
             $splitError = TransactionWriteRules::splitLedgerError($locked, array_keys($changes));
 
@@ -156,12 +164,35 @@ class TransactionWriter
         return DB::transaction(function () use ($transaction, $updateBalance): bool {
             $locked = Transaction::query()->whereKey($transaction->id)->lockForUpdate()->firstOrFail();
 
+            if ($updateBalance) {
+                $this->lockBalanceAccounts([$locked->account_id]);
+            }
+
             $balanceUpdated = $updateBalance && $this->balanceAdjuster->reverseDeletedTransaction($locked);
 
             $locked->delete();
 
             return $balanceUpdated;
         }, attempts: 5);
+    }
+
+    /**
+     * One balance write at a time per account, taken before any plain read in
+     * the transaction. Under REPEATABLE READ the first plain read fixes the
+     * snapshot and a locking read does not, so whoever waits here still sees
+     * what the writer before it committed. Taken later, a parallel write on a
+     * new day would carry forward a stale balance, and the running balance
+     * would end wrong with nothing to say so; on the same new day both would
+     * insert its row and one would die on the unique index.
+     *
+     * In id order, so a move between two accounts cannot deadlock with the
+     * opposite one.
+     *
+     * @param  list<string>  $accountIds
+     */
+    private function lockBalanceAccounts(array $accountIds): void
+    {
+        Account::query()->whereKey(array_values(array_unique($accountIds)))->orderBy('id')->lockForUpdate()->get(['id']);
     }
 
     /**

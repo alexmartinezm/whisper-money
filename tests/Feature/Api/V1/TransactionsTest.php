@@ -501,6 +501,21 @@ describe('create', function () {
             ->and($connected->balances()->where('balance_date', '2026-01-15')->value('balance'))->toBe(10_000);
     });
 
+    it('locks the account before anything reads a snapshot, and only when the balance moves', function () {
+        $user = User::factory()->create();
+        $account = Account::factory()->create(['user_id' => $user->id, 'type' => 'checking']);
+        $body = ['account_id' => $account->id, 'description' => 'Cash', 'amount' => -100, 'transaction_date' => '2026-01-15'];
+        $headers = transactionsWriter($user);
+
+        $moving = statementsOfFirstTransaction(fn () => withHeaders($headers)->postJson('/api/v1/transactions', [...$body, 'update_balance' => true])->assertCreated());
+
+        expect($moving[0])->toContain('`accounts`')->toContain('for update');
+
+        $still = statementsOfFirstTransaction(fn () => withHeaders($headers)->postJson('/api/v1/transactions', $body)->assertCreated());
+
+        expect($still[0] ?? '')->not->toContain('`accounts`');
+    });
+
     it('leaves the balance alone unless asked', function () {
         $user = User::factory()->create();
         $manual = Account::factory()->create(['user_id' => $user->id, 'type' => 'checking']);
@@ -885,6 +900,21 @@ describe('update', function () {
             ->and($account->balances()->where('balance_date', '2026-01-20')->value('balance'))->toBe(10_000);
     });
 
+    it('locks both accounts of a move before anything reads a snapshot', function () {
+        $user = User::factory()->create();
+        $from = Account::factory()->create(['user_id' => $user->id, 'type' => 'checking', 'currency_code' => 'EUR']);
+        $to = Account::factory()->create(['user_id' => $user->id, 'type' => 'checking', 'currency_code' => 'EUR']);
+        $transaction = transactionOn($from, ['currency_code' => 'EUR']);
+        $headers = transactionsWriter($user);
+
+        $statements = statementsOfFirstTransaction(fn () => withHeaders($headers)
+            ->patchJson('/api/v1/transactions/'.$transaction->id, ['account_id' => $to->id, 'update_balance' => true])
+            ->assertOk());
+
+        expect($statements[0])->toContain('`transactions`')->toContain('for update')
+            ->and($statements[1])->toContain('`accounts`')->toContain('for update')->toContain('`id` in (?, ?)');
+    });
+
     it('takes the new account\'s currency with the move, and off the old balance', function () {
         $user = User::factory()->create();
         $from = Account::factory()->create(['user_id' => $user->id, 'type' => 'checking', 'currency_code' => 'EUR']);
@@ -1180,6 +1210,20 @@ describe('delete', function () {
 
         expect($transaction->fresh()->trashed())->toBeTrue()
             ->and($account->balances()->sole()->balance)->toBe(10_100);
+    });
+
+    it('locks the account before anything reads a snapshot', function () {
+        $user = User::factory()->create();
+        $account = Account::factory()->create(['user_id' => $user->id, 'type' => 'checking', 'currency_code' => 'EUR']);
+        $transaction = transactionOn($account, ['currency_code' => 'EUR']);
+        $headers = transactionsWriter($user);
+
+        $statements = statementsOfFirstTransaction(fn () => withHeaders($headers)
+            ->deleteJson('/api/v1/transactions/'.$transaction->id, ['update_balance' => true])
+            ->assertOk());
+
+        expect($statements[0])->toContain('`transactions`')->toContain('for update')
+            ->and($statements[1])->toContain('`accounts`')->toContain('for update');
     });
 
     it('leaves the balance alone unless asked, and a connected one always', function () {

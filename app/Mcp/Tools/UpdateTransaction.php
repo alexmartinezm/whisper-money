@@ -8,7 +8,6 @@ use App\Models\User;
 use App\Services\Transactions\TransactionWriter;
 use App\Services\Transactions\TransactionWriteRules;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
-use Illuminate\Support\Facades\DB;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Attributes\Description;
@@ -56,38 +55,39 @@ class UpdateTransaction extends WriteTool
 
     protected function write(Request $request, User $user): Response
     {
-        return DB::transaction(function () use ($request, $user): Response {
-            $space = $this->resolveSpace($request, $user);
-            $transaction = $this->transactionInSpace($request, $space);
-            $transaction = Transaction::query()->whereKey($transaction->id)->lockForUpdate()->firstOrFail();
+        $space = $this->resolveSpace($request, $user);
+        $transaction = $this->transactionInSpace($request, $space);
 
-            $refusal = $this->refuseUneditable($request, $transaction);
+        $refusal = $this->refuseUneditable($request, $transaction);
 
-            if ($refusal !== null) {
-                return $refusal;
-            }
+        if ($refusal !== null) {
+            return $refusal;
+        }
 
-            $request->validate(TransactionWriteRules::updateRules());
+        $request->validate(TransactionWriteRules::updateRules());
 
-            // ponytail: unlike the web edit path this does not learn a correction
-            // rule: MCP writes stay predictable and side-effect free.
-            $written = app(TransactionWriter::class)->update($transaction, $this->requestedFields($request, [
-                'description' => fn () => $request->string('description')->toString(),
-                'amount' => fn () => $request->integer('amount'),
-                'transaction_date' => fn () => $request->string('transaction_date')->toString(),
-                'currency_code' => fn () => $request->string('currency_code')->toString(),
-                'account_id' => fn () => $this->accountInSpace($request, $space)->id,
-                'notes' => fn () => $this->nullableString($request, 'notes'),
-                'creditor_name' => fn () => $this->nullableString($request, 'creditor_name'),
-                'debtor_name' => fn () => $this->nullableString($request, 'debtor_name'),
-                'category_id' => fn () => $request->filled('category_id') ? $this->categoryInSpace($request, $space)->id : null,
-            ]), $request->boolean('update_balance'));
+        // The writer locks and opens its own transaction: wrapping these reads
+        // in one would fix the snapshot before its balance lock. It also checks
+        // for a split again under the lock.
+        //
+        // ponytail: unlike the web edit path this does not learn a correction
+        // rule: MCP writes stay predictable and side-effect free.
+        $written = app(TransactionWriter::class)->update($transaction, $this->requestedFields($request, [
+            'description' => fn () => $request->string('description')->toString(),
+            'amount' => fn () => $request->integer('amount'),
+            'transaction_date' => fn () => $request->string('transaction_date')->toString(),
+            'currency_code' => fn () => $request->string('currency_code')->toString(),
+            'account_id' => fn () => $this->accountInSpace($request, $space)->id,
+            'notes' => fn () => $this->nullableString($request, 'notes'),
+            'creditor_name' => fn () => $this->nullableString($request, 'creditor_name'),
+            'debtor_name' => fn () => $this->nullableString($request, 'debtor_name'),
+            'category_id' => fn () => $request->filled('category_id') ? $this->categoryInSpace($request, $space)->id : null,
+        ]), $request->boolean('update_balance'));
 
-            return $this->json([
-                'transaction' => $this->presentTransaction($written->transaction),
-                'balance_updated' => $written->balanceUpdated,
-            ]);
-        });
+        return $this->json([
+            'transaction' => $this->presentTransaction($written->transaction),
+            'balance_updated' => $written->balanceUpdated,
+        ]);
     }
 
     /**

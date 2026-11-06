@@ -24,10 +24,14 @@ use Carbon\Carbon;
 use Carbon\CarbonImmutable;
 use Illuminate\Cache\RateLimiter;
 use Illuminate\Contracts\Queue\Job;
+use Illuminate\Database\Events\TransactionBeginning;
+use Illuminate\Database\Events\TransactionCommitted;
+use Illuminate\Database\Events\TransactionRolledBack;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
@@ -788,4 +792,36 @@ function issueOAuthToken(User $user, ?array $scopes = ['mcp:use'], ?Client $clie
     ])->assertOk()->json('access_token');
 
     return $token;
+}
+
+/**
+ * The SQL of the first database transaction $callback opens, in order, so a
+ * test can tell which statement fixes a REPEATABLE READ snapshot: only a plain
+ * read does, a locking one does not. The cache driver's own transactions, which
+ * the rate limiter opens on every request, are left out.
+ *
+ * @return list<string>
+ */
+function statementsOfFirstTransaction(Closure $callback): array
+{
+    $runs = [];
+    $depth = 0;
+
+    Event::listen(TransactionBeginning::class, function () use (&$runs, &$depth): void {
+        if ($depth++ === 0) {
+            $runs[] = [];
+        }
+    });
+    Event::listen([TransactionCommitted::class, TransactionRolledBack::class], function () use (&$depth): void {
+        $depth = max(0, $depth - 1);
+    });
+    DB::listen(function ($query) use (&$runs, &$depth): void {
+        if ($depth > 0) {
+            $runs[array_key_last($runs)][] = $query->sql;
+        }
+    });
+
+    $callback();
+
+    return collect($runs)->first(fn (array $run): bool => ! collect($run)->every(fn (string $sql): bool => str_contains($sql, '`cache'))) ?? [];
 }

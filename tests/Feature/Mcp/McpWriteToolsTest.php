@@ -117,6 +117,25 @@ it('creates a transaction on a connected account without touching its balances',
     expect($account->balances()->where('balance_date', '2026-01-15')->value('balance'))->toBe(10_000);
 });
 
+it('locks the account before anything reads a snapshot when it moves a balance', function (string $tool) {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id, 'type' => 'checking', 'currency_code' => 'EUR']);
+    $transaction = Transaction::factory()->plaintext()->create(['user_id' => $user->id, 'account_id' => $account->id, 'category_id' => null, 'currency_code' => 'EUR']);
+
+    $arguments = match ($tool) {
+        CreateTransaction::class => ['account_id' => $account->id, 'description' => 'Cash', 'amount' => -100, 'transaction_date' => '2026-01-15'],
+        UpdateTransaction::class => ['transaction_id' => $transaction->id, 'amount' => -100],
+        DeleteTransaction::class => ['transaction_id' => $transaction->id],
+    };
+
+    $statements = statementsOfFirstTransaction(fn () => callWriteTool($user, $tool, [...$arguments, 'update_balance' => true])->assertOk());
+    $firstPlainRead = collect($statements)->search(fn (string $sql): bool => str_starts_with($sql, 'select') && ! str_contains($sql, 'for update'));
+    $accountLock = collect($statements)->search(fn (string $sql): bool => str_contains($sql, '`accounts`') && str_contains($sql, 'for update'));
+
+    expect($accountLock)->toBeInt()
+        ->and($firstPlainRead === false || $accountLock < $firstPlainRead)->toBeTrue();
+})->with([CreateTransaction::class, UpdateTransaction::class, DeleteTransaction::class]);
+
 it('edits a manual transaction', function () {
     $user = User::factory()->create();
     $account = Account::factory()->create(['user_id' => $user->id]);
