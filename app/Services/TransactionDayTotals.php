@@ -22,8 +22,8 @@ use stdClass;
  *
  * `total` adds up postings. A split transaction stands at its own amount,
  * unless the filters name a category, a category type, a label or a cashflow
- * block: then it only adds the lines they keep, the ones the CSV export would write
- * ({@see TransactionCsvExporter::postings()}, which goes through
+ * block: then it only adds the lines they keep, the ones the CSV export would
+ * write ({@see TransactionCsvExporter::postings()}, which goes through
  * {@see CashflowBlockQuery::postingFilter()}), because the rest of it is not
  * what the list was asked for.
  */

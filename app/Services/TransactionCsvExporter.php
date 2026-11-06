@@ -20,9 +20,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * that holds each part as a transaction of its own reads: amount and category
  * from the line, everything else from the transaction. Under a category,
  * category type or label filter only the lines that filter would match are
- * written, in SQL through {@see self::constrainLines()}; under a cashflow block filter only
- * the postings in the block, the way the analysis drawer narrows them. The
- * rows and their count both go through the same narrowing.
+ * written, in SQL through {@see self::constrainLines()}; under a cashflow block
+ * filter only the postings in the block, the way the analysis drawer narrows
+ * them. The rows and their count both go through the same narrowing.
  */
 class TransactionCsvExporter
 {
