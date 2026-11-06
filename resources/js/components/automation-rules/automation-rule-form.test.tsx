@@ -133,3 +133,33 @@ describe('AutomationRuleForm priority', () => {
         expect(router.patch.mock.lastCall![1]).toMatchObject({ priority: 5 });
     });
 });
+
+describe('AutomationRuleForm note', () => {
+    beforeEach(() => {
+        router.post.mockClear();
+        router.patch.mockClear();
+    });
+
+    it('leaves out of an edit the note it has no field for', () => {
+        renderForm({
+            mode: 'edit',
+            rule: makeRule({ action_note: 'Weekly shop' }),
+        });
+        submit();
+
+        const payload = router.patch.mock.lastCall![1];
+
+        expect(payload).not.toHaveProperty('action_note');
+        expect(payload).not.toHaveProperty('action_note_iv');
+    });
+
+    it('leaves it out of a new rule too', () => {
+        renderForm({ mode: 'create' });
+        submit();
+
+        const payload = router.post.mock.lastCall![1];
+
+        expect(payload).not.toHaveProperty('action_note');
+        expect(payload).not.toHaveProperty('action_note_iv');
+    });
+});

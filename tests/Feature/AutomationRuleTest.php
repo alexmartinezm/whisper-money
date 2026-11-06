@@ -556,3 +556,55 @@ test('editing a rule from the web stores its conditions as an object', function 
     'stored as an object' => [['in' => ['old', ['var' => 'description']]]],
     'stored double-encoded' => [json_encode(['in' => ['old', ['var' => 'description']]])],
 ]);
+
+/**
+ * The fields of the web form's save that do not depend on the note.
+ *
+ * @return array<string, mixed>
+ */
+function webRuleSave(AutomationRule $rule): array
+{
+    return [
+        'title' => 'Renamed',
+        'priority' => $rule->priority,
+        'rules_json' => json_encode(['in' => ['grocery', ['var' => 'description']]]),
+        'action_category_id' => $rule->action_category_id,
+    ];
+}
+
+test('a web save keeps a note set through the API or MCP', function (array $form) {
+    $user = User::factory()->create();
+    $rule = AutomationRule::factory()->create([
+        'user_id' => $user->id,
+        'action_category_id' => Category::factory()->create(['user_id' => $user->id])->id,
+        'action_note' => 'Weekly shop',
+        'action_note_iv' => null,
+    ]);
+
+    $this->actingAs($user)
+        ->from(route('automation-rules.index'))
+        ->patch(route('automation-rules.update', $rule), [...webRuleSave($rule), ...$form])
+        ->assertRedirect(route('automation-rules.index'));
+
+    expect($rule->refresh())->title->toBe('Renamed')->action_note->toBe('Weekly shop');
+})->with([
+    'the form sends no note' => [[]],
+    'an open tab still sends an empty note' => [['action_note' => null, 'action_note_iv' => null]],
+]);
+
+test('a web save keeps a note still encrypted on the device', function () {
+    $user = User::factory()->create();
+    $rule = AutomationRule::factory()->create([
+        'user_id' => $user->id,
+        'action_category_id' => Category::factory()->create(['user_id' => $user->id])->id,
+        'action_note' => 'bm90ZS1jaXBoZXI=',
+        'action_note_iv' => 'abcdefghijklmnop',
+    ]);
+
+    $this->actingAs($user)
+        ->from(route('automation-rules.index'))
+        ->patch(route('automation-rules.update', $rule), [...webRuleSave($rule), 'action_note' => null, 'action_note_iv' => null])
+        ->assertRedirect(route('automation-rules.index'));
+
+    expect($rule->refresh())->action_note->toBe('bm90ZS1jaXBoZXI=')->action_note_iv->toBe('abcdefghijklmnop');
+});
