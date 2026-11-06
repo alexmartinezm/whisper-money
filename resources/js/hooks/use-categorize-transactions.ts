@@ -1,5 +1,5 @@
 import type { AutomateCategorizationCandidate } from '@/components/automation-rules/automate-categorization-dialog';
-import { captureEvent } from '@/lib/posthog';
+import { showAutomatizeToast } from '@/lib/automatize-toast';
 import { transactionSyncService } from '@/services/transaction-sync';
 import { type Account, type Bank } from '@/types/account';
 import { type Category } from '@/types/category';
@@ -7,17 +7,8 @@ import {
     type DecryptedTransaction,
     type Transaction,
 } from '@/types/transaction';
-import { __ } from '@/utils/i18n';
 import { parseISO } from 'date-fns';
-import {
-    createElement,
-    useCallback,
-    useEffect,
-    useMemo,
-    useRef,
-    useState,
-} from 'react';
-import { toast } from 'sonner';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 export type AnimationState = 'idle' | 'exiting' | 'entering' | 'success';
 
@@ -182,27 +173,11 @@ export function useCategorizeTransactions({
                 setCategoryUsageOrder(getCategoryUsageOrder());
                 setCategorizedCount((prev) => prev + 1);
                 setAutomateCandidate(nextAutomateCandidate);
-                toast.success(__('Transaction categorized'), {
-                    closeButton: true,
-                    duration: 12000,
-                    action: {
-                        label: createElement(
-                            'span',
-                            {
-                                title: __(
-                                    'Automatize the categorization of future transactions like this one',
-                                ),
-                            },
-                            __('Automatize'),
-                        ),
-                        onClick: () => {
-                            captureEvent(
-                                'automation_rule_toast_automatize_clicked',
-                                { source: 'categorize_flow' },
-                            );
-                            setAutomateCandidate(nextAutomateCandidate);
-                            setAutomateDialogOpen(true);
-                        },
+                showAutomatizeToast({
+                    source: 'categorize_flow',
+                    onAutomatize: () => {
+                        setAutomateCandidate(nextAutomateCandidate);
+                        setAutomateDialogOpen(true);
                     },
                 });
             } catch (error) {
