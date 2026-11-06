@@ -223,4 +223,3 @@ it('still takes the cursors and the filters a list declares', function () {
         ->assertOk()
         ->assertJsonPath('data.*.id', [$newer->id]);
 });
-

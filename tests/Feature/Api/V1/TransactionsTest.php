@@ -74,7 +74,7 @@ function encryptedTransactionOn(Account $account, array $attributes = []): Trans
 /**
  * @param  array<int, array{0: Category, 1: int}>  $lines  each line's category and amount
  */
-function splitInto(Transaction $transaction, array $lines): Transaction
+function splitTransactionInto(Transaction $transaction, array $lines): Transaction
 {
     foreach (array_values($lines) as $position => [$category, $amount]) {
         TransactionSplit::factory()->create([
@@ -230,7 +230,7 @@ describe('list', function () {
         $home = Category::factory()->create(['user_id' => $user->id, 'type' => CategoryType::Expense]);
         $elsewhere = Category::factory()->create(['user_id' => $user->id, 'type' => CategoryType::Expense]);
         $label = Label::factory()->create(['user_id' => $user->id]);
-        $split = splitInto(transactionOn($account, ['amount' => -1000]), [[$food, -600], [$home, -400]]);
+        $split = splitTransactionInto(transactionOn($account, ['amount' => -1000]), [[$food, -600], [$home, -400]]);
         $split->labels()->attach($label);
 
         foreach (["category_id={$food->id}", "category_id={$home->id}", 'label_ids[]='.$label->id] as $filter) {
@@ -348,7 +348,7 @@ describe('list', function () {
         $category = Category::factory()->create(['user_id' => $user->id, 'type' => CategoryType::Expense]);
         $label = Label::factory()->create(['user_id' => $user->id]);
         $seed = function () use ($account, $category, $label): void {
-            splitInto(transactionOn($account, ['amount' => -1000]), [[$category, -600], [$category, -400]])->labels()->attach($label);
+            splitTransactionInto(transactionOn($account, ['amount' => -1000]), [[$category, -600], [$category, -400]])->labels()->attach($label);
         };
         $headers = apiV1Bearer($user);
         $seed();
@@ -1083,7 +1083,7 @@ describe('update', function () {
         $user = User::factory()->create();
         $account = Account::factory()->create(['user_id' => $user->id]);
         $category = Category::factory()->create(['user_id' => $user->id, 'type' => CategoryType::Expense]);
-        $transaction = splitInto(transactionOn($account, ['amount' => -1000]), [[$category, -600], [$category, -400]]);
+        $transaction = splitTransactionInto(transactionOn($account, ['amount' => -1000]), [[$category, -600], [$category, -400]]);
 
         withHeaders(transactionsWriter($user))
             ->patchJson('/api/v1/transactions/'.$transaction->id, $body)
@@ -1102,7 +1102,7 @@ describe('update', function () {
         $user = User::factory()->create();
         $account = Account::factory()->create(['user_id' => $user->id]);
         $category = Category::factory()->create(['user_id' => $user->id, 'type' => CategoryType::Expense]);
-        $transaction = splitInto(transactionOn($account, ['amount' => -1000]), [[$category, -600], [$category, -400]]);
+        $transaction = splitTransactionInto(transactionOn($account, ['amount' => -1000]), [[$category, -600], [$category, -400]]);
 
         withHeaders(transactionsWriter($user))
             ->patchJson('/api/v1/transactions/'.$transaction->id, ['transaction_date' => '2026-02-01', 'notes' => 'Shared'])
@@ -1116,7 +1116,7 @@ describe('update', function () {
         $user = User::factory()->create();
         $account = Account::factory()->create(['user_id' => $user->id]);
         $category = Category::factory()->create(['user_id' => $user->id, 'type' => CategoryType::Expense]);
-        $transaction = splitInto(transactionOn($account, ['amount' => -1000]), [[$category, -600], [$category, -400]]);
+        $transaction = splitTransactionInto(transactionOn($account, ['amount' => -1000]), [[$category, -600], [$category, -400]]);
 
         expect(fn () => app(TransactionWriter::class)->update($transaction, ['amount' => -1], false))
             ->toThrow(ValidationException::class);
@@ -1354,7 +1354,7 @@ describe('delete', function () {
         $account = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR']);
         $food = Category::factory()->create(['user_id' => $user->id, 'type' => CategoryType::Expense]);
         $period = budgetPeriodCovering(Budget::factory()->forCategories($food)->create(['user_id' => $user->id]), '2026-01-15');
-        $transaction = splitInto(transactionOn($account, ['amount' => -1000, 'currency_code' => 'EUR', 'transaction_date' => '2026-01-15']), [[$food, -600], [$food, -400]]);
+        $transaction = splitTransactionInto(transactionOn($account, ['amount' => -1000, 'currency_code' => 'EUR', 'transaction_date' => '2026-01-15']), [[$food, -600], [$food, -400]]);
         app(BudgetTransactionService::class)->assignTransaction($transaction->fresh());
 
         expect((int) $period->budgetTransactions()->sole()->amount)->toBe(1000);
@@ -1439,7 +1439,7 @@ describe('labels', function () {
         $category = Category::factory()->create(['user_id' => $user->id, 'type' => CategoryType::Expense]);
         $label = Label::factory()->create(['user_id' => $user->id]);
         $bank = transactionOn(Account::factory()->connected()->create(['user_id' => $user->id]), ['source' => TransactionSource::EnableBanking]);
-        $split = splitInto(transactionOn(Account::factory()->create(['user_id' => $user->id]), ['amount' => -1000]), [[$category, -600], [$category, -400]]);
+        $split = splitTransactionInto(transactionOn(Account::factory()->create(['user_id' => $user->id]), ['amount' => -1000]), [[$category, -600], [$category, -400]]);
         $encrypted = encryptedTransactionOn(Account::factory()->create(['user_id' => $user->id]));
         $notes = $encrypted->notes;
 
@@ -1606,7 +1606,7 @@ describe('split', function () {
         $user = User::factory()->create();
         $food = Category::factory()->create(['user_id' => $user->id, 'type' => CategoryType::Expense]);
         $home = Category::factory()->create(['user_id' => $user->id, 'type' => CategoryType::Expense]);
-        $transaction = splitInto(transactionOn(Account::factory()->connected()->create(['user_id' => $user->id]), [
+        $transaction = splitTransactionInto(transactionOn(Account::factory()->connected()->create(['user_id' => $user->id]), [
             'amount' => -1000,
             'source' => TransactionSource::EnableBanking,
         ]), [[$food, -500], [$home, -500]]);
@@ -1816,7 +1816,7 @@ describe('merge splits', function () {
     it('returns the transaction to unsplit, filed by hand under the category sent', function () {
         $user = User::factory()->create();
         $food = Category::factory()->create(['user_id' => $user->id, 'name' => 'Food', 'type' => CategoryType::Expense]);
-        $transaction = splitInto(transactionOn(Account::factory()->create(['user_id' => $user->id]), ['amount' => -1000]), [[$food, -600], [$food, -400]]);
+        $transaction = splitTransactionInto(transactionOn(Account::factory()->create(['user_id' => $user->id]), ['amount' => -1000]), [[$food, -600], [$food, -400]]);
 
         withHeaders(transactionsWriter($user))
             ->postJson('/api/v1/transactions/'.$transaction->id.'/merge-splits', ['category_id' => Str::upper($food->id)])
@@ -1838,7 +1838,7 @@ describe('merge splits', function () {
         $home = Category::factory()->create(['user_id' => $user->id, 'type' => CategoryType::Expense]);
         $foodPeriod = budgetPeriodCovering(Budget::factory()->forCategories($food)->create(['user_id' => $user->id]), '2026-01-15');
         $homePeriod = budgetPeriodCovering(Budget::factory()->forCategories($home)->create(['user_id' => $user->id]), '2026-01-15');
-        $transaction = splitInto(transactionOn($account, ['amount' => -1000, 'currency_code' => 'EUR', 'transaction_date' => '2026-01-15']), [[$food, -600], [$home, -400]]);
+        $transaction = splitTransactionInto(transactionOn($account, ['amount' => -1000, 'currency_code' => 'EUR', 'transaction_date' => '2026-01-15']), [[$food, -600], [$home, -400]]);
         app(BudgetTransactionService::class)->assignTransaction($transaction->fresh());
 
         expect((int) $homePeriod->budgetTransactions()->sole()->amount)->toBe(400);
@@ -1855,7 +1855,7 @@ describe('merge splits', function () {
         $user = User::factory()->create();
         Feature::for($user)->deactivate(TransactionSplitting::class);
         $category = Category::factory()->create(['user_id' => $user->id, 'type' => CategoryType::Expense]);
-        $transaction = splitInto(transactionOn(Account::factory()->create(['user_id' => $user->id]), ['amount' => -1000]), [[$category, -600], [$category, -400]]);
+        $transaction = splitTransactionInto(transactionOn(Account::factory()->create(['user_id' => $user->id]), ['amount' => -1000]), [[$category, -600], [$category, -400]]);
 
         withHeaders(transactionsWriter($user))
             ->postJson('/api/v1/transactions/'.$transaction->id.'/merge-splits', ['category_id' => $category->id])
@@ -1886,7 +1886,7 @@ describe('merge splits', function () {
         $user = User::factory()->create();
         $expense = Category::factory()->create(['user_id' => $user->id, 'type' => CategoryType::Expense]);
         $transfer = Category::factory()->create(['user_id' => $user->id, 'type' => CategoryType::Transfer]);
-        $transaction = splitInto(transactionOn(Account::factory()->create(['user_id' => $user->id]), ['amount' => -1000]), [[$expense, -600], [$expense, -400]]);
+        $transaction = splitTransactionInto(transactionOn(Account::factory()->create(['user_id' => $user->id]), ['amount' => -1000]), [[$expense, -600], [$expense, -400]]);
         $url = '/api/v1/transactions/'.$transaction->id.'/merge-splits';
 
         withHeaders(transactionsWriter($user))->postJson($url, ['colour' => 'red'])
@@ -1907,7 +1907,7 @@ describe('merge splits', function () {
     it('merges once for a retried idempotency key', function () {
         $user = User::factory()->create();
         $category = Category::factory()->create(['user_id' => $user->id, 'type' => CategoryType::Expense]);
-        $transaction = splitInto(transactionOn(Account::factory()->create(['user_id' => $user->id]), ['amount' => -1000]), [[$category, -600], [$category, -400]]);
+        $transaction = splitTransactionInto(transactionOn(Account::factory()->create(['user_id' => $user->id]), ['amount' => -1000]), [[$category, -600], [$category, -400]]);
         $headers = [...transactionsWriter($user), 'Idempotency-Key' => 'merge-1'];
         $body = ['category_id' => $category->id];
 
@@ -1923,7 +1923,7 @@ describe('merge splits', function () {
         $owner = User::factory()->create();
         $space = sharedTransactionSpace($user, $owner);
         $category = Category::factory()->create(['user_id' => $owner->id, 'space_id' => $space->id, 'type' => CategoryType::Expense]);
-        $theirs = splitInto(transactionOn(Account::factory()->create(['user_id' => $owner->id, 'space_id' => $space->id]), ['amount' => -1000]), [[$category, -600], [$category, -400]]);
+        $theirs = splitTransactionInto(transactionOn(Account::factory()->create(['user_id' => $owner->id, 'space_id' => $space->id]), ['amount' => -1000]), [[$category, -600], [$category, -400]]);
 
         withHeaders(transactionsWriter($user))
             ->postJson('/api/v1/transactions/'.$theirs->id.'/merge-splits?space='.$space->id, ['category_id' => $category->id])
