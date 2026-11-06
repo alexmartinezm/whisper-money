@@ -1,4 +1,5 @@
 import { type CursorPaginatedResponse } from '@/lib/cursor-pagination';
+import { FILTER_FACETS } from '@/lib/transaction-filter-facets';
 import {
     type ServerTransaction,
     type TransactionFilters,
@@ -82,8 +83,11 @@ function page(
     };
 }
 
-function renderSource(nextCursor: string | null = 'cursor-2') {
-    const appliedFilters = { ...NO_FILTERS };
+function renderSource(
+    nextCursor: string | null = 'cursor-2',
+    applied: Partial<AppliedFilters> = {},
+) {
+    const appliedFilters = { ...NO_FILTERS, ...applied };
     const transactions = page([row('a')], nextCursor);
     const dayTotals = { '2026-10-01': { count: 4, total: -400 } };
 
@@ -185,6 +189,180 @@ describe('useServerTransactionSource', () => {
 
         expect(visit).toHaveBeenCalledOnce();
         expect(visit.mock.calls[0][0]).toBe('/transactions?search=cof');
+    });
+
+    it('offers every facet there is', () => {
+        expect(renderSource().result.current.facets).toEqual(FILTER_FACETS);
+    });
+
+    describe('a page that lands after the list moved on', () => {
+        function slowPage() {
+            let land = (_response: unknown) => {};
+            const fetchMock = vi.fn(
+                () =>
+                    new Promise((resolve) => {
+                        land = resolve;
+                    }),
+            );
+            vi.stubGlobal('fetch', fetchMock);
+
+            return {
+                fetchMock,
+                landWith: (id: string) =>
+                    land({
+                        json: async () => ({
+                            props: {
+                                transactions: page([row(id)], 'stale-cursor'),
+                                dayTotals: {},
+                            },
+                        }),
+                    }),
+            };
+        }
+
+        beforeEach(() => vi.useRealTimers());
+        afterEach(() => vi.unstubAllGlobals());
+
+        it('is discarded when the filters changed, rows and cursor alike', async () => {
+            const { fetchMock, landWith } = slowPage();
+            const { result } = renderSource();
+
+            let pending: Promise<void> | undefined;
+            act(() => {
+                pending = result.current.pagination.loadMore();
+            });
+
+            const signal = (
+                fetchMock.mock.calls[0] as unknown as [
+                    string,
+                    { signal: AbortSignal },
+                ]
+            )[1].signal;
+
+            act(() =>
+                result.current.onFiltersChange({
+                    ...result.current.filters,
+                    categoryIds: ['food'],
+                }),
+            );
+
+            expect(signal.aborted).toBe(true);
+            expect(result.current.pagination.isLoadingMore).toBe(false);
+
+            const { onSuccess } = visit.mock.calls[0][1];
+            act(() =>
+                onSuccess({
+                    props: {
+                        transactions: page([row('b')], 'b-cursor'),
+                        dayTotals: {},
+                    },
+                }),
+            );
+
+            await act(async () => {
+                landWith('a-next');
+                await pending;
+            });
+
+            expect(result.current.rows.map((loaded) => loaded.id)).toEqual([
+                'b',
+            ]);
+
+            fetchMock.mockClear();
+            act(() => {
+                void result.current.pagination.loadMore();
+            });
+
+            expect((fetchMock.mock.calls[0] as unknown[])[0]).toBe(
+                '/transactions?category_ids=food&cursor=b-cursor',
+            );
+        });
+
+        it('still lands when nothing changed', async () => {
+            const { landWith } = slowPage();
+            const { result } = renderSource();
+
+            let pending: Promise<void> | undefined;
+            act(() => {
+                pending = result.current.pagination.loadMore();
+            });
+
+            await act(async () => {
+                landWith('next');
+                await pending;
+            });
+
+            expect(result.current.rows.map((loaded) => loaded.id)).toEqual([
+                'a',
+                'next',
+            ]);
+        });
+    });
+
+    describe('refreshing the filter summary after a local edit', () => {
+        const FILTERED = { category_ids: ['food'] };
+
+        it('asks once for the summary alone, however many edits come', () => {
+            const { result } = renderSource(null, FILTERED);
+
+            act(() => {
+                result.current.refreshSummary();
+                result.current.refreshSummary();
+                result.current.refreshSummary();
+            });
+            expect(reload).not.toHaveBeenCalled();
+
+            act(() => vi.advanceTimersByTime(500));
+
+            expect(reload).toHaveBeenCalledOnce();
+            expect(reload).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    only: ['filterSummary'],
+                    async: true,
+                }),
+            );
+        });
+
+        it('asks nothing of an unfiltered list, which has no summary', () => {
+            const { result } = renderSource();
+
+            act(() => result.current.refreshSummary());
+            act(() => vi.advanceTimersByTime(500));
+
+            expect(reload).not.toHaveBeenCalled();
+        });
+
+        it('leaves it to a change of filters, cancelling one under way', () => {
+            const { result } = renderSource(null, FILTERED);
+            const cancel = vi.fn();
+
+            act(() => result.current.refreshSummary());
+            act(() => vi.advanceTimersByTime(500));
+            act(() => reload.mock.calls[0][0].onCancelToken({ cancel }));
+            act(() => result.current.refreshSummary());
+            expect(cancel).toHaveBeenCalledOnce();
+
+            act(() =>
+                result.current.onFiltersChange({
+                    ...result.current.filters,
+                    categoryIds: ['home'],
+                }),
+            );
+            act(() => vi.advanceTimersByTime(500));
+
+            expect(reload).toHaveBeenCalledOnce();
+        });
+
+        it('forgets a pending refresh when the rows reload with their summary', () => {
+            const { result } = renderSource(null, FILTERED);
+
+            act(() => result.current.refreshSummary());
+            act(() => result.current.reload());
+            act(() => vi.advanceTimersByTime(500));
+
+            expect(reload).toHaveBeenCalledOnce();
+            expect(reload.mock.calls[0][0].only).toContain('transactions');
+        });
     });
 
     it('appends the next page and keeps the figure of a day already shown', async () => {

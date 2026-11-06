@@ -158,6 +158,7 @@ export default function Transactions({
                         labels={initialLabels}
                         automationRules={automationRules}
                         enableSavedFilters
+                        onTransactionsChanged={source.refreshSummary}
                         categorizingIds={ai.categorizingIds}
                         categoryFilterIds={categoryFilterIds}
                         isNewRow={isNewRow}

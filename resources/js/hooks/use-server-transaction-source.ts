@@ -14,7 +14,11 @@ import {
     mergeNextPage,
     type ServerDayTotal,
 } from '@/lib/transaction-day-groups';
-import { serializeFilters } from '@/lib/transaction-filter-serialization';
+import { FILTER_FACETS } from '@/lib/transaction-filter-facets';
+import {
+    hasActiveFilters,
+    serializeFilters,
+} from '@/lib/transaction-filter-serialization';
 import { type Category, type CategoryType } from '@/types/category';
 import {
     type DecryptedTransaction,
@@ -24,6 +28,7 @@ import {
 import { type TransactionTableSource } from '@/types/transaction-table-source';
 import { toLocalDate } from '@/utils/date';
 import { __ } from '@/utils/i18n';
+import { type CancelToken } from '@inertiajs/core';
 import { router, usePage } from '@inertiajs/react';
 import axios from 'axios';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -132,6 +137,12 @@ function onlySearchChanged(next: Filters, current: Filters): boolean {
 }
 
 /**
+ * How long edits rest before the summary is asked again, so a run of them, or
+ * a bulk action that reports row by row, costs one request.
+ */
+const SUMMARY_REFRESH_DEBOUNCE_MS = 500;
+
+/**
  * Everything the table reads that the payload does not carry ready to use: a
  * date trimmed to its day, the text a legacy encrypted row can show, the
  * account's bank hoisted onto the row, and labels present as both the objects
@@ -169,6 +180,8 @@ export function useServerTransactionSource({
 }): TransactionTableSource & {
     /** The current query, for an export of exactly these rows. */
     queryParams: Record<string, string>;
+    /** Asks for the filter summary again, after a local edit moved it. */
+    refreshSummary: () => void;
 } {
     const [allTransactions, setAllTransactions] = useState<
         DecryptedTransaction[]
@@ -185,23 +198,36 @@ export function useServerTransactionSource({
     const [isLoadingMore, setIsLoadingMore] = useState(false);
     const [isNavigating, setIsNavigating] = useState(false);
     const [queryKey, setQueryKey] = useState(0);
+    const pendingPage = useRef<AbortController | null>(null);
 
-    const replaceLoadedRows = useCallback((props: Record<string, unknown>) => {
-        const txns = props.transactions;
-
-        if (!isCursorPaginatedResponse<ServerTransaction>(txns)) {
-            return;
-        }
-
-        const rows = txns.data.map(toDecryptedTransaction);
-        setAllTransactions(rows);
-        setNextCursor(txns.next_cursor);
-        setServed({
-            transactions: rows,
-            dayTotals:
-                (props.dayTotals as Record<string, ServerDayTotal>) ?? {},
-        });
+    // A page asked for the rows on screen has no place in any other list.
+    const discardPendingPage = useCallback(() => {
+        pendingPage.current?.abort();
+        pendingPage.current = null;
+        setIsLoadingMore(false);
     }, []);
+
+    const replaceLoadedRows = useCallback(
+        (props: Record<string, unknown>) => {
+            const txns = props.transactions;
+
+            if (!isCursorPaginatedResponse<ServerTransaction>(txns)) {
+                return;
+            }
+
+            discardPendingPage();
+
+            const rows = txns.data.map(toDecryptedTransaction);
+            setAllTransactions(rows);
+            setNextCursor(txns.next_cursor);
+            setServed({
+                transactions: rows,
+                dayTotals:
+                    (props.dayTotals as Record<string, ServerDayTotal>) ?? {},
+            });
+        },
+        [discardPendingPage],
+    );
 
     // Reset is handled explicitly via onSuccess in navigateWithFilters,
     // and append is handled via onSuccess in loadMore.
@@ -228,6 +254,20 @@ export function useServerTransactionSource({
     });
 
     const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const summaryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const summaryReloadRef = useRef<CancelToken | null>(null);
+
+    // Whatever replaces the rows brings its own summary, or asks for one.
+    const cancelSummaryRefresh = useCallback(() => {
+        if (summaryTimerRef.current) {
+            clearTimeout(summaryTimerRef.current);
+            summaryTimerRef.current = null;
+        }
+        summaryReloadRef.current?.cancel();
+        summaryReloadRef.current = null;
+    }, []);
+
+    useEffect(() => cancelSummaryRefresh, [cancelSummaryRefresh]);
 
     const navigateWithFilters = useCallback(
         (newFilters: Filters, debounceMs = 0) => {
@@ -260,6 +300,8 @@ export function useServerTransactionSource({
         (changedFilters: Filters) => {
             const newFilters = withoutDatelessCashflowBlock(changedFilters);
             setFilters(newFilters);
+            discardPendingPage();
+            cancelSummaryRefresh();
 
             // Debounce search, immediate for other filters
             navigateWithFilters(
@@ -267,17 +309,47 @@ export function useServerTransactionSource({
                 onlySearchChanged(newFilters, filters) ? 300 : 0,
             );
         },
-        [filters, navigateWithFilters],
+        [
+            filters,
+            navigateWithFilters,
+            discardPendingPage,
+            cancelSummaryRefresh,
+        ],
     );
 
     // Refresh the transaction list from the server (resets accumulated pages),
     // and the summary of what the filters match, which an edit can move.
     const reload = useCallback(() => {
+        cancelSummaryRefresh();
         router.reload({
             only: ['transactions', 'dayTotals', 'filterSummary'],
             onSuccess: (page) => replaceLoadedRows(page.props),
         });
-    }, [replaceLoadedRows]);
+    }, [replaceLoadedRows, cancelSummaryRefresh]);
+
+    // Async, so it never cancels a visit the user started meanwhile. Without
+    // a filter the server sends no summary, so there is nothing to ask for.
+    const refreshSummary = useCallback(() => {
+        cancelSummaryRefresh();
+
+        if (!hasActiveFilters(filters)) {
+            return;
+        }
+
+        summaryTimerRef.current = setTimeout(() => {
+            summaryTimerRef.current = null;
+            router.reload({
+                only: ['filterSummary'],
+                async: true,
+                onCancelToken: (token) => {
+                    summaryReloadRef.current = token;
+                },
+                onFinish: () => {
+                    summaryReloadRef.current = null;
+                },
+            });
+        }, SUMMARY_REFRESH_DEBOUNCE_MS);
+    }, [filters, cancelSummaryRefresh]);
 
     // Load More with cursor pagination (fetch directly to avoid cursor in URL)
     const { component, version } = usePage();
@@ -286,6 +358,9 @@ export function useServerTransactionSource({
             return;
         }
 
+        const page = new AbortController();
+        pendingPage.current = page;
+
         setIsLoadingMore(true);
         try {
             const params = clientFiltersToQueryParams(filters);
@@ -293,6 +368,7 @@ export function useServerTransactionSource({
             const url = transactionsIndex({ query: params }).url;
 
             const response = await fetch(url, {
+                signal: page.signal,
                 headers: {
                     'X-Inertia': 'true',
                     'X-Inertia-Version': version ?? '',
@@ -305,7 +381,10 @@ export function useServerTransactionSource({
             const json = await response.json();
             const next = json.props.transactions;
 
-            if (!isCursorPaginatedResponse<ServerTransaction>(next)) {
+            if (
+                page.signal.aborted ||
+                !isCursorPaginatedResponse<ServerTransaction>(next)
+            ) {
                 return;
             }
 
@@ -320,9 +399,14 @@ export function useServerTransactionSource({
                 ),
             );
         } catch (error) {
-            console.error('Failed to load more transactions:', error);
+            if (!page.signal.aborted) {
+                console.error('Failed to load more transactions:', error);
+            }
         } finally {
-            setIsLoadingMore(false);
+            if (pendingPage.current === page) {
+                pendingPage.current = null;
+                setIsLoadingMore(false);
+            }
         }
     }, [
         nextCursor,
@@ -345,6 +429,7 @@ export function useServerTransactionSource({
         isLoading: isNavigating,
         filters,
         onFiltersChange,
+        facets: FILTER_FACETS,
         daySummaryOf,
         pagination: {
             displayedCount: allTransactions.length,
@@ -356,6 +441,7 @@ export function useServerTransactionSource({
         },
         reload,
         refreshRows: reload,
+        refreshSummary,
         countMatching,
         queryKey,
         matchingFilters,

@@ -195,6 +195,33 @@ describe('useTransactionBulkActions', () => {
         expect(result.current.rows[1].category_id).toBeNull();
     });
 
+    it('reports a label edit, as a category one, unless the rows reload anyway', async () => {
+        const onTransactionsChanged = vi.fn();
+        const edited = renderBulk([transaction('a')], ['a'], {
+            onTransactionsChanged,
+        });
+
+        await act(() =>
+            edited.result.current.bulk.barProps.onLabelsChange(['label']),
+        );
+
+        expect(onTransactionsChanged).toHaveBeenCalledOnce();
+
+        onTransactionsChanged.mockClear();
+        const allMatching = renderBulk([transaction('a')], ['a'], {
+            matchingFilters: { search: 'coffee' },
+            onServerChanged: vi.fn(),
+            onTransactionsChanged,
+        });
+
+        act(() => allMatching.result.current.bulk.barProps.onSelectAll?.());
+        await act(() =>
+            allMatching.result.current.bulk.barProps.onLabelsChange(['label']),
+        );
+
+        expect(onTransactionsChanged).not.toHaveBeenCalled();
+    });
+
     it('announces a label edit only when asked to', async () => {
         const quiet = renderBulk([transaction('a')], ['a']);
 
