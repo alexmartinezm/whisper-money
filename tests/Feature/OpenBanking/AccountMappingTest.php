@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\BankingConnectionStatus;
+use App\Enums\BankingProvider;
 use App\Jobs\SyncBankingConnectionJob;
 use App\Models\Account;
 use App\Models\Bank;
@@ -92,6 +93,147 @@ test('show closes the connection when no pending account can be mapped', functio
     $this->assertDatabaseMissing('accounts', [
         'banking_connection_id' => $connection->id,
     ]);
+});
+
+/**
+ * A connection to the same bank that already syncs `shared-uid`, as a bank that
+ * shares one session between connections leaves it.
+ *
+ * @return array{0: User, 1: BankingConnection}
+ */
+function userWithSiblingHoldingSharedUid(bool $onboarded = true): array
+{
+    $factory = User::factory();
+    $user = ($onboarded ? $factory->onboarded() : $factory)->create();
+
+    $sibling = BankingConnection::factory()->create(['user_id' => $user->id]);
+    Account::factory()->connected()->create([
+        'user_id' => $user->id,
+        'banking_connection_id' => $sibling->id,
+        'external_account_id' => 'shared-uid',
+    ]);
+
+    return [$user, $sibling];
+}
+
+/**
+ * @param  list<string>  $uids
+ * @return array<int, array<string, mixed>>
+ */
+function pendingAccountsFor(array $uids): array
+{
+    return array_map(fn (string $uid): array => [
+        'uid' => $uid,
+        'currency' => 'EUR',
+        'name' => "Account {$uid}",
+        'account_id' => ['iban' => null],
+    ], $uids);
+}
+
+test('show does not offer an account a sibling connection already syncs', function () {
+    [$user] = userWithSiblingHoldingSharedUid();
+    $connection = BankingConnection::factory()->awaitingMapping()->create([
+        'user_id' => $user->id,
+        'pending_accounts_data' => pendingAccountsFor(['shared-uid', 'new-uid']),
+    ]);
+
+    $this->actingAs($user)
+        ->get(route('open-banking.map-accounts', $connection))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('bankAccounts', 1)
+            ->where('bankAccounts.0.uid', 'new-uid')
+        );
+});
+
+test('show still offers an account an api-key connection holds under the same uid', function () {
+    [$user] = userWithSiblingHoldingSharedUid();
+    $connection = BankingConnection::factory()->awaitingMapping()->create([
+        'user_id' => $user->id,
+        'provider' => BankingProvider::Wise,
+        'pending_accounts_data' => pendingAccountsFor(['shared-uid']),
+    ]);
+
+    $this->actingAs($user)
+        ->get(route('open-banking.map-accounts', $connection))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->has('bankAccounts', 1));
+});
+
+test('show drops a connection whose accounts all sync through a sibling', function () {
+    Queue::fake();
+
+    [$user, $sibling] = userWithSiblingHoldingSharedUid();
+    $connection = BankingConnection::factory()->awaitingMapping()->create([
+        'user_id' => $user->id,
+        'pending_accounts_data' => pendingAccountsFor(['shared-uid']),
+    ]);
+
+    $this->actingAs($user)
+        ->get(route('open-banking.map-accounts', $connection))
+        ->assertRedirect(route('settings.connections.index'))
+        ->assertSessionHas('error', fn (string $message): bool => str_contains($message, 'already sync'));
+
+    $this->assertSoftDeleted($connection);
+    expect($sibling->refresh()->isActive())->toBeTrue()
+        ->and(Account::query()->where('external_account_id', 'shared-uid')->count())->toBe(1);
+});
+
+test('show keeps a connection with accounts of its own even if a sibling holds every pending uid', function () {
+    Queue::fake();
+
+    [$user] = userWithSiblingHoldingSharedUid();
+    $connection = BankingConnection::factory()->awaitingMapping()->create([
+        'user_id' => $user->id,
+        'pending_accounts_data' => pendingAccountsFor(['shared-uid']),
+    ]);
+    $ownAccount = Account::factory()->connected()->create([
+        'user_id' => $user->id,
+        'banking_connection_id' => $connection->id,
+        'external_account_id' => 'own-uid',
+    ]);
+
+    $this->actingAs($user)->get(route('open-banking.map-accounts', $connection))->assertRedirect();
+
+    $this->assertNotSoftDeleted($connection);
+    expect($ownAccount->refresh()->banking_connection_id)->toBe($connection->id);
+});
+
+test('onboarding does not create an account a sibling connection already syncs', function () {
+    Queue::fake();
+
+    [$user] = userWithSiblingHoldingSharedUid(onboarded: false);
+    $connection = BankingConnection::factory()->awaitingMapping()->create([
+        'user_id' => $user->id,
+        'pending_accounts_data' => pendingAccountsFor(['shared-uid', 'new-uid']),
+    ]);
+
+    $this->actingAs($user)->get(route('open-banking.map-accounts', $connection));
+
+    expect(Account::query()->where('external_account_id', 'shared-uid')->count())->toBe(1)
+        ->and(Account::query()->where('external_account_id', 'new-uid')->count())->toBe(1);
+});
+
+test('store ignores an account a sibling connection already syncs', function () {
+    Queue::fake();
+
+    [$user] = userWithSiblingHoldingSharedUid();
+    $connection = BankingConnection::factory()->awaitingMapping()->create([
+        'user_id' => $user->id,
+        'pending_accounts_data' => pendingAccountsFor(['shared-uid', 'new-uid']),
+    ]);
+
+    $this->actingAs($user)
+        ->post(route('open-banking.map-accounts.store', $connection), [
+            'mappings' => [
+                ['bank_account_uid' => 'shared-uid', 'action' => 'create'],
+                ['bank_account_uid' => 'new-uid', 'action' => 'create'],
+            ],
+        ])
+        ->assertRedirect();
+
+    expect(Account::query()->where('external_account_id', 'shared-uid')->count())->toBe(1)
+        ->and(Account::query()->where('external_account_id', 'new-uid')->count())->toBe(1);
 });
 
 test('show redirects if no pending accounts', function () {

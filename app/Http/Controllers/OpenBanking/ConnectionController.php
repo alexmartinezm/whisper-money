@@ -60,6 +60,7 @@ class ConnectionController extends Controller
                 $connection->can_sync_manually = ! $connection->isRateLimitedFor(userPresent: true);
                 $connection->is_rate_limited = $connection->isRateLimited();
                 $connection->is_beta = $connection->isBeta();
+                $connection->failed_on_wrong_login = $connection->failedOnWrongLogin();
                 $connection->next_sync_attempt_at = $nextScheduledSync?->max($connection->rate_limited_until);
             });
 

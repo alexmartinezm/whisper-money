@@ -4,9 +4,12 @@ namespace App\Models;
 
 use App\Enums\BankingConnectionStatus;
 use App\Enums\BankingProvider;
+use App\Jobs\SyncBankingConnectionJob;
 use App\Models\Concerns\BelongsToSpace;
 use Carbon\Carbon;
+use Carbon\CarbonInterface;
 use Database\Factories\BankingConnectionFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -18,6 +21,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 /**
  * @property bool $has_pending_accounts
  * @property bool $can_sync_manually
+ * @property bool $failed_on_wrong_login
  * @property bool $is_rate_limited
  * @property bool $is_beta
  * @property Carbon|null $next_sync_attempt_at
@@ -36,6 +40,12 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  */
 class BankingConnection extends Model
 {
+    /**
+     * Stored in English and translated where it is shown, because the
+     * connections page has to recognise it whatever language the user reconnected in.
+     */
+    public const string WRONG_LOGIN_ERROR = 'This bank login does not cover the accounts on this connection, so the connection was left as it was. Try again with the login you used for them.';
+
     /** @use HasFactory<BankingConnectionFactory> */
     use BelongsToSpace, HasFactory, HasUuids, SoftDeletes;
 
@@ -149,9 +159,119 @@ class BankingConnection extends Model
         return $this->hasOne(BankingSyncLog::class)->latestOfMany();
     }
 
+    /**
+     * Connections a scheduled sync should pick up: Active ones and Error ones
+     * still inside their retry budget, with an unexpired consent, plus Active
+     * Enable Banking ones whose consent ran out (the sync marks those expired),
+     * all outside a rate-limit backoff and owned by a user that still exists.
+     *
+     * @param  Builder<BankingConnection>  $query
+     * @return Builder<BankingConnection>
+     */
+    public function scopeEligibleForScheduledSync(Builder $query): Builder
+    {
+        return $query
+            ->whereHas('user')
+            ->where(function (Builder $query) {
+                $query->where(function (Builder $query) {
+                    $query->where(function (Builder $query) {
+                        $query->where('status', BankingConnectionStatus::Active)
+                            ->orWhere(function (Builder $query) {
+                                $query->where('status', BankingConnectionStatus::Error)
+                                    ->where('consecutive_sync_failures', '<', SyncBankingConnectionJob::MAX_SCHEDULED_RETRIES);
+                            });
+                    })->where(function (Builder $query) {
+                        $query->whereNull('valid_until')
+                            ->orWhere('valid_until', '>', now());
+                    });
+                })->orWhere(fn (Builder $query) => $query->consentExpiredWhileActive());
+            })
+            ->where(function (Builder $query) {
+                $query->whereNull('rate_limited_until')
+                    ->orWhere('rate_limited_until', '<=', now());
+            });
+    }
+
+    /**
+     * Active Enable Banking connections whose consent has run out. They are still
+     * dispatched so the sync job can mark them expired and tell the user; that
+     * path never reaches the bank.
+     *
+     * @param  Builder<BankingConnection>  $query
+     * @return Builder<BankingConnection>
+     */
+    public function scopeConsentExpiredWhileActive(Builder $query): Builder
+    {
+        return $query->where('provider', BankingProvider::EnableBanking)
+            ->where('status', BankingConnectionStatus::Active)
+            ->whereNotNull('valid_until')
+            ->where('valid_until', '<=', now());
+    }
+
+    /**
+     * Connections that have not synced successfully since $since. Never-synced
+     * connections count as not synced.
+     *
+     * @param  Builder<BankingConnection>  $query
+     * @return Builder<BankingConnection>
+     */
+    public function scopeNotSyncedSince(Builder $query, CarbonInterface $since): Builder
+    {
+        return $query->where(function (Builder $query) use ($since) {
+            $query->whereNull('last_synced_at')
+                ->orWhere('last_synced_at', '<', $since);
+        });
+    }
+
+    /**
+     * Where a reconnect that did not go through leaves the connection. While the
+     * consent runs that is Error, which the sweep still retries and which finds
+     * the old session working or expires it. Once the consent has lapsed the sweep
+     * no longer takes an Error connection, and the settings page only offers
+     * Reconnect on some errors, so it is Expired.
+     */
+    public function statusAfterFailedReconnect(): BankingConnectionStatus
+    {
+        return $this->valid_until?->isPast()
+            ? BankingConnectionStatus::Expired
+            : BankingConnectionStatus::Error;
+    }
+
+    /**
+     * Whether a reconnect left this connection needing another try with the
+     * right login.
+     */
+    public function failedOnWrongLogin(): bool
+    {
+        return $this->error_message === self::WRONG_LOGIN_ERROR;
+    }
+
     public function isActive(): bool
     {
         return $this->status === BankingConnectionStatus::Active;
+    }
+
+    /**
+     * Point the connection at a freshly authorized provider session.
+     *
+     * Reconnecting is the way out of a parked connection, so it has to hand back
+     * the full retry budget. Carrying the old count over meant the first failure
+     * after a reconnect could re-park it immediately, which is the state the user
+     * just paid SCA to leave.
+     *
+     * @param  array<string, mixed>  $sessionData
+     * @param  array<string, mixed>  $attributes
+     */
+    public function activateWithSession(array $sessionData, array $attributes = []): void
+    {
+        $this->update([
+            'session_id' => $sessionData['session_id'],
+            'status' => BankingConnectionStatus::Active,
+            'valid_until' => $sessionData['access']['valid_until'] ?? null,
+            'error_message' => null,
+            'consecutive_sync_failures' => 0,
+            ...$attributes,
+        ]);
     }
 
     public function isIndexaCapital(): bool
@@ -202,16 +322,42 @@ class BankingConnection extends Model
     /**
      * Pending accounts the user can actually map. Providers sometimes report accounts
      * without a uid (EnableBanking does it for some French cards); those can never be
-     * synced, so offering them for mapping only produces a validation error.
+     * synced, so offering them for mapping only produces a validation error. A uid
+     * a sibling connection already syncs is left out too: a bank that shares one
+     * session lists the sibling's accounts here, and creating them would import
+     * their history a second time.
      *
      * @return array<int, array<string, mixed>>
      */
     public function mappablePendingAccounts(): array
     {
+        $siblingUids = $this->uidsHeldBySiblings();
+
         return array_values(array_filter(
             $this->pending_accounts_data ?? [],
-            fn (array $account): bool => ! empty($account['uid']),
+            fn (array $account): bool => ! empty($account['uid']) && ! in_array($account['uid'], $siblingUids, true),
         ));
+    }
+
+    /**
+     * The uids the user's other connections sync. Only Enable Banking can share
+     * a session between connections.
+     *
+     * @return list<string>
+     */
+    private function uidsHeldBySiblings(): array
+    {
+        if (! $this->isEnableBanking()) {
+            return [];
+        }
+
+        return Account::query()
+            ->where('user_id', $this->user_id)
+            ->whereNotNull('banking_connection_id')
+            ->where('banking_connection_id', '!=', $this->getKey())
+            ->whereNotNull('external_account_id')
+            ->pluck('external_account_id')
+            ->all();
     }
 
     /**

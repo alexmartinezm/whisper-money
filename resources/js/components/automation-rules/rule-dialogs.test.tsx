@@ -40,6 +40,10 @@ vi.mock('@/components/automation-rules/edit-automation-rule-dialog', () => ({
     EditAutomationRuleDialog: () => null,
 }));
 
+vi.mock('@/hooks/use-mobile', () => ({
+    useIsMobile: () => false,
+}));
+
 vi.mock('@/components/automation-rules/delete-automation-rule-dialog', () => ({
     DeleteAutomationRuleDialog: () => null,
 }));
