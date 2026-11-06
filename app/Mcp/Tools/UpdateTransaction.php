@@ -2,15 +2,12 @@
 
 namespace App\Mcp\Tools;
 
-use App\Enums\CategorySource;
 use App\Enums\TransactionSource;
-use App\Models\Space;
 use App\Models\Transaction;
 use App\Models\User;
-use App\Rules\StorableDate;
-use App\Services\ManualBalanceAdjuster;
+use App\Services\Transactions\TransactionWriter;
+use App\Services\Transactions\TransactionWriteRules;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -70,43 +67,25 @@ class UpdateTransaction extends WriteTool
                 return $refusal;
             }
 
-            $request->validate([
-                'description' => ['sometimes', 'string'],
-                'amount' => ['sometimes', 'integer'],
-                'transaction_date' => ['sometimes', 'date', new StorableDate],
-                'currency_code' => ['sometimes', 'string', 'size:3'],
-                'notes' => ['sometimes', 'nullable', 'string'],
-                'creditor_name' => ['sometimes', 'nullable', 'string', 'max:255'],
-                'debtor_name' => ['sometimes', 'nullable', 'string', 'max:255'],
-            ]);
+            $request->validate(TransactionWriteRules::updateRules());
 
-            // Snapshot the pre-edit account/date/amount so a manual balance can be
-            // moved off the old values if the edit changes them.
-            $originalSnapshot = clone $transaction;
-
-            $this->applyFields($request, $transaction, [
+            // ponytail: unlike the web edit path this does not learn a correction
+            // rule: MCP writes stay predictable and side-effect free.
+            $written = app(TransactionWriter::class)->update($transaction, $this->requestedFields($request, [
                 'description' => fn () => $request->string('description')->toString(),
                 'amount' => fn () => $request->integer('amount'),
-                'transaction_date' => fn () => Carbon::parse($request->string('transaction_date')->toString()),
-                'currency_code' => fn () => mb_strtoupper($request->string('currency_code')->toString()),
+                'transaction_date' => fn () => $request->string('transaction_date')->toString(),
+                'currency_code' => fn () => $request->string('currency_code')->toString(),
                 'account_id' => fn () => $this->accountInSpace($request, $space)->id,
                 'notes' => fn () => $this->nullableString($request, 'notes'),
                 'creditor_name' => fn () => $this->nullableString($request, 'creditor_name'),
                 'debtor_name' => fn () => $this->nullableString($request, 'debtor_name'),
-            ]);
-
-            $this->retireLegacyIvs($request, $transaction);
-            $this->applyCategory($request, $transaction, $space);
-
-            $transaction->save();
-
-            // Before the refresh below: it reloads the row and with it drops the
-            // wasChanged() state the balance move is decided on.
-            $balanceUpdated = $this->syncManualBalance($request, $transaction, $originalSnapshot);
+                'category_id' => fn () => $request->filled('category_id') ? $this->categoryInSpace($request, $space)->id : null,
+            ]), $request->boolean('update_balance'));
 
             return $this->json([
-                'transaction' => $this->presentTransaction($transaction->refresh()),
-                'balance_updated' => $balanceUpdated,
+                'transaction' => $this->presentTransaction($written->transaction),
+                'balance_updated' => $written->balanceUpdated,
             ]);
         });
     }
@@ -135,65 +114,5 @@ class UpdateTransaction extends WriteTool
         $fields = implode(', ', $locked);
 
         return Response::error("Only manually-created transactions can change {$fields}. This one came from a bank or import, so its core fields are locked; notes and category_id can still be edited here, and label_transaction handles its labels.");
-    }
-
-    /**
-     * Writing one of the legacy encrypted fields in the clear retires its iv:
-     * one left behind would have the browser try to decrypt plain text and
-     * render the field as broken. The web edit dialog clears them for the same
-     * reason, and the client-side encryption they belong to is being migrated
-     * away.
-     */
-    private function retireLegacyIvs(Request $request, Transaction $transaction): void
-    {
-        foreach (['description' => 'description_iv', 'notes' => 'notes_iv'] as $field => $iv) {
-            if ($request->has($field)) {
-                $transaction->{$iv} = null;
-            }
-        }
-    }
-
-    /**
-     * A new category is always a manual assignment: reset any AI/rule provenance
-     * so the row is not later treated as machine-categorized.
-     *
-     * ponytail: unlike the web edit path this does not learn a correction rule —
-     * MCP writes stay predictable and side-effect free.
-     */
-    private function applyCategory(Request $request, Transaction $transaction, Space $space): void
-    {
-        if (! $request->has('category_id')) {
-            return;
-        }
-
-        $newCategoryId = $request->filled('category_id') ? $this->categoryInSpace($request, $space)->id : null;
-
-        if ($newCategoryId === $transaction->category_id) {
-            return;
-        }
-
-        $transaction->category_id = $newCategoryId;
-        $transaction->category_source = $newCategoryId === null ? null : CategorySource::Manual;
-        $transaction->ai_confidence = null;
-        $transaction->categorized_by_rule_id = null;
-    }
-
-    /**
-     * Move the manual balance off the pre-edit account/date/amount and onto the
-     * new ones. Either side no-ops on an account that does not own its
-     * balance (a connected one, or a credit card), so moving a transaction
-     * onto one still unwinds the account it came from.
-     */
-    private function syncManualBalance(Request $request, Transaction $transaction, Transaction $originalSnapshot): bool
-    {
-        if (! $request->boolean('update_balance') || ! $transaction->wasChanged(ManualBalanceAdjuster::BALANCE_AFFECTING_ATTRIBUTES)) {
-            return false;
-        }
-
-        $adjuster = app(ManualBalanceAdjuster::class);
-        $reversed = $adjuster->reverseDeletedTransaction($originalSnapshot);
-        $applied = $adjuster->applyCreatedTransaction($transaction->load('account'));
-
-        return $reversed || $applied;
     }
 }

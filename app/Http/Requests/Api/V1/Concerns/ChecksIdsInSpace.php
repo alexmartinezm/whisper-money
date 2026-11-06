@@ -47,6 +47,40 @@ trait ChecksIdsInSpace
     }
 
     /**
+     * The rules for a list of ids of the caller's own $model in the request's
+     * space. An oversized list gets none for its items: Laravel expands them
+     * per item before the cap on the list is ever read, so a huge list would
+     * cost its `distinct` and its lookup just to be refused.
+     *
+     * @param  'present'|'sometimes'  $presence
+     * @param  class-string<Model>  $model
+     * @return array<string, array<mixed>>
+     */
+    protected function idListInSpace(string $field, string $presence, int $max, string $model, string $noun): array
+    {
+        $ids = $this->input($field);
+
+        return [
+            $field => [$presence, 'array', 'list', "max:{$max}"],
+            ...is_array($ids) && count($ids) > $max ? [] : ["{$field}.*" => ['string', 'distinct:ignore_case', $this->inSpace($model, $noun)]],
+        ];
+    }
+
+    /**
+     * The validated list of ids in $field, as stored.
+     *
+     * @param  class-string<Model>  $model
+     * @return list<string>
+     */
+    protected function idListAsStored(string $model, string $field): array
+    {
+        return array_map(
+            fn (string $id): string => $this->idInSpace($model, "{$field}.*", $id),
+            array_values($this->validated($field, [])),
+        );
+    }
+
+    /**
      * The ids of the caller's own $model in the request's space among every
      * value sent for the field $attribute belongs to (`splits.*.label_ids.*`
      * for `splits.1.label_ids.0`), each keyed by its lowercase form. Looked up

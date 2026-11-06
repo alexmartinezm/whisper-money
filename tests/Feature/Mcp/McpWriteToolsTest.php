@@ -75,6 +75,31 @@ it('creates a manual transaction and defaults the currency to the account', func
     expect($transaction->source->value)->toBe('manually_created');
 });
 
+it('keeps what a rule tagged a new transaction with next to the labels it was sent', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id]);
+    $sent = Label::factory()->create(['user_id' => $user->id]);
+    $tagged = Label::factory()->create(['user_id' => $user->id]);
+    $rule = AutomationRule::factory()->create([
+        'user_id' => $user->id,
+        'priority' => 1,
+        'rules_json' => ['in' => ['hucha', ['var' => 'description']]],
+        'action_category_id' => null,
+    ]);
+    $rule->labels()->attach($tagged->id);
+
+    callWriteTool($user, CreateTransaction::class, [
+        'account_id' => $account->id,
+        'description' => 'Hucha enero',
+        'amount' => 5000,
+        'transaction_date' => '2026-01-15',
+        'label_ids' => [$sent->id],
+    ])->assertOk();
+
+    expect(Transaction::query()->sole()->labels()->pluck('labels.id')->sort()->values()->all())
+        ->toBe(collect([$sent->id, $tagged->id])->sort()->values()->all());
+});
+
 it('creates a transaction on a connected account without touching its balances', function () {
     $user = User::factory()->create();
     $account = Account::factory()->connected()->create(['user_id' => $user->id]);

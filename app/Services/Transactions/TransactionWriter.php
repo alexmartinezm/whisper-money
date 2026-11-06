@@ -1,0 +1,217 @@
+<?php
+
+namespace App\Services\Transactions;
+
+use App\Enums\CategorySource;
+use App\Enums\TransactionSource;
+use App\Jobs\ReassignTransactionsToBudgets;
+use App\Models\Account;
+use App\Models\Space;
+use App\Models\Transaction;
+use App\Models\User;
+use App\Services\ManualBalanceAdjuster;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
+
+/**
+ * Creating, editing and deleting a transaction, shared by the transaction MCP
+ * tools and `/api/v1/transactions`. The inputs arrive validated
+ * (TransactionWriteRules) and with the account, category and labels they point
+ * at already checked by the caller.
+ *
+ * Every write goes through the model, so its events (budget assignment,
+ * automation rules, AI categorization) fire as they do for the app's writes.
+ * The account balance only moves when the caller asks for it.
+ */
+class TransactionWriter
+{
+    public function __construct(private ManualBalanceAdjuster $balanceAdjuster) {}
+
+    /**
+     * Automation rules run while the row is saved, so $labelIds go on top of
+     * what a rule tagged it with: the goal a rule fills keeps its transaction.
+     * They arrive after the row's own budget assignment, so a budget that
+     * tracks one of them needs another pass.
+     *
+     * @param  array<string, mixed>  $fields  `description`, `amount` and `transaction_date`, and optionally `currency_code` (the account's when left out), `category_id`, `notes`, `creditor_name` and `debtor_name`
+     * @param  list<string>  $labelIds
+     */
+    public function create(User $user, Space $space, Account $account, array $fields, array $labelIds, bool $updateBalance): WrittenTransaction
+    {
+        $categoryId = self::filledOrNull($fields['category_id'] ?? null);
+        $currencyCode = self::filledOrNull($fields['currency_code'] ?? null);
+
+        [$transaction, $balanceUpdated] = DB::transaction(function () use ($user, $space, $account, $fields, $labelIds, $updateBalance, $categoryId, $currencyCode): array {
+            $transaction = new Transaction([
+                'user_id' => $user->id,
+                'space_id' => $space->id,
+                'account_id' => $account->id,
+                'category_id' => $categoryId,
+                'category_source' => $categoryId === null ? null : CategorySource::Manual,
+                'description' => (string) $fields['description'],
+                'transaction_date' => self::day($fields['transaction_date']),
+                'amount' => (int) $fields['amount'],
+                'currency_code' => $currencyCode === null ? $account->currency_code : mb_strtoupper($currencyCode),
+                'notes' => self::filledOrNull($fields['notes'] ?? null),
+                'creditor_name' => self::filledOrNull($fields['creditor_name'] ?? null),
+                'debtor_name' => self::filledOrNull($fields['debtor_name'] ?? null),
+                'source' => TransactionSource::ManuallyCreated,
+            ]);
+            $transaction->save();
+
+            if ($labelIds !== []) {
+                $transaction->labels()->syncWithoutDetaching($labelIds);
+            }
+
+            // The adjuster no-ops on a connected account, whose balances belong
+            // to the bank sync. Report what it actually did, otherwise the
+            // caller says a balance moved when it did not.
+            return [$transaction, $updateBalance && $this->balanceAdjuster->applyCreatedTransaction($transaction->load('account'))];
+        }, attempts: 5);
+
+        if ($labelIds !== []) {
+            ReassignTransactionsToBudgets::dispatch([$transaction->id]);
+        }
+
+        return new WrittenTransaction($transaction->refresh(), $balanceUpdated);
+    }
+
+    /**
+     * Change only the fields in $changes, under a row lock, where a split
+     * created concurrently would otherwise slip past the caller's check. A
+     * changed category is always a manual assignment.
+     *
+     * @param  array<string, mixed>  $changes  any of `description`, `amount`, `transaction_date`, `currency_code`, `account_id`, `notes`, `creditor_name`, `debtor_name` and `category_id`
+     */
+    public function update(Transaction $transaction, array $changes, bool $updateBalance): WrittenTransaction
+    {
+        return DB::transaction(function () use ($transaction, $changes, $updateBalance): WrittenTransaction {
+            $locked = Transaction::query()->whereKey($transaction->id)->lockForUpdate()->firstOrFail();
+
+            $splitError = TransactionWriteRules::splitLedgerError($locked, array_keys($changes));
+
+            if ($splitError !== null) {
+                throw ValidationException::withMessages(['splits' => $splitError]);
+            }
+
+            // Snapshot the pre-edit account/date/amount so a manual balance can
+            // be moved off the old values if the edit changes them.
+            $original = clone $locked;
+
+            $this->applyFields($locked, $changes);
+            $locked->save();
+
+            // Before the refresh: it drops the wasChanged() state.
+            $balanceUpdated = $updateBalance && $this->moveBalance($original, $locked);
+
+            return new WrittenTransaction($locked->refresh(), $balanceUpdated);
+        }, attempts: 5);
+    }
+
+    /**
+     * Soft delete, as the app does: the sync dedupes against deleted rows, so
+     * it does not bring a bank transaction back. Says whether the account
+     * balance moved.
+     */
+    public function delete(Transaction $transaction, bool $updateBalance): bool
+    {
+        return DB::transaction(function () use ($transaction, $updateBalance): bool {
+            $locked = Transaction::query()->whereKey($transaction->id)->lockForUpdate()->firstOrFail();
+
+            $balanceUpdated = $updateBalance && $this->balanceAdjuster->reverseDeletedTransaction($locked);
+
+            $locked->delete();
+
+            return $balanceUpdated;
+        }, attempts: 5);
+    }
+
+    /**
+     * ponytail: unlike the web edit path this does not learn a correction rule:
+     * writes from outside the app stay predictable and side-effect free.
+     *
+     * @param  array<string, mixed>  $changes
+     */
+    private function applyFields(Transaction $transaction, array $changes): void
+    {
+        $casts = [
+            'description' => fn (mixed $value): string => (string) $value,
+            'amount' => fn (mixed $value): int => (int) $value,
+            'transaction_date' => fn (mixed $value): Carbon => Carbon::parse(self::day($value)),
+            'currency_code' => fn (mixed $value): string => mb_strtoupper((string) $value),
+            'account_id' => fn (mixed $value): string => (string) $value,
+            'notes' => self::filledOrNull(...),
+            'creditor_name' => self::filledOrNull(...),
+            'debtor_name' => self::filledOrNull(...),
+        ];
+
+        foreach ($casts as $attribute => $cast) {
+            if (array_key_exists($attribute, $changes)) {
+                $transaction->{$attribute} = $cast($changes[$attribute]);
+            }
+        }
+
+        // A field written in the clear retires its own iv, and only its own:
+        // one left behind would have the browser decrypt plain text, and the
+        // other field may still be encrypted.
+        foreach (['description' => 'description_iv', 'notes' => 'notes_iv'] as $field => $iv) {
+            if (array_key_exists($field, $changes)) {
+                $transaction->{$iv} = null;
+            }
+        }
+
+        if (array_key_exists('category_id', $changes)) {
+            $this->assignCategory($transaction, self::filledOrNull($changes['category_id']));
+        }
+    }
+
+    /**
+     * A new category resets any AI/rule provenance, so the row is not later
+     * treated as machine-categorized.
+     */
+    private function assignCategory(Transaction $transaction, ?string $categoryId): void
+    {
+        if ($categoryId === $transaction->category_id) {
+            return;
+        }
+
+        $transaction->category_id = $categoryId;
+        $transaction->category_source = $categoryId === null ? null : CategorySource::Manual;
+        $transaction->ai_confidence = null;
+        $transaction->categorized_by_rule_id = null;
+    }
+
+    /**
+     * Either side no-ops on an account that does not own its balance (a
+     * connected one, or a credit card), so moving a transaction onto one still
+     * unwinds the account it came from.
+     */
+    private function moveBalance(Transaction $original, Transaction $edited): bool
+    {
+        if (! TransactionWriteRules::movesBalance($edited) || ! $edited->wasChanged(ManualBalanceAdjuster::BALANCE_AFFECTING_ATTRIBUTES)) {
+            return false;
+        }
+
+        $reversed = $this->balanceAdjuster->reverseDeletedTransaction($original);
+        $applied = $this->balanceAdjuster->applyCreatedTransaction($edited->load('account'));
+
+        return $reversed || $applied;
+    }
+
+    /**
+     * The day of a date sent with or without a time, as `balance_date` is kept.
+     */
+    private static function day(mixed $value): string
+    {
+        return Carbon::parse((string) $value)->toDateString();
+    }
+
+    /**
+     * A string field, or null when an empty value was sent to clear it.
+     */
+    private static function filledOrNull(mixed $value): ?string
+    {
+        return filled($value) ? (string) $value : null;
+    }
+}
