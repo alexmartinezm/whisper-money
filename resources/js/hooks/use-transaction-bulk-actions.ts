@@ -99,6 +99,8 @@ export function useTransactionBulkActions({
     const [isBulkUpdating, setIsBulkUpdating] = useState(false);
     const [isReEvaluatingBulk, setIsReEvaluatingBulk] = useState(false);
     const [isSelectingAll, setIsSelectingAll] = useState(false);
+    const [isRemoveLabelsDialogOpen, setIsRemoveLabelsDialogOpen] =
+        useState(false);
 
     const selectedIds = useMemo(
         () => Object.keys(rowSelection),
@@ -236,7 +238,10 @@ export function useTransactionBulkActions({
      * what the table shows: a split transaction it skipped stays as it was.
      */
     async function applyBulkEdit(
-        changes: { category_id: string | null } | { label_ids: string[] },
+        changes:
+            | { category_id: string | null }
+            | { label_ids: string[] }
+            | { remove_all_labels: true },
         outcome: {
             describe: (result: BulkUpdateResult) => string;
             /** Toast it on every table, not only those announcing outcomes. */
@@ -317,9 +322,11 @@ export function useTransactionBulkActions({
         }
     }
 
-    async function handleBulkLabelsChange(labelIds: string[]) {
+    async function applyLabelEdit(
+        changes: { label_ids: string[] } | { remove_all_labels: true },
+    ) {
         const updated = await applyBulkEdit(
-            { label_ids: labelIds },
+            changes,
             { describe: labelsEditOutcome },
             {
                 log: 'Failed to update transactions with labels:',
@@ -330,6 +337,24 @@ export function useTransactionBulkActions({
         if (updated && !reachesAllMatching) {
             onTransactionsChanged?.();
         }
+    }
+
+    /** Adds to the labels each row has, whichever those are. */
+    async function handleBulkLabelsChange(labelIds: string[]) {
+        if (labelIds.length > 0) {
+            await applyLabelEdit({ label_ids: labelIds });
+        }
+    }
+
+    function handleRemoveAllLabelsClick() {
+        if (selectedIds.length > 0 || reachesAllMatching) {
+            setIsRemoveLabelsDialogOpen(true);
+        }
+    }
+
+    async function handleRemoveAllLabels() {
+        setIsRemoveLabelsDialogOpen(false);
+        await applyLabelEdit({ remove_all_labels: true });
     }
 
     async function handleBulkReEvaluateRules() {
@@ -374,6 +399,7 @@ export function useTransactionBulkActions({
                 : undefined,
             onCategoryChange: handleBulkCategoryChange,
             onLabelsChange: handleBulkLabelsChange,
+            onRemoveAllLabels: handleRemoveAllLabelsClick,
             onDelete: handleBulkDeleteClick,
             onReEvaluateRules: handleBulkReEvaluateRules,
             isUpdating:
@@ -392,9 +418,20 @@ export function useTransactionBulkActions({
             onConfirm: isBulkDeleteMode ? handleBulkDelete : handleDelete,
             onClose: closeDeleteDialog,
         },
+        removeLabelsDialog: {
+            isOpen: isRemoveLabelsDialogOpen,
+            isAllMatching: reachesAllMatching,
+            selectedCount,
+            onConfirm: handleRemoveAllLabels,
+            onClose: () => setIsRemoveLabelsDialogOpen(false),
+        },
     };
 }
 
 export type TransactionDeleteDialogState = ReturnType<
     typeof useTransactionBulkActions
 >['deleteDialog'];
+
+export type TransactionRemoveLabelsDialogState = ReturnType<
+    typeof useTransactionBulkActions
+>['removeLabelsDialog'];

@@ -3576,6 +3576,8 @@
     "Download 1 transaction": "Descargar 1 transacción",
     "1 transaction · :file": "1 transacción · :file",
     "Are you sure you want to delete :count transactions? This action cannot be undone.": "¿Estás seguro de que quieres eliminar :count transacciones? Esta acción no se puede deshacer.",
+    "Are you sure you want to remove every label from :count transactions? This action cannot be undone.": "¿Estás seguro de que quieres quitar todas las etiquetas de :count transacciones? Esta acción no se puede deshacer.",
+    "Are you sure you want to remove every label from all the transactions matching the filters? This action cannot be undone.": "¿Estás seguro de que quieres quitar todas las etiquetas de todas las transacciones que coinciden con los filtros? Esta acción no se puede deshacer.",
     "selected": "seleccionadas",
     "Select all matching filters": "Seleccionar todas las del filtro",
     "Selection actions": "Acciones de la selección",

@@ -51,6 +51,7 @@ export function MobileBulkActionsBar({
     labels = [],
     onCategoryChange,
     onLabelsChange,
+    onRemoveAllLabels,
     onLabelCreated,
     onDelete,
     onReEvaluateRules,
@@ -111,6 +112,7 @@ export function MobileBulkActionsBar({
             <BulkLabelSelect
                 labels={labels}
                 onLabelsChange={onLabelsChange}
+                onRemoveAllLabels={onRemoveAllLabels}
                 onLabelCreated={onLabelCreated}
                 drawer={{
                     title: __('Add labels'),

@@ -4,6 +4,7 @@ import { createTransactionColumns } from '@/components/transactions/transaction-
 import { TransactionDeleteDialogs } from '@/components/transactions/transaction-delete-dialogs';
 import { TransactionFilters as TransactionFiltersComponent } from '@/components/transactions/transaction-filters';
 import { TransactionListSkeleton } from '@/components/transactions/transaction-list-skeleton';
+import { TransactionRemoveLabelsDialog } from '@/components/transactions/transaction-remove-labels-dialog';
 import { TransactionRowDialogs } from '@/components/transactions/transaction-row-dialogs';
 import { TransactionTableRow } from '@/components/transactions/transaction-table-row';
 import { Button } from '@/components/ui/button';
@@ -369,6 +370,8 @@ export function TransactionTable({
                 dialog={bulk.deleteDialog}
                 confirmBulkByTyping={confirmBulkByTyping}
             />
+
+            <TransactionRemoveLabelsDialog dialog={bulk.removeLabelsDialog} />
 
             <BulkActionsBar
                 {...bulk.barProps}

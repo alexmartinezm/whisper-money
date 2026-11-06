@@ -31,8 +31,17 @@ vi.mock('@/components/transactions/responsive-transaction-table', () => ({
     ),
 }));
 vi.mock('@/components/transactions/bulk-actions-bar', () => ({
-    BulkActionsBar: ({ selectedCount }: { selectedCount: number }) => (
-        <div data-testid="bulk-bar">{selectedCount} selected</div>
+    BulkActionsBar: ({
+        selectedCount,
+        onRemoveAllLabels,
+    }: {
+        selectedCount: number;
+        onRemoveAllLabels: () => void;
+    }) => (
+        <div>
+            <div data-testid="bulk-bar">{selectedCount} selected</div>
+            <button onClick={onRemoveAllLabels}>ask to remove labels</button>
+        </div>
     ),
 }));
 vi.mock('@/components/transactions/transaction-filters', () => ({
@@ -204,6 +213,22 @@ describe('TransactionTable', () => {
         act(() => fireEvent.click(screen.getByText('clear selection')));
 
         expect(screen.getByTestId('bulk-bar').textContent).toBe('0 selected');
+    });
+
+    it('asks before the bulk bar takes the labels off the ticked rows', () => {
+        renderTable(source());
+
+        fireEvent.click(screen.getByText('tick b'));
+
+        expect(screen.queryByRole('alertdialog')).toBeNull();
+
+        fireEvent.click(screen.getByText('ask to remove labels'));
+
+        expect(
+            within(screen.getByRole('alertdialog')).getByText(
+                'Are you sure you want to remove every label from 1 transactions? This action cannot be undone.',
+            ),
+        ).toBeTruthy();
     });
 
     it('loads more by itself only when the source pages that way', () => {

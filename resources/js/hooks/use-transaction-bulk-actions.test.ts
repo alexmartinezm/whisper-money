@@ -259,6 +259,71 @@ describe('useTransactionBulkActions', () => {
         expect(result.current.bulk.barProps.isSelectingAll).toBe(false);
     });
 
+    it('removes every label from the ticked rows only once confirmed', async () => {
+        const onTransactionsChanged = vi.fn();
+        const { result } = renderBulk([transaction('a')], ['a'], {
+            onTransactionsChanged,
+        });
+
+        act(() => result.current.bulk.barProps.onRemoveAllLabels());
+
+        expect(result.current.bulk.removeLabelsDialog.isOpen).toBe(true);
+        expect(result.current.bulk.removeLabelsDialog.selectedCount).toBe(1);
+        expect(sync.updateMany).not.toHaveBeenCalled();
+
+        await act(() => result.current.bulk.removeLabelsDialog.onConfirm());
+
+        expect(sync.updateMany).toHaveBeenCalledWith(['a'], {
+            remove_all_labels: true,
+        });
+        expect(onTransactionsChanged).toHaveBeenCalledOnce();
+    });
+
+    it('sends nothing when the removal of every label is cancelled', () => {
+        const { result } = renderBulk([transaction('a')], ['a']);
+
+        act(() => result.current.bulk.barProps.onRemoveAllLabels());
+        act(() => result.current.bulk.removeLabelsDialog.onClose());
+
+        expect(result.current.bulk.removeLabelsDialog.isOpen).toBe(false);
+        expect(sync.updateMany).not.toHaveBeenCalled();
+        expect(sync.updateByFilters).not.toHaveBeenCalled();
+    });
+
+    it('removes every label from every matching row once confirmed', async () => {
+        const { result } = renderBulk([transaction('a')], ['a'], {
+            matchingFilters: { search: 'coffee' },
+        });
+
+        act(() => result.current.bulk.barProps.onSelectAll?.());
+        act(() => result.current.bulk.barProps.onRemoveAllLabels());
+
+        expect(result.current.bulk.removeLabelsDialog.isAllMatching).toBe(true);
+
+        await act(() => result.current.bulk.removeLabelsDialog.onConfirm());
+
+        expect(sync.updateByFilters).toHaveBeenCalledWith(FILTERS, {
+            remove_all_labels: true,
+        });
+        expect(sync.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('does not ask to remove labels with nothing selected', () => {
+        const { result } = renderBulk([transaction('a')], []);
+
+        act(() => result.current.bulk.barProps.onRemoveAllLabels());
+
+        expect(result.current.bulk.removeLabelsDialog.isOpen).toBe(false);
+    });
+
+    it('sends no empty label list', async () => {
+        const { result } = renderBulk([transaction('a')], ['a']);
+
+        await act(() => result.current.bulk.barProps.onLabelsChange([]));
+
+        expect(sync.updateMany).not.toHaveBeenCalled();
+    });
+
     it('clears the progress toast when the server rejects a bulk edit', async () => {
         toastMock.loading.mockReturnValue('progress');
         sync.updateByFilters.mockRejectedValue(new Error('500'));

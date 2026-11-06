@@ -2,12 +2,16 @@
 
 use App\Enums\CategorySource;
 use App\Enums\CategoryType;
+use App\Jobs\ReassignTransactionsToBudgets;
 use App\Models\Account;
+use App\Models\AutomationRule;
 use App\Models\Category;
 use App\Models\Label;
 use App\Models\Transaction;
 use App\Models\TransactionSplit;
 use App\Models\User;
+use App\Services\AutomationRuleService;
+use Illuminate\Support\Facades\Bus;
 
 beforeEach(function () {
     $this->user = User::factory()->create([
@@ -259,7 +263,7 @@ it('can bulk update transactions with labels by IDs', function () {
     }
 });
 
-it('bulk update replaces labels instead of merging them', function () {
+it('bulk update adds labels and keeps the ones a row already has', function () {
     $label1 = Label::factory()->create(['user_id' => $this->user->id, 'name' => 'Old Label 1']);
     $label2 = Label::factory()->create(['user_id' => $this->user->id, 'name' => 'Old Label 2']);
     $label3 = Label::factory()->create(['user_id' => $this->user->id, 'name' => 'New Label']);
@@ -271,12 +275,10 @@ it('bulk update replaces labels instead of merging them', function () {
             'account_id' => $this->account->id,
         ]);
 
-    // Attach existing labels
     foreach ($transactions as $transaction) {
         $transaction->labels()->attach([$label1->id, $label2->id]);
     }
 
-    // Bulk update with new label should replace, not merge
     $response = $this->actingAs($this->user)->patchJson('/transactions/bulk', [
         'transaction_ids' => $transactions->pluck('id')->toArray(),
         'label_ids' => [$label3->id],
@@ -284,14 +286,165 @@ it('bulk update replaces labels instead of merging them', function () {
 
     $response->assertSuccessful();
 
-    // Verify labels were replaced, not merged
     foreach ($transactions as $transaction) {
-        $labelIds = $transaction->fresh()->labels->pluck('id')->toArray();
-        expect($labelIds)->toHaveCount(1);
-        expect($labelIds)->toEqual([$label3->id]);
-        expect($labelIds)->not->toContain($label1->id);
-        expect($labelIds)->not->toContain($label2->id);
+        expect($transaction->fresh()->labels->pluck('id')->all())
+            ->toEqualCanonicalizing([$label1->id, $label2->id, $label3->id]);
     }
+
+    expect(collect($response->json('transactions'))->map(fn (array $row): int => count($row['labels']))->all())->toBe([3, 3]);
+});
+
+it('adds labels to the rows matching the filters and keeps theirs', function () {
+    $existing = Label::factory()->create(['user_id' => $this->user->id]);
+    $added = Label::factory()->create(['user_id' => $this->user->id]);
+    $matching = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'category_id' => $this->category->id,
+    ]);
+    $matching->labels()->attach($existing->id);
+    $outside = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'category_id' => Category::factory()->create(['user_id' => $this->user->id])->id,
+    ]);
+    $outside->labels()->attach($existing->id);
+
+    $this->actingAs($this->user)->patchJson('/transactions/bulk', [
+        'filters' => ['category_ids' => [$this->category->id]],
+        'label_ids' => [$added->id],
+    ])->assertSuccessful();
+
+    expect($matching->fresh()->labels->pluck('id')->all())->toEqualCanonicalizing([$existing->id, $added->id])
+        ->and($outside->fresh()->labels->pluck('id')->all())->toBe([$existing->id]);
+});
+
+it('can never clear labels through an add', function (?array $labelIds) {
+    $label = Label::factory()->create(['user_id' => $this->user->id]);
+    $transaction = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+    ]);
+    $transaction->labels()->attach($label->id);
+
+    $this->actingAs($this->user)->patchJson('/transactions/bulk', [
+        'transaction_ids' => [$transaction->id],
+        'label_ids' => $labelIds,
+    ])->assertBadRequest();
+
+    expect($transaction->fresh()->labels->pluck('id')->all())->toBe([$label->id]);
+})->with([
+    'an empty list' => [[]],
+    'null' => [null],
+]);
+
+it('reports only the rows an add actually changed', function () {
+    Bus::fake([ReassignTransactionsToBudgets::class]);
+
+    $label = Label::factory()->create(['user_id' => $this->user->id]);
+    $alreadyLabelled = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+    ]);
+    $alreadyLabelled->labels()->attach($label->id);
+    $unlabelled = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+    ]);
+
+    $response = $this->actingAs($this->user)->patchJson('/transactions/bulk', [
+        'transaction_ids' => [$alreadyLabelled->id, $unlabelled->id],
+        'label_ids' => [$label->id],
+    ])->assertSuccessful();
+
+    expect($response->json('updated_ids'))->toBe([$unlabelled->id])
+        ->and($response->json('count'))->toBe(2);
+
+    Bus::assertDispatched(
+        ReassignTransactionsToBudgets::class,
+        fn (ReassignTransactionsToBudgets $job): bool => $job->transactionIds === [$unlabelled->id] && $job->notify === false,
+    );
+});
+
+it('adds a label to a split transaction, keeping its lines and labels', function () {
+    $existing = Label::factory()->create(['user_id' => $this->user->id]);
+    $added = Label::factory()->create(['user_id' => $this->user->id]);
+    $split = Transaction::factory()->plaintext()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'category_id' => null,
+        'amount' => -10000,
+    ]);
+    $split->labels()->attach($existing->id);
+    $line = TransactionSplit::factory()->create([
+        'transaction_id' => $split->id,
+        'category_id' => $this->category->id,
+        'amount' => -10000,
+    ]);
+
+    $response = $this->actingAs($this->user)->patchJson('/transactions/bulk', [
+        'transaction_ids' => [$split->id],
+        'label_ids' => [$added->id],
+    ])->assertSuccessful();
+
+    expect($response->json('skipped_split_count'))->toBe(0)
+        ->and($response->json('updated_ids'))->toBe([$split->id])
+        ->and($split->fresh()->labels->pluck('id')->all())->toEqualCanonicalizing([$existing->id, $added->id])
+        ->and($line->fresh()->amount)->toBe(-10000)
+        ->and($split->fresh()->splits)->toHaveCount(1);
+});
+
+it('adds a label to an encrypted row without touching what is encrypted', function () {
+    $existing = Label::factory()->create(['user_id' => $this->user->id]);
+    $added = Label::factory()->create(['user_id' => $this->user->id]);
+    $encrypted = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+    ]);
+    $encrypted->labels()->attach($existing->id);
+
+    expect($encrypted->description_iv)->not->toBeNull();
+
+    $this->actingAs($this->user)->patchJson('/transactions/bulk', [
+        'transaction_ids' => [$encrypted->id],
+        'label_ids' => [$added->id],
+    ])->assertSuccessful();
+
+    $fresh = $encrypted->fresh();
+
+    expect($fresh->labels->pluck('id')->all())->toEqualCanonicalizing([$existing->id, $added->id])
+        ->and($fresh->description)->toBe($encrypted->description)
+        ->and($fresh->description_iv)->toBe($encrypted->description_iv);
+});
+
+it('keeps a label a rule set when another is added, and the added one when rules run again', function () {
+    $ruleLabel = Label::factory()->create(['user_id' => $this->user->id]);
+    $added = Label::factory()->create(['user_id' => $this->user->id]);
+    $rule = AutomationRule::factory()->create([
+        'user_id' => $this->user->id,
+        'rules_json' => ['in' => ['coffee', ['var' => 'description']]],
+        'action_category_id' => $this->category->id,
+    ]);
+    $rule->labels()->sync([$ruleLabel->id]);
+    $transaction = Transaction::factory()->plaintext()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'category_id' => null,
+        'description' => 'Coffee shop',
+    ]);
+    $service = app(AutomationRuleService::class);
+    $service->applyRules($transaction);
+
+    expect($transaction->fresh()->labels->pluck('id')->all())->toBe([$ruleLabel->id]);
+
+    $this->actingAs($this->user)->patchJson('/transactions/bulk', [
+        'transaction_ids' => [$transaction->id],
+        'label_ids' => [$added->id],
+    ])->assertSuccessful();
+
+    $service->applyRules($transaction->fresh());
+
+    expect($transaction->fresh()->labels->pluck('id')->all())->toEqualCanonicalizing([$ruleLabel->id, $added->id]);
 });
 
 it('returns the emptied rows when the bulk action removes every label', function () {
@@ -309,7 +462,7 @@ it('returns the emptied rows when the bulk action removes every label', function
 
     $response = $this->actingAs($this->user)->patchJson('/transactions/bulk', [
         'transaction_ids' => [$transaction->id],
-        'label_ids' => [],
+        'remove_all_labels' => true,
     ])->assertSuccessful();
 
     expect($response->json('updated_ids'))->toContain($transaction->id);
@@ -320,6 +473,53 @@ it('returns the emptied rows when the bulk action removes every label', function
         ->and($returned['labels'])->toBe([])
         ->and($transaction->fresh()->labels)->toHaveCount(0);
 });
+
+it('removes every label from the rows matching the filters and no others', function () {
+    $label = Label::factory()->create(['user_id' => $this->user->id]);
+    $matching = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'category_id' => $this->category->id,
+    ]);
+    $matching->labels()->attach($label->id);
+    $outside = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+        'category_id' => Category::factory()->create(['user_id' => $this->user->id])->id,
+    ]);
+    $outside->labels()->attach($label->id);
+
+    $this->actingAs($this->user)->patchJson('/transactions/bulk', [
+        'filters' => ['category_ids' => [$this->category->id]],
+        'remove_all_labels' => true,
+    ])->assertSuccessful();
+
+    expect($matching->fresh()->labels)->toHaveCount(0)
+        ->and($outside->fresh()->labels)->toHaveCount(1);
+});
+
+it('refuses a remove-all that also names labels, or that is not a plain yes', function (array $request) {
+    $label = Label::factory()->create(['user_id' => $this->user->id]);
+    $transaction = Transaction::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+    ]);
+    $transaction->labels()->attach($label->id);
+
+    $this->actingAs($this->user)->patchJson('/transactions/bulk', [
+        'transaction_ids' => [$transaction->id],
+        ...$request,
+        'label_ids' => $request['label_ids'] ?? null,
+    ])->assertUnprocessable();
+
+    expect($transaction->fresh()->labels->pluck('id')->all())->toBe([$label->id]);
+})->with([
+    'with labels' => fn (): array => [
+        'remove_all_labels' => true,
+        'label_ids' => [Label::factory()->create(['user_id' => $this->user->id])->id],
+    ],
+    'false' => [['remove_all_labels' => false]],
+]);
 
 it('bulk updates only the rows of a category type, leaving a split transaction alone', function () {
     $groceries = Category::factory()->create(['user_id' => $this->user->id, 'type' => CategoryType::Expense]);

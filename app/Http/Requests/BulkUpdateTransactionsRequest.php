@@ -45,6 +45,7 @@ class BulkUpdateTransactionsRequest extends FormRequest
             'notes_iv' => ['nullable', 'string', 'size:16'],
             'label_ids' => ['nullable', 'array'],
             'label_ids.*' => ['required', 'string', 'uuid', $this->userOwned('labels')],
+            'remove_all_labels' => ['sometimes', 'accepted', 'prohibits:label_ids'],
         ];
     }
 

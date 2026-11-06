@@ -30,7 +30,8 @@ interface LabelComboboxProps {
     placeholder?: string;
     triggerClassName?: string;
     allowCreate?: boolean;
-    allowRemoveAll?: boolean;
+    /** Offers "Remove all labels", which is this and not an empty value. */
+    onRemoveAll?: () => void;
     onLabelCreated?: (label: Label) => void;
     /**
      * Replaces the default trigger button. It must forward its ref and props,
@@ -49,7 +50,7 @@ export function LabelCombobox({
     placeholder = 'Add labels...',
     triggerClassName,
     allowCreate = true,
-    allowRemoveAll = false,
+    onRemoveAll,
     onLabelCreated,
     trigger,
     drawer,
@@ -251,10 +252,10 @@ export function LabelCombobox({
                     {sortedLabels.length === 0 && !showCreateOption && (
                         <CommandEmpty>{__('No labels found.')}</CommandEmpty>
                     )}
-                    {allowRemoveAll && (
+                    {onRemoveAll && (
                         <CommandItem
                             onSelect={() => {
-                                onValueChange([]);
+                                onRemoveAll();
                                 setOpen(false);
                             }}
                             className="gap-2"
