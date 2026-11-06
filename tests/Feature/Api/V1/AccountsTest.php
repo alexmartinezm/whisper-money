@@ -400,6 +400,45 @@ describe('update', function () {
     });
 });
 
+describe('property details', function () {
+    it('asks for the property type when a change would create the details without it', function (array $account, array $change) {
+        $user = User::factory()->create();
+        $model = Account::factory()->create(['user_id' => $user->id, ...$account]);
+
+        withHeaders(accountsWriter($user))
+            ->patchJson("/api/v1/accounts/{$model->id}", $change)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('property_type');
+
+        expect($model->fresh()->type)->toBe($account['type'])
+            ->and($model->realEstateDetail()->exists())->toBeFalse();
+    })->with([
+        'turning an account into a property' => [['type' => AccountType::Checking], ['type' => 'real_estate', 'address' => 'Main St 1']],
+        'a property with no details yet' => [['type' => AccountType::RealEstate], ['address' => 'Main St 1']],
+    ]);
+
+    it('creates the details once the property type comes along', function () {
+        $user = User::factory()->create();
+        $model = Account::factory()->create(['user_id' => $user->id, 'type' => AccountType::Checking]);
+
+        withHeaders(accountsWriter($user))
+            ->patchJson("/api/v1/accounts/{$model->id}", ['type' => 'real_estate', 'address' => 'Main St 1', 'property_type' => PropertyType::cases()[0]->value])
+            ->assertOk();
+
+        expect($model->realEstateDetail()->sole()->address)->toBe('Main St 1');
+    });
+
+    it('needs no property type to change a property that has its details, or a change that adds none', function () {
+        $user = User::factory()->create();
+        $property = Account::factory()->create(['user_id' => $user->id, 'type' => AccountType::RealEstate]);
+        $property->realEstateDetail()->create(['property_type' => PropertyType::cases()[0]->value]);
+        $bare = Account::factory()->create(['user_id' => $user->id, 'type' => AccountType::Checking]);
+
+        withHeaders(accountsWriter($user))->patchJson("/api/v1/accounts/{$property->id}", ['address' => 'Main St 1'])->assertOk();
+        withHeaders(accountsWriter($user))->patchJson("/api/v1/accounts/{$bare->id}", ['type' => 'real_estate'])->assertOk();
+    });
+});
+
 describe('malformed input', function () {
     it('answers a list where a type or a space goes with a 422, not a 500', function () {
         $headers = accountsWriter(User::factory()->create());
@@ -472,6 +511,19 @@ describe('references', function () {
             ->assertJsonValidationErrors('bank_id');
 
         expect($account->fresh()->bank_id)->not->toBe($private->id);
+    });
+
+    it('stores a linked loan as it is, whatever case it was sent in', function () {
+        $user = User::factory()->create();
+        $loan = Account::factory()->create(['user_id' => $user->id, 'type' => AccountType::Loan]);
+        $property = Account::factory()->create(['user_id' => $user->id, 'type' => AccountType::RealEstate]);
+        $property->realEstateDetail()->create(['property_type' => PropertyType::cases()[0]->value]);
+
+        withHeaders(accountsWriter($user))
+            ->patchJson("/api/v1/accounts/{$property->id}", ['linked_loan_account_id' => strtoupper($loan->id)])
+            ->assertOk();
+
+        expect($property->realEstateDetail()->sole()->linked_loan_account_id)->toBe($loan->id);
     });
 
     it('takes a public bank and one of the user\'s own', function () {

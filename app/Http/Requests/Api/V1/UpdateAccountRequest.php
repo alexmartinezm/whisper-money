@@ -32,8 +32,8 @@ class UpdateAccountRequest extends FormRequest
     }
 
     /**
-     * Refuse unknown fields, and changing what the bank sync owns on a
-     * connected account.
+     * Refuse unknown fields, changing what the bank sync owns on a connected
+     * account, and property details with no property type to create them with.
      *
      * @return array<int, callable(Validator): void>
      */
@@ -43,6 +43,7 @@ class UpdateAccountRequest extends FormRequest
             $errors = [
                 ...$this->unknownFieldRefusals(),
                 ...$this->accountRules()->syncOwnedFieldErrors($this->account(), $this->all(), $this->requestedType()),
+                ...$this->accountRules()->propertyTypeErrors($this->account(), $this->all(), $this->requestedType()),
             ];
 
             $this->addRefusals($validator, $errors);

@@ -25,6 +25,24 @@ trait ValidatesAccountWrites
     }
 
     /**
+     * The validated fields, with the linked accounts as stored.
+     *
+     * @return array<string, mixed>
+     */
+    public function accountAttributes(): array
+    {
+        $validated = $this->validated();
+
+        foreach (['linked_loan_account_id', 'linked_real_estate_account_id'] as $field) {
+            if (isset($validated[$field])) {
+                $validated[$field] = $this->idInSpace(Account::class, $field, $validated[$field]);
+            }
+        }
+
+        return $validated;
+    }
+
+    /**
      * The type the request asks for, null when it sends none or an invalid one.
      */
     protected function requestedType(): ?AccountType

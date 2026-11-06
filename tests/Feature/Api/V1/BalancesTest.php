@@ -119,6 +119,19 @@ describe('record', function () {
             ->assertJsonPath('data.derived', false);
     });
 
+    it('replaces the day\'s snapshot when the date comes with a time', function () {
+        $user = User::factory()->create();
+        $account = Account::factory()->withBalance()->create(['user_id' => $user->id]);
+        AccountBalance::factory()->create(['account_id' => $account->id, 'balance_date' => '2026-01-31', 'balance' => 100]);
+
+        withHeaders(apiV1Bearer($user, ['api:read', 'api:write']))
+            ->postJson("/api/v1/accounts/{$account->id}/balances", ['balance' => 250, 'balance_date' => '2026-01-31T12:00:00Z'])
+            ->assertOk()
+            ->assertJsonPath('data.balance_date', '2026-01-31');
+
+        expect($account->balances()->sole())->balance->toBe(250);
+    });
+
     it('validates the balance', function () {
         $user = User::factory()->create();
         $account = Account::factory()->withBalance()->create(['user_id' => $user->id]);

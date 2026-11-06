@@ -9,6 +9,7 @@ use App\Models\Account;
 use App\Models\CreditCardDetail;
 use App\Models\User;
 use App\Services\CurrencyOptions;
+use Illuminate\Support\Arr;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -39,6 +40,13 @@ class AccountWriteRules
      * @var list<string>
      */
     private const array ConnectionFields = ['banking_connection_id', 'external_account_id', 'is_connected'];
+
+    /**
+     * The fields besides the property type that write a property's details.
+     *
+     * @var list<string>
+     */
+    private const array RealEstateFields = ['address', 'purchase_price', 'purchase_date', 'area_value', 'area_unit', 'linked_loan_account_id', 'notes', 'revaluation_percentage'];
 
     public function __construct(private User $rulesUser) {}
 
@@ -157,6 +165,25 @@ class AccountWriteRules
         }
 
         return [];
+    }
+
+    /**
+     * A property's details are created by the first write that carries one,
+     * and they cannot exist without a property type.
+     *
+     * @param  array<string, mixed>  $input
+     * @return array<string, string>
+     */
+    public function propertyTypeErrors(Account $account, array $input, ?AccountType $requestedType): array
+    {
+        if (($requestedType ?? $account->type) !== AccountType::RealEstate
+            || isset($input['property_type'])
+            || $account->realEstateDetail !== null
+            || Arr::whereNotNull(Arr::only($input, self::RealEstateFields)) === []) {
+            return [];
+        }
+
+        return ['property_type' => 'This account has no property details yet, so property_type is needed to create them.'];
     }
 
     /**

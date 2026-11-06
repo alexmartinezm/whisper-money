@@ -418,6 +418,16 @@ it('keeps an encrypted name marked as ciphertext when an edit leaves it alone', 
     expect($account->fresh())->name_iv->toBe('abcdefghijklmnop')->encrypted->toBeTrue();
 });
 
+it('asks for the property type when an edit would create the details without it', function () {
+    $user = User::factory()->create();
+    $account = Account::factory()->create(['user_id' => $user->id, 'type' => AccountType::Checking]);
+
+    callWriteTool($user, UpdateAccount::class, ['account_id' => $account->id, 'type' => 'real_estate', 'address' => 'Main St 1'])
+        ->assertHasErrors(['property_type']);
+
+    expect($account->fresh()->type)->toBe(AccountType::Checking);
+});
+
 it('refuses the private bank of another user on an account', function () {
     $user = User::factory()->create();
     $account = Account::factory()->create(['user_id' => $user->id]);

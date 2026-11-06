@@ -59,6 +59,8 @@ class UpdateAccount extends WriteTool
 
         $validated = $request->validate($rules->updateRules($type, $account->creditCardDetail));
 
+        AccountWriteRules::throwIfAny($rules->propertyTypeErrors($account, $request->all(), $requestedType));
+
         $missingLoanFields = app(AccountWriteService::class)->update($account, [
             ...$validated,
             ...$request->has('type') ? ['type' => $type->value] : [],

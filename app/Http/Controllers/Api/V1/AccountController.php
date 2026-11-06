@@ -59,7 +59,7 @@ class AccountController extends Controller
     {
         $account = $this->accountWriteService->create(
             $this->user($request),
-            $request->validated(),
+            $request->accountAttributes(),
             $this->space($request)->id,
         );
 
@@ -92,7 +92,7 @@ class AccountController extends Controller
         // A loan whose details cannot be created yet is refused whole: the
         // transaction rolls back whatever else the request changed.
         DB::transaction(fn () => AccountWriteRules::throwIfAny(AccountWriteRules::missingLoanFieldErrors(
-            $this->accountWriteService->update($model, $request->validated()),
+            $this->accountWriteService->update($model, $request->accountAttributes()),
             restSaved: false,
         )));
 

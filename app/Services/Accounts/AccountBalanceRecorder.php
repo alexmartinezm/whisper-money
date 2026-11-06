@@ -6,6 +6,7 @@ use App\Enums\AccountType;
 use App\Models\Account;
 use App\Models\AccountBalance;
 use App\Rules\StorableDate;
+use Illuminate\Support\Carbon;
 
 /**
  * Recording a balance snapshot on an account, shared by the create_balance
@@ -50,13 +51,13 @@ class AccountBalanceRecorder
     }
 
     /**
-     * Write the snapshot for $date (today when null), replacing the one
-     * already there. A null $investedAmount leaves the stored one alone.
+     * Write the snapshot for the day of $date (today when null), replacing the
+     * one already there. A null $investedAmount leaves the stored one alone.
      */
     public function record(Account $account, int $balance, ?string $date, ?int $investedAmount): AccountBalance
     {
         return AccountBalance::updateOrCreate(
-            ['account_id' => $account->id, 'balance_date' => $date ?? now()->toDateString()],
+            ['account_id' => $account->id, 'balance_date' => $date === null ? now()->toDateString() : Carbon::parse($date)->toDateString()],
             [
                 'balance' => $balance,
                 // The caller's own figure, so the rebuild of derived balances
