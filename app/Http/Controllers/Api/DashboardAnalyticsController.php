@@ -7,12 +7,11 @@ use App\Enums\CategoryType;
 use App\Http\Controllers\Controller;
 use App\Models\Account;
 use App\Models\Transaction;
-use App\Services\AccountMetricsService;
 use App\Services\BalanceLookup;
 use App\Services\CategorySpendingService;
 use App\Services\ExchangeRateService;
 use App\Services\LoanAmortizationService;
-use App\Services\NetWorthCalculator;
+use App\Services\NetWorthAnalyticsService;
 use App\Services\PeriodComparator;
 use App\Services\Transactions\EffectiveTransactionPostings;
 use Carbon\Carbon;
@@ -23,42 +22,17 @@ class DashboardAnalyticsController extends Controller
 {
     public function __construct(
         private ExchangeRateService $exchangeRateService,
-        private AccountMetricsService $accountMetricsService,
         private LoanAmortizationService $loanAmortizationService,
         private CategorySpendingService $categorySpendingService,
-        private NetWorthCalculator $netWorthCalculator,
+        private NetWorthAnalyticsService $netWorth,
         private EffectiveTransactionPostings $postings,
     ) {}
 
-    public function netWorth(Request $request)
+    public function netWorth(Request $request): JsonResponse
     {
-        $validated = $request->validate([
-            'from' => 'required|date',
-            'to' => 'required|date',
-        ]);
+        $validated = $request->validate(PeriodComparator::rules());
 
-        $period = PeriodComparator::fromRequest($validated);
-        $previousPeriod = $period->previous();
-
-        $userCurrency = $request->user()->currency_code;
-
-        $accounts = Account::query()
-            ->where('user_id', $request->user()->id)
-            ->get();
-
-        // Load every account's balance history for the compared range in a
-        // fixed number of queries instead of one balance lookup per account.
-        $lookup = BalanceLookup::forAccounts(
-            $accounts->pluck('id'),
-            $previousPeriod->to,
-            $period->to,
-        );
-
-        return response()->json([
-            'current' => $this->netWorthCalculator->at($accounts, $lookup, $period->to, $userCurrency),
-            'previous' => $this->netWorthCalculator->at($accounts, $lookup, $previousPeriod->to, $userCurrency),
-            'currency_code' => $userCurrency,
-        ]);
+        return response()->json($this->netWorth->totals($request->user(), PeriodComparator::fromRequest($validated)));
     }
 
     public function monthlySpending(Request $request)
@@ -77,33 +51,9 @@ class DashboardAnalyticsController extends Controller
         ]);
     }
 
-    public function netWorthEvolution(Request $request)
+    public function netWorthEvolution(Request $request): JsonResponse
     {
-        $validated = $request->validate([
-            'from' => 'required|date',
-            'to' => 'required|date',
-            'include_excluded' => 'sometimes|boolean',
-        ]);
-
-        $start = Carbon::parse($validated['from']);
-        $end = Carbon::parse($validated['to']);
-
-        $userCurrency = $request->user()->currency_code;
-
-        $accounts = Account::query()
-            ->where('user_id', $request->user()->id)
-            ->when(! $request->boolean('include_excluded'), function ($query) {
-                $query->where(function ($query) {
-                    $query->whereNull('include_in_net_worth')
-                        ->orWhere('include_in_net_worth', true);
-                });
-            })
-            ->with(['bank:id,name,logo'])
-            ->get();
-
-        return response()->json(
-            $this->accountMetricsService->getNetWorthEvolution($userCurrency, $accounts, $start, $end)
-        );
+        return $this->netWorthEvolutionJson($request, daily: false);
     }
 
     public function accountBalanceEvolution(Request $request, Account $account)
@@ -157,33 +107,9 @@ class DashboardAnalyticsController extends Controller
         return $this->evolutionResponse($points, $account, $displayCurrencyCode);
     }
 
-    public function netWorthDailyEvolution(Request $request)
+    public function netWorthDailyEvolution(Request $request): JsonResponse
     {
-        $validated = $request->validate([
-            'from' => 'required|date',
-            'to' => 'required|date',
-            'include_excluded' => 'sometimes|boolean',
-        ]);
-
-        $start = Carbon::parse($validated['from']);
-        $end = Carbon::parse($validated['to']);
-
-        $userCurrency = $request->user()->currency_code;
-
-        $accounts = Account::query()
-            ->where('user_id', $request->user()->id)
-            ->when(! $request->boolean('include_excluded'), function ($query) {
-                $query->where(function ($query) {
-                    $query->whereNull('include_in_net_worth')
-                        ->orWhere('include_in_net_worth', true);
-                });
-            })
-            ->with(['bank:id,name,logo'])
-            ->get();
-
-        return response()->json(
-            $this->accountMetricsService->getNetWorthDailyEvolution($userCurrency, $accounts, $start, $end)
-        );
+        return $this->netWorthEvolutionJson($request, daily: true);
     }
 
     public function topCategories(Request $request)
@@ -222,6 +148,26 @@ class DashboardAnalyticsController extends Controller
             ->values();
 
         return response()->json($top);
+    }
+
+    /**
+     * The evolution of the accounts the chart draws: `include_excluded` adds
+     * the ones the user switched off in net worth.
+     */
+    private function netWorthEvolutionJson(Request $request, bool $daily): JsonResponse
+    {
+        $validated = $request->validate([
+            ...PeriodComparator::rules(),
+            'include_excluded' => 'sometimes|boolean',
+        ]);
+
+        return response()->json($this->netWorth->evolution(
+            $request->user(),
+            Carbon::parse($validated['from']),
+            Carbon::parse($validated['to']),
+            $daily,
+            $request->boolean('include_excluded'),
+        ));
     }
 
     private function calculateSpending(Carbon $from, Carbon $to): int
