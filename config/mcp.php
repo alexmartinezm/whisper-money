@@ -24,6 +24,26 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Verified Apps
+    |--------------------------------------------------------------------------
+    |
+    | OAuth apps shown as verified on the consent screen and in the connected
+    | apps lists, each with the exact hosts its callbacks live on. A client is
+    | verified as an app only when every redirect URI it registered is https
+    | on one of these hosts (no subdomains, no other port, no credentials), so
+    | the authorization code can only reach those hosts. Only the host is
+    | checked: the callback path is not, so what a verified app does with a
+    | path on its own host is on that app. The client's own name is never
+    | trusted: anyone can register a client called "Claude".
+    |
+    */
+
+    'verified_apps' => [
+        'Claude' => ['claude.ai'],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Allowed Custom Schemes
     |--------------------------------------------------------------------------
     |

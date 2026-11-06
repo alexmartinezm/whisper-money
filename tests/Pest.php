@@ -3,6 +3,7 @@
 use App\Enums\BankingConnectionStatus;
 use App\Enums\CategoryType;
 use App\Enums\RecurringCadence;
+use App\Http\Controllers\Api\V1\Controller;
 use App\Jobs\SyncBankingConnectionJob;
 use App\Models\Account;
 use App\Models\AccountBalance;
@@ -28,8 +29,13 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Str;
+use Illuminate\Testing\TestResponse;
 use Laravel\Ai\Exceptions\ProviderOverloadedException;
 use Laravel\Mcp\Server\Testing\TestResponse as McpTestResponse;
+use Laravel\Passport\Client;
+use Laravel\Passport\ClientRepository;
 use Stripe\Collection as StripeCollection;
 use Stripe\Service\SubscriptionService;
 use Stripe\StripeClient;
@@ -614,4 +620,172 @@ function seriesCharging(User $user, Account $account, array $amounts, string $na
     }
 
     return $series;
+}
+
+/*
+|--------------------------------------------------------------------------
+| Public API v1
+|--------------------------------------------------------------------------
+*/
+
+/**
+ * The `Authorization` header for a fresh API personal access token.
+ *
+ * Also forgets the resolved guards: they cache the first request's user for
+ * the rest of the test (each request is a fresh process in production), so
+ * a test switching tokens would otherwise keep authenticating the old one.
+ *
+ * @param  array<int, string>  $abilities
+ * @return array{Authorization: string}
+ */
+function apiV1Bearer(User $user, array $abilities = ['api:read'], ?DateTimeInterface $expiresAt = null): array
+{
+    app('auth')->forgetGuards();
+
+    return ['Authorization' => 'Bearer '.$user->createToken('api', $abilities, $expiresAt)->plainTextToken];
+}
+
+/**
+ * Register throwaway routes under the real `api-v1` middleware group, for the
+ * cross-cutting behaviour (write abilities, idempotency, errors) no shipped
+ * endpoint exercises yet: `POST /api/v1/_test/echo` answers 201 with the body
+ * it got (a `name` over 10 characters is a 422), `GET /api/v1/_test/space` names the space the request resolves to
+ * and `GET /api/v1/_test/boom` throws.
+ */
+function registerApiV1TestRoutes(): void
+{
+    Route::middleware('api-v1')->prefix('api/v1/_test')->name('api.v1._test.')->group(function (): void {
+        Route::post('echo', fn (Illuminate\Http\Request $request) => response()->json([
+            'data' => ['id' => (string) Str::uuid(), ...$request->validate(['name' => ['sometimes', 'string', 'max:10']])],
+        ], 201))->name('echo');
+        Route::get('space', fn (Illuminate\Http\Request $request) => (new class extends Controller
+        {
+            /** @return array{data: array{id: string}} */
+            public function __invoke(Illuminate\Http\Request $request): array
+            {
+                return ['data' => ['id' => $this->space($request)->id]];
+            }
+        })($request))->name('space');
+        Route::get('boom', fn () => throw new RuntimeException('secret internals'))->name('boom');
+    });
+}
+
+/*
+|--------------------------------------------------------------------------
+| OAuth (Authorization Code + PKCE)
+|--------------------------------------------------------------------------
+*/
+
+/**
+ * A hosted-callback redirect URI inside the config('mcp.redirect_domains')
+ * allowlist (Anthropic's Claude connector callback).
+ */
+const CLAUDE_CALLBACK = 'https://claude.ai/api/mcp/auth_callback';
+
+/**
+ * Generate a PKCE (verifier, S256 challenge) pair.
+ *
+ * @return array{0: string, 1: string}
+ */
+function pkcePair(): array
+{
+    $verifier = Str::random(64);
+    $challenge = rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '=');
+
+    return [$verifier, $challenge];
+}
+
+/**
+ * A public (PKCE) client, as dynamic client registration creates one.
+ */
+function oauthClient(string $name = 'Claude', string $redirectUri = CLAUDE_CALLBACK): Client
+{
+    return app(ClientRepository::class)->createAuthorizationCodeGrantClient(
+        name: $name,
+        redirectUris: [$redirectUri],
+        confidential: false,
+    );
+}
+
+/**
+ * Open the consent screen for the client as the user. A null scope list sends
+ * no `scope` parameter at all.
+ *
+ * @param  list<string>|null  $scopes
+ */
+function requestOAuthConsent(User $user, Client $client, ?array $scopes, string $challenge): TestResponse
+{
+    return test()->actingAs($user)->get('/oauth/authorize?'.http_build_query(array_filter([
+        'client_id' => $client->id,
+        'redirect_uri' => $client->redirect_uris[0],
+        'response_type' => 'code',
+        'scope' => $scopes === null ? null : implode(' ', $scopes),
+        'state' => 'state-token',
+        'code_challenge' => $challenge,
+        'code_challenge_method' => 'S256',
+    ], fn (?string $value): bool => $value !== null)));
+}
+
+/**
+ * Press the approve button of a consent screen, echoing its single-use token.
+ */
+function approveOAuthConsent(User $user, Client $client, TestResponse $consent): TestResponse
+{
+    preg_match('/name="auth_token" value="([^"]+)"/', $consent->getContent(), $matches);
+    expect($matches[1] ?? null)->not->toBeNull();
+
+    return test()->actingAs($user)->post('/oauth/authorize', [
+        'auth_token' => $matches[1],
+        'client_id' => $client->id,
+        'state' => 'state-token',
+    ]);
+}
+
+/**
+ * The query string of the client callback a response redirects to.
+ *
+ * @return array<string, string>
+ */
+function oauthRedirectQuery(TestResponse $response): array
+{
+    parse_str((string) parse_url((string) $response->headers->get('Location'), PHP_URL_QUERY), $query);
+
+    return $query;
+}
+
+/**
+ * Drop the browser session the consent flow signed in with, so the next
+ * request authenticates with its bearer token alone, as a real client does.
+ */
+function forgetSignedInUser(): void
+{
+    app('auth')->forgetGuards();
+}
+
+/**
+ * Drive the full Authorization Code + PKCE flow for the user and return the
+ * issued bearer access token, exactly as Claude/ChatGPT would obtain one:
+ * authorize with a code challenge, approve on the consent screen, then
+ * exchange the code + verifier at the token endpoint.
+ *
+ * @param  list<string>|null  $scopes
+ */
+function issueOAuthToken(User $user, ?array $scopes = ['mcp:use'], ?Client $client = null): string
+{
+    $client ??= oauthClient();
+    [$verifier, $challenge] = pkcePair();
+
+    $consent = requestOAuthConsent($user, $client, $scopes, $challenge)->assertOk();
+    $code = oauthRedirectQuery(approveOAuthConsent($user, $client, $consent)->assertRedirect())['code'] ?? null;
+    expect($code)->not->toBeNull();
+
+    $token = test()->post('/oauth/token', [
+        'grant_type' => 'authorization_code',
+        'client_id' => $client->id,
+        'redirect_uri' => $client->redirect_uris[0],
+        'code_verifier' => $verifier,
+        'code' => $code,
+    ])->assertOk()->json('access_token');
+
+    return $token;
 }

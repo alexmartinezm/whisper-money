@@ -2,7 +2,10 @@
 
 namespace App\Http\Controllers\Settings;
 
+use App\Enums\AccessTokenType;
 use App\Http\Controllers\Controller;
+use App\Http\Controllers\Settings\Concerns\ManagesAccessTokens;
+use App\Http\Controllers\Settings\Concerns\ManagesConnectedApps;
 use App\Http\Requests\Settings\StoreMcpTokenRequest;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -12,8 +15,11 @@ use Laravel\Sanctum\PersonalAccessToken;
 
 class McpTokenController extends Controller
 {
+    use ManagesAccessTokens, ManagesConnectedApps;
+
     /**
-     * Show the MCP access page: existing tokens, connection details and the
+     * Show the MCP access page: existing tokens, the connected OAuth apps,
+     * connection details and the
      * one-time plaintext secret when a token was just created.
      */
     public function index(Request $request): Response
@@ -21,7 +27,10 @@ class McpTokenController extends Controller
         abort_if($request->user()->isRestrictedDemoAccount(), 404);
 
         return Inertia::render('settings/mcp', [
-            'tokens' => $this->tokensFor($request),
+            'connectedApps' => $this->connectedApps($request),
+            'tokens' => $this->managedTokens($request)
+                ->map(fn (PersonalAccessToken $token): array => $this->tokenRow($token))
+                ->all(),
             'serverUrl' => url('/mcp'),
             'oauthUrl' => url('/mcp/oauth'),
             'subscribeUrl' => route('subscribe'),
@@ -37,17 +46,16 @@ class McpTokenController extends Controller
      */
     public function store(StoreMcpTokenRequest $request): RedirectResponse
     {
-        $abilities = $request->validated('scope') === 'read_write'
-            ? ['mcp:read', 'mcp:write']
-            : ['mcp:read'];
-
-        $token = $request->user()->createToken($request->validated('name'), $abilities);
+        $token = $request->user()->createToken(
+            $request->validated('name'),
+            $this->abilitiesFor($request->validated('scope')),
+        );
 
         return to_route('mcp.index')->with('mcp_token', $token->plainTextToken);
     }
 
     /**
-     * Revoke (delete) a token the user owns.
+     * Revoke (delete) an MCP token the user owns.
      */
     public function destroy(Request $request, PersonalAccessToken $token): RedirectResponse
     {
@@ -59,46 +67,31 @@ class McpTokenController extends Controller
     }
 
     /**
-     * Rotate a token: revoke it and issue a fresh secret keeping the same name
-     * and scope, so a leaked token can be replaced without reconfiguring intent.
+     * Rotate an MCP token: revoke it and issue a fresh secret keeping the same
+     * name and abilities (and so the `wm_mcp_` prefix), so a leaked token can be
+     * replaced without reconfiguring intent.
      */
     public function rotate(Request $request, PersonalAccessToken $token): RedirectResponse
     {
         $this->authorizeOwnership($request, $token);
 
-        $fresh = $request->user()->createToken($token->name, $token->abilities);
-        $token->delete();
+        return to_route('mcp.index')->with('mcp_token', $this->reissue($request, $token));
+    }
 
-        return to_route('mcp.index')->with('mcp_token', $fresh->plainTextToken);
+    protected function tokenType(): AccessTokenType
+    {
+        return AccessTokenType::Mcp;
     }
 
     /**
-     * Ensure the token belongs to the requesting user before mutating it.
+     * Whether the token belongs on this screen: it carries `mcp:*` abilities,
+     * or the `*` wildcard, which also authenticates at `/mcp`. API tokens are
+     * not managed from here.
      */
-    private function authorizeOwnership(Request $request, PersonalAccessToken $token): void
+    protected function managesToken(PersonalAccessToken $token): bool
     {
-        abort_unless(
-            $token->tokenable_id === $request->user()->getKey()
-                && $token->tokenable_type === $request->user()->getMorphClass(),
-            403
-        );
-    }
+        $abilities = $token->abilities ?? [];
 
-    /**
-     * @return list<array{id: int|string, name: string, scope: string, created_at: ?string, last_used_at: ?string}>
-     */
-    private function tokensFor(Request $request): array
-    {
-        return $request->user()->tokens()
-            ->latest()
-            ->get()
-            ->map(fn (PersonalAccessToken $token): array => [
-                'id' => $token->id,
-                'name' => $token->name,
-                'scope' => in_array('mcp:write', $token->abilities ?? [], true) ? 'read_write' : 'read',
-                'created_at' => $token->created_at?->toIso8601String(),
-                'last_used_at' => $token->last_used_at?->toIso8601String(),
-            ])
-            ->all();
+        return AccessTokenType::Mcp->matches($abilities) || in_array('*', $abilities, true);
     }
 }
