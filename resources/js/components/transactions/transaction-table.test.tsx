@@ -76,6 +76,7 @@ function source(
         isLoading: false,
         filters: {} as TransactionTableSource['filters'],
         onFiltersChange: vi.fn(),
+        facets: [],
         daySummaryOf: () => ({ count: 0, total: { status: 'pending' } }),
         pagination: {
             displayedCount: 2,

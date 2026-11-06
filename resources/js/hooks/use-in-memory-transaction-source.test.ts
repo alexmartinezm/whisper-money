@@ -1,3 +1,4 @@
+import { FILTER_FACETS } from '@/lib/transaction-filter-facets';
 import { type Category } from '@/types/category';
 import { type Transaction, type TransactionFilters } from '@/types/transaction';
 import { act, renderHook, waitFor } from '@testing-library/react';
@@ -438,5 +439,104 @@ describe('useInMemoryTransactionSource', () => {
                 total: { amount: -3000 },
             });
         });
+    });
+
+    describe('the label and AI filters', () => {
+        const food = { id: 'food', parent_id: null } as unknown as Category;
+        const rows = [
+            transaction('labelled', {
+                amount: -100,
+                labels: [{ id: 'trip' }],
+            } as unknown as Partial<Transaction>),
+            transaction('in-food', { category_id: 'food' }),
+            transaction('guessed', { category_source: 'ai' }),
+            transaction('split', {
+                amount: -10000,
+                labels: [{ id: 'trip' }],
+                splits: [
+                    { category_id: 'food', amount: -3000 },
+                    { category_id: 'home', amount: -7000 },
+                ],
+            } as unknown as Partial<Transaction>),
+        ];
+
+        function renderFiltered(changes: Partial<TransactionFilters>) {
+            const { result } = renderHook(() =>
+                useInMemoryTransactionSource({
+                    transactions: rows,
+                    categories: [food],
+                }),
+            );
+            const next = { ...result.current.filters, ...changes };
+            const counted = result.current.countMatching(
+                next,
+                new AbortController().signal,
+            );
+
+            act(() => result.current.onFiltersChange(next));
+
+            return { result, counted };
+        }
+
+        const ids = (rendered: { rows: { id: string }[] }) =>
+            rendered.rows.map((row) => row.id).sort();
+
+        it('keeps the rows carrying a label, in the list, the count and the day', async () => {
+            const { result, counted } = renderFiltered({ labelIds: ['trip'] });
+
+            expect(ids(result.current)).toEqual(['labelled', 'split']);
+            await expect(counted).resolves.toBe(2);
+            expect(result.current.daySummaryOf('2026-10-01')).toMatchObject({
+                count: 2,
+                // A label keeps every line of a split transaction.
+                total: { amount: -10100 },
+            });
+        });
+
+        it('reads a label and a category as one filter, as the server does', async () => {
+            const { result, counted } = renderFiltered({
+                categoryIds: ['food'],
+                labelIds: ['trip'],
+            });
+
+            expect(ids(result.current)).toEqual([
+                'in-food',
+                'labelled',
+                'split',
+            ]);
+            await expect(counted).resolves.toBe(3);
+        });
+
+        it('keeps what AI categorized, in the list, the count and the day', async () => {
+            const { result, counted } = renderFiltered({
+                aiCategorizedOnly: true,
+            });
+
+            expect(ids(result.current)).toEqual(['guessed']);
+            await expect(counted).resolves.toBe(1);
+            expect(result.current.daySummaryOf('2026-10-01').count).toBe(1);
+        });
+    });
+
+    it('offers every facet but the cashflow block, and drops a block with its dates', () => {
+        const { result } = renderHook(() =>
+            useInMemoryTransactionSource({
+                transactions: ROWS,
+                categories: NO_CATEGORIES,
+            }),
+        );
+
+        expect(result.current.facets).toEqual(
+            FILTER_FACETS.filter((facet) => facet !== 'cashflowBlock'),
+        );
+
+        act(() =>
+            result.current.onFiltersChange({
+                ...result.current.filters,
+                cashflowBlock: 'fixed',
+            }),
+        );
+
+        expect(result.current.filters.cashflowBlock).toBeNull();
     });
 });

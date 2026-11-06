@@ -44,6 +44,7 @@ import { UNCATEGORIZED_CATEGORY_ID } from '@/lib/transaction-category-filter';
 import {
     amountTypeOf,
     facetChips,
+    type FilterFacet,
     withAmountType,
     withoutAmount,
     withoutFacets,
@@ -85,6 +86,8 @@ export interface TransactionFiltersSheetProps {
     accounts: Account[];
     hideAccountFilter: boolean;
     enableSavedFilters: boolean;
+    /** The facets the list applies: no other is offered. */
+    facets: readonly FilterFacet[];
 }
 
 /** Options a section lists before "View all (N)". */
@@ -128,6 +131,7 @@ function FiltersDraft({
     accounts,
     hideAccountFilter,
     enableSavedFilters,
+    facets,
     onClose,
 }: Omit<TransactionFiltersSheetProps, 'open' | 'onOpenChange'> & {
     onClose: () => void;
@@ -150,6 +154,8 @@ function FiltersDraft({
         },
         enabled: enableSavedFilters,
     });
+
+    const offers = (facet: FilterFacet) => facets.includes(facet);
 
     const update = (changes: Partial<TransactionFilters>) =>
         setDraft((current) => ({ ...current, ...changes }));
@@ -238,15 +244,20 @@ function FiltersDraft({
                     <Button
                         variant="ghost"
                         className="h-11 text-muted-foreground"
-                        onClick={() =>
+                        onClick={() => {
+                            // A saved view's search goes too: the sheet has no
+                            // field to clear it from, and the one on the bar
+                            // says what the list is searching for.
+                            setDraftOwnsSearch(false);
                             setDraft(
                                 withoutFacets({
                                     ...draft,
                                     dateFrom: null,
                                     dateTo: null,
+                                    searchText: filters.searchText,
                                 }),
-                            )
-                        }
+                            );
+                        }}
                     >
                         {__('Reset')}
                     </Button>
@@ -265,69 +276,77 @@ function FiltersDraft({
                     <ChevronRight className="size-4 shrink-0" />
                 </button>
 
-                <SheetRow label={__('Type')} className="gap-4">
-                    <TypeSegments
-                        value={amountTypeOf(draft)}
-                        onChange={(type) =>
-                            setDraft(
-                                type === null
-                                    ? withoutAmount(draft)
-                                    : withAmountType(draft, type),
-                            )
-                        }
-                    />
-                </SheetRow>
-
-                <SheetSection
-                    label={__('Category type')}
-                    value={chipValue('categoryType') ?? __('Any')}
-                    testId="sheet-category-types"
-                >
-                    <CheckOptions
-                        options={CATEGORY_TYPES.map((type) => ({
-                            id: type,
-                            label: getCategoryTypeLabel(type),
-                            checked: draft.categoryTypes.includes(type),
-                        }))}
-                        onToggle={(type) =>
-                            update({
-                                categoryTypes: toggleId(
-                                    draft.categoryTypes,
-                                    type,
-                                ),
-                            })
-                        }
-                    />
-                </SheetSection>
-
-                <SheetSection
-                    label={__('Categories')}
-                    value={selectionText(draft.categoryIds.length)}
-                    testId="sheet-categories"
-                >
-                    <CategoryOptions
-                        categories={categories}
-                        selectedIds={draft.categoryIds}
-                        onChange={(categoryIds) => update({ categoryIds })}
-                    />
-                </SheetSection>
-
-                <SheetSection
-                    label={__('Amount')}
-                    value={chipValue('amount') ?? __('Any')}
-                    testId="sheet-amount"
-                >
-                    <div className="px-5 pb-4">
-                        <AmountFilterFields
-                            amountMin={draft.amountMin}
-                            amountMax={draft.amountMax}
-                            onChange={update}
-                            showDirection={false}
+                {offers('type') && (
+                    <SheetRow label={__('Type')} className="gap-4">
+                        <TypeSegments
+                            value={amountTypeOf(draft)}
+                            onChange={(type) =>
+                                setDraft(
+                                    type === null
+                                        ? withoutAmount(draft)
+                                        : withAmountType(draft, type),
+                                )
+                            }
                         />
-                    </div>
-                </SheetSection>
+                    </SheetRow>
+                )}
 
-                {!hideAccountFilter && (
+                {offers('categoryType') && (
+                    <SheetSection
+                        label={__('Category type')}
+                        value={chipValue('categoryType') ?? __('Any')}
+                        testId="sheet-category-types"
+                    >
+                        <CheckOptions
+                            options={CATEGORY_TYPES.map((type) => ({
+                                id: type,
+                                label: getCategoryTypeLabel(type),
+                                checked: draft.categoryTypes.includes(type),
+                            }))}
+                            onToggle={(type) =>
+                                update({
+                                    categoryTypes: toggleId(
+                                        draft.categoryTypes,
+                                        type,
+                                    ),
+                                })
+                            }
+                        />
+                    </SheetSection>
+                )}
+
+                {offers('category') && (
+                    <SheetSection
+                        label={__('Categories')}
+                        value={selectionText(draft.categoryIds.length)}
+                        testId="sheet-categories"
+                    >
+                        <CategoryOptions
+                            categories={categories}
+                            selectedIds={draft.categoryIds}
+                            onChange={(categoryIds) => update({ categoryIds })}
+                        />
+                    </SheetSection>
+                )}
+
+                {offers('amount') && (
+                    <SheetSection
+                        label={__('Amount')}
+                        value={chipValue('amount') ?? __('Any')}
+                        testId="sheet-amount"
+                    >
+                        <div className="px-5 pb-4">
+                            <AmountFilterFields
+                                amountMin={draft.amountMin}
+                                amountMax={draft.amountMax}
+                                onChange={update}
+                                showDirection={false}
+                            />
+                        </div>
+                    </SheetSection>
+                )}
+
+                {!hideAccountFilter && offers('account') && (
                     <SheetSection
                         label={__('Accounts')}
                         value={selectionText(draft.accountIds.length)}
@@ -356,70 +375,78 @@ function FiltersDraft({
                     </SheetSection>
                 )}
 
-                <SheetSection
-                    label={__('Labels')}
-                    value={selectionText(draft.labelIds.length)}
-                    testId="sheet-labels"
-                >
-                    <CheckOptions
-                        options={labels.map((label) => {
-                            const colors = getLabelColorClasses(label.color);
-                            return {
-                                id: label.id,
-                                label: label.name,
-                                checked: draft.labelIds.includes(label.id),
-                                leading: (
-                                    <OptionCircle className={colors.bg}>
-                                        <LabelIcon
-                                            label={label}
-                                            className={cn(
-                                                'size-3.5',
-                                                colors.text,
-                                            )}
-                                        />
-                                    </OptionCircle>
-                                ),
-                            };
-                        })}
-                        onToggle={(id) =>
-                            update({ labelIds: toggleId(draft.labelIds, id) })
-                        }
-                    />
-                </SheetSection>
+                {offers('label') && (
+                    <SheetSection
+                        label={__('Labels')}
+                        value={selectionText(draft.labelIds.length)}
+                        testId="sheet-labels"
+                    >
+                        <CheckOptions
+                            options={labels.map((label) => {
+                                const colors = getLabelColorClasses(
+                                    label.color,
+                                );
+                                return {
+                                    id: label.id,
+                                    label: label.name,
+                                    checked: draft.labelIds.includes(label.id),
+                                    leading: (
+                                        <OptionCircle className={colors.bg}>
+                                            <LabelIcon
+                                                label={label}
+                                                className={cn(
+                                                    'size-3.5',
+                                                    colors.text,
+                                                )}
+                                            />
+                                        </OptionCircle>
+                                    ),
+                                };
+                            })}
+                            onToggle={(id) =>
+                                update({
+                                    labelIds: toggleId(draft.labelIds, id),
+                                })
+                            }
+                        />
+                    </SheetSection>
+                )}
 
-                <SheetSection
-                    label={__('Counterparty')}
-                    value={
-                        [draft.creditorName, draft.debtorName]
-                            .filter(Boolean)
-                            .join(', ') || __('Any')
-                    }
-                    testId="sheet-counterparty"
-                >
-                    <div className="flex flex-col gap-2 px-5 pb-4">
-                        <Input
-                            className="h-11"
-                            value={draft.creditorName}
-                            onChange={(e) =>
-                                update({ creditorName: e.target.value })
-                            }
-                            placeholder={__('Creditor name')}
-                            aria-label={__('Creditor name')}
-                        />
-                        <Input
-                            className="h-11"
-                            value={draft.debtorName}
-                            onChange={(e) =>
-                                update({ debtorName: e.target.value })
-                            }
-                            placeholder={__('Debtor name')}
-                            aria-label={__('Debtor name')}
-                        />
-                    </div>
-                </SheetSection>
+                {offers('counterparty') && (
+                    <SheetSection
+                        label={__('Counterparty')}
+                        value={
+                            [draft.creditorName, draft.debtorName]
+                                .filter(Boolean)
+                                .join(', ') || __('Any')
+                        }
+                        testId="sheet-counterparty"
+                    >
+                        <div className="flex flex-col gap-2 px-5 pb-4">
+                            <Input
+                                className="h-11"
+                                value={draft.creditorName}
+                                onChange={(e) =>
+                                    update({ creditorName: e.target.value })
+                                }
+                                placeholder={__('Creditor name')}
+                                aria-label={__('Creditor name')}
+                            />
+                            <Input
+                                className="h-11"
+                                value={draft.debtorName}
+                                onChange={(e) =>
+                                    update({ debtorName: e.target.value })
+                                }
+                                placeholder={__('Debtor name')}
+                                aria-label={__('Debtor name')}
+                            />
+                        </div>
+                    </SheetSection>
+                )}
 
                 {/* A block only narrows a whole date range. */}
-                {draft.dateFrom && draft.dateTo ? (
+                {offers('cashflowBlock') && draft.dateFrom && draft.dateTo ? (
                     <SheetSection
                         label={__('Cashflow block')}
                         value={chipValue('cashflowBlock') ?? __('Any')}
@@ -453,17 +480,19 @@ function FiltersDraft({
                 ) : null}
 
                 {/* The whole row toggles, not only the switch. */}
-                <label className={cn(ROW, 'cursor-pointer')}>
-                    {__('AI guesses only')}
-                    <AiSparkleIcon className="size-4 shrink-0" />
-                    <SwitchButton
-                        label={__('AI guesses only')}
-                        checked={draft.aiCategorizedOnly}
-                        onChange={(aiCategorizedOnly) =>
-                            update({ aiCategorizedOnly })
-                        }
-                    />
-                </label>
+                {offers('ai') && (
+                    <label className={cn(ROW, 'cursor-pointer')}>
+                        {__('AI guesses only')}
+                        <AiSparkleIcon className="size-4 shrink-0" />
+                        <SwitchButton
+                            label={__('AI guesses only')}
+                            checked={draft.aiCategorizedOnly}
+                            onChange={(aiCategorizedOnly) =>
+                                update({ aiCategorizedOnly })
+                            }
+                        />
+                    </label>
+                )}
 
                 {enableSavedFilters && (
                     <SheetRow label={__('Saved views')}>

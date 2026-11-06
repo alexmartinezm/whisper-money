@@ -16,16 +16,19 @@ import { __ } from '@/utils/i18n';
  * chip. The period and the search have their own controls, so they are not
  * facets.
  */
-export type FilterFacet =
-    | 'type'
-    | 'amount'
-    | 'categoryType'
-    | 'category'
-    | 'account'
-    | 'label'
-    | 'counterparty'
-    | 'ai'
-    | 'cashflowBlock';
+export const FILTER_FACETS = [
+    'type',
+    'amount',
+    'categoryType',
+    'category',
+    'account',
+    'label',
+    'counterparty',
+    'ai',
+    'cashflowBlock',
+] as const;
+
+export type FilterFacet = (typeof FILTER_FACETS)[number];
 
 export interface FacetChip {
     /** Unique among the chips: a facet can show more than one. */

@@ -1,3 +1,7 @@
+import {
+    FILTER_FACETS,
+    type FilterFacet,
+} from '@/lib/transaction-filter-facets';
 import { type Account } from '@/types/account';
 import { type Category } from '@/types/category';
 import { type TransactionFilters as FiltersType } from '@/types/transaction';
@@ -50,7 +54,11 @@ const emptyFilters: FiltersType = {
 
 function renderFilters(
     filters: Partial<FiltersType> = {},
-    props: { hideAccountFilter?: boolean; enableSavedFilters?: boolean } = {},
+    props: {
+        hideAccountFilter?: boolean;
+        enableSavedFilters?: boolean;
+        facets?: readonly FilterFacet[];
+    } = {},
 ) {
     const onFiltersChange = vi.fn();
     render(
@@ -62,6 +70,7 @@ function renderFilters(
             accounts={accounts}
             trailing={<button>columns</button>}
             countMatching={vi.fn()}
+            facets={FILTER_FACETS}
             {...props}
         />,
     );
@@ -198,6 +207,25 @@ describe('Desktop transaction filters', () => {
         );
     });
 
+    it('offers only the facets the list applies', () => {
+        renderFilters(
+            {
+                dateFrom: toLocalDate('2026-10-01'),
+                dateTo: toLocalDate('2026-10-31'),
+            },
+            {
+                facets: FILTER_FACETS.filter(
+                    (facet) => facet !== 'cashflowBlock',
+                ),
+            },
+        );
+
+        fireEvent.click(screen.getByTestId('add-filter-button'));
+
+        expect(screen.queryByText('Cashflow block')).toBeNull();
+        expect(screen.getByText('Category')).toBeTruthy();
+    });
+
     it('offers the cashflow block only over a whole date range', () => {
         renderFilters({
             dateFrom: toLocalDate('2026-10-01'),
@@ -275,6 +303,7 @@ describe('Desktop transaction filters', () => {
                     labels={[]}
                     accounts={accounts}
                     countMatching={vi.fn()}
+                    facets={FILTER_FACETS}
                 />
             );
         }

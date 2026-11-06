@@ -1,4 +1,8 @@
 import { searchableCategories } from '@/lib/category-tree.fixture';
+import {
+    FILTER_FACETS,
+    type FilterFacet,
+} from '@/lib/transaction-filter-facets';
 import { type Account } from '@/types/account';
 import { type Category } from '@/types/category';
 import { type TransactionFilters as FiltersType } from '@/types/transaction';
@@ -11,12 +15,14 @@ import {
     waitFor,
     within,
 } from '@testing-library/react';
+import axios from 'axios';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TransactionFilters } from './transaction-filters';
 
 // The phone's bar and filters sheet; the desktop chips toolbar has its own tests.
 vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => true }));
 vi.mock('@/hooks/use-locale', () => ({ useLocale: () => 'en-US' }));
+vi.mock('axios');
 
 const accounts: Account[] = [
     {
@@ -64,11 +70,15 @@ function renderFilters(
     {
         categories = searchableCategories,
         hideAccountFilter = false,
+        enableSavedFilters = false,
         countMatching = vi.fn().mockResolvedValue(21),
+        facets = FILTER_FACETS,
     }: {
         categories?: Category[];
         hideAccountFilter?: boolean;
+        enableSavedFilters?: boolean;
         countMatching?: ReturnType<typeof vi.fn>;
+        facets?: readonly FilterFacet[];
     } = {},
 ) {
     const onFiltersChange = vi.fn();
@@ -80,7 +90,9 @@ function renderFilters(
             labels={[]}
             accounts={accounts}
             hideAccountFilter={hideAccountFilter}
+            enableSavedFilters={enableSavedFilters}
             countMatching={countMatching}
+            facets={facets}
         />,
     );
     return { onFiltersChange, countMatching };
@@ -347,6 +359,79 @@ describe('TransactionFilters phone sheet', () => {
         fireEvent.click(screen.getByTestId('apply-filters'));
 
         expect(applied(onFiltersChange).creditorName).toBe('Mercadona');
+    });
+
+    it('offers only the facets the list applies', () => {
+        renderFilters(october, {
+            facets: FILTER_FACETS.filter(
+                (facet) => facet !== 'cashflowBlock' && facet !== 'label',
+            ),
+        });
+
+        const sheet = within(openSheet());
+
+        expect(sheet.queryByTestId('sheet-cashflow-block')).toBeNull();
+        expect(sheet.queryByTestId('sheet-labels')).toBeNull();
+        expect(sheet.getByTestId('sheet-categories')).toBeTruthy();
+    });
+
+    it("Reset takes a saved view's search with it", async () => {
+        vi.mocked(axios.get).mockResolvedValue({
+            data: {
+                data: [
+                    {
+                        id: 'saved-1',
+                        name: 'Rent',
+                        filters: {
+                            search: 'rent',
+                            category_ids: ['food'],
+                        },
+                    },
+                ],
+            },
+        });
+        const { onFiltersChange, countMatching } = renderFilters(
+            {},
+            { enableSavedFilters: true },
+        );
+        const sheet = within(openSheet());
+
+        fireEvent.pointerDown(
+            await sheet.findByRole('button', { name: /saved/i }),
+            { button: 0, ctrlKey: false },
+        );
+        fireEvent.click(await screen.findByRole('menuitem', { name: 'Rent' }));
+
+        await waitFor(() =>
+            expect(countMatching).toHaveBeenLastCalledWith(
+                expect.objectContaining({ searchText: 'rent' }),
+                expect.anything(),
+            ),
+        );
+
+        fireEvent.click(sheet.getByRole('button', { name: 'Reset' }));
+        fireEvent.click(sheet.getByTestId('apply-filters'));
+
+        expect(applied(onFiltersChange)).toMatchObject({
+            searchText: '',
+            categoryIds: [],
+        });
+    });
+
+    it('Reset leaves the search on the bar, which it does not own', () => {
+        const { onFiltersChange } = renderFilters({
+            searchText: 'coffee',
+            categoryIds: ['food'],
+        });
+        const sheet = within(openSheet());
+
+        fireEvent.click(sheet.getByRole('button', { name: 'Reset' }));
+        fireEvent.click(sheet.getByTestId('apply-filters'));
+
+        expect(applied(onFiltersChange)).toMatchObject({
+            searchText: 'coffee',
+            categoryIds: [],
+        });
     });
 
     it('drops the cashflow block with the dates it narrows', () => {

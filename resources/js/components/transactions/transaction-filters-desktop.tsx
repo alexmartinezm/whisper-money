@@ -58,6 +58,8 @@ interface DesktopTransactionFiltersProps {
     accounts: Account[];
     hideAccountFilter: boolean;
     enableSavedFilters: boolean;
+    /** The facets the list applies: no other is offered. */
+    facets: readonly FilterFacet[];
     /** At the far end of the toolbar, such as the column picker. */
     trailing?: ReactNode;
 }
@@ -75,6 +77,7 @@ export function DesktopTransactionFilters({
     accounts,
     hideAccountFilter,
     enableSavedFilters,
+    facets,
     trailing,
 }: DesktopTransactionFiltersProps) {
     const locale = useLocale();
@@ -124,7 +127,7 @@ export function DesktopTransactionFilters({
                     onChange={(value) => text.setValue('searchText', value)}
                 />
                 <AddFilterButton
-                    facets={availableFacets(filters, hideAccountFilter)}
+                    facets={availableFacets(filters, hideAccountFilter, facets)}
                     editorProps={editorProps}
                 />
                 <div className="ml-auto flex items-center gap-1">
@@ -265,15 +268,19 @@ const FACET_MENU: FacetMenuItem[] = [
 ];
 
 /**
- * What "+ Filter" offers: every facet but the accounts on a page already
- * narrowed to one, and the cashflow block only over a whole date range, the
- * only thing it can narrow.
+ * What "+ Filter" offers: every facet the list applies, but the accounts on a
+ * page already narrowed to one, and the cashflow block only over a whole date
+ * range, the only thing it can narrow.
  */
 function availableFacets(
     filters: TransactionFilters,
     hideAccountFilter: boolean,
+    facets: readonly FilterFacet[],
 ): FacetMenuItem[] {
     return FACET_MENU.filter(({ facet }) => {
+        if (!facets.includes(facet)) {
+            return false;
+        }
         if (facet === 'account') {
             return !hideAccountFilter;
         }

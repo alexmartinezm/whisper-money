@@ -1,10 +1,12 @@
 import { useInMemoryDaySummaries } from '@/hooks/use-day-summaries';
+import { withoutDatelessCashflowBlock } from '@/lib/cashflow-block';
 import { reloadPage } from '@/lib/leave-page';
 import {
     createTransactionCategoryFilter,
     createTransactionCategoryTypeFilter,
 } from '@/lib/transaction-category-filter';
 import { createRowTotalAmount } from '@/lib/transaction-day-groups';
+import { FILTER_FACETS } from '@/lib/transaction-filter-facets';
 import { type Category } from '@/types/category';
 import {
     type DecryptedTransaction,
@@ -16,6 +18,14 @@ import { type UUID } from '@/types/uuid';
 import { __ } from '@/utils/i18n';
 import { isWithinInterval, parseISO } from 'date-fns';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+
+/**
+ * Every facet but the cashflow block, which budgets decide: the page holds
+ * neither those nor the rest of the period the block is read over.
+ */
+const IN_MEMORY_FACETS = FILTER_FACETS.filter(
+    (facet) => facet !== 'cashflowBlock',
+);
 
 /** The rows as the table edits them: text ready to read, label ids set. */
 function toDecryptedRows(
@@ -92,6 +102,10 @@ function matchesFilters(
         return false;
     }
 
+    if (filters.aiCategorizedOnly && transaction.category_source !== 'ai') {
+        return false;
+    }
+
     if (
         !accountId &&
         filters.accountIds.length > 0 &&
@@ -121,21 +135,29 @@ function matchesFilters(
     return true;
 }
 
-/** A row in a wanted category that also has a wanted type, split lines included. */
+/**
+ * The category, label and type filters, the way the server reads them: a row
+ * in a wanted category or carrying a wanted label, split lines included, that
+ * also has a wanted type.
+ */
 function categoryMatcher(
-    filters: Pick<Filters, 'categoryIds' | 'categoryTypes'>,
+    filters: Pick<Filters, 'categoryIds' | 'categoryTypes' | 'labelIds'>,
     categories: Category[],
 ): (transaction: DecryptedTransaction) => boolean {
-    const inCategory = createTransactionCategoryFilter(
-        filters.categoryIds,
-        categories,
-    );
+    const { categoryIds, labelIds } = filters;
+    const inCategory = createTransactionCategoryFilter(categoryIds, categories);
     const ofType = createTransactionCategoryTypeFilter(
         filters.categoryTypes,
         categories,
     );
 
-    return (transaction) => inCategory(transaction) && ofType(transaction);
+    const inCategoryOrLabel = (transaction: DecryptedTransaction) =>
+        (categoryIds.length === 0 && labelIds.length === 0) ||
+        (categoryIds.length > 0 && inCategory(transaction)) ||
+        (transaction.label_ids ?? []).some((id) => labelIds.includes(id));
+
+    return (transaction) =>
+        inCategoryOrLabel(transaction) && ofType(transaction);
 }
 
 /** The ids of the rows whose description or notes hold the search text. */
@@ -273,19 +295,9 @@ export function useInMemoryTransactionSource({
         [orderedTransactions, displayedCount],
     );
 
-    // These lists filter by category only, so a split transaction adds the
-    // lines in the wanted categories and a label picked here narrows nothing.
     const rowTotalAmount = useMemo(
-        () =>
-            createRowTotalAmount(
-                {
-                    categoryIds: filters.categoryIds,
-                    categoryTypes: filters.categoryTypes,
-                    labelIds: [],
-                },
-                categories,
-            ),
-        [filters.categoryIds, filters.categoryTypes, categories],
+        () => createRowTotalAmount(filters, categories),
+        [filters, categories],
     );
 
     // Over every row the filters keep, not only the drawn slice, so a day cut
@@ -332,13 +344,19 @@ export function useInMemoryTransactionSource({
         [transactions, accountId, categories],
     );
 
+    const onFiltersChange = useCallback(
+        (next: Filters) => setFilters(withoutDatelessCashflowBlock(next)),
+        [],
+    );
+
     return {
         rows: displayedTransactions,
         heldRows: transactions,
         setRows: setTransactions,
         isLoading: providedTransactions === undefined,
         filters,
-        onFiltersChange: setFilters,
+        onFiltersChange,
+        facets: IN_MEMORY_FACETS,
         daySummaryOf,
         pagination: {
             displayedCount,

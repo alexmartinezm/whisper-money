@@ -1,4 +1,5 @@
 import { type DaySummaryOf } from '@/lib/transaction-day-groups';
+import { type FilterFacet } from '@/lib/transaction-filter-facets';
 import {
     type DecryptedTransaction,
     type TransactionFilters,
@@ -35,6 +36,8 @@ export interface TransactionTableSource {
     isLoading: boolean;
     filters: TransactionFilters;
     onFiltersChange: (filters: TransactionFilters) => void;
+    /** The facets this source applies: the filters offer these and no others. */
+    facets: readonly FilterFacet[];
     daySummaryOf: DaySummaryOf;
     pagination: TransactionTablePagination;
     /** Fetches the rows again, after a change the source cannot apply itself. */

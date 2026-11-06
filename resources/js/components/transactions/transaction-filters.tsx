@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button';
 import { useDebouncedTextFilters } from '@/hooks/use-debounced-text-filters';
 import { useLocale } from '@/hooks/use-locale';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { facetChips } from '@/lib/transaction-filter-facets';
+import { facetChips, type FilterFacet } from '@/lib/transaction-filter-facets';
 import { type Account } from '@/types/account';
 import { type Category } from '@/types/category';
 import { type Label } from '@/types/label';
@@ -32,6 +32,8 @@ interface TransactionFiltersProps {
     enableSavedFilters?: boolean;
     /** How many rows a filter set would list, for the phone's filters sheet. */
     countMatching: TransactionFiltersSheetProps['countMatching'];
+    /** The facets the list applies: no other is offered. */
+    facets: readonly FilterFacet[];
 }
 
 /**
@@ -81,6 +83,7 @@ function PhoneTransactionFilters({
     hideAccountFilter,
     enableSavedFilters,
     countMatching,
+    facets,
 }: TransactionFiltersProps & {
     hideAccountFilter: boolean;
     enableSavedFilters: boolean;
@@ -150,6 +153,7 @@ function PhoneTransactionFilters({
                 filters={filters}
                 onApply={onFiltersChange}
                 countMatching={countMatching}
+                facets={facets}
                 categories={categories}
                 labels={labels}
                 accounts={accounts}

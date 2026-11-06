@@ -297,6 +297,7 @@ export function TransactionTable({
                         hideAccountFilter={hideAccountFilter}
                         enableSavedFilters={enableSavedFilters}
                         countMatching={source.countMatching}
+                        facets={source.facets}
                         actions={renderToolbar({
                             columnPicker: isMobile ? (
                                 <DataTableViewOptions
