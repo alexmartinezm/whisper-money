@@ -43,7 +43,6 @@ export interface NavDivider {
 
 export interface Features {
     cashflow: boolean;
-    calculateBalancesOnImport: boolean;
     transactionSplitting: boolean;
     recurringTransactions: boolean;
     /** Cashflow shows the Available card and the savings/investments split. */

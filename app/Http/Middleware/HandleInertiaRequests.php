@@ -4,7 +4,6 @@ namespace App\Http\Middleware;
 
 use App\Enums\AccountType;
 use App\Enums\BankingProvider;
-use App\Features\CalculateBalancesOnImport;
 use App\Features\CashflowAvailableFree;
 use App\Features\CustomDashboards;
 use App\Features\RecurringTransactions;
@@ -344,7 +343,6 @@ class HandleInertiaRequests extends Middleware
         if (! $user) {
             return [
                 'cashflow' => true,
-                'calculateBalancesOnImport' => false,
                 'transactionSplitting' => true,
                 'recurringTransactions' => false,
                 'cashflowAvailableFree' => false,
@@ -356,7 +354,6 @@ class HandleInertiaRequests extends Middleware
 
         // One query for every flag, however many of them get read below.
         $features = Feature::for($user)->values([
-            CalculateBalancesOnImport::class,
             TransactionSplitting::class,
             RecurringTransactions::class,
             CashflowAvailableFree::class,
@@ -365,7 +362,6 @@ class HandleInertiaRequests extends Middleware
 
         return [
             'cashflow' => true,
-            'calculateBalancesOnImport' => $features[CalculateBalancesOnImport::class] !== false,
             'transactionSplitting' => $features[TransactionSplitting::class] !== false,
             'recurringTransactions' => $features[RecurringTransactions::class] !== false,
             'cashflowAvailableFree' => $features[CashflowAvailableFree::class] !== false,
