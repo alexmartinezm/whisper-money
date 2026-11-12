@@ -2,6 +2,7 @@
 
 use App\Enums\BankingConnectionStatus;
 use App\Features\CashflowAvailableFree;
+use App\Features\CustomDashboards;
 use App\Features\TransactionSplitting;
 use App\Jobs\PurgeResidualEncryptionArtifactsJob;
 use App\Models\BankingConnection;
@@ -107,6 +108,7 @@ test('shared feature flags do not include coinbase flag', function () {
         'cashflowAvailableFree' => false,
         'fullImport' => false,
         'fullImportSettings' => false,
+        'customDashboards' => false,
     ]);
 });
 
@@ -131,6 +133,19 @@ test('shared feature flags reflect the cashflow available flag per user', functi
     actingAs($user)->withoutVite()->get(route('dashboard'))
         ->assertInertia(fn (Assert $page) => $page
             ->where('features.cashflowAvailableFree', $active)
+        );
+})->with(['active' => true, 'inactive' => false]);
+
+test('shared feature flags reflect the custom dashboards flag per user', function (bool $active) {
+    $user = User::factory()->onboarded()->create();
+
+    if ($active) {
+        Feature::for($user)->activate(CustomDashboards::class);
+    }
+
+    actingAs($user)->withoutVite()->get(route('dashboard'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('features.customDashboards', $active)
         );
 })->with(['active' => true, 'inactive' => false]);
 

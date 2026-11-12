@@ -1,6 +1,7 @@
 <?php
 
 use App\Features\CalculateBalancesOnImport;
+use App\Features\CustomDashboards;
 use App\Models\User;
 use Laravel\Pennant\Feature;
 
@@ -21,4 +22,17 @@ test('rejects an out-of-range percentage', function () {
 
     $this->artisan('feature:enable', ['feature' => 'CalculateBalancesOnImport', 'target' => '0%'])
         ->assertFailed();
+});
+
+test('turns custom dashboards on for one user by email', function () {
+    $user = User::factory()->create();
+    $other = User::factory()->create();
+
+    expect(Feature::for($user)->active(CustomDashboards::class))->toBeFalse();
+
+    $this->artisan('feature:enable', ['feature' => 'CustomDashboards', 'target' => $user->email])
+        ->assertSuccessful();
+
+    expect(Feature::for($user)->active(CustomDashboards::class))->toBeTrue()
+        ->and(Feature::for($other)->active(CustomDashboards::class))->toBeFalse();
 });

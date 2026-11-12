@@ -7,6 +7,7 @@ use App\Enums\BankingConnectionStatus;
 use App\Enums\BankingProvider;
 use App\Features\CalculateBalancesOnImport;
 use App\Features\CashflowAvailableFree;
+use App\Features\CustomDashboards;
 use App\Features\FullImport;
 use App\Features\RecurringTransactions;
 use App\Features\TransactionSplitting;
@@ -336,6 +337,7 @@ class HandleInertiaRequests extends Middleware
                 'cashflowAvailableFree' => false,
                 'fullImport' => false,
                 'fullImportSettings' => false,
+                'customDashboards' => false,
             ];
         }
 
@@ -346,6 +348,7 @@ class HandleInertiaRequests extends Middleware
             RecurringTransactions::class,
             CashflowAvailableFree::class,
             FullImport::class,
+            CustomDashboards::class,
         ]);
 
         return [
@@ -361,6 +364,7 @@ class HandleInertiaRequests extends Middleware
             // pages pay for it.
             'fullImport' => $user->canUseFullImport(),
             'fullImportSettings' => request()->is('settings', 'settings/*') && $user->canSeeFullImportSettings(),
+            'customDashboards' => $features[CustomDashboards::class] !== false,
         ];
     }
 
