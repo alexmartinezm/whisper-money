@@ -45,6 +45,7 @@ use Stripe\Subscription as StripeSubscription;
  * @property ?Carbon $onboarded_at
  * @property ?string $price_arm
  * @property ?string $signup_plan
+ * @property ?string $default_dashboard_id
  */
 class User extends Authenticatable implements HasLocalePreference, MustVerifyEmail
 {
@@ -411,6 +412,22 @@ class User extends Authenticatable implements HasLocalePreference, MustVerifyEma
     public function savingsGoals(): HasMany
     {
         return $this->hasMany(SavingsGoal::class);
+    }
+
+    /** @return HasMany<Dashboard, $this> */
+    public function dashboards(): HasMany
+    {
+        return $this->hasMany(Dashboard::class);
+    }
+
+    /**
+     * The dashboard the app opens on. Null is the system dashboard.
+     *
+     * @return BelongsTo<Dashboard, $this>
+     */
+    public function defaultDashboard(): BelongsTo
+    {
+        return $this->belongsTo(Dashboard::class, 'default_dashboard_id');
     }
 
     /** @return HasMany<MonthlySummary, $this> */

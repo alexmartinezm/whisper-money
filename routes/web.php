@@ -12,6 +12,9 @@ use App\Http\Controllers\CashflowController;
 use App\Http\Controllers\ComparisonController;
 use App\Http\Controllers\CreditCardDetailController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\Dashboards\DashboardManagementController;
+use App\Http\Controllers\Dashboards\DashboardWidgetController;
+use App\Http\Controllers\Dashboards\DefaultDashboardController;
 use App\Http\Controllers\IntegrationRequestController;
 use App\Http\Controllers\IntegrationsController;
 use App\Http\Controllers\LoanDetailController;
@@ -185,6 +188,26 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
 Route::middleware(['auth', 'verified', 'onboarded', 'subscribed'])->group(function () {
     Route::get('dashboard', DashboardController::class)->name('dashboard');
+
+    // The user's own dashboards and the system widgets placed on them. Only
+    // for users with the CustomDashboards flag: DashboardPolicy and the form
+    // requests refuse everyone else with a 403. Writes are closed to the demo
+    // account, whose dashboards everybody shares.
+    Route::middleware('block-demo')->prefix('dashboards')->name('dashboards.')->group(function () {
+        Route::post('/', [DashboardManagementController::class, 'store'])->name('store');
+        Route::patch('reorder', [DashboardManagementController::class, 'reorder'])->name('reorder');
+        Route::put('default', DefaultDashboardController::class)->name('default.update');
+        Route::patch('{dashboard}', [DashboardManagementController::class, 'update'])->name('update');
+        Route::delete('{dashboard}', [DashboardManagementController::class, 'destroy'])->name('destroy');
+
+        Route::scopeBindings()->prefix('{dashboard}/widgets')->name('widgets.')->group(function () {
+            Route::post('/', [DashboardWidgetController::class, 'store'])->name('store');
+            Route::patch('reorder', [DashboardWidgetController::class, 'reorder'])->name('reorder');
+            Route::patch('{widget}', [DashboardWidgetController::class, 'update'])->name('update');
+            Route::delete('{widget}', [DashboardWidgetController::class, 'destroy'])->name('destroy');
+        });
+    });
+
     // Renders the dashboard with the integration-requests drawer opened on top.
     Route::get('integration-requests', [IntegrationRequestController::class, 'index'])->name('integration-requests.index');
     Route::get('cashflow', CashflowController::class)->name('cashflow');
