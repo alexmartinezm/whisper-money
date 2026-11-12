@@ -26,6 +26,9 @@ $readOnly = [
     'list_recurring_series',
     'list_savings_goals',
     'list_spaces',
+    'list_dashboards',
+    'get_widget_sdk',
+    'get_widget',
 ];
 
 /**
@@ -43,11 +46,16 @@ $destructive = [
     'delete_balance',
     'delete_budget',
     'split_transaction',
+    // Deletes the placement, its size and position with it. update_widget is
+    // not here: every revision is kept and can be gone back to.
+    'remove_widget',
 ];
 
 it('declares all three MCP hints on every tool', function () use ($readOnly, $destructive) {
     /** @var array<int, class-string<Tool>> $tools */
     $tools = (new ReflectionClass(WhisperMoneyServer::class))->getDefaultProperties()['tools'];
+
+    expect($tools)->toHaveCount(count($readOnly) + 30);
 
     foreach ($tools as $class) {
         $tool = app($class);

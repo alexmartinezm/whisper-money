@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Servers;
 
+use App\Mcp\Resources\WidgetPreview;
 use App\Mcp\Tools\AggregateTransactions;
 use App\Mcp\Tools\CategorizeTransaction;
 use App\Mcp\Tools\CreateAccount;
@@ -9,9 +10,11 @@ use App\Mcp\Tools\CreateAutomationRule;
 use App\Mcp\Tools\CreateBalance;
 use App\Mcp\Tools\CreateBudget;
 use App\Mcp\Tools\CreateCategory;
+use App\Mcp\Tools\CreateDashboard;
 use App\Mcp\Tools\CreateLabel;
 use App\Mcp\Tools\CreateSavingsGoal;
 use App\Mcp\Tools\CreateTransaction;
+use App\Mcp\Tools\CreateWidget;
 use App\Mcp\Tools\DeleteAutomationRule;
 use App\Mcp\Tools\DeleteBalance;
 use App\Mcp\Tools\DeleteBudget;
@@ -23,16 +26,21 @@ use App\Mcp\Tools\GetCreditCardUsage;
 use App\Mcp\Tools\GetMonthlySavings;
 use App\Mcp\Tools\GetNetWorth;
 use App\Mcp\Tools\GetRunway;
+use App\Mcp\Tools\GetWidget;
+use App\Mcp\Tools\GetWidgetSdk;
 use App\Mcp\Tools\LabelTransaction;
 use App\Mcp\Tools\ListAccounts;
 use App\Mcp\Tools\ListAutomationRules;
 use App\Mcp\Tools\ListBalances;
 use App\Mcp\Tools\ListBudgets;
 use App\Mcp\Tools\ListCategories;
+use App\Mcp\Tools\ListDashboards;
 use App\Mcp\Tools\ListLabels;
 use App\Mcp\Tools\ListRecurringSeries;
 use App\Mcp\Tools\ListSavingsGoals;
 use App\Mcp\Tools\ListSpaces;
+use App\Mcp\Tools\PlaceWidget;
+use App\Mcp\Tools\RemoveWidget;
 use App\Mcp\Tools\SearchTransactions;
 use App\Mcp\Tools\SpendingByCategory;
 use App\Mcp\Tools\SpendingByLabel;
@@ -45,6 +53,7 @@ use App\Mcp\Tools\UpdateCategory;
 use App\Mcp\Tools\UpdateLabel;
 use App\Mcp\Tools\UpdateSavingsGoal;
 use App\Mcp\Tools\UpdateTransaction;
+use App\Mcp\Tools\UpdateWidget;
 use Laravel\Mcp\Server;
 use Laravel\Mcp\Server\Attributes\Instructions;
 use Laravel\Mcp\Server\Attributes\Name;
@@ -175,6 +184,28 @@ themselves.
   goals' month in progress (`saved` against `target`, a partial first month
   left out) and gives `last_month`: how many goals met their target of how many
   were judged.
+- Custom dashboards: the user can build their own dashboards from widgets you
+  write as React components (TSX), drawn with their live data. Dashboards and
+  widgets belong to the user, not to a space, and a widget reads only the
+  user's own data. They are enabled per account: when the dashboard tools are
+  not listed, or one says the feature is not enabled for this account, tell
+  the user so instead of retrying. To build one: call
+  `get_widget_sdk` first and follow its `rules` — the code is checked against
+  closed lists and anything not listed is refused. Then `create_widget` with a
+  manifest (name, size, the API calls whose answers the widget reads, with
+  `{{range.from}}`/`{{range.to}}` for the range the dashboard shows) and the
+  TSX, and `place_widget` it on a dashboard (`list_dashboards`,
+  `create_dashboard`). A refused save answers with every error, each with a
+  `path` (`manifest.data.x.params.y`, `source:12:5`) and a `message`: fix them
+  all and save again. Write texts in the user's language, make it responsive
+  with container variants and right in light and dark mode, show every amount
+  with the SDK's `<Amount>` (minor units, with the row's currency) and hide
+  figures in charts when `privacyMode` is on; a widget never touches the
+  network. A widget
+  that throws on the dashboard keeps that error: `get_widget` returns it as
+  `last_error` with its revision, and `update_widget` saves the fix as a new
+  revision. Clients that show MCP Apps draw a live preview of the widget under
+  `create_widget`, `update_widget` and `get_widget`.
 
 Write tools ... require a read & write Sanctum token; OAuth connections follow the current
 WriteTool policy. A read-only Sanctum token can analyse data but never change it. Manual
@@ -234,13 +265,18 @@ class WhisperMoneyServer extends Server
      * tools across two pages, so a client that does not follow `nextCursor`
      * silently loses everything past the fifteenth — half the write tools, and
      * whichever read tool a later addition happens to push over the edge. The
-     * ceiling is 50, comfortably above the current count, and a larger
-     * discovery payload is a better trade than tools nobody can see.
+     * ceiling is 100, comfortably above the current count (51 with the custom
+     * dashboard tools), and a larger discovery payload is a better trade than
+     * tools nobody can see. The framework caps any page at
+     * $maxPaginationLength (50 by default), so it is raised with it.
      *
      * @api Read by Laravel MCP's Server when it builds the tools/list page,
      *      never by application code.
      */
-    public int $defaultPaginationLength = 50;
+    public int $defaultPaginationLength = 100;
+
+    /** @api Read by Laravel MCP's Server, see $defaultPaginationLength. */
+    public int $maxPaginationLength = 100;
 
     /** @var array<int, class-string<Tool>> */
     protected array $tools = [
@@ -263,6 +299,9 @@ class WhisperMoneyServer extends Server
         ListRecurringSeries::class,
         ListSavingsGoals::class,
         ListSpaces::class,
+        ListDashboards::class,
+        GetWidgetSdk::class,
+        GetWidget::class,
 
         // Write
         CreateAccount::class,
@@ -290,5 +329,15 @@ class WhisperMoneyServer extends Server
         DeleteBudget::class,
         CreateSavingsGoal::class,
         UpdateSavingsGoal::class,
+        CreateDashboard::class,
+        CreateWidget::class,
+        UpdateWidget::class,
+        PlaceWidget::class,
+        RemoveWidget::class,
+    ];
+
+    /** @var array<int, class-string<Server\Resource>> */
+    protected array $resources = [
+        WidgetPreview::class,
     ];
 }

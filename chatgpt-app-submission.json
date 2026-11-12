@@ -295,6 +295,70 @@
         "open_world_justification": "Declared open-world because it changes data in the user's Whisper Money account, a service outside ChatGPT. It is limited to that one private account: it never reaches the public internet, a bank or any third party.",
         "destructive_justification": "Reversible: the name, target and reminder can be set straight back, past months keep the target they had, and no transaction is touched."
       }
+    },
+    "list_dashboards": {
+      "annotations": { "readOnlyHint": true, "openWorldHint": false, "destructiveHint": false },
+      "justifications": {
+        "read_only_justification": "Lists the user's own dashboards and widgets so later calls can reference their ids. It writes nothing.",
+        "open_world_justification": "Lists only dashboards and widgets inside the authenticated user's own Whisper Money account, a closed system.",
+        "destructive_justification": "Read-only, so nothing can be changed or lost."
+      }
+    },
+    "get_widget_sdk": {
+      "annotations": { "readOnlyHint": true, "openWorldHint": false, "destructiveHint": false },
+      "justifications": {
+        "read_only_justification": "Returns the fixed reference for writing a dashboard widget. It writes nothing.",
+        "open_world_justification": "Returns a static reference served by Whisper Money; it reaches no other system.",
+        "destructive_justification": "Read-only, so nothing can be changed or lost."
+      }
+    },
+    "get_widget": {
+      "annotations": { "readOnlyHint": true, "openWorldHint": false, "destructiveHint": false },
+      "justifications": {
+        "read_only_justification": "Reads one of the user's own widgets, its code and its last error. It writes nothing.",
+        "open_world_justification": "Reads only a widget inside the authenticated user's own Whisper Money account, a closed system.",
+        "destructive_justification": "Read-only, so nothing can be changed or lost."
+      }
+    },
+    "create_dashboard": {
+      "annotations": { "readOnlyHint": false, "openWorldHint": true, "destructiveHint": false },
+      "justifications": {
+        "read_only_justification": "Writes: it creates a new, empty dashboard in the user's own account.",
+        "open_world_justification": "Declared open-world because it changes data in the user's Whisper Money account, a service outside ChatGPT. It is limited to that one private account: it never reaches the public internet, a bank or any third party.",
+        "destructive_justification": "Additive and reversible: nothing existing is modified, and the new dashboard can be deleted afterwards in the app."
+      }
+    },
+    "create_widget": {
+      "annotations": { "readOnlyHint": false, "openWorldHint": true, "destructiveHint": false },
+      "justifications": {
+        "read_only_justification": "Writes: it saves a new widget in the user's own account.",
+        "open_world_justification": "Declared open-world because it changes data in the user's Whisper Money account, a service outside ChatGPT. It is limited to that one private account: it never reaches the public internet, a bank or any third party.",
+        "destructive_justification": "Additive and reversible: nothing existing is modified, and the new widget is not shown anywhere until it is placed."
+      }
+    },
+    "update_widget": {
+      "annotations": { "readOnlyHint": false, "openWorldHint": true, "destructiveHint": false },
+      "justifications": {
+        "read_only_justification": "Writes: it saves a new revision of one of the user's widgets.",
+        "open_world_justification": "Declared open-world because it changes data in the user's Whisper Money account, a service outside ChatGPT. It is limited to that one private account: it never reaches the public internet, a bank or any third party.",
+        "destructive_justification": "Reversible: every earlier revision is kept, and the widget can go back to any of them in the app or be saved again with the previous code."
+      }
+    },
+    "place_widget": {
+      "annotations": { "readOnlyHint": false, "openWorldHint": true, "destructiveHint": false },
+      "justifications": {
+        "read_only_justification": "Writes: it adds one of the user's widgets to one of their dashboards.",
+        "open_world_justification": "Declared open-world because it changes data in the user's Whisper Money account, a service outside ChatGPT. It is limited to that one private account: it never reaches the public internet, a bank or any third party.",
+        "destructive_justification": "Additive and reversible: it adds a widget at the end of the dashboard, and remove_widget takes it off again."
+      }
+    },
+    "remove_widget": {
+      "annotations": { "readOnlyHint": false, "openWorldHint": true, "destructiveHint": true },
+      "justifications": {
+        "read_only_justification": "Writes: it takes a widget off one of the user's dashboards.",
+        "open_world_justification": "Declared open-world because it changes data in the user's Whisper Money account, a service outside ChatGPT. It is limited to that one private account: it never reaches the public internet, a bank or any third party.",
+        "destructive_justification": "Removes the widget from that dashboard, with its size and position. A widget the user wrote is kept and can be placed again; a built-in one can be put back in the app."
+      }
     }
   },
   "test_cases": [
