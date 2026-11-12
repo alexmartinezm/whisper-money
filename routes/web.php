@@ -42,6 +42,9 @@ use App\Http\Controllers\SitemapController;
 use App\Http\Controllers\SubscriptionController;
 use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\TransactionExportController;
+use App\Http\Controllers\Widgets\WidgetDataController;
+use App\Http\Controllers\Widgets\WidgetErrorController;
+use App\Http\Controllers\Widgets\WidgetRevisionController;
 use App\Models\Bank;
 use App\Support\Marketing\ComparisonPages;
 use App\Support\Marketing\IntegrationsPage;
@@ -205,6 +208,21 @@ Route::middleware(['auth', 'verified', 'onboarded', 'subscribed'])->group(functi
             Route::patch('reorder', [DashboardWidgetController::class, 'reorder'])->name('reorder');
             Route::patch('{widget}', [DashboardWidgetController::class, 'update'])->name('update');
             Route::delete('{widget}', [DashboardWidgetController::class, 'destroy'])->name('destroy');
+        });
+    });
+
+    // The widgets the user's agent writes: their data, read from the saved
+    // manifest through the widget gateway, the runtime errors they raise and
+    // going back to an earlier revision. Like the dashboards, only for users
+    // with the CustomDashboards flag (WidgetDefinitionPolicy and the data
+    // request refuse everyone else with a 403); writes are closed to the demo
+    // account.
+    Route::get('dashboards/{dashboard}/widgets/data', [WidgetDataController::class, 'dashboard'])->name('dashboards.widgets.data');
+    Route::prefix('widgets/{widget}')->name('widgets.')->group(function () {
+        Route::get('data', [WidgetDataController::class, 'show'])->name('data');
+        Route::middleware('block-demo')->group(function () {
+            Route::post('errors', [WidgetErrorController::class, 'store'])->middleware('throttle:widget-errors')->name('errors.store');
+            Route::post('revert', [WidgetRevisionController::class, 'revert'])->name('revert');
         });
     });
 

@@ -326,7 +326,8 @@ describe('the CustomDashboards flag and the demo account', function () {
                 ->missing('selectedDashboard')
                 ->loadDeferredProps('dashboard', fn (AssertableInertia $reload) => $reload
                     ->has('netWorthEvolution')
-                    ->missing('dashboards')));
+                    ->missing('dashboards')
+                    ->missing('userWidgets')));
     });
 
     it('lets a user with the flag build dashboards', function () {
