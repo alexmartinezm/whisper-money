@@ -72,11 +72,12 @@ export interface DashboardProps extends SharedData {
     monthlySavingsLastMonth?: MonthlyVerdicts | null;
     /**
      * Deferred: the user's own dashboards, in their order. This and the two
-     * below come only with the CustomDashboards flag.
+     * below are sent only with the CustomDashboards flag, and read only by
+     * `CustomDashboardsView`, which the page draws only with it.
      */
     dashboards?: DashboardSummary[];
     /** The dashboard the app opens on; null is the system dashboard. */
-    defaultDashboardId?: string | null;
+    defaultDashboardId: string | null;
     /** The user dashboard on screen; null is the system dashboard. */
-    selectedDashboard?: SelectedDashboard | null;
+    selectedDashboard: SelectedDashboard | null;
 }

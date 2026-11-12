@@ -1,3 +1,4 @@
+import { CustomDashboardsView } from '@/components/dashboard/custom-dashboards/custom-dashboards-view';
 import { DashboardLayoutView } from '@/components/dashboard/widgets/dashboard-layout-view';
 import { SYSTEM_DASHBOARD_LAYOUT } from '@/components/dashboard/widgets/registry';
 import HeadingSmall from '@/components/heading-small';
@@ -52,6 +53,13 @@ export default function Dashboard() {
         setShowUnlockDialog(false);
     }
 
+    const heading = (
+        <HeadingSmall
+            title={__('Dashboard')}
+            description={__('Overview of your financial health')}
+        />
+    );
+
     return (
         <AppSidebarLayout breadcrumbs={breadcrumbs}>
             <Head title={__('Dashboard')} />
@@ -78,15 +86,21 @@ export default function Dashboard() {
             )}
 
             <div className="space-y-6 p-6">
-                <HeadingSmall
-                    title={__('Dashboard')}
-                    description={__('Overview of your financial health')}
-                />
-
-                <DashboardLayoutView
-                    layout={SYSTEM_DASHBOARD_LAYOUT}
-                    data={props}
-                />
+                {props.features.customDashboards ? (
+                    <CustomDashboardsView
+                        data={props}
+                        heading={heading}
+                        notice={null}
+                    />
+                ) : (
+                    <>
+                        {heading}
+                        <DashboardLayoutView
+                            layout={SYSTEM_DASHBOARD_LAYOUT}
+                            data={props}
+                        />
+                    </>
+                )}
             </div>
         </AppSidebarLayout>
     );
