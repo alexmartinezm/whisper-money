@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Api\V1;
 
 use App\Http\Requests\Api\V1\Concerns\ChecksIdsInSpace;
+use App\Http\Requests\Api\V1\Concerns\RefusesUnknownParameters;
 use App\Models\Account;
 use App\Models\Category;
 use App\Models\Label;
@@ -24,6 +25,7 @@ use Illuminate\Validation\Validator;
 class AggregateTransactionsRequest extends FormRequest
 {
     use ChecksIdsInSpace;
+    use RefusesUnknownParameters;
 
     /**
      * @return array<string, array<mixed>>
@@ -48,13 +50,7 @@ class AggregateTransactionsRequest extends FormRequest
      */
     public function after(): array
     {
-        return [function (Validator $validator): void {
-            $known = [...array_keys($this->rules()), 'space'];
-
-            foreach (array_diff(array_map(strval(...), array_keys($this->all())), $known) as $key) {
-                $validator->errors()->add($key, "This endpoint does not take a {$key} parameter.");
-            }
-        }];
+        return [fn (Validator $validator) => $this->refuseUnknownParameters($validator, [...array_keys($this->rules()), 'space'])];
     }
 
     /**

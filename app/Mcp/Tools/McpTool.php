@@ -4,6 +4,7 @@ namespace App\Mcp\Tools;
 
 use App\Enums\PlanFeature;
 use App\Models\Account;
+use App\Models\Category;
 use App\Models\Label;
 use App\Models\McpToolCall;
 use App\Models\Space;
@@ -187,11 +188,11 @@ abstract class McpTool extends Tool
      * space, whichever member keeps it: the MCP is space-wide, unlike
      * `/api/v1`. Returns an empty collection when $ids is empty.
      *
-     * @template TModel of Model
+     * @template TModel of Account|Category|Label
      *
      * @param  list<string>  $ids
      * @param  string  $key  the argument the ids came under, for the message
-     * @param  class-string<TModel>  $model  a model scoped by space (`forSpace`)
+     * @param  class-string<TModel>  $model
      * @param  string  $noun  how a row is named in the message: `label`, `account`, `category`
      * @param  string  $listTool  the tool that lists the valid ids
      * @return Collection<int, TModel>

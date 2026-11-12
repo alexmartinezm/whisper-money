@@ -3,27 +3,37 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Requests\Api\V1\AggregateTransactionsRequest;
+use App\Http\Requests\Api\V1\AnalyticsRangeRequest;
+use App\Http\Requests\Api\V1\AnalyticsSnapshotRequest;
 use App\Http\Requests\Api\V1\CashflowRequest;
 use App\Http\Requests\Api\V1\NetWorthRequest;
 use App\Http\Requests\Api\V1\SpendingByCategoryRequest;
 use App\Http\Resources\V1\CashflowResource;
+use App\Http\Resources\V1\CreditCardUsageResource;
+use App\Http\Resources\V1\MonthlySavingsResource;
 use App\Http\Resources\V1\NetWorthResource;
 use App\Http\Resources\V1\SpendingByCategoryResource;
+use App\Http\Resources\V1\SpendingByLabelResource;
 use App\Http\Resources\V1\TransactionAggregateResource;
 use App\Services\CashflowAnalyticsService;
 use App\Services\CategorySpendingService;
+use App\Services\CreditCards\CreditCardStatementService;
+use App\Services\LabelSpendingService;
 use App\Services\NetWorthAnalyticsService;
+use App\Services\SavingsGoals\CurrentMonthSavings;
 use App\Services\Transactions\TransactionAggregator;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 /**
- * Figures rolled up from the caller's own transactions and balances over a
- * date range. They add up every space the caller has, as the app's screens and
- * the MCP tools do, and only ever the caller's own rows: another member of a
- * shared space's money never counts. There is no `space`: a figure for one
- * space is not what the screens show, so sending one is refused rather than
- * ignored. Aggregates are the exception: they read the caller's own
- * transactions in one space, the `space` parameter's, and give each currency
- * its own bucket.
+ * Figures rolled up from the caller's own transactions, balances and goals:
+ * cashflow, net worth, spending by category and by label over a date range,
+ * credit card usage and this month's savings. They add up every space the
+ * caller has, as the app's screens and the MCP tools do, and only ever the
+ * caller's own rows: another member of a shared space's money never counts.
+ * There is no `space`: a figure for one space is not what the screens show,
+ * so sending one is refused rather than ignored. Aggregates are the
+ * exception: they read the caller's own transactions in one space, the
+ * `space` parameter's, and give each currency its own bucket.
  */
 class AnalyticsController extends Controller
 {
@@ -78,6 +88,49 @@ class AnalyticsController extends Controller
         return new SpendingByCategoryResource(
             $spending->forPeriod($this->user($request)->id, $period->from, $period->to, $request->parentCategoryId()),
         );
+    }
+
+    /**
+     * Retrieve spending by label
+     *
+     * Your expenses in a date range by label, largest first, each against
+     * the previous period. A transaction counts under every label it
+     * carries. The labels of savings goals are left out: they track
+     * contributions, not spending. The range can touch at most 120 calendar
+     * months.
+     */
+    public function spendingByLabel(AnalyticsRangeRequest $request, LabelSpendingService $spending): SpendingByLabelResource
+    {
+        $period = $request->period();
+
+        return new SpendingByLabelResource([
+            'period' => $period,
+            'labels' => $spending->comparedForPeriod($this->user($request)->id, $period),
+        ]);
+    }
+
+    /**
+     * Retrieve credit card usage
+     *
+     * How much of each of your credit cards is in use, archived cards left
+     * out: what is still to be charged, what is left of the limit and how
+     * that built up day by day. Each card's amounts are in its own currency.
+     */
+    public function creditCardUsage(AnalyticsSnapshotRequest $request, CreditCardStatementService $statements): AnonymousResourceCollection
+    {
+        return CreditCardUsageResource::collection($statements->liveUsageFor($this->user($request)));
+    }
+
+    /**
+     * Retrieve this month's savings
+     *
+     * The month in progress across your monthly savings goals that are not
+     * archived: what they saved so far against their targets, each goal's
+     * month, and how every monthly goal did last month.
+     */
+    public function monthlySavings(AnalyticsSnapshotRequest $request, CurrentMonthSavings $savings): MonthlySavingsResource
+    {
+        return new MonthlySavingsResource($savings->forUser($this->user($request)));
     }
 
     /**

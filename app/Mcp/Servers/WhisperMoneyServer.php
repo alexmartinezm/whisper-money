@@ -19,6 +19,8 @@ use App\Mcp\Tools\DeleteCategory;
 use App\Mcp\Tools\DeleteLabel;
 use App\Mcp\Tools\DeleteTransaction;
 use App\Mcp\Tools\GetCashflow;
+use App\Mcp\Tools\GetCreditCardUsage;
+use App\Mcp\Tools\GetMonthlySavings;
 use App\Mcp\Tools\GetNetWorth;
 use App\Mcp\Tools\GetRunway;
 use App\Mcp\Tools\LabelTransaction;
@@ -33,6 +35,7 @@ use App\Mcp\Tools\ListSavingsGoals;
 use App\Mcp\Tools\ListSpaces;
 use App\Mcp\Tools\SearchTransactions;
 use App\Mcp\Tools\SpendingByCategory;
+use App\Mcp\Tools\SpendingByLabel;
 use App\Mcp\Tools\SplitTransaction;
 use App\Mcp\Tools\UpdateAccount;
 use App\Mcp\Tools\UpdateAutomationRule;
@@ -66,10 +69,11 @@ themselves.
   Transaction, account, category, label, budget, balance, automation-rule and savings goal
   tools accept an optional `space` id and default to the personal space; call
   `list_spaces` to discover ids.
-  `get_cashflow`, `get_net_worth` and `spending_by_category` are the exception: they take no
-  `space` and aggregate every space the user has, with no way to narrow them to one. Never
-  present their figures next to a space-filtered total as if the two were comparable — the
-  gap is the other spaces, not a discrepancy.
+  `get_cashflow`, `get_net_worth`, `spending_by_category`, `spending_by_label`,
+  `get_credit_card_usage` and `get_monthly_savings` are the exception: they take no
+  `space` and aggregate every space the user has (the user's own rows only), with no way
+  to narrow them to one. Never present their figures next to a space-filtered total as if
+  the two were comparable — the gap is the other spaces, not a discrepancy.
 - Categories form a tree, and a child never disagrees with its parent: it inherits the
   parent's type and cashflow direction, and moving a category re-derives both and cascades
   them to everything below it. Deleting one with `strategy: "cascade"` also needs
@@ -160,6 +164,17 @@ themselves.
   range comes back, zeros included; a request that would return more than 1000
   buckets is refused, so narrow the range or pick a longer period. A transaction
   with several labels counts once under each of them.
+- `spending_by_label`, `get_credit_card_usage` and `get_monthly_savings` give
+  the figures of the app's dashboard cards, across every space like
+  `get_cashflow`. `spending_by_label` ranks the labels by expense over a range,
+  each against the previous period; a transaction counts under every label it
+  carries (a split one with its expense lines only), and savings goal labels are
+  left out. `get_credit_card_usage` gives each live card's `credit_card_usage`
+  (see below) plus `daily`, the running `used` from `period_from` to today, in
+  the card's own currency. `get_monthly_savings` adds up the running monthly
+  goals' month in progress (`saved` against `target`, a partial first month
+  left out) and gives `last_month`: how many goals met their target of how many
+  were judged.
 
 Write tools ... require a read & write Sanctum token; OAuth connections follow the current
 WriteTool policy. A read-only Sanctum token can analyse data but never change it. Manual
@@ -232,10 +247,13 @@ class WhisperMoneyServer extends Server
         // Read
         SearchTransactions::class,
         SpendingByCategory::class,
+        SpendingByLabel::class,
         AggregateTransactions::class,
         GetCashflow::class,
         GetRunway::class,
         GetNetWorth::class,
+        GetCreditCardUsage::class,
+        GetMonthlySavings::class,
         ListAccounts::class,
         ListAutomationRules::class,
         ListBalances::class,
