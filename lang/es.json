@@ -120,6 +120,7 @@
     "Apply a filter to enable this button": "Aplica un filtro para activar este botón",
     "A breakdown of the transactions matching your current filters.": "Un desglose de las transacciones que coinciden con tus filtros actuales.",
     "Could not load the analysis. Please try again.": "No se pudo cargar el análisis. Inténtalo de nuevo.",
+    "No transactions": "Sin movimientos",
     "No transactions match the current filters.": "Ninguna transacción coincide con los filtros actuales.",
     "Avg / day": "Media / día",
     "transactions": "transacciones",

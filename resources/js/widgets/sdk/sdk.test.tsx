@@ -46,6 +46,8 @@ function renderInWidget(
                         bankLogo: 'javascript:alert(1)',
                     },
                 },
+                categories: [],
+                labels: [],
             }}
         >
             {children}
