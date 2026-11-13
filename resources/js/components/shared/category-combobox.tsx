@@ -101,6 +101,7 @@ export function CategoryCombobox({
     const [open, setOpen] = useState(false);
     const [filterValue, setFilterValue] = useState('');
     const listRef = useRef<HTMLDivElement>(null);
+    const searchRef = useRef<HTMLInputElement>(null);
 
     const selectedCategory =
         value && value !== 'null'
@@ -152,6 +153,7 @@ export function CategoryCombobox({
             align="start"
             className={cn('w-72', contentClassName)}
             drawerClassName={cn(DRAWER_COMMAND_CLASS, contentClassName)}
+            initialFocus={searchRef}
             trigger={
                 trigger ?? (
                     <Button
@@ -187,6 +189,7 @@ export function CategoryCombobox({
             {header}
             <Command shouldFilter={false}>
                 <CommandInput
+                    ref={searchRef}
                     placeholder={__('Search categories...')}
                     value={filterValue}
                     onValueChange={setFilterValue}
