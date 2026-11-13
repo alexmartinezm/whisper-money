@@ -14,6 +14,7 @@ import { SafeModeNotice } from '@/widgets/runtime/safe-mode-notice';
 import { Check, LayoutGrid, Pencil } from 'lucide-react';
 import { type ReactNode, useMemo, useState } from 'react';
 import { AddWidgetMenu } from './add-widget-menu';
+import { AiDashboardGuideDialog } from './ai-dashboard-guide-dialog';
 import { dashboardActions } from './dashboard-actions';
 import { DashboardGrid, EditableDashboardGrid } from './dashboard-grid';
 import { DashboardNameDialog } from './dashboard-name-dialog';
@@ -52,6 +53,7 @@ export function CustomDashboardsView({ data, heading, notice }: Props) {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [creating, setCreating] = useState(false);
     const [managing, setManaging] = useState(false);
+    const [aiGuideOpen, setAiGuideOpen] = useState(false);
 
     // The list is deferred; until it lands, the one on screen is all we know.
     const dashboards =
@@ -115,6 +117,7 @@ export function CustomDashboardsView({ data, heading, notice }: Props) {
                         canManage={canManage}
                         isLoading={data.dashboards === undefined}
                         onCreate={() => setCreating(true)}
+                        onCreateWithAi={() => setAiGuideOpen(true)}
                         onManage={() => setManaging(true)}
                     />
                 </div>
@@ -139,6 +142,10 @@ export function CustomDashboardsView({ data, heading, notice }: Props) {
             )}
 
             <DashboardNameDialog open={creating} onOpenChange={setCreating} />
+            <AiDashboardGuideDialog
+                open={aiGuideOpen}
+                onOpenChange={setAiGuideOpen}
+            />
             <ManageDashboardsDialog
                 open={managing}
                 onOpenChange={setManaging}
