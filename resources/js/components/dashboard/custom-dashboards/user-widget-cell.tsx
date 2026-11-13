@@ -15,6 +15,7 @@ import {
     WidgetErrorState,
     type WidgetRuntimeError,
 } from '@/widgets/runtime/widget-error-boundary';
+import { type OpenTransaction } from '@/widgets/sdk/transaction-opener';
 import { EllipsisVertical, ShieldAlert, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { type PlacedUserWidget } from './grid-layout';
@@ -46,6 +47,8 @@ export interface UserWidgetCellProps {
     isEditing: boolean;
     /** Takes it off the dashboard; absent when the user cannot edit it. */
     onRemove?: () => void;
+    /** Opens a transaction the widget lists; absent while the dashboard is edited. */
+    onOpenTransaction?: OpenTransaction;
 }
 
 type Content =
@@ -126,6 +129,7 @@ export function UserWidgetCell({
     canRevert,
     isEditing,
     onRemove,
+    onOpenTransaction,
 }: UserWidgetCellProps) {
     const content = useCellContent(placement, definition, gate, data);
     const [detailsOpen, setDetailsOpen] = useState(false);
@@ -183,6 +187,7 @@ export function UserWidgetCell({
                         frame={definition.manifest.frame}
                         onError={(caught) => onError(definition, caught)}
                         onSettled={() => settle?.(placement.id)}
+                        onOpenTransaction={onOpenTransaction}
                     />
                     {content.resolved.truncated && (
                         <span

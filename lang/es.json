@@ -3749,5 +3749,6 @@
     "This widget could not get its data": "Este widget no ha podido obtener sus datos",
     "Version :number": "Versión :number",
     "Versions": "Versiones",
-    "Your widgets": "Tus widgets"
+    "Your widgets": "Tus widgets",
+    "The transaction could not be opened.": "No se ha podido abrir la transacción."
 }
