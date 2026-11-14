@@ -223,6 +223,7 @@ export function useInMemoryTransactionSource({
     categories,
     accountId,
     pageSize = 25,
+    reload = reloadPage,
 }: {
     /** The rows, as the page received them; undefined while they load. */
     transactions?: Transaction[];
@@ -231,6 +232,8 @@ export function useInMemoryTransactionSource({
     /** Keeps the list to one account, the filter for it hidden. */
     accountId?: UUID;
     pageSize?: number;
+    /** Brings in what a duplicate changed; the page reloads by default. */
+    reload?: () => void;
 }): TransactionTableSource {
     const [transactions, setTransactions] = useState<DecryptedTransaction[]>(
         () => toDecryptedRows(providedTransactions),
@@ -367,7 +370,7 @@ export function useInMemoryTransactionSource({
             loadMore,
             loadsOnScroll: false,
         },
-        reload: reloadPage,
+        reload,
         countMatching,
         queryKey: 0,
     };

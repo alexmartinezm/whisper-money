@@ -4,10 +4,11 @@ import { CategoryIcon } from '@/components/shared/category-combobox';
 import {
     buildSplitBreakdown,
     type SplitBreakdownLine,
-} from '@/components/transactions/category-cell';
+} from '@/components/transactions/split-breakdown';
 import { StatementPaymentNote } from '@/components/transactions/statement-payment-note';
 import {
     ENCRYPTED_PLACEHOLDER,
+    TransactionBadge,
     TransactionDescription,
 } from '@/components/transactions/transaction-description';
 import { AmountDisplay } from '@/components/ui/amount-display';
@@ -167,14 +168,7 @@ export function TransactionListRow({
                             {description}
                         </span>
                     )}
-                    {badge && (
-                        <span
-                            className="shrink-0 self-center rounded-full border border-neutral-200 px-1.5 py-px text-[11px] font-medium text-neutral-700 dark:border-neutral-700 dark:text-neutral-300"
-                            data-testid="transaction-list-row-badge"
-                        >
-                            {badge}
-                        </span>
-                    )}
+                    {badge && <TransactionBadge text={badge} />}
                     <AmountDisplay
                         amountInCents={transaction.amount}
                         currencyCode={transaction.currency_code}
