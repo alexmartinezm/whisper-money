@@ -82,6 +82,10 @@ export function useWidgetData(): Readonly<Record<string, unknown>> {
     return useWidgetSdk().data;
 }
 
+/** Taken when the SDK loads, before any widget runs. */
+const { freeze } = Object;
+
+/** Frozen: the SDK's own components read the same object after the widget. */
 export function useWidgetEnv(): WidgetEnv {
-    return useWidgetSdk().env;
+    return freeze(useWidgetSdk().env);
 }

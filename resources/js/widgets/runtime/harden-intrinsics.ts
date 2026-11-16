@@ -12,14 +12,24 @@
  *   every function they hold as an own property (the function objects, not
  *   what they return); for `Intl`, each constructor is frozen with its own
  *   statics too (`Intl.NumberFormat.supportedLocalesOf`).
+ * - The methods every value shares are frozen as function objects: each
+ *   function held by `Object.prototype`, `Array.prototype`,
+ *   `Function.prototype`… and the iterator and Intl prototypes (accessors'
+ *   get/set included). A widget reads them from any value it holds
+ *   (`({}).hasOwnProperty`, `[].slice`), and an own property on one
+ *   (`hasOwnProperty.call = …`) would make React or a library, which call
+ *   `hasOwnProperty.call(obj, key)`, run widget code with their objects.
  *
- * Static side only, on purpose. Prototype objects (`Object.prototype`,
- * `Array.prototype`, `Function.prototype`…) stay as they are: freezing them
- * triggers the "override mistake" in third-party code (assigning `toString`
- * or `constructor` on an instance throws once the inherited one is
- * read-only), which would break the app around the widgets. They are out of
- * a widget's reach anyway: `prototype`, `constructor` and `__proto__` are
- * forbidden property names and `get()` only reads own properties.
+ * The prototype objects themselves stay as they are, on purpose: freezing
+ * them triggers the "override mistake" in third-party code (assigning
+ * `toString` or `constructor` on an instance throws once the inherited one
+ * is read-only), which would break the app around the widgets. Replacing a
+ * method on a prototype needs the prototype, which is out of a widget's
+ * reach: `prototype`, `constructor` and `__proto__` are forbidden property
+ * names and `get()` only reads own properties. `constructor` is skipped here
+ * for the same reason: it is only reached by that forbidden name, and
+ * freezing `Error` or `Promise` would break code that sets
+ * `Error.stackTraceLimit`.
  *
  * It runs from registerWidgetModules(), so pages without user widgets (and
  * users who never load one) are untouched; it is idempotent, and an object a
@@ -108,6 +118,106 @@ function freezeStatics(target: unknown, depth: number): void {
     freeze(target);
 }
 
+/** Freeze every function `target` holds: values, getters and setters. */
+function freezeOwnMethods(target: object): void {
+    try {
+        for (const key of Reflect.ownKeys(target)) {
+            if (key === 'constructor') {
+                continue;
+            }
+
+            const descriptor = Object.getOwnPropertyDescriptor(target, key);
+
+            for (const method of [
+                descriptor?.value,
+                descriptor?.get,
+                descriptor?.set,
+            ]) {
+                if (typeof method === 'function') {
+                    freeze(method);
+                }
+            }
+        }
+    } catch {
+        // An exotic prototype: the others still get done.
+    }
+}
+
+/**
+ * The prototypes whose methods a widget can read from a value it holds:
+ * literals, what the safe globals build or return, iterators, async
+ * functions and generators, errors it catches, Intl objects and what they
+ * return.
+ */
+function reachablePrototypes(): object[] {
+    const { getPrototypeOf } = Object;
+    function* generator() {
+        yield 0;
+    }
+    async function* asyncGenerator() {
+        yield 0;
+    }
+    const sources: (() => unknown)[] = [
+        () => Object.prototype,
+        () => Array.prototype,
+        () => String.prototype,
+        () => Number.prototype,
+        () => Boolean.prototype,
+        () => BigInt.prototype,
+        () => Symbol.prototype,
+        () => Date.prototype,
+        () => Map.prototype,
+        () => Set.prototype,
+        () => Function.prototype,
+        () => RegExp.prototype,
+        () => Promise.prototype,
+        () => Error.prototype,
+        () => getPrototypeOf([][Symbol.iterator]()),
+        () => getPrototypeOf(getPrototypeOf([][Symbol.iterator]())),
+        () => getPrototypeOf(''[Symbol.iterator]()),
+        () => getPrototypeOf(new Map()[Symbol.iterator]()),
+        () => getPrototypeOf(new Set()[Symbol.iterator]()),
+        () => getPrototypeOf('a'.matchAll(/a/g)),
+        () => getPrototypeOf(generator.prototype),
+        () => getPrototypeOf(asyncGenerator.prototype),
+        () => getPrototypeOf(getPrototypeOf(asyncGenerator.prototype)),
+        () => getPrototypeOf(new Intl.Segmenter().segment('a')),
+        () =>
+            getPrototypeOf(
+                new Intl.Segmenter().segment('a')[Symbol.iterator](),
+            ),
+        // Intl's members are not enumerable: Object.values() sees none.
+        ...Reflect.ownKeys(Intl).map(
+            (key) => () =>
+                (
+                    Intl as unknown as Record<
+                        PropertyKey,
+                        { prototype?: unknown }
+                    >
+                )[key]?.prototype,
+        ),
+    ];
+    const prototypes: object[] = [];
+
+    for (const source of sources) {
+        try {
+            const prototype = source();
+
+            // Function.prototype is itself a function.
+            if (
+                (typeof prototype === 'object' && prototype !== null) ||
+                typeof prototype === 'function'
+            ) {
+                prototypes.push(prototype);
+            }
+        } catch {
+            // Not in this browser (an older Intl): nothing to reach.
+        }
+    }
+
+    return prototypes;
+}
+
 function lockBinding(name: string): void {
     try {
         const descriptor = Object.getOwnPropertyDescriptor(globalThis, name);
@@ -141,6 +251,10 @@ export function hardenIntrinsics(): void {
 
     for (const name of SHARED_OBJECTS) {
         freezeStatics(global[name], name === 'Intl' ? 2 : 1);
+    }
+
+    for (const prototype of reachablePrototypes()) {
+        freezeOwnMethods(prototype);
     }
 }
 

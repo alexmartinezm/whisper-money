@@ -282,6 +282,33 @@ export default function W() {
         ).rejects.toThrow(WidgetModuleError);
     });
 
+    it.each([
+        '({}).hasOwnProperty.call=()=>false',
+        '[].slice.call=(x)=>x',
+        '[].push.apply=()=>0',
+        "''.at.call=(s)=>s",
+    ])(
+        'refuses a module that gives a shared method an own property: %s',
+        async (statement) => {
+            await expect(
+                loadWidgetModule(
+                    `${statement};export default function W(){return null}`,
+                ),
+            ).rejects.toThrow(WidgetModuleError);
+            expect(Object.hasOwn({}.hasOwnProperty, 'call')).toBe(false);
+        },
+    );
+
+    it('freezes the plain objects inside element props', async () => {
+        const Widget = await loadWidgetModule(
+            'import{jsx as j}from"react/jsx-runtime";export default function W(){const e=j("div",{style:{width:1},children:["a"]});let mutated=0;try{e.props.style.backgroundImage="url(https://evil.test)";mutated++}catch{}try{e.props.children.push("b");mutated++}catch{}return j("span",{children:String(mutated)})}',
+        );
+
+        render(<Widget />);
+
+        expect(screen.getByText('0')).toBeInTheDocument();
+    });
+
     it('refuses modules outside the contract', async () => {
         await expect(
             loadWidgetModule(

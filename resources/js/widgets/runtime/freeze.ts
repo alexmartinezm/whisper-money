@@ -15,13 +15,19 @@ function isObjectLike(value: unknown): value is object {
 }
 
 /**
- * One export of a module widgets link against: the value itself and, for a
- * component wrapped by `forwardRef` or `memo`, the function it wraps
- * (`render`, `type`), which React calls.
+ * One export of a module widgets link against: the value itself and every
+ * function it holds, such as what `forwardRef` or `memo` wrap (`render`,
+ * `type`), which React calls, or `wm.download`.
  */
 export function freezeExport<T>(value: T): T {
     if (!isObjectLike(value)) {
         return value;
+    }
+
+    for (const inner of values(value)) {
+        if (typeof inner === 'function') {
+            freeze(inner);
+        }
     }
 
     for (const inner of [

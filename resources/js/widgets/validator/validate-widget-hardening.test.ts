@@ -156,6 +156,44 @@ describe('validateWidget: writes to globals and imports', () => {
     });
 });
 
+describe('validateWidget: shared methods', () => {
+    it.each([
+        [
+            'hasOwnProperty',
+            topLevel(
+                'const hop = ({}).hasOwnProperty; hop.call = () => false;',
+            ),
+        ],
+        [
+            'slice',
+            topLevel('const s = [].slice; s.call = (x) => Array.from(x);'),
+        ],
+        [
+            'toString',
+            topLevel(
+                "const o = {}; o.toString.call = (v) => '[object Object]';",
+            ),
+        ],
+        ['push', topLevel('[].push.apply = (t, a) => 0;')],
+        ['at', topLevel("''.at.call = (s, i) => s;")],
+        [
+            'destructured call',
+            topLevel('const f = () => 1; const { call } = f;'),
+        ],
+        ['bracketed call', topLevel("const f = () => 1; const c = f['call'];")],
+        ['optional call', topLevel('const f = () => 1; const c = f?.call;')],
+        ['bind', topLevel('const f = () => 1; const g = f.bind(null);')],
+        [
+            'call through get()',
+            widget("const f = () => 1; const c = get(f, 'call');"),
+        ],
+    ])('rejects reaching .call/.apply/.bind: %s', (_name, source) => {
+        expect(validateWidget(source).map((error) => error.code)).toContain(
+            'forbidden-property',
+        );
+    });
+});
+
 describe('validateWidget: DOM and React internals', () => {
     it.each([
         'insertAdjacentHTML',

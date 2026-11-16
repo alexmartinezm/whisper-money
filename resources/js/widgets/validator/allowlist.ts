@@ -114,7 +114,9 @@ export const SAFE_STATIC_METHODS: ReadonlyMap<
  * literal key: they lead to prototypes, `Function` or the DOM. `$$typeof`,
  * `_owner` and `_store` are React element internals: with them a widget could
  * forge an element (`{ $$typeof, type: 'iframe', props }`) that JSX checks
- * never saw. The DOM members after them lead from a node or an event that
+ * never saw. `call`, `apply` and `bind` would let a widget give a method
+ * every value shares (`({}).hasOwnProperty`, `[].slice`) an own property
+ * the app then calls. The DOM members after them lead from a node or an event that
  * reached a widget to HTML parsing, script execution, attribute writes, the
  * rest of the tree, the document or storage; `stateNode`, `return` and
  * `_reactInternals` walk React's fibers back to host nodes. Names a finance
@@ -142,6 +144,9 @@ export const FORBIDDEN_PROPERTY_NAMES: ReadonlySet<string> = new Set([
     '$$typeof',
     '_owner',
     '_store',
+    'call',
+    'apply',
+    'bind',
     'innerHTML',
     'outerHTML',
     'insertAdjacentHTML',

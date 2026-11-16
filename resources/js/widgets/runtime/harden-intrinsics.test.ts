@@ -61,7 +61,51 @@ describe('hardenIntrinsics', () => {
         expect(new Intl.NumberFormat('en-US').format(1234)).toBe('1,234');
     });
 
+    function* generator() {
+        yield 0;
+    }
+
+    it.each([
+        ['Object.prototype', {}.hasOwnProperty],
+        ['Array.prototype', [].slice],
+        ['String.prototype', ''.at],
+        ['Number.prototype', (1).toFixed],
+        ['Boolean.prototype', true.valueOf],
+        ['Date.prototype', new Date().getTime],
+        ['Map.prototype', new Map().get],
+        ['Set.prototype', new Set().has],
+        ['Function.prototype', (() => 1).call],
+        ['RegExp.prototype', /a/.test],
+        ['Promise.prototype', Promise.resolve().then],
+        ['Error.prototype', new Error('x').toString],
+        ['the array iterator', [][Symbol.iterator]().next],
+        ['the generator prototype', generator().next],
+        [
+            'Intl.NumberFormat.prototype',
+            new Intl.NumberFormat().resolvedOptions,
+        ],
+        [
+            'an accessor of Intl.NumberFormat.prototype',
+            Object.getOwnPropertyDescriptor(
+                Intl.NumberFormat.prototype,
+                'format',
+            )?.get,
+        ],
+    ])('freezes the methods of %s', (_name, method) => {
+        expect(Object.isFrozen(method)).toBe(true);
+        expect(() => {
+            (method as unknown as Record<string, unknown>).call = () => false;
+        }).toThrow(TypeError);
+        expect(Object.hasOwn(method as object, 'call')).toBe(false);
+    });
+
     it('leaves prototypes alone, so the override mistake never bites the app', () => {
+        // Frozen, Object.prototype would make `instance.toString = …` throw in
+        // third-party code: only the functions on it are frozen.
+        expect(Object.isFrozen(Object.prototype)).toBe(false);
+        expect(Object.isExtensible(Object.prototype)).toBe(true);
+        expect(Object.isFrozen(Error)).toBe(false);
+
         for (const prototype of [
             Object.prototype,
             Array.prototype,

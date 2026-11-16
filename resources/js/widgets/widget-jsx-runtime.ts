@@ -14,11 +14,19 @@ export type JsxRuntime = {
 
 const COLOR_PROPS = ['fill', 'stroke'] as const;
 
+/** Taken when the module loads, before any widget runs. */
+const { freeze, getPrototypeOf, hasOwn, isFrozen, values } = Object;
+const { isArray } = Array;
+const OBJECT_PROTOTYPE = Object.prototype;
+
 /**
  * The `react/jsx-runtime` widgets get: the app's own, with every element it
  * creates hardened.
  *
- * - Frozen, so `el.type = 'iframe'` after the validator saw a <div> fails.
+ * - Frozen, so `el.type = 'iframe'` after the validator saw a <div> fails,
+ *   with its props and the plain objects and arrays in them (`style`, a
+ *   Recharts `tick`, `children`), so `el.props.style.background = 'url(…)'`
+ *   or a handler added to `tick` after the checks fails too.
  * - `$$typeof` made non-enumerable, so `{ ...el, type: 'iframe' }` produces a
  *   plain object React refuses to render (the validator already rejects
  *   reading `$$typeof` by name, and the SDK's `get()` must too).
@@ -50,15 +58,48 @@ function hardenElement(element: unknown): unknown {
         descriptors.$$typeof = { ...descriptors.$$typeof, enumerable: false };
     }
 
-    const props = (element as { props?: unknown }).props;
-
-    if (typeof props === 'object' && props !== null) {
-        Object.freeze(props);
-    }
+    freezePlainValues((element as { props?: unknown }).props);
 
     return Object.freeze(
         Object.create(Object.getPrototypeOf(element), descriptors),
     );
+}
+
+/**
+ * Freeze a props object and every plain object or array under it, even under
+ * one React already froze (it freezes `props` in development, not what they
+ * hold). Elements (created, and so hardened, on their own), functions and
+ * class instances such as a Date are left as they are.
+ */
+function freezePlainValues(root: unknown): void {
+    const pending: unknown[] = [root];
+    const seen = new WeakSet<object>();
+
+    while (pending.length > 0) {
+        const next = pending.pop();
+
+        if (typeof next !== 'object' || next === null || seen.has(next)) {
+            continue;
+        }
+
+        seen.add(next);
+
+        const prototype = getPrototypeOf(next);
+        const isPlain =
+            isArray(next) ||
+            prototype === OBJECT_PROTOTYPE ||
+            prototype === null;
+
+        if (!isPlain || hasOwn(next, '$$typeof')) {
+            continue;
+        }
+
+        pending.push(...values(next));
+
+        if (!isFrozen(next)) {
+            freeze(next);
+        }
+    }
 }
 
 function withoutExternalUrls(

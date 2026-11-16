@@ -20,7 +20,7 @@ final class WidgetRules
     public const int VERSION = 2;
 
     /** sha256 of the rule sources, as WidgetRulesVersionTest computes it. */
-    public const string SourcesHash = '9b7b24b77865bae107b29eaf7f52bd4530e9bcb39260bac524c32d8a3d341c7b';
+    public const string SourcesHash = 'c9116817fe701a3d69c1cd6b7080b11ade52c5fad794cdf7e8e9c2fc41e93c04';
 
     /**
      * What a widget that no longer passes the rules is served instead of its
