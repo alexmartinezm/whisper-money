@@ -4,6 +4,7 @@ namespace App\Services\Widgets;
 
 use App\Enums\WidgetHeight;
 use App\Enums\WidgetOrigin;
+use App\Enums\WidgetRecheck;
 use App\Enums\WidgetWidth;
 use App\Models\Dashboard;
 use App\Models\DashboardWidget;
@@ -145,6 +146,109 @@ class WidgetDefinitionService
     }
 
     /**
+     * Check $widget again under the current rules (WidgetRules::VERSION)
+     * before its module is served, unless it was already, or $force says to
+     * anyway. Its stored TSX is validated and compiled again: when it passes,
+     * the new module is stored; when it does not, its module is replaced by
+     * an inert one and the reasons are kept as its last error (phase
+     * `rules`), for the agent to fix with update_widget. Neither is a new
+     * revision, nor an edit the dashboard shows: `updated_at` is left alone.
+     * When the compiler cannot judge it, $widget is only served inert this
+     * time, and checked again on its next load.
+     */
+    public function recheck(WidgetDefinition $widget, bool $force = false): WidgetRecheck
+    {
+        if (! $force && $widget->rules_version >= WidgetRules::VERSION) {
+            return WidgetRecheck::Current;
+        }
+
+        $compilation = $this->compiler->compile($widget->source);
+
+        if ($compilation->ok && $compilation->js !== null) {
+            $wasBlocked = ($widget->last_error['phase'] ?? null) === WidgetRules::ErrorPhase;
+
+            $this->storeRecheck($widget, [
+                'compiled_js' => $compilation->js,
+                'rules_version' => WidgetRules::VERSION,
+                ...($wasBlocked ? ['last_error' => null, 'last_error_at' => null] : []),
+            ]);
+
+            return WidgetRecheck::Recompiled;
+        }
+
+        if ($this->compilerFailed($compilation)) {
+            // Fail closed for this request only: nothing is stored.
+            $widget->forceFill([
+                'compiled_js' => WidgetRules::InertModule,
+                'last_error' => $this->rulesError($widget, 'This widget could not be checked against the current widget rules, so it is not drawn. It is checked again the next time it loads.', []),
+            ]);
+
+            return WidgetRecheck::Unavailable;
+        }
+
+        $this->storeRecheck($widget, [
+            'compiled_js' => WidgetRules::InertModule,
+            'rules_version' => WidgetRules::VERSION,
+            'last_error' => $this->rulesError(
+                $widget,
+                'This widget no longer passes the widget rules, which changed since it was saved, so it is not drawn. Fix every error listed and save it again with update_widget.',
+                array_map(fn (array $error): array => ['path' => "source:{$error['line']}:{$error['column']}", 'message' => $error['message']], $compilation->errors),
+            ),
+            'last_error_at' => now(),
+        ]);
+
+        return WidgetRecheck::Neutralised;
+    }
+
+    /**
+     * The compiler itself broke or timed out: it said nothing about the widget.
+     */
+    private function compilerFailed(WidgetCompilation $compilation): bool
+    {
+        return collect($compilation->errors)->contains(fn (array $error): bool => in_array($error['code'], ['compiler', 'timeout'], true));
+    }
+
+    /**
+     * @param  list<array{path: string, message: string}>  $errors
+     * @return array{revision: int, phase: string, message: string, stack: null, component_stack: null, errors: list<array{path: string, message: string}>}
+     */
+    private function rulesError(WidgetDefinition $widget, string $message, array $errors): array
+    {
+        return [
+            'revision' => $widget->revision,
+            'phase' => WidgetRules::ErrorPhase,
+            'message' => $message,
+            'stack' => null,
+            'component_stack' => null,
+            'errors' => $errors,
+        ];
+    }
+
+    /**
+     * Store what a recheck found, only if $widget is still at the revision
+     * that was checked (a save meanwhile has already stored a newer module,
+     * checked under the current rules), and without touching `updated_at`.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    private function storeRecheck(WidgetDefinition $widget, array $attributes): void
+    {
+        $columns = array_map(fn (mixed $value): mixed => is_array($value) ? json_encode($value, JSON_THROW_ON_ERROR) : $value, $attributes);
+
+        $stored = WidgetDefinition::query()
+            ->whereKey($widget->id)
+            ->where('revision', $widget->revision)
+            ->toBase()
+            ->update($columns) === 1;
+
+        if ($stored) {
+            $widget->forceFill($attributes)->syncOriginal();
+        } else {
+            $widget->refresh();
+        }
+    }
+
+    /**
      * The data each of $widgets reads, resolved as $user through the gateway,
      * by widget id. All their calls go in one resolution, so two widgets that
      * read the same thing cost one call. $origin says who asked: the
@@ -261,6 +365,7 @@ class WidgetDefinitionService
             'name' => $content->manifest['name'],
             ...$content->attributes(),
             'revision' => $number,
+            'rules_version' => WidgetRules::VERSION,
             // The error came from the code this revision replaces.
             'last_error' => null,
             'last_error_at' => null,

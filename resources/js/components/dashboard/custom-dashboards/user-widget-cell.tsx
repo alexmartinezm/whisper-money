@@ -55,6 +55,7 @@ type Content =
     | { kind: 'off' }
     | { kind: 'loading' }
     | { kind: 'safe' }
+    | { kind: 'blocked'; message: string }
     | { kind: 'data-failed'; message: string }
     | { kind: 'ready'; resolved: ResolvedWidgetData };
 
@@ -84,6 +85,14 @@ function useCellContent(
 
     if (definition === undefined || gate.mode !== 'run') {
         return { kind: 'loading' };
+    }
+
+    // The server found this version no longer passes the widget rules and
+    // serves it inert: say so, and never mount it.
+    const stored = definition.last_error;
+
+    if (stored?.phase === 'rules' && stored.revision === definition.revision) {
+        return { kind: 'blocked', message: stored.message };
     }
 
     // A widget just added has no data until the new request lands, and a
@@ -141,7 +150,7 @@ export function UserWidgetCell({
 
     // A cell that will never mount its widget is as settled as it gets.
     useEffect(() => {
-        if (content.kind === 'data-failed') {
+        if (content.kind === 'data-failed' || content.kind === 'blocked') {
             settle?.(placement.id);
         }
     }, [content.kind, settle, placement.id]);
@@ -167,6 +176,15 @@ export function UserWidgetCell({
                 <SafeModePlaceholder
                     name={definition?.name}
                     onRemove={onRemove}
+                />
+            )}
+            {content.kind === 'blocked' && (
+                <WidgetErrorState
+                    title={__('This widget was blocked by a security update')}
+                    hint={__(
+                        'Ask your agent to fix it, or remove it from the dashboard.',
+                    )}
+                    message={content.message}
                 />
             )}
             {content.kind === 'data-failed' && (

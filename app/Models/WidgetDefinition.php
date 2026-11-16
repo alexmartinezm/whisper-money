@@ -29,7 +29,8 @@ use Illuminate\Support\Carbon;
  * @property string $source
  * @property string $compiled_js
  * @property int $revision
- * @property array{revision: int, phase: string, message: string, stack: string|null, component_stack: string|null}|null $last_error
+ * @property int $rules_version the App\Services\Widgets\WidgetRules version its module was last checked under
+ * @property array{revision: int, phase: string, message: string, stack: string|null, component_stack: string|null, errors?: list<array{path: string, message: string}>}|null $last_error
  * @property Carbon|null $last_error_at
  * @property WidgetOrigin $created_via
  */
@@ -48,6 +49,7 @@ class WidgetDefinition extends Model implements SizedWidget
         'source',
         'compiled_js',
         'revision',
+        'rules_version',
         'last_error',
         'last_error_at',
         'created_via',
@@ -61,6 +63,7 @@ class WidgetDefinition extends Model implements SizedWidget
         return [
             'manifest' => 'array',
             'revision' => 'integer',
+            'rules_version' => 'integer',
             'last_error' => 'array',
             'last_error_at' => 'datetime',
             'created_via' => WidgetOrigin::class,

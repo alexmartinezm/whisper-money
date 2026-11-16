@@ -44,7 +44,7 @@ class WidgetSdkReference
         'Draw bank logos with <BankLogo accountId /> from the SDK; there is no <img>.',
         'List transactions with <TransactionList transactions={…} /> from the SDK, not a hand-made Table: it draws the app\'s own list (newest first, a header per day with its total, each row with its category, account, labels and notes; the desktop table when the widget is wide enough, the phone\'s compact list otherwise) and blurs it in privacy mode. Shape it with its props (component_docs.TransactionList), never by mapping rows into Table cells.',
         'Handle empty data (a new user, a month without transactions) with a short message or <EmptyState>, never a blank chart.',
-        'A saved widget can still fail on the dashboard. create_widget, update_widget and get_widget list in data_failures every data call the API refuses: fix those right away. A runtime error only shows up once the widget is placed and the user opens the dashboard; get_widget then returns it as last_error with the revision it came from. last_error: null means no error was caught yet, not that the widget works.',
+        'A saved widget can still fail on the dashboard. create_widget, update_widget and get_widget list in data_failures every data call the API refuses: fix those right away. A runtime error only shows up once the widget is placed and the user opens the dashboard; get_widget then returns it as last_error with the revision it came from. last_error: null means no error was caught yet, not that the widget works. A last_error with phase "rules" means the widget rules changed since the widget was saved and it no longer passes them: it is not drawn until you fix every error in its errors list and save it again with update_widget.',
     ];
 
     /**

@@ -143,6 +143,31 @@ describe('<UserWidgetCell>', () => {
         expect(settle).toHaveBeenCalledWith('placement-1');
     });
 
+    it('never mounts a version the server blocked under the widget rules', () => {
+        settle.mockClear();
+        drawn.props = null;
+        renderCell({
+            definition: {
+                ...DEFINITION,
+                last_error: {
+                    revision: 2,
+                    phase: 'rules',
+                    message: 'This widget no longer passes the widget rules.',
+                    stack: null,
+                    component_stack: null,
+                    errors: [{ path: 'source:3:1', message: 'Nope.' }],
+                },
+            },
+        });
+
+        expect(cellState()).toBe('blocked');
+        expect(screen.getAllByRole('alert')[0].textContent).toContain(
+            'blocked by a security update',
+        );
+        expect(drawn.props).toBeNull();
+        expect(settle).toHaveBeenCalledWith('placement-1');
+    });
+
     it('says the data is partial when the gateway cut it', () => {
         renderCell({
             data: ready({

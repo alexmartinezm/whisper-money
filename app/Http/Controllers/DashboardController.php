@@ -17,6 +17,7 @@ use App\Services\LabelSpendingService;
 use App\Services\NetWorth\ProjectNetWorth;
 use App\Services\PeriodComparator;
 use App\Services\SavingsGoals\CurrentMonthSavings;
+use App\Services\Widgets\WidgetDefinitionService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -35,6 +36,7 @@ class DashboardController extends Controller
         private CashflowSummaryService $summaries,
         private CreditCardStatementService $creditCardStatementService,
         private CurrentMonthSavings $currentMonthSavings,
+        private WidgetDefinitionService $widgetDefinitions,
     ) {}
 
     public function __invoke(Request $request): Response
@@ -156,6 +158,10 @@ class DashboardController extends Controller
     }
 
     /**
+     * Each widget is checked again first when it was saved under older widget
+     * rules: one that no longer passes is served as an inert module, with
+     * the reasons as its last error ({@see WidgetDefinitionService::recheck()}).
+     *
      * @return array<string, array{id: string, name: string, revision: int, js: string, manifest: array<string, mixed>, last_error: array<string, mixed>|null, last_error_at: string|null, revisions: list<array{number: int, created_via: string, restored_from: int|null, created_at: string|null}>}>
      */
     private function presentUserWidgets(Dashboard $dashboard): array
@@ -164,6 +170,7 @@ class DashboardController extends Controller
             ->onDashboard($dashboard)
             ->with(['revisions' => fn ($query) => $query->orderByDesc('number')->select(['id', 'widget_definition_id', 'number', 'created_via', 'restored_from', 'created_at'])])
             ->get()
+            ->each(fn (WidgetDefinition $widget) => $this->widgetDefinitions->recheck($widget))
             ->mapWithKeys(fn (WidgetDefinition $widget): array => [$widget->id => [
                 'id' => $widget->id,
                 'name' => $widget->name,

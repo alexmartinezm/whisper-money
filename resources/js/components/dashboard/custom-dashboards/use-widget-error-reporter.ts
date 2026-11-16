@@ -14,7 +14,7 @@ export interface CaughtWidgetError extends WidgetRuntimeError {
 /** The error the details show: the one caught on this page, else the stored one. */
 export interface ShownWidgetError {
     revision: number;
-    phase: 'load' | 'render';
+    phase: 'load' | 'render' | 'rules';
     message: string;
     at: string | null;
 }

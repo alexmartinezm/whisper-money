@@ -60,13 +60,18 @@ export interface WidgetDefinitionSummary {
     size: UserWidgetManifestSize;
 }
 
-/** The runtime error a user widget raised, as it was stored with it. */
+/**
+ * The runtime error a user widget raised, as it was stored with it. `rules`:
+ * the server blocked it because it no longer passes the widget rules (its
+ * module is then an inert one), with the reasons in `errors`.
+ */
 export interface UserWidgetError {
     revision: number;
-    phase: 'load' | 'render';
+    phase: 'load' | 'render' | 'rules';
     message: string;
     stack: string | null;
     component_stack: string | null;
+    errors?: { path: string; message: string }[];
 }
 
 export interface UserWidgetRevision {

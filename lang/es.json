@@ -3739,6 +3739,8 @@
     "Go back to this one": "Volver a esta",
     "Go back to version :number?": "¿Volver a la versión :number?",
     "It did not load": "No se cargó",
+    "This widget was blocked by a security update": "Este widget se ha bloqueado por una actualización de seguridad",
+    "It was blocked by a security update": "Se bloqueó por una actualización de seguridad",
     "It stopped while drawing": "Falló al dibujarse",
     "Last error": "Último error",
     "Not loaded in safe mode.": "No se carga en modo seguro.",

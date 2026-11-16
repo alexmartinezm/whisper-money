@@ -102,9 +102,13 @@ export function UserWidgetDetailsDialog({
                                 >
                                     <p className="flex items-center gap-2 text-sm font-medium">
                                         <TriangleAlert className="size-4 shrink-0 text-destructive dark:text-red-400" />
-                                        {error.phase === 'load'
-                                            ? __('It did not load')
-                                            : __('It stopped while drawing')}
+                                        {error.phase === 'rules'
+                                            ? __(
+                                                  'It was blocked by a security update',
+                                              )
+                                            : error.phase === 'load'
+                                              ? __('It did not load')
+                                              : __('It stopped while drawing')}
                                     </p>
                                     <p className="font-mono text-xs break-words whitespace-pre-wrap">
                                         {error.message}

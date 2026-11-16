@@ -17,6 +17,10 @@ use App\Services\Widgets\Gateway\DashboardVariables;
  * and the user's currency, locale, chart colors, accounts, categories and
  * labels.
  *
+ * A widget saved under older widget rules is checked again first, and one
+ * that no longer passes them is served as an inert module
+ * ({@see WidgetDefinitionService::recheck()}).
+ *
  * The widget tools put it in their result's `_meta` under MetaKey
  * (resources/js/widgets/preview/main.tsx reads the same key), so the agent
  * never pays for the module and the data in its context.
@@ -38,6 +42,10 @@ class WidgetPreviewPayload
      */
     public function for(User $user, WidgetDefinition $widget): array
     {
+        // A widget saved under older rules is checked again before its module
+        // leaves the server; one that fails is served inert.
+        $this->widgets->recheck($widget);
+
         $answers = $this->widgets
             ->data($user, [$widget], DashboardVariables::currentMonthOf($user), WidgetOrigin::Mcp)[$widget->id];
 

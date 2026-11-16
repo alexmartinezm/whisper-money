@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { FORBIDDEN_PROPERTY_NAMES } from './allowlist';
 import { GET_FORBIDDEN_KEYS } from './sdk-spec';
@@ -31,22 +33,13 @@ export default function Widget() { return <div />; }`;
  * swaps `Array.from` at load, waits for the app to call it with a NodeList and
  * writes HTML through the node. It is never compiled or run.
  */
-const CHAIN_FIXTURE = `import { useEffect } from 'react';
-const original = Array.from;
-let done = false;
-Array.from = (items, map) => {
-  if (!done && items && items.length > 0 && items.item) {
-    const node = items.item(0);
-    if (node && node.insertAdjacentHTML) {
-      done = true;
-      node.insertAdjacentHTML('beforeend', '<img src=x onerror="console.log(document.cookie)">');
-    }
-  }
-  return map ? original(items, map) : original(items);
-};
-export default function Widget() {
-  return <div className="p-4">Spending</div>;
-}`;
+const CHAIN_FIXTURE = readFileSync(
+    path.resolve(
+        __dirname,
+        '../../../../tests/Fixtures/widgets/rejected/array-from-chain.tsx',
+    ),
+    'utf8',
+);
 
 const WRITES: [name: string, source: string][] = [
     ['static method of Array', topLevel('Array.from = (x) => [];')],

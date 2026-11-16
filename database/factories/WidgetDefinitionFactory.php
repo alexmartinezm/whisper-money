@@ -6,6 +6,7 @@ use App\Enums\WidgetFrame;
 use App\Enums\WidgetOrigin;
 use App\Models\User;
 use App\Models\WidgetDefinition;
+use App\Services\Widgets\WidgetRules;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -39,8 +40,21 @@ class WidgetDefinitionFactory extends Factory
             'source' => 'export default function Widget() { return <div />; }',
             'compiled_js' => 'import{jsx as e}from"react/jsx-runtime";function t(){return e("div",{})}export{t as default};',
             'revision' => 1,
+            'rules_version' => WidgetRules::VERSION,
             'created_via' => WidgetOrigin::Mcp,
         ];
+    }
+
+    /**
+     * Saved under older widget rules, with $source and a stand-in module:
+     * the next time it would be served, it is checked again.
+     */
+    public function checkedUnderOldRules(?string $source = null): static
+    {
+        return $this->state(fn (array $attributes): array => [
+            'rules_version' => WidgetRules::VERSION - 1,
+            'source' => $source ?? $attributes['source'],
+        ]);
     }
 
     /**
