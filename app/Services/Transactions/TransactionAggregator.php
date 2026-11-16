@@ -37,7 +37,9 @@ use stdClass;
  * lines there added up: it counts once, and avg/min/max read that sum.
  *
  * The API reads only the caller's own transactions in the space; the MCP tool
- * reads every member's, as the other MCP tools do.
+ * reads every member's, as the other MCP tools do. The API also reads an
+ * account name still encrypted on the device as '' (never its ciphertext, nor
+ * ordered by it); the MCP tool names accounts as list_accounts does.
  *
  * Grouped by a period, every period of the range is returned, with zeros where
  * nothing was booked, so a chart has no gaps.
@@ -76,6 +78,11 @@ class TransactionAggregator
     private const TYPE_SQL = 'case when categories.id is not null then categories.type when '.Transaction::POSTING_AMOUNT_SQL." < 0 then 'expense' else 'income' end";
 
     private const CURRENCY_SQL = "upper(coalesce(nullif(transactions.currency_code, ''), accounts.currency_code))";
+
+    /**
+     * The account name the API answers: '' while it is still encrypted on the device.
+     */
+    private const READABLE_ACCOUNT_NAME_SQL = "case when accounts.name_iv is null then accounts.name else '' end";
 
     /**
      * The SQL selecting each dimension, keyed by the column it comes back as.
@@ -178,14 +185,15 @@ class TransactionAggregator
      * The transactions of $space added up as $parameters ask, already
      * validated with {@see self::rules()} and with every id checked to be in
      * the space. Only $user's own unless $everyMember, which reads every
-     * member's (the MCP tool, space-wide like the other MCP tools).
+     * member's (the MCP tool, space-wide like the other MCP tools). An
+     * encrypted account name reads '' unless $rawAccountNames (the MCP tool).
      *
      * @param  array<string, mixed>  $parameters
      * @return array{group_by: list<string>, metrics: list<string>, from: string, to: string, buckets: list<array<string, int|string|null>>}
      *
      * @throws ValidationException when the result has more than {@see self::MAX_BUCKETS} buckets
      */
-    public function aggregate(User $user, Space $space, array $parameters, bool $everyMember = false): array
+    public function aggregate(User $user, Space $space, array $parameters, bool $everyMember = false, bool $rawAccountNames = false): array
     {
         $groupBy = array_values($parameters['group_by'] ?? []);
         $metrics = array_values($parameters['metrics'] ?? self::DEFAULT_METRICS);
@@ -200,7 +208,7 @@ class TransactionAggregator
             : $this->spaces->ownedInSpace(Transaction::query(), $user, $space);
         $categoryIds = $this->categoryIds($user, $space, $parameters, $everyMember);
 
-        $buckets = $this->buckets($this->postings($transactions, $parameters, $categoryIds, $groupBy), $groupBy, $metrics)
+        $buckets = $this->buckets($this->postings($transactions, $parameters, $categoryIds, $groupBy, $rawAccountNames), $groupBy, $metrics)
             ->limit(self::MAX_BUCKETS + 1)
             ->get()
             ->map(fn (stdClass $row): array => $this->bucket($row, $groupBy, $metrics))
@@ -234,7 +242,7 @@ class TransactionAggregator
      * @param  list<string>  $groupBy
      * @return Builder<Transaction>
      */
-    private function postings(Builder $transactions, array $parameters, array $categoryIds, array $groupBy): Builder
+    private function postings(Builder $transactions, array $parameters, array $categoryIds, array $groupBy, bool $rawAccountNames): Builder
     {
         $labelIds = array_values($parameters['label_ids'] ?? []);
         $types = array_values($parameters['types'] ?? []);
@@ -267,7 +275,7 @@ class TransactionAggregator
         // Grouped by the expression, not the alias: MySQL reads a bare name in
         // GROUP BY as a column of the joined tables first, so `type` would
         // group by accounts.type and `category_id` by the transaction's own.
-        foreach ($this->columns($groupBy) as $alias => $sql) {
+        foreach ($this->columns($groupBy, $rawAccountNames) as $alias => $sql) {
             $query->selectRaw("{$sql} as {$alias}")->groupByRaw($sql);
         }
 
@@ -309,12 +317,16 @@ class TransactionAggregator
      * @param  list<string>  $groupBy
      * @return array<string, string>
      */
-    private function columns(array $groupBy): array
+    private function columns(array $groupBy, bool $rawAccountNames = true): array
     {
         $columns = [];
 
         foreach ($groupBy as $dimension) {
             $columns = [...$columns, ...self::DIMENSION_COLUMNS[$dimension]];
+        }
+
+        if (! $rawAccountNames && isset($columns['account_name'])) {
+            $columns['account_name'] = self::READABLE_ACCOUNT_NAME_SQL;
         }
 
         return [...$columns, 'currency' => self::CURRENCY_SQL];

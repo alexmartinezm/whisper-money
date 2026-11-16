@@ -235,6 +235,22 @@ describe('grouping', function () {
             ]);
     });
 
+    it('answers an empty name for an account still encrypted on the device', function () {
+        ['user' => $user, 'account' => $account] = apiAggregateBook();
+        $encrypted = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR', 'name' => 'AAAAc2VjcmV0', 'name_iv' => 'aXZpdml2aXZpdml2', 'encrypted' => true]);
+        apiAggregateRow($account, '2026-10-01', -1_000);
+        apiAggregateRow($encrypted, '2026-10-02', -300);
+
+        withHeaders(apiV1Bearer($user))
+            ->getJson(apiAggregateUrl(['from' => '2026-10-01', 'to' => '2026-10-31', 'group_by' => ['account']]))
+            ->assertOk()
+            ->assertJsonPath('data.buckets', [
+                ['account_id' => $encrypted->id, 'account_name' => '', 'currency' => 'EUR', 'sum' => -300, 'count' => 1],
+                ['account_id' => $account->id, 'account_name' => 'Main', 'currency' => 'EUR', 'sum' => -1_000, 'count' => 1],
+            ])
+            ->assertDontSee('c2VjcmV0');
+    });
+
     it('counts the user\'s share of the account and stops counting an archived account from its archive day', function () {
         ['user' => $user] = apiAggregateBook();
         $shared = Account::factory()->create(['user_id' => $user->id, 'currency_code' => 'EUR', 'ownership_percentage' => 50]);

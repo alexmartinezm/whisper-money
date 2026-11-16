@@ -143,3 +143,13 @@ it('refuses more buckets than the cap', function () {
         ->tool(AggregateTransactions::class, ['from' => '2020-01-01', 'to' => '2026-10-31', 'group_by' => ['day']])
         ->assertHasErrors(['This aggregation returns more than 1000 buckets.']);
 });
+
+it('names an account by group as list_accounts does', function () {
+    ['user' => $user, 'space' => $space, 'account' => $account] = mcpAggregateSpace();
+    $account->forceFill(['name' => 'c2VjcmV0', 'name_iv' => 'aXZpdml2aXZpdml2', 'encrypted' => true])->save();
+
+    WhisperMoneyServer::actingAs($user)
+        ->tool(AggregateTransactions::class, ['from' => '2026-10-01', 'to' => '2026-10-31', 'group_by' => ['account'], 'metrics' => ['count'], 'account_ids' => [$account->id], 'space' => $space->id])
+        ->assertOk()
+        ->assertSee('{"account_id":"'.$account->id.'","account_name":"c2VjcmV0","currency":"EUR","count":1}');
+});

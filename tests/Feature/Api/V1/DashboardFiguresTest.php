@@ -242,6 +242,17 @@ describe('credit card usage', function () {
         ])->all())->toEqual($web);
     });
 
+    it('answers an empty name for a card still encrypted on the device', function () {
+        $user = User::factory()->create(['currency_code' => 'EUR']);
+        figuresCard($user, 'c2VjcmV0', 1_000, limit: 300_000, attributes: ['name_iv' => 'aXZpdml2aXZpdml2', 'encrypted' => true]);
+
+        withHeaders(apiV1Bearer($user))
+            ->getJson('/api/v1/analytics/credit-card-usage')
+            ->assertOk()
+            ->assertJsonPath('data.0.name', '')
+            ->assertDontSee('c2VjcmV0');
+    });
+
     it('leaves out another member\'s card in a shared space', function () {
         ['user' => $user, 'owner' => $owner, 'space' => $space] = figuresSharedSpace();
         figuresCard($owner, 'Theirs', 9_999, limit: 100_000, attributes: ['space_id' => $space->id]);

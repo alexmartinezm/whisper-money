@@ -61,7 +61,7 @@ class AggregateTransactions extends McpTool
             'label_ids' => $this->rowsInSpace($space, $this->listedIds($validated, 'label_ids'), 'label_ids', Label::class, 'label', 'list_labels')->modelKeys(),
             'account_ids' => $this->rowsInSpace($space, $this->listedIds($validated, 'account_ids'), 'account_ids', Account::class, 'account', 'list_accounts')->modelKeys(),
             'category_ids' => $this->rowsInSpace($space, $this->listedIds($validated, 'category_ids'), 'category_ids', Category::class, 'category', 'list_categories')->modelKeys(),
-        ], everyMember: true);
+        ], everyMember: true, rawAccountNames: true);
 
         // The formatted amounts save the agent scaling minor units itself (see
         // SpendingByCategory): each bucket carries its own currency.
