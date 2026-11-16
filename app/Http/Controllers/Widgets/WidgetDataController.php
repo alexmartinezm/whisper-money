@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Widgets;
 
+use App\Enums\WidgetOrigin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Widgets\WidgetDataRequest;
 use App\Models\Dashboard;
@@ -30,7 +31,7 @@ class WidgetDataController extends Controller
     {
         $this->authorize('view', $widget);
 
-        $data = $this->widgets->data($request->user(), [$widget], $request->variables());
+        $data = $this->widgets->data($request->user(), [$widget], $request->variables(), WidgetOrigin::Web);
 
         return response()->json(['revision' => $widget->revision, 'data' => $data[$widget->id]]);
     }
@@ -46,7 +47,7 @@ class WidgetDataController extends Controller
             ->onDashboard($dashboard)
             ->get();
 
-        $data = $this->widgets->data($request->user(), $widgets, $request->variables());
+        $data = $this->widgets->data($request->user(), $widgets, $request->variables(), WidgetOrigin::Web);
 
         return response()->json([
             'widgets' => $widgets->mapWithKeys(fn (WidgetDefinition $widget): array => [$widget->id => [
