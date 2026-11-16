@@ -46,6 +46,31 @@ function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null;
 }
 
+/**
+ * A widget's answers when they were read for the revision on screen. Answers
+ * read for another revision (the request repeats after a revert or an update)
+ * are `stale`: drawing the new code with them could throw for keys it no
+ * longer reads, and that error would be blamed on the new revision.
+ */
+export function widgetAnswers(
+    state: UserWidgetDataState,
+    definitionId: string,
+    revision: number | undefined,
+): { answers: Record<string, WidgetCallAnswer> | undefined; stale: boolean } {
+    const entry =
+        state.status === 'ready' ? state.widgets[definitionId] : undefined;
+
+    if (entry === undefined) {
+        return { answers: undefined, stale: false };
+    }
+
+    if (revision !== undefined && entry.revision !== revision) {
+        return { answers: undefined, stale: true };
+    }
+
+    return { answers: entry.data, stale: false };
+}
+
 /** Splits a widget's answers into the data it reads and what went wrong. */
 export function resolveWidgetData(
     answers: Record<string, WidgetCallAnswer>,

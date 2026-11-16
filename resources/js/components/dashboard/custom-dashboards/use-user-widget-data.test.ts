@@ -1,7 +1,11 @@
 import { type UserWidgetDefinition } from '@/types/dashboard';
 import { renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resolveWidgetData, useUserWidgetData } from './use-user-widget-data';
+import {
+    resolveWidgetData,
+    useUserWidgetData,
+    widgetAnswers,
+} from './use-user-widget-data';
 
 function definition(id: string, revision = 1): UserWidgetDefinition {
     return {
@@ -15,6 +19,38 @@ function definition(id: string, revision = 1): UserWidgetDefinition {
         revisions: [],
     };
 }
+
+describe('widgetAnswers', () => {
+    const state = {
+        status: 'ready' as const,
+        widgets: {
+            w: { revision: 2, data: { rows: { status: 200, body: {} } } },
+        },
+        refreshing: true,
+    };
+
+    it('hands over the answers read for the revision on screen', () => {
+        expect(widgetAnswers(state, 'w', 2)).toEqual({
+            answers: { rows: { status: 200, body: {} } },
+            stale: false,
+        });
+    });
+
+    it('holds back the answers read for another revision', () => {
+        expect(widgetAnswers(state, 'w', 3)).toEqual({
+            answers: undefined,
+            stale: true,
+        });
+    });
+
+    it('has nothing for a widget the request did not cover', () => {
+        expect(widgetAnswers(state, 'other', 1)).toEqual({
+            answers: undefined,
+            stale: false,
+        });
+        expect(widgetAnswers({ status: 'loading' }, 'w', 2).stale).toBe(false);
+    });
+});
 
 describe('resolveWidgetData', () => {
     it('hands the widget the body of each call', () => {

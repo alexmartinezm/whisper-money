@@ -103,6 +103,21 @@ describe('<UserWidgetCell>', () => {
         expect(screen.getByTestId('user-widget')).toBeTruthy();
     });
 
+    it('never draws a new revision with the data read for the previous one', () => {
+        const onError = vi.fn();
+        drawn.props = null;
+        renderCell({
+            definition: { ...DEFINITION, revision: 3 },
+            data: ready({ rows: { status: 200, body: { data: [] } } }, true),
+            onError,
+        });
+
+        expect(cellState()).toBe('loading');
+        expect(screen.queryByTestId('user-widget')).toBeNull();
+        expect(drawn.props).toBeNull();
+        expect(onError).not.toHaveBeenCalled();
+    });
+
     it('waits for the new request when it was just added', () => {
         renderCell({
             data: { status: 'ready', widgets: {}, refreshing: true },

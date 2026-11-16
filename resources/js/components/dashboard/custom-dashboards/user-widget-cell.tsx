@@ -20,6 +20,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { type PlacedUserWidget } from './grid-layout';
 import {
     resolveWidgetData,
+    widgetAnswers,
     type ResolvedWidgetData,
     type UserWidgetDataState,
 } from './use-user-widget-data';
@@ -60,10 +61,11 @@ function useCellContent(
     gate: UserWidgetsGate,
     data: UserWidgetDataState,
 ): Content {
-    const answers =
-        data.status === 'ready'
-            ? data.widgets[placement.definitionId]?.data
-            : undefined;
+    const { answers, stale } = widgetAnswers(
+        data,
+        placement.definitionId,
+        definition?.revision,
+    );
     const resolved = useMemo(
         () => (answers === undefined ? null : resolveWidgetData(answers)),
         [answers],
@@ -81,9 +83,11 @@ function useCellContent(
         return { kind: 'loading' };
     }
 
-    // A widget just added has no data until the new request lands.
+    // A widget just added has no data until the new request lands, and a
+    // widget whose revision changed waits for the data read for that revision.
     if (
         data.status === 'loading' ||
+        stale ||
         (resolved === null && data.status === 'ready' && data.refreshing)
     ) {
         return { kind: 'loading' };
