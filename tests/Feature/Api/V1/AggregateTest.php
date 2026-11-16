@@ -346,7 +346,7 @@ describe('split transactions', function () {
 
     it('keeps only the lines a category or type filter matches', function (string $filter, int $sum) {
         ['user' => $user, 'account' => $account, 'food' => $food, 'groceries' => $groceries] = apiAggregateBook();
-        $transfer = Category::factory()->create(['user_id' => $user->id, 'type' => CategoryType::Transfer]);
+        $transfer = Category::factory()->create(['user_id' => $user->id, 'type' => CategoryType::Transfer, 'name' => 'Between accounts']);
         apiAggregateSplit(apiAggregateRow($account, '2026-10-05', -10_000), [[$groceries, -6_000], [$transfer, -4_000]]);
 
         $narrowed = match ($filter) {
@@ -365,7 +365,7 @@ describe('split transactions', function () {
 
     it('reads each line\'s type, and keeps every line under a label', function () {
         ['user' => $user, 'account' => $account, 'food' => $food] = apiAggregateBook();
-        $savings = Category::factory()->create(['user_id' => $user->id, 'type' => CategoryType::Savings]);
+        $savings = Category::factory()->create(['user_id' => $user->id, 'type' => CategoryType::Savings, 'name' => 'Rainy day']);
         $trip = Label::factory()->create(['user_id' => $user->id, 'name' => 'Trip']);
         apiAggregateSplit(apiAggregateRow($account, '2026-10-05', -10_000), [[$food, -7_000], [$savings, -3_000]])
             ->labels()->attach($trip->id);
