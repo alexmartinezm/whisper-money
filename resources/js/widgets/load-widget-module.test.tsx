@@ -165,6 +165,17 @@ describe('loadWidgetModule', () => {
         expect(screen.getByText('false:false')).toBeInTheDocument();
     });
 
+    it('drops a fill that is not a string or a number', async () => {
+        const Widget = await loadWidgetModule(
+            'import{jsx as j}from"react/jsx-runtime";const p={toString:()=>"url(https://evil.test/x.svg#a)"};export default function W(){return j("svg",{children:[j("rect",{"data-testid":"a",fill:p},"a"),j("rect",{"data-testid":"b",stroke:"#fff",fill:"red"},"b")]})}',
+        );
+
+        render(<Widget />);
+
+        expect(screen.getByTestId('a')).not.toHaveAttribute('fill');
+        expect(screen.getByTestId('b')).toHaveAttribute('fill', 'red');
+    });
+
     it('drops external url() from fill and stroke at runtime', async () => {
         const Widget = await loadWidgetModule(
             'import{jsx as j}from"react/jsx-runtime";export default function W(){return j("svg",{children:[j("rect",{"data-testid":"a",fill:"url(https://evil.test/x)"},"a"),j("rect",{"data-testid":"b",fill:"url(#grad)"},"b")]})}',

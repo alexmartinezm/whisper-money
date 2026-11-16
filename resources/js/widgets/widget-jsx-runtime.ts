@@ -110,7 +110,17 @@ function withoutExternalUrls(
     for (const name of COLOR_PROPS) {
         const value = props[name];
 
-        if (typeof value === 'string' && hasExternalUrl(value)) {
+        // Only strings and numbers are colours. Anything else is dropped: an
+        // object is turned into text when the attribute is set, so its
+        // `toString` could answer a `url()` this check never read.
+        const isUnsafe =
+            typeof value === 'string'
+                ? hasExternalUrl(value)
+                : value !== undefined &&
+                  value !== null &&
+                  typeof value !== 'number';
+
+        if (isUnsafe) {
             safe = { ...safe, [name]: undefined };
         }
     }
