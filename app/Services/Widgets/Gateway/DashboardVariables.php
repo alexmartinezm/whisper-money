@@ -28,6 +28,16 @@ final readonly class DashboardVariables
     ) {}
 
     /**
+     * The month $user is in on their own calendar ({@see User::localToday()}),
+     * not the server's: at 23:30 UTC on 31 October it is already November in
+     * Madrid and still October in Buenos Aires.
+     */
+    public static function currentMonthOf(User $user): self
+    {
+        return self::forMonthOf(CarbonImmutable::instance($user->localToday()));
+    }
+
+    /**
      * The whole month $day falls in: pass the user's own today
      * ({@see User::localToday()}), not the server's.
      */

@@ -10,6 +10,7 @@ use App\Models\DashboardWidget;
 use App\Models\Transaction;
 use App\Models\User;
 use App\Models\WidgetDefinition;
+use App\Services\Widgets\Gateway\DashboardVariables;
 use Inertia\Testing\AssertableInertia;
 use Laravel\Pennant\Feature;
 
@@ -99,6 +100,29 @@ describe('widget data', function () {
             ->assertJsonPath('data.rows.body.data.0.id', $november->id);
     });
 
+    it('reads the owner\'s current month on their own calendar, on each side of UTC', function (string $timezone, string $now, string $month) {
+        $this->travelTo($now);
+        $user = widgetOwner(['timezone' => $timezone]);
+        [$october, $november] = octoberAndNovemberTransactions($user);
+        $expected = $month === '2026-10' ? $october : $november;
+
+        expect(DashboardVariables::currentMonthOf($user)->values())->toBe([
+            'range.from' => "{$month}-01",
+            'range.to' => $month === '2026-10' ? '2026-10-31' : '2026-11-30',
+        ]);
+
+        $this->actingAs($user)
+            ->getJson(route('widgets.data', transactionsWidget($user)))
+            ->assertOk()
+            ->assertJsonCount(1, 'data.rows.body.data')
+            ->assertJsonPath('data.rows.body.data.0.id', $expected->id);
+    })->with([
+        'east of UTC, past its midnight' => ['Europe/Madrid', '2026-10-31 23:30:00', '2026-11'],
+        'east of UTC, before its midnight' => ['Europe/Madrid', '2026-10-31 22:30:00', '2026-10'],
+        'west of UTC, before its midnight' => ['America/Argentina/Buenos_Aires', '2026-11-01 01:00:00', '2026-10'],
+        'west of UTC, past its midnight' => ['America/Argentina/Buenos_Aires', '2026-11-01 03:30:00', '2026-11'],
+    ]);
+
     it('refuses a range that ends before it starts', function () {
         $user = widgetOwner();
 
@@ -173,6 +197,32 @@ describe('widget data', function () {
             ->assertJsonPath("widgets.{$second->id}.data.rows.body.data.0.id", $october->id);
 
         expect(ApiRequest::query()->count())->toBe(1);
+    });
+
+    it('shares one row budget between every widget of a dashboard', function () {
+        config(['widgets.gateway.max_rows_per_resolution' => 1]);
+        $user = widgetOwner();
+        octoberAndNovemberTransactions($user);
+        $dashboard = Dashboard::factory()->for($user)->create();
+        $october = transactionsWidget($user);
+        $november = WidgetDefinition::factory()->for($user)->reading([
+            'rows' => ['endpoint' => 'GET /transactions', 'params' => ['from' => '2026-11-01', 'to' => '2026-11-30'], 'paginate' => 'all'],
+        ])->create();
+        foreach ([$october, $november] as $widget) {
+            DashboardWidget::factory()->for($dashboard)->create(['system_widget' => null, 'widget_definition_id' => $widget->id, 'width' => '1/2', 'height' => 'm']);
+        }
+
+        $widgets = $this->actingAs($user)
+            ->getJson(route('dashboards.widgets.data', ['dashboard' => $dashboard, 'range' => ['from' => '2026-10-01', 'to' => '2026-10-31']]))
+            ->assertOk()
+            ->json('widgets');
+
+        // Whichever widget is read first spends the one row; the other is refused.
+        $answers = collect($widgets)->map(fn (array $widget): array => $widget['data']['rows']);
+
+        expect($answers->pluck('status')->sort()->values()->all())->toBe([200, 422])
+            ->and($answers->firstWhere('status', 200)['body']['data'])->toHaveCount(1)
+            ->and($answers->firstWhere('status', 422)['body']['code'])->toBe('too_many_rows');
     });
 
     it('refuses another user\'s dashboard', function () {

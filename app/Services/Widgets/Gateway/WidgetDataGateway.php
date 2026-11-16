@@ -8,6 +8,7 @@ use App\Http\ApiV1\ErrorRenderer;
 use App\Http\ApiV1\Listing;
 use App\Models\ApiRequest;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull;
 use Illuminate\Foundation\Http\Middleware\TrimStrings;
@@ -33,7 +34,9 @@ use Throwable;
  * Nothing is cached across resolutions: the same call twice within one is
  * read once, and only that one counts towards the gateway's own limit. Each
  * call made is recorded in `api_requests` as a `dashboard` one, under the
- * name of the API route it stands for.
+ * name of the API route it stands for. The rows the `paginate: "all"` calls
+ * of one resolution read add up to at most `widgets.gateway.max_rows_per_resolution`
+ * ({@see RowBudget}).
  *
  * @api resolved by the widget data routes, which arrive with the saved widgets
  */
@@ -59,14 +62,15 @@ class WidgetDataGateway
     {
         $answered = [];
         $made = [];
+        $rows = new RowBudget((int) config('widgets.gateway.max_rows_per_resolution'));
 
-        $result = array_map(function (array $call) use ($user, $variables, &$answered, &$made): array {
+        $result = array_map(function (array $call) use ($user, $variables, $rows, &$answered, &$made): array {
             $params = $variables->fill($call['params'] ?? []);
             $paginate = $call['paginate'] ?? null;
             $key = md5((string) json_encode([$call['endpoint'], $this->sorted($params), $paginate]));
 
             if (! isset($answered[$key])) {
-                $answered[$key] = $this->answer($user, $call['endpoint'], $params, $paginate);
+                $answered[$key] = $this->answer($user, $call['endpoint'], $params, $paginate, $rows);
                 $made[] = [$call['endpoint'], $answered[$key]['status']];
             }
 
@@ -82,7 +86,7 @@ class WidgetDataGateway
      * @param  array<string, mixed>  $params
      * @return array{status: int, body: array<mixed>}
      */
-    private function answer(User $user, string $name, array $params, ?string $paginate): array
+    private function answer(User $user, string $name, array $params, ?string $paginate, RowBudget $rows): array
     {
         try {
             $endpoint = $this->endpoints->find($name)
@@ -90,7 +94,7 @@ class WidgetDataGateway
 
             $this->throttle($user);
 
-            return $this->call($endpoint, $user, $params, $paginate === 'all');
+            return $this->call($endpoint, $user, $params, $paginate === 'all' ? $rows : null);
         } catch (Throwable $exception) {
             return $this->failure($exception);
         }
@@ -98,9 +102,10 @@ class WidgetDataGateway
 
     /**
      * @param  array<string, mixed>  $params
+     * @param  RowBudget|null  $readAll  the resolution's row budget for a `paginate: "all"` call, else null
      * @return array{status: int, body: array<mixed>}
      */
-    private function call(Endpoint $endpoint, User $user, array $params, bool $readAll): array
+    private function call(Endpoint $endpoint, User $user, array $params, ?RowBudget $readAll): array
     {
         $path = [];
 
@@ -116,8 +121,8 @@ class WidgetDataGateway
         $result = $endpoint->handle($request, $user, $path);
 
         if ($result instanceof Listing) {
-            if ($readAll) {
-                return ['status' => 200, 'body' => $result->all($request, (int) config('widgets.gateway.max_rows'))];
+            if ($readAll !== null) {
+                return ['status' => 200, 'body' => $this->readAll($result, $request, $readAll)];
             }
 
             $result = $result->paginate($request);
@@ -126,6 +131,26 @@ class WidgetDataGateway
         $response = $result->response($request);
 
         return ['status' => $response->getStatusCode(), 'body' => $response->getData(true)];
+    }
+
+    /**
+     * The whole list, up to `widgets.gateway.max_rows` and what is left of the
+     * resolution's row budget. A list cut short by either is marked
+     * `truncated`; once the budget is spent, the call is refused.
+     *
+     * @param  Listing<Model>  $listing
+     * @return array{data: list<mixed>, truncated: bool}
+     */
+    private function readAll(Listing $listing, Request $request, RowBudget $rows): array
+    {
+        if ($rows->isSpent()) {
+            throw new ApiV1Exception(422, 'too_many_rows', "The other calls already read {$rows->total} rows, the most one load of widget data may read. Narrow this call (a shorter range or a filter), or read one page of it instead of the whole list.", ['max_rows' => $rows->total]);
+        }
+
+        $body = $listing->all($request, min((int) config('widgets.gateway.max_rows'), $rows->remaining()));
+        $rows->spend(count($body['data']));
+
+        return $body;
     }
 
     /**

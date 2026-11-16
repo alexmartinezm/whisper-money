@@ -276,6 +276,39 @@ describe('reading a whole list', function () {
             ->and($listing()->all($request, 5, chunkSize: 5))->toMatchArray(['truncated' => false]);
     });
 
+    it('caps the rows every whole-list call of one resolution reads together', function () {
+        config(['widgets.gateway.max_rows_per_resolution' => 7]);
+
+        $answers = app(WidgetDataGateway::class)->resolve($this->user, [
+            'all' => ['endpoint' => 'GET /transactions', 'paginate' => 'all'],
+            'again' => ['endpoint' => 'GET /transactions', 'paginate' => 'all'],
+            'fromTheSecond' => ['endpoint' => 'GET /transactions', 'params' => ['from' => '2026-10-02'], 'paginate' => 'all'],
+            'toTheThird' => ['endpoint' => 'GET /transactions', 'params' => ['to' => '2026-10-03'], 'paginate' => 'all'],
+            'onePage' => ['endpoint' => 'GET /transactions', 'params' => ['limit' => 2]],
+        ], gatewayOctober());
+
+        // A repeated call is read once and spends nothing more; the one that
+        // reaches the budget is cut short like a list past max_rows, and the
+        // ones after it are refused. A single page is not a whole list.
+        expect(array_map(fn (array $answer): int => $answer['status'], $answers))->toBe([
+            'all' => 200, 'again' => 200, 'fromTheSecond' => 200, 'toTheThird' => 422, 'onePage' => 200,
+        ])
+            ->and($answers['all']['body']['data'])->toHaveCount(5)
+            ->and($answers['again']['body']['truncated'])->toBeFalse()
+            ->and($answers['fromTheSecond']['body']['truncated'])->toBeTrue()
+            ->and(array_column($answers['fromTheSecond']['body']['data'], 'transaction_date'))->toBe(['2026-10-05', '2026-10-04'])
+            ->and($answers['toTheThird']['body'])->toMatchArray(['code' => 'too_many_rows', 'max_rows' => 7])
+            ->and($answers['onePage']['body']['data'])->toHaveCount(2);
+    });
+
+    it('starts every resolution with a whole row budget', function () {
+        config(['widgets.gateway.max_rows_per_resolution' => 5]);
+
+        expect(gatewayCall($this->user, 'GET /transactions', [], 'all')['body']['data'])->toHaveCount(5)
+            ->and(gatewayCall($this->user, 'GET /transactions', [], 'all')['body'])->toMatchArray(['truncated' => false])
+            ->and(gatewayCall($this->user, 'GET /transactions', [], 'all')['body']['data'])->toHaveCount(5);
+    });
+
     it('still validates the filters', function () {
         expect(gatewayCall($this->user, 'GET /transactions', ['from' => 'soon'], 'all')['status'])->toBe(422)
             ->and(gatewayCall($this->user, 'GET /transactions', ['colour' => 'red'], 'all')['body']['errors'])

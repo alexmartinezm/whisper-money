@@ -71,6 +71,6 @@ class WidgetDataRequest extends FormRequest
             );
         }
 
-        return DashboardVariables::forMonthOf(CarbonImmutable::instance($this->user()->localToday()));
+        return DashboardVariables::currentMonthOf($this->user());
     }
 }

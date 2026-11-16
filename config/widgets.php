@@ -14,13 +14,17 @@ return [
     | call counts, except one repeated within the same resolution.
     |
     | `max_rows` caps what a call with `paginate: "all"` reads; past it the
-    | result is marked `truncated`.
+    | result is marked `truncated`. `max_rows_per_resolution` caps the rows
+    | all such calls of one load read together (one widget, or every widget
+    | of a dashboard): the call that reaches it is truncated, and the ones
+    | after it answer a 422 `too_many_rows`.
     |
     */
 
     'gateway' => [
         'calls_per_minute' => (int) env('WIDGET_GATEWAY_CALLS_PER_MINUTE', 300),
         'max_rows' => (int) env('WIDGET_GATEWAY_MAX_ROWS', 10000),
+        'max_rows_per_resolution' => (int) env('WIDGET_GATEWAY_MAX_ROWS_PER_RESOLUTION', 10000),
     ],
 
     /*
