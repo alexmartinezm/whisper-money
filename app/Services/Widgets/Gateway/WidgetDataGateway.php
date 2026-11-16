@@ -138,7 +138,7 @@ class WidgetDataGateway
      * resolution's row budget. A list cut short by either is marked
      * `truncated`; once the budget is spent, the call is refused.
      *
-     * @param  Listing<Model>  $listing
+     * @param  Listing<covariant Model>  $listing
      * @return array{data: list<mixed>, truncated: bool}
      */
     private function readAll(Listing $listing, Request $request, RowBudget $rows): array

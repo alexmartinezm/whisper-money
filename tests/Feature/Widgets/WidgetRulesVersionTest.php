@@ -1,6 +1,5 @@
 <?php
 
-use App\Services\Widgets\WidgetRules;
 use Illuminate\Support\Facades\File;
 
 /**
@@ -22,6 +21,9 @@ function widgetRuleSources(): array
         ->all();
 }
 
+/** sha256 of the rule sources, as widgetRuleSourcesHash() computes it. */
+const WIDGET_RULE_SOURCES_HASH = 'c9116817fe701a3d69c1cd6b7080b11ade52c5fad794cdf7e8e9c2fc41e93c04';
+
 function widgetRuleSourcesHash(): string
 {
     $context = hash_init('sha256');
@@ -35,8 +37,8 @@ function widgetRuleSourcesHash(): string
 
 it('pins the widget rules to their version', function () {
     expect(widgetRuleSourcesHash())->toBe(
-        WidgetRules::SourcesHash,
-        'The widget validator changed: bump WidgetRules::VERSION and update the pinned hash (WidgetRules::SourcesHash), so the widgets stored under the old rules are checked again.',
+        WIDGET_RULE_SOURCES_HASH,
+        'The widget validator changed: bump WidgetRules::VERSION and update the pinned hash (WIDGET_RULE_SOURCES_HASH in this file), so the widgets stored under the old rules are checked again.',
     );
 });
 

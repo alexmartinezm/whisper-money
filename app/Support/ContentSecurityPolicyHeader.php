@@ -12,7 +12,7 @@ use Symfony\Component\HttpFoundation\Response;
  */
 final class ContentSecurityPolicyHeader
 {
-    public const string Header = 'Content-Security-Policy';
+    private const string Header = 'Content-Security-Policy';
 
     public const string ReportOnlyHeader = 'Content-Security-Policy-Report-Only';
 

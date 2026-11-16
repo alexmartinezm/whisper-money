@@ -41,7 +41,7 @@ final readonly class DashboardVariables
      * The whole month $day falls in: pass the user's own today
      * ({@see User::localToday()}), not the server's.
      */
-    public static function forMonthOf(CarbonImmutable $day): self
+    private static function forMonthOf(CarbonImmutable $day): self
     {
         return new self($day->startOfMonth(), $day->endOfMonth()->startOfDay());
     }

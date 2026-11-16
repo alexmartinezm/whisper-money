@@ -10,7 +10,7 @@ namespace App\Services\Widgets;
  * version is checked again before its module is served again
  * ({@see WidgetDefinitionService::recheck()}, `widgets:revalidate`).
  *
- * WidgetRulesVersionTest pins SourcesHash to those files: changing them
+ * WidgetRulesVersionTest pins a hash of those files: changing them
  * fails it until VERSION is bumped and the hash updated, so the rules never
  * change without the stored widgets being re-checked.
  */
@@ -18,9 +18,6 @@ final class WidgetRules
 {
     /** 1: the rules widgets were first saved under. 2: fork hardening. */
     public const int VERSION = 2;
-
-    /** sha256 of the rule sources, as WidgetRulesVersionTest computes it. */
-    public const string SourcesHash = 'c9116817fe701a3d69c1cd6b7080b11ade52c5fad794cdf7e8e9c2fc41e93c04';
 
     /**
      * What a widget that no longer passes the rules is served instead of its
