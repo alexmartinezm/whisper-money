@@ -94,6 +94,20 @@ describe('resolveWidgetData', () => {
     });
 });
 
+/** One widget's data, loaded once, with a refresh token to move on. */
+async function renderRefreshable() {
+    const definitions = [definition('a')];
+    const hook = renderHook(
+        ({ refreshToken }) =>
+            useUserWidgetData('dash-1', definitions, true, { refreshToken }),
+        { initialProps: { refreshToken: 0 } },
+    );
+
+    await waitFor(() => expect(hook.result.current.status).toBe('ready'));
+
+    return hook;
+}
+
 describe('useUserWidgetData', () => {
     const fetchMock = vi.fn();
 
@@ -141,16 +155,7 @@ describe('useUserWidgetData', () => {
     });
 
     it('asks again when the refresh token moves on, keeping the data meanwhile', async () => {
-        const definitions = [definition('a')];
-        const { result, rerender } = renderHook(
-            ({ refreshToken }) =>
-                useUserWidgetData('dash-1', definitions, true, {
-                    refreshToken,
-                }),
-            { initialProps: { refreshToken: 0 } },
-        );
-
-        await waitFor(() => expect(result.current.status).toBe('ready'));
+        const { result, rerender } = await renderRefreshable();
         rerender({ refreshToken: 1 });
 
         expect(result.current).toMatchObject({
@@ -164,16 +169,7 @@ describe('useUserWidgetData', () => {
     });
 
     it('keeps the data on screen when a refresh fails', async () => {
-        const definitions = [definition('a')];
-        const { result, rerender } = renderHook(
-            ({ refreshToken }) =>
-                useUserWidgetData('dash-1', definitions, true, {
-                    refreshToken,
-                }),
-            { initialProps: { refreshToken: 0 } },
-        );
-
-        await waitFor(() => expect(result.current.status).toBe('ready'));
+        const { result, rerender } = await renderRefreshable();
         fetchMock.mockResolvedValueOnce({ ok: false, status: 500 });
         rerender({ refreshToken: 1 });
 
