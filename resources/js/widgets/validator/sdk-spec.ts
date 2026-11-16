@@ -1,4 +1,4 @@
-import { FORBIDDEN_PROPERTY_NAMES } from './allowlist';
+import { FORBIDDEN_PROPERTY_NAMES, REACT_INTERNAL_PREFIX } from './allowlist';
 import type { ComponentProps } from './component-props';
 
 /**
@@ -35,6 +35,11 @@ export const SDK_VALUES: ReadonlySet<string> = new Set([
 export const GET_FORBIDDEN_KEYS: ReadonlySet<string> = new Set(
     [...FORBIDDEN_PROPERTY_NAMES].filter((name) => name !== 'target'),
 );
+
+/** Whether `get(obj, key)` refuses `key`: the list, or a React internal key. */
+export function isGetForbiddenKey(key: string): boolean {
+    return GET_FORBIDDEN_KEYS.has(key) || REACT_INTERNAL_PREFIX.test(key);
+}
 
 const KEY_AND_CLASS = { key: 'value', className: 'className' } as const;
 

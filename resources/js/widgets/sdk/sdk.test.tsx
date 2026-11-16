@@ -92,6 +92,16 @@ describe('get', () => {
         },
     );
 
+    it('refuses the keys React puts on DOM nodes, even as own properties', () => {
+        for (const key of [
+            '__reactFiber$x1',
+            '__reactProps$x1',
+            '_reactRootContainer',
+        ]) {
+            expect(sdk.get({ [key]: 'x' }, key)).toBeUndefined();
+        }
+    });
+
     it('returns undefined for anything that is not an object and a key', () => {
         expect(sdk.get(null, 'a')).toBeUndefined();
         expect(sdk.get('text', 'length')).toBeUndefined();

@@ -8,6 +8,7 @@ import {
     WIDGET_FILE_NAME,
 } from './ast-helpers';
 import { WIDGET_CLASS_NAMES } from './class-names';
+import { checkDelete, checkUpdateExpression } from './global-rules';
 import { checkImport } from './import-rules';
 import { checkJsxChild, checkJsxElement } from './jsx-rules';
 import {
@@ -70,6 +71,9 @@ const RULES: Partial<Record<ts.SyntaxKind, Rule>> = {
     [ts.SyntaxKind.CallExpression]: checkCall,
     [ts.SyntaxKind.ForOfStatement]: checkLoop,
     [ts.SyntaxKind.ForInStatement]: checkLoop,
+    [ts.SyntaxKind.PrefixUnaryExpression]: checkUpdateExpression,
+    [ts.SyntaxKind.PostfixUnaryExpression]: checkUpdateExpression,
+    [ts.SyntaxKind.DeleteExpression]: checkDelete,
     [ts.SyntaxKind.JsxElement]: checkJsxElement,
     [ts.SyntaxKind.JsxSelfClosingElement]: checkJsxElement,
     [ts.SyntaxKind.JsxExpression]: checkJsxChild,

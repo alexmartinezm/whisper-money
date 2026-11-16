@@ -2,8 +2,9 @@
  * Closed lists the widget validator checks TSX against. Anything that is not
  * listed here is rejected: a list of what is allowed can only fall short (and
  * is fixed by extending it), while a list of what is forbidden always leaves
- * something out. The single exception is FORBIDDEN_PROPERTY_NAMES, because
- * widget data carries arbitrary keys.
+ * something out. The single exception is FORBIDDEN_PROPERTY_NAMES: property
+ * access stays a denylist because widget data carries arbitrary API keys,
+ * which no allowlist of property names could anticipate.
  */
 
 export const SDK_MODULE = '@whisper-money/widget-sdk';
@@ -54,6 +55,48 @@ export const SAFE_GLOBALS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Safe globals that are namespaces shared with the app: a widget may only read
+ * a member of them (`Math.max(…)`, `JSON.stringify(x)`, `new Intl.NumberFormat()`),
+ * never hold the namespace itself in a variable, an object, an array or an
+ * argument, where a write through the copy would reach the app's own.
+ */
+export const NAMESPACE_GLOBALS: ReadonlySet<string> = new Set([
+    'Math',
+    'JSON',
+    'Intl',
+]);
+
+/**
+ * Safe globals that are functions shared with the app. Besides reading a
+ * member of them, a widget may call them, construct them, test with them
+ * (`x instanceof Date`) and pass them straight to an array callback
+ * (CALLBACK_METHODS: `rows.map(Number)`, `.filter(Boolean)`), and nothing else.
+ */
+export const CONSTRUCTOR_GLOBALS: ReadonlySet<string> = new Set([
+    'Number',
+    'String',
+    'Boolean',
+    'Date',
+    'Map',
+    'Set',
+]);
+
+/** Methods a CONSTRUCTOR_GLOBALS function may be handed to as a callback. */
+export const CALLBACK_METHODS: ReadonlySet<string> = new Set([
+    'map',
+    'filter',
+    'find',
+    'findIndex',
+    'findLast',
+    'findLastIndex',
+    'some',
+    'every',
+    'flatMap',
+    'forEach',
+    'from',
+]);
+
+/**
  * Globals that may only be used through these static methods. The rest of
  * `Object` (`getPrototypeOf`, `getOwnPropertyDescriptor`, `defineProperty`…)
  * reaches prototypes without ever writing `constructor`.
@@ -71,8 +114,14 @@ export const SAFE_STATIC_METHODS: ReadonlyMap<
  * literal key: they lead to prototypes, `Function` or the DOM. `$$typeof`,
  * `_owner` and `_store` are React element internals: with them a widget could
  * forge an element (`{ $$typeof, type: 'iframe', props }`) that JSX checks
- * never saw. The SDK's `get()` rejects them too, except `target`
- * (GET_FORBIDDEN_KEYS in sdk-spec.ts).
+ * never saw. The DOM members after them lead from a node or an event that
+ * reached a widget to HTML parsing, script execution, attribute writes, the
+ * rest of the tree, the document or storage; `stateNode`, `return` and
+ * `_reactInternals` walk React's fibers back to host nodes. Names a finance
+ * widget uses as data keys, style keys or props (`children`, `parent`, `top`,
+ * `style`, `value`, `name`, `remove`…) stay out on purpose. The SDK's `get()`
+ * rejects them too, except `target` (GET_FORBIDDEN_KEYS in sdk-spec.ts), and
+ * both reject every name REACT_INTERNAL_PREFIX matches.
  */
 export const FORBIDDEN_PROPERTY_NAMES: ReadonlySet<string> = new Set([
     'constructor',
@@ -93,7 +142,80 @@ export const FORBIDDEN_PROPERTY_NAMES: ReadonlySet<string> = new Set([
     '$$typeof',
     '_owner',
     '_store',
+    'innerHTML',
+    'outerHTML',
+    'insertAdjacentHTML',
+    'insertAdjacentElement',
+    'insertAdjacentText',
+    'setHTMLUnsafe',
+    'setHTML',
+    'srcdoc',
+    'write',
+    'writeln',
+    'createContextualFragment',
+    'setAttribute',
+    'setAttributeNS',
+    'setAttributeNode',
+    'attributes',
+    'parentElement',
+    'srcElement',
+    'relatedTarget',
+    'offsetParent',
+    'firstChild',
+    'lastChild',
+    'firstElementChild',
+    'lastElementChild',
+    'nextSibling',
+    'previousSibling',
+    'nextElementSibling',
+    'previousElementSibling',
+    'childNodes',
+    'closest',
+    'querySelector',
+    'querySelectorAll',
+    'getElementById',
+    'getElementsByClassName',
+    'getElementsByTagName',
+    'getElementsByName',
+    'appendChild',
+    'insertBefore',
+    'replaceChild',
+    'replaceChildren',
+    'replaceWith',
+    'cloneNode',
+    'createElement',
+    'createElementNS',
+    'documentElement',
+    'contentWindow',
+    'contentDocument',
+    'shadowRoot',
+    'attachShadow',
+    'cookie',
+    'localStorage',
+    'sessionStorage',
+    'indexedDB',
+    'item',
+    'namedItem',
+    'dispatchEvent',
+    'addEventListener',
+    'stateNode',
+    'return',
+    '_reactInternals',
 ]);
+
+/**
+ * The keys React puts on DOM nodes and roots (`__reactFiber$…`,
+ * `__reactProps$…`, `_reactRootContainer`): own properties, so `get()` alone
+ * would read them. No data key starts like this.
+ */
+export const REACT_INTERNAL_PREFIX = /^_{1,2}react/i;
+
+/** Whether `name` may never be read from a widget. */
+export function isForbiddenPropertyName(name: string): boolean {
+    return (
+        FORBIDDEN_PROPERTY_NAMES.has(name) || REACT_INTERNAL_PREFIX.test(name)
+    );
+}
 
 export const HTML_TAGS: ReadonlySet<string> = new Set([
     'div',

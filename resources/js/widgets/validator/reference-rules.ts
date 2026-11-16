@@ -1,6 +1,6 @@
 import ts from 'typescript';
 import {
-    FORBIDDEN_PROPERTY_NAMES,
+    isForbiddenPropertyName,
     SAFE_GLOBALS,
     SAFE_STATIC_METHODS,
     SDK_MODULE,
@@ -11,7 +11,8 @@ import {
     literalKeyOf,
     unwrap,
 } from './ast-helpers';
-import { GET_FORBIDDEN_KEYS } from './sdk-spec';
+import { checkSharedGlobalUse, checkWriteTarget } from './global-rules';
+import { isGetForbiddenKey } from './sdk-spec';
 import type { ValidationContext } from './validation-context';
 
 const COMPUTED_KEY_HINT =
@@ -24,7 +25,11 @@ const COMPUTED_KEY_HINT =
 export function checkReference(
     context: ValidationContext,
     identifier: ts.Identifier,
-    symbol = context.checker.getSymbolAtLocation(identifier),
+    // Null: resolved to nothing. Undefined (left out) would fall back to the
+    // name's own symbol, which for `{ window }` is the object's property.
+    symbol: ts.Symbol | null = context.checker.getSymbolAtLocation(
+        identifier,
+    ) ?? null,
 ): void {
     const name = identifier.text;
 
@@ -41,6 +46,8 @@ export function checkReference(
     }
 
     if (SAFE_GLOBALS.has(name)) {
+        checkSharedGlobalUse(context, identifier);
+
         return;
     }
 
@@ -78,7 +85,7 @@ export function checkCall(
 
     if (
         key !== null &&
-        GET_FORBIDDEN_KEYS.has(key) &&
+        isGetForbiddenKey(key) &&
         context.isImported(node.expression, SDK_MODULE, 'get')
     ) {
         context.report(
@@ -126,7 +133,7 @@ export function checkShorthandProperty(
     checkReference(
         context,
         node.name,
-        context.checker.getShorthandAssignmentValueSymbol(node),
+        context.checker.getShorthandAssignmentValueSymbol(node) ?? null,
     );
 
     if (node.objectAssignmentInitializer) {
@@ -164,8 +171,9 @@ export function checkBindingElement(
 
 /**
  * Destructuring assignments (`({ [k]: v } = x)`) read computed keys through
- * object literals, and reassigning a function swaps a handler that was
- * checked to have no parameters for one that has them.
+ * object literals, reassigning a function swaps a handler that was checked to
+ * have no parameters for one that has them, and a write to a global or an
+ * import changes what the app itself runs (checkWriteTarget).
  */
 export function checkBinaryExpression(
     context: ValidationContext,
@@ -192,6 +200,8 @@ export function checkBinaryExpression(
                 `Functions cannot be reassigned. Declare a new function instead of overwriting \`${left.text}\`.`,
             );
         }
+
+        checkWriteTarget(context, node.left);
     }
 
     context.visitChildren(node);
@@ -212,6 +222,8 @@ export function checkLoop(
             'destructuring-assignment',
             'Destructure loop items in a declaration: `for (const { a } of rows)`.',
         );
+    } else if (!ts.isVariableDeclarationList(target)) {
+        checkWriteTarget(context, target);
     }
 
     context.visitChildren(node);
@@ -270,8 +282,8 @@ function checkPropertyName(
     node: ts.Node,
     name: string,
 ): void {
-    if (FORBIDDEN_PROPERTY_NAMES.has(name)) {
-        const instead = GET_FORBIDDEN_KEYS.has(name)
+    if (isForbiddenPropertyName(name)) {
+        const instead = isGetForbiddenKey(name)
             ? 'If your data has a field with this name, read it through Object.entries(row).'
             : `To read a data field called "${name}", use get(obj, '${name}') from the SDK.`;
 

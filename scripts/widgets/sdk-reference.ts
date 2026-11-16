@@ -9,10 +9,13 @@
  * widget-classes.json itself.
  */
 import {
+    CALLBACK_METHODS,
     COMMON_ATTRIBUTES,
+    CONSTRUCTOR_GLOBALS,
     FORBIDDEN_PROPERTY_NAMES,
     HTML_ATTRIBUTES,
     HTML_TAGS,
+    NAMESPACE_GLOBALS,
     NATIVE_HANDLERS,
     REACT_EXPORTS,
     SAFE_GLOBALS,
@@ -50,6 +53,12 @@ export function widgetSdkReference() {
             },
         },
         globals: list(SAFE_GLOBALS),
+        global_usage: {
+            members_only: list(NAMESPACE_GLOBALS),
+            call_construct_or_members: list(CONSTRUCTOR_GLOBALS),
+            callback_methods: list(CALLBACK_METHODS),
+            note: 'Globals and imports are shared with the app: never assign to them, to anything reached from them (Math.max = …, wm.download = …), nor delete or increment them; keep a copy of your own in a variable instead. members_only globals are only used through a member (Math.max(a, b), JSON.stringify(x), new Intl.NumberFormat(locale)); call_construct_or_members globals may also be called, constructed, used after instanceof or handed straight to one of callback_methods (rows.map(Number), xs.filter(Boolean)), never kept in a variable, an object or an array.',
+        },
         static_methods: Object.fromEntries(
             [...SAFE_STATIC_METHODS].map(([global, methods]) => [
                 global,
