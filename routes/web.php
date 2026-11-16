@@ -222,7 +222,7 @@ Route::middleware(['auth', 'verified', 'onboarded', 'subscribed'])->group(functi
         Route::get('data', [WidgetDataController::class, 'show'])->name('data');
         Route::middleware('block-demo')->group(function () {
             Route::post('errors', [WidgetErrorController::class, 'store'])->middleware('throttle:widget-errors')->name('errors.store');
-            Route::post('revert', [WidgetRevisionController::class, 'revert'])->name('revert');
+            Route::post('revert', [WidgetRevisionController::class, 'revert'])->middleware('throttle:widget-reverts')->name('revert');
         });
     });
 

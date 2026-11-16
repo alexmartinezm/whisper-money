@@ -208,21 +208,23 @@ describe('widget data', function () {
         $november = WidgetDefinition::factory()->for($user)->reading([
             'rows' => ['endpoint' => 'GET /transactions', 'params' => ['from' => '2026-11-01', 'to' => '2026-11-30'], 'paginate' => 'all'],
         ])->create();
-        foreach ([$october, $november] as $widget) {
-            DashboardWidget::factory()->for($dashboard)->create(['system_widget' => null, 'widget_definition_id' => $widget->id, 'width' => '1/2', 'height' => 'm']);
+        // The widget saved last sits first on the dashboard.
+        foreach ([$november, $october] as $position => $widget) {
+            DashboardWidget::factory()->for($dashboard)->create(['system_widget' => null, 'widget_definition_id' => $widget->id, 'width' => '1/2', 'height' => 'm', 'position' => $position]);
         }
 
-        $widgets = $this->actingAs($user)
-            ->getJson(route('dashboards.widgets.data', ['dashboard' => $dashboard, 'range' => ['from' => '2026-10-01', 'to' => '2026-10-31']]))
-            ->assertOk()
-            ->json('widgets');
+        // The widget placed first spends the one row, on every load; the other is refused.
+        foreach (range(1, 3) as $load) {
+            $widgets = $this->actingAs($user)
+                ->getJson(route('dashboards.widgets.data', ['dashboard' => $dashboard, 'range' => ['from' => '2026-10-01', 'to' => '2026-10-31']]))
+                ->assertOk()
+                ->json('widgets');
 
-        // Whichever widget is read first spends the one row; the other is refused.
-        $answers = collect($widgets)->map(fn (array $widget): array => $widget['data']['rows']);
-
-        expect($answers->pluck('status')->sort()->values()->all())->toBe([200, 422])
-            ->and($answers->firstWhere('status', 200)['body']['data'])->toHaveCount(1)
-            ->and($answers->firstWhere('status', 422)['body']['code'])->toBe('too_many_rows');
+            expect($widgets[$november->id]['data']['rows']['status'])->toBe(200)
+                ->and($widgets[$november->id]['data']['rows']['body']['data'])->toHaveCount(1)
+                ->and($widgets[$october->id]['data']['rows']['status'])->toBe(422)
+                ->and($widgets[$october->id]['data']['rows']['body']['code'])->toBe('too_many_rows');
+        }
     });
 
     it('refuses another user\'s dashboard', function () {
@@ -345,6 +347,18 @@ describe('placing and reverting from the web', function () {
         $this->actingAs($user)
             ->post(route('widgets.revert', transactionsWidget($user)), ['revision' => 4])
             ->assertSessionHasErrors('revision');
+    });
+
+    it('throttles reverts per user, since each one compiles the widget again', function () {
+        $user = widgetOwner();
+        $widget = transactionsWidget($user);
+
+        foreach (range(1, 10) as $attempt) {
+            $this->actingAs($user)->post(route('widgets.revert', $widget), ['revision' => 4])->assertSessionHasErrors('revision');
+        }
+
+        $this->actingAs($user)->post(route('widgets.revert', transactionsWidget($user)), ['revision' => 1])->assertTooManyRequests();
+        $this->actingAs(widgetOwner())->post(route('widgets.revert', $widget), ['revision' => 1])->assertNotFound();
     });
 
     it('does not let a user revert another user\'s widget', function () {

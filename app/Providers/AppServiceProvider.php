@@ -170,6 +170,14 @@ class AppServiceProvider extends ServiceProvider
                 ->by($request->user()?->getAuthIdentifier().'|'.($widget instanceof WidgetDefinition ? $widget->id : $widget));
         });
 
+        // Going back to an earlier revision of a user widget, from the
+        // dashboard. Each one compiles the widget again, synchronously, so a
+        // few a minute per user is plenty for a person and a ceiling for a
+        // loop.
+        RateLimiter::for('widget-reverts', function (Request $request): Limit {
+            return Limit::perMinute(10)->by((string) $request->user()?->getAuthIdentifier());
+        });
+
         // AI column-mapping suggestions are asked once per imported file, so 20
         // a minute per user is plenty. A named limiter keeps its own bucket: a
         // plain `throttle:20,1` would share (and double-count) the key of the

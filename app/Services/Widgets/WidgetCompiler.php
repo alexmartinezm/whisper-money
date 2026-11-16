@@ -65,7 +65,7 @@ class WidgetCompiler
             return $this->crashed('unreadable output: '.$exception->getMessage());
         }
 
-        if (! is_array($payload) || ! is_bool($payload['ok'] ?? null) || ! is_array($payload['errors'] ?? null)) {
+        if (! $this->isCompileResult($payload)) {
             return $this->crashed('unexpected output shape');
         }
 
@@ -76,6 +76,22 @@ class WidgetCompiler
             errors: $payload['errors'],
             timings: $payload['timings'],
         );
+    }
+
+    /**
+     * Whether $payload carries every key a compile result has: a successful
+     * compile hands back its module and a failed one none, so a compiler that
+     * answers anything else is treated as crashed, not as a half result.
+     */
+    private function isCompileResult(mixed $payload): bool
+    {
+        if (! is_array($payload) || ! is_bool($payload['ok'] ?? null) || ! is_array($payload['errors'] ?? null) || ! is_array($payload['timings'] ?? null)) {
+            return false;
+        }
+
+        $js = $payload['js'] ?? null;
+
+        return $payload['ok'] ? is_string($js) : $js === null;
     }
 
     /**

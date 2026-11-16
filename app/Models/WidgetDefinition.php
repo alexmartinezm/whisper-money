@@ -89,13 +89,23 @@ class WidgetDefinition extends Model implements SizedWidget
     }
 
     /**
-     * The widgets placed on $dashboard, each once however many times it is placed.
+     * The widgets placed on $dashboard, each once however many times it is
+     * placed, in the order they sit on it (by their first placement). The
+     * order is steady on purpose: the widgets of a dashboard share one row
+     * budget, and the ones read last are the ones refused when it runs out.
      *
      * @param  Builder<WidgetDefinition>  $query
      */
     public function scopeOnDashboard(Builder $query, Dashboard $dashboard): void
     {
-        $query->whereIn('id', $dashboard->widgets()->whereNotNull('widget_definition_id')->select('widget_definition_id'));
+        $query->whereIn('id', $dashboard->widgets()->whereNotNull('widget_definition_id')->select('widget_definition_id'))
+            ->orderBy(
+                DashboardWidget::query()
+                    ->selectRaw('min(position)')
+                    ->whereColumn('dashboard_widgets.widget_definition_id', 'widget_definitions.id')
+                    ->where('dashboard_widgets.dashboard_id', $dashboard->id)
+            )
+            ->orderBy('widget_definitions.id');
     }
 
     /** @return array{width: WidgetWidth, height: WidgetHeight} */

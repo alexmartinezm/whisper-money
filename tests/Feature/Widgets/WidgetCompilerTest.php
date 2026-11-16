@@ -68,16 +68,21 @@ it('reports a crashed compiler without leaking its output to the agent or the re
     Exceptions::assertReported(fn (RuntimeException $exception) => $exception->getMessage() === 'Widget compiler crashed: exit code 3');
 });
 
-it('treats output that is not a compile result as a crash', function () {
+it('treats output that is not a compile result as a crash', function (string $fixture) {
     Exceptions::fake();
 
-    $compilation = (new WidgetCompiler(base_path('tests/Fixtures/widgets/unexpected-output-compiler.ts')))
+    $compilation = (new WidgetCompiler(base_path("tests/Fixtures/widgets/{$fixture}")))
         ->compile('export default function W() { return <div />; }');
 
-    expect($compilation->errors[0]['code'])->toBe('compiler');
+    expect($compilation->ok)->toBeFalse()
+        ->and($compilation->js)->toBeNull()
+        ->and($compilation->errors[0]['code'])->toBe('compiler');
 
     Exceptions::assertReported(fn (RuntimeException $exception) => str_contains($exception->getMessage(), 'unexpected output shape'));
-});
+})->with([
+    'another shape' => 'unexpected-output-compiler.ts',
+    'a success without its module or timings' => 'incomplete-output-compiler.ts',
+]);
 
 it('rejects deeply nested widgets as too complex instead of crashing Bun', function (string $source) {
     $compilation = app(WidgetCompiler::class)->compile($source);
