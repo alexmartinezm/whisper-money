@@ -1,6 +1,7 @@
 import { dashboard as dashboardWidgetsData } from '@/actions/App/Http/Controllers/Widgets/WidgetDataController';
 import { fetchJson } from '@/lib/fetch-json';
 import { type UserWidgetDefinition } from '@/types/dashboard';
+import { deepFreeze } from '@/widgets/runtime/freeze';
 import { useEffect, useMemo, useState } from 'react';
 
 /** One call of a manifest, answered as `/api/v1` would answer it. */
@@ -92,7 +93,9 @@ export function resolveWidgetData(
             continue;
         }
 
-        data[key] = body;
+        // Once per request: a widget is handed these rows and must not be able
+        // to rewrite them for the app, which reads them again.
+        data[key] = deepFreeze(body);
         resolved.truncated ||= isRecord(body) && body.truncated === true;
     }
 

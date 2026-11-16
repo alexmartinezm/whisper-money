@@ -221,6 +221,67 @@ export default function W() {
         },
     );
 
+    it('hands out frozen modules and exports', () => {
+        const registry = (globalThis as unknown as Record<symbol, unknown>)[
+            Symbol.for('whisper-money.widget-modules')
+        ] as Record<string, Record<string, unknown>>;
+
+        for (const module of Object.values(registry)) {
+            expect(Object.isFrozen(module)).toBe(true);
+
+            for (const value of Object.values(module)) {
+                if (typeof value === 'function' || typeof value === 'object') {
+                    expect(Object.isFrozen(value)).toBe(true);
+                }
+            }
+        }
+
+        const { wm } = registry['@whisper-money/widget-sdk'] as {
+            wm: { download: unknown };
+        };
+
+        expect(() => {
+            wm.download = () => undefined;
+        }).toThrow(TypeError);
+    });
+
+    /** What the validator rejects, written as compiled code to get past it. */
+    it.each([
+        'Array.from=()=>[]',
+        'Object.keys=()=>[]',
+        'JSON.parse=(s)=>s',
+        'Math.max=()=>0',
+        'Math={}',
+        'Date.now=()=>0',
+        'Intl.NumberFormat=function(){}',
+        'Intl.NumberFormat.supportedLocalesOf=()=>[]',
+        'parseInt=()=>0',
+        'Number.isFinite=()=>true',
+    ])('refuses a module that swaps a shared global: %s', async (statement) => {
+        await expect(
+            loadWidgetModule(
+                `${statement};export default function W(){return null}`,
+            ),
+        ).rejects.toThrow(WidgetModuleError);
+
+        expect(Array.from('ab')).toEqual(['a', 'b']);
+        expect(Math.max(1, 2)).toBe(2);
+        expect(JSON.parse('1')).toBe(1);
+    });
+
+    it('refuses a module that swaps what an import holds', async () => {
+        await expect(
+            loadWidgetModule(
+                'import{wm}from"@whisper-money/widget-sdk";wm.download=()=>0;export default function W(){return null}',
+            ),
+        ).rejects.toThrow(WidgetModuleError);
+        await expect(
+            loadWidgetModule(
+                'import{Button}from"@whisper-money/widget-sdk";Button.displayName="x";export default function W(){return null}',
+            ),
+        ).rejects.toThrow(WidgetModuleError);
+    });
+
     it('refuses modules outside the contract', async () => {
         await expect(
             loadWidgetModule(

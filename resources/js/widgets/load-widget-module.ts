@@ -1,5 +1,7 @@
 import type { ComponentType } from 'react';
 import { parseImportPrelude } from './import-prelude';
+import { freezeModule } from './runtime/freeze';
+import { hardenIntrinsics } from './runtime/harden-intrinsics';
 import { WIDGET_EXTERNALS, type WidgetExternal } from './validator/allowlist';
 
 /**
@@ -46,10 +48,23 @@ type GlobalWithRegistry = typeof globalThis & {
     [REGISTRY_KEY]?: WidgetModuleRegistry;
 };
 
+/**
+ * Store the modules widgets link against. Before any widget can run, the
+ * shared globals are hardened (harden-intrinsics.ts) and every module and
+ * export is frozen, so no widget can swap what the app or another widget
+ * calls.
+ */
 export function registerWidgetModules(registry: WidgetModuleRegistry): void {
-    (globalThis as GlobalWithRegistry)[REGISTRY_KEY] = Object.freeze({
-        ...registry,
-    });
+    hardenIntrinsics();
+
+    (globalThis as GlobalWithRegistry)[REGISTRY_KEY] = Object.freeze(
+        Object.fromEntries(
+            Object.entries(registry).map(([specifier, module]) => [
+                specifier,
+                freezeModule(module),
+            ]),
+        ) as WidgetModuleRegistry,
+    );
 }
 
 /**

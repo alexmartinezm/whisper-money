@@ -30,6 +30,7 @@ import {
     scopedTransactionTable,
     WidgetTransactionTableProvider,
 } from '../sdk/transaction-table-host';
+import { deepFreeze } from './freeze';
 import { type UserWidgetProps } from './user-widget';
 import {
     isWidgetCarded,
@@ -68,10 +69,13 @@ export default function UserWidgetFrame({
     className,
 }: UserWidgetProps) {
     const [state, setState] = useState<LoadState>({ status: 'loading' });
-    const sdk = useWidgetSdkValue(data, size);
+    // Frozen before the widget ever sees it: the rows the host's table acts on
+    // are read from here, so the widget must not be able to rewrite them.
+    const frozenData = useMemo(() => deepFreeze(data), [data]);
+    const sdk = useWidgetSdkValue(frozenData, size);
     const transactionTable = useMemo(
-        () => scopedTransactionTable(renderTransactionTable, data),
-        [renderTransactionTable, data],
+        () => scopedTransactionTable(renderTransactionTable, frozenData),
+        [renderTransactionTable, frozenData],
     );
     const { crashed, markCrashed } = useWidgetCrash(data);
     const carded = isWidgetCarded(frame, state.status === 'ready' && !crashed);

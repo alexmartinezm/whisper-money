@@ -63,6 +63,17 @@ describe('resolveWidgetData', () => {
         expect(resolved.truncated).toBe(false);
     });
 
+    it('freezes the rows it hands the widget, all the way down', () => {
+        const resolved = resolveWidgetData({
+            tx: { status: 200, body: { data: [{ id: 't1', amount: -5 }] } },
+        });
+        const rows = (resolved.data.tx as { data: { amount: number }[] }).data;
+
+        expect(Object.isFrozen(resolved.data)).toBe(true);
+        expect(Object.isFrozen(rows)).toBe(true);
+        expect(Object.isFrozen(rows[0])).toBe(true);
+    });
+
     it('keeps the calls the API refused apart, with its message', () => {
         const resolved = resolveWidgetData({
             ok: { status: 200, body: {} },

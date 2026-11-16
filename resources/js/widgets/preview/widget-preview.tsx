@@ -6,7 +6,14 @@ import { cn } from '@/lib/utils';
 import { type Category } from '@/types/category';
 import { type WidgetFrame } from '@/types/dashboard';
 import { type Label } from '@/types/label';
-import { type ComponentType, useEffect, useRef, useState } from 'react';
+import {
+    type ComponentType,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+} from 'react';
+import { deepFreeze } from '../runtime/freeze';
 import {
     isWidgetCarded,
     useWidgetCrash,
@@ -183,6 +190,7 @@ export function WidgetPreview({
     const [privacyMode, setPrivacyMode] = useState(false);
     const [failure] = payload.failures;
     const { crashed, markCrashed } = useWidgetCrash(payload);
+    const data = useMemo(() => deepFreeze(payload.data), [payload.data]);
 
     useEffect(() => {
         setDefaultMoneyLocale(payload.locale);
@@ -206,7 +214,7 @@ export function WidgetPreview({
         content = (
             <WidgetErrorState message={`${failure.key}: ${failure.message}`} />
         );
-    } else if (payload.data === null) {
+    } else if (data === null) {
         content = (
             <p className="flex h-full items-center justify-center p-4 text-center text-sm text-muted-foreground">
                 This widget reads too much data to preview it here. Open it on
@@ -234,7 +242,7 @@ export function WidgetPreview({
             >
                 <WidgetSdkProvider
                     value={{
-                        data: payload.data,
+                        data,
                         accounts: payload.accounts,
                         categories: payload.categories ?? [],
                         labels: payload.labels ?? [],

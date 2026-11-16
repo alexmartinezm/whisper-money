@@ -269,7 +269,9 @@ describe('useUserWidgetsGate', () => {
     });
 
     it('marks the load before the widgets mount and clears it once they drew', () => {
-        vi.useFakeTimers();
+        // Timers only: the widget runtime loaded above froze the `Date` binding
+        // (harden-intrinsics.ts), which faking Date would have to replace.
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
         const { result } = renderHook(() => useUserWidgetsGate(['a', 'b']));
 
         expect(result.current.mode).toBe('run');
