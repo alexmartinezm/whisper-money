@@ -86,7 +86,14 @@ it('keeps the framing guarantee in the same header on the pages that deny framin
 });
 
 it('leaves JSON answers alone: Inertia visits, the API and MCP', function () {
-    $visit = get(route('login'), ['X-Inertia' => 'true', 'X-Requested-With' => 'XMLHttpRequest']);
+    // With built assets a visit that names another asset version is answered
+    // 409, and the version is only known once a page has been rendered.
+    $version = get(route('login'))->viewData('page')['version'];
+    $visit = get(route('login'), [
+        'X-Inertia' => 'true',
+        'X-Requested-With' => 'XMLHttpRequest',
+        'X-Inertia-Version' => $version,
+    ]);
     $api = getJson('/api/v1/accounts');
     $mcp = $this->postJson('/mcp', ['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list']);
 
