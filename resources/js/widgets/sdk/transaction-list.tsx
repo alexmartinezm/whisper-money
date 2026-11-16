@@ -17,15 +17,9 @@ import { compareNewestFirst } from '@/hooks/use-in-memory-transaction-source';
 import { useTransactionLayout } from '@/hooks/use-transaction-layout';
 import { type DaySummaryOf } from '@/lib/transaction-day-groups';
 import { cn } from '@/lib/utils';
-import { type Account, type Bank } from '@/types/account';
 import { type Category } from '@/types/category';
 import { type Label } from '@/types/label';
-import {
-    type CategorySource,
-    type DecryptedTransaction,
-    type TransactionSource,
-    type TransactionSplit,
-} from '@/types/transaction';
+import { type DecryptedTransaction } from '@/types/transaction';
 import { __ } from '@/utils/i18n';
 import {
     getCoreRowModel,
@@ -33,129 +27,20 @@ import {
     useReactTable,
 } from '@tanstack/react-table';
 import { Fragment, useMemo, useState } from 'react';
-import { safeLogoUrl } from './bank-logo';
-import { useWidgetSdk, type WidgetAccount } from './context';
+import { useWidgetSdk } from './context';
 import { EmptyState } from './primitives';
 import { classNameOf } from './props';
-import { isRecord, useWidgetTransactionTable } from './transaction-table-host';
+import {
+    type ApiTransaction,
+    apiTransactions,
+    toHeldTransaction,
+} from './transaction-rows';
+import { useWidgetTransactionTable } from './transaction-table-host';
 
 /** The parts of a row a widget may leave out with `hide`. */
 const HIDEABLE_PARTS = ['account', 'labels', 'notes'] as const;
 
 type HideablePart = (typeof HIDEABLE_PARTS)[number];
-
-interface NamedRef {
-    id: string;
-    name: string;
-}
-
-/** A line of a split transaction, as `GET /transactions` nests it. */
-interface ApiSplitLine {
-    id: string;
-    category: NamedRef | null;
-    amount: number;
-    position: number;
-}
-
-/**
- * A row of `GET /transactions` (TransactionResource), the fields read here. A
- * split transaction is one row with its lines under `splits`; a field still
- * encrypted on the device comes as ''.
- */
-interface ApiTransaction {
-    /** The row as the API answered it, which the formatters receive. */
-    raw: Readonly<Record<string, unknown>>;
-    id: string;
-    transaction_date: string;
-    description: string;
-    amount: number;
-    currency: string;
-    account: NamedRef | null;
-    category: NamedRef | null;
-    category_source: CategorySource | null;
-    labels: NamedRef[];
-    source: TransactionSource;
-    notes: string | null;
-    creditor_name: string | null;
-    debtor_name: string | null;
-    splits: ApiSplitLine[];
-}
-
-function stringOrNull(value: unknown): string | null {
-    return typeof value === 'string' ? value : null;
-}
-
-function namedRef(value: unknown): NamedRef | null {
-    return isRecord(value) &&
-        typeof value.id === 'string' &&
-        typeof value.name === 'string'
-        ? { id: value.id, name: value.name }
-        : null;
-}
-
-function splitLine(value: unknown): ApiSplitLine | null {
-    return isRecord(value) &&
-        typeof value.id === 'string' &&
-        typeof value.amount === 'number' &&
-        Number.isFinite(value.amount)
-        ? {
-              id: value.id,
-              category: namedRef(value.category),
-              amount: value.amount,
-              position: typeof value.position === 'number' ? value.position : 0,
-          }
-        : null;
-}
-
-/**
- * One API row, or null when it lacks what a line needs (an id, a date, an
- * amount and its currency): widget data is whatever the widget handed over.
- */
-function apiTransaction(value: unknown): ApiTransaction | null {
-    if (
-        !isRecord(value) ||
-        typeof value.id !== 'string' ||
-        typeof value.transaction_date !== 'string' ||
-        typeof value.amount !== 'number' ||
-        !Number.isFinite(value.amount) ||
-        typeof value.currency !== 'string'
-    ) {
-        return null;
-    }
-
-    return {
-        raw: value,
-        id: value.id,
-        transaction_date: value.transaction_date,
-        description:
-            typeof value.description === 'string' ? value.description : '',
-        amount: value.amount,
-        currency: value.currency,
-        account: namedRef(value.account),
-        category: namedRef(value.category),
-        category_source: (value.category_source ??
-            null) as CategorySource | null,
-        labels: Array.isArray(value.labels)
-            ? value.labels.map(namedRef).filter((label) => label !== null)
-            : [],
-        source: value.source as TransactionSource,
-        notes: stringOrNull(value.notes),
-        creditor_name: stringOrNull(value.creditor_name),
-        debtor_name: stringOrNull(value.debtor_name),
-        splits: Array.isArray(value.splits)
-            ? value.splits.map(splitLine).filter((line) => line !== null)
-            : [],
-    };
-}
-
-/** The rows of `transactions`: a list, or a `paginate: "all"` answer. */
-function apiTransactions(value: unknown): ApiTransaction[] {
-    const rows = isRecord(value) && !Array.isArray(value) ? value.data : value;
-
-    return Array.isArray(rows)
-        ? rows.map(apiTransaction).filter((row) => row !== null)
-        : [];
-}
 
 /**
  * The parts `hide` names, as a string: a widget writes `hide={['notes']}`
@@ -172,80 +57,6 @@ function hiddenPartsOf(key: string): ReadonlySet<HideablePart> {
     return new Set(
         HIDEABLE_PARTS.filter((part) => key.split(',').includes(part)),
     );
-}
-
-function bankOf(account: WidgetAccount | undefined): Bank | undefined {
-    return account?.bankName
-        ? {
-              id: '',
-              user_id: null,
-              name: account.bankName,
-              logo: safeLogoUrl(account.bankLogo),
-          }
-        : undefined;
-}
-
-/** A split's lines as the app's table draws them, each with its category. */
-function splitsOf(
-    row: ApiTransaction,
-    categoryById: ReadonlyMap<string, Category>,
-): TransactionSplit[] {
-    return row.splits.map((line) => ({
-        id: line.id,
-        transaction_id: row.id,
-        category_id: line.category?.id ?? '',
-        category: line.category
-            ? (categoryById.get(line.category.id) ?? null)
-            : null,
-        amount: line.amount,
-        position: line.position,
-    }));
-}
-
-/**
- * An API row as the shape the app's own table holds its rows in: a split
- * transaction stays one row, at its own amount, with its lines. Notes the
- * server could not read ('') are left out.
- */
-function toHeldTransaction(
-    row: ApiTransaction,
-    accounts: Readonly<Record<string, WidgetAccount>>,
-    categoryById: ReadonlyMap<string, Category>,
-): DecryptedTransaction {
-    const notes = row.notes === '' ? null : row.notes;
-    const splits = splitsOf(row, categoryById);
-
-    return {
-        id: row.id,
-        user_id: '',
-        account_id: row.account?.id ?? '',
-        category_id: row.category?.id ?? null,
-        description: row.description,
-        description_iv: null,
-        decryptedDescription: row.description,
-        transaction_date: row.transaction_date,
-        amount: row.amount,
-        currency_code: row.currency,
-        notes,
-        notes_iv: null,
-        decryptedNotes: notes,
-        source: row.source,
-        category_source: row.category_source,
-        label_ids: row.labels.map((label) => label.id),
-        creditor_name: row.creditor_name,
-        debtor_name: row.debtor_name,
-        splits,
-        is_split: splits.length > 0,
-        split_count: splits.length,
-        created_at: '',
-        updated_at: '',
-        // The rows read only the name, the bank its logo and name.
-        account: (row.account ?? undefined) as Account | undefined,
-        bank:
-            row.account && Object.hasOwn(accounts, row.account.id)
-                ? bankOf(accounts[row.account.id])
-                : undefined,
-    };
 }
 
 /**
@@ -277,7 +88,9 @@ function displayCopy(
 /**
  * The user's categories, plus one for each category a row names that the
  * page does not know (another member's in a shared space), so the row says
- * its name rather than "Uncategorized".
+ * its name rather than "Uncategorized". For the read-only list only: the
+ * host's editable table gets the user's own categories and labels, never a
+ * placeholder built from what the widget passed.
  */
 function categoriesFor(
     rows: ApiTransaction[],
@@ -562,7 +375,9 @@ function ReadOnlyTransactions({
  * in place, rows ticked for the bulk actions bar, the row menus and the edit
  * dialog, the widget's data reloaded after each change. Where nothing can be
  * edited (`readOnly`, the MCP preview, a dashboard being arranged) it only
- * draws the rows.
+ * draws the rows. The editable table only takes the ids of the rows (and
+ * the formatters' text) from the widget: each row it acts on is the host's
+ * own copy of that transaction (scopedTransactionTable).
  *
  * - `transactions`: the rows, or the `{ data, truncated }` of `paginate: "all"`.
  * - `hide`: parts to leave out of every row: `'account'`, `'labels'`, `'notes'`.
@@ -671,10 +486,13 @@ export function TransactionList({
                     className={classNameOf(className)}
                 >
                     {renderTable({
-                        ...shared,
+                        transactionIds: held.map(({ id }) => id),
+                        pageSize: shared.pageSize,
+                        displayRow,
+                        badgeOf,
+                        hiddenLabelId: shared.hiddenLabelId,
+                        showDayTotals: shared.showDayTotals,
                         hideAccount,
-                        categories,
-                        labels,
                     })}
                 </div>
             ) : (

@@ -1,13 +1,28 @@
 import { type DisplayRow } from '@/components/transactions/transaction-base-columns';
+import { compareNewestFirst } from '@/hooks/use-in-memory-transaction-source';
 import { type Category } from '@/types/category';
 import { type Label } from '@/types/label';
 import { type DecryptedTransaction } from '@/types/transaction';
 import { createContext, type ReactNode, useContext } from 'react';
+import { type WidgetAccount } from './context';
+import {
+    apiTransaction,
+    isRecord,
+    toHeldTransaction,
+} from './transaction-rows';
 
-/** What `<TransactionList>` hands the host's transactions table. */
-export interface WidgetTransactionTableProps {
-    /** The widget's rows, newest first, as the API answered them. */
-    transactions: DecryptedTransaction[];
+/**
+ * Widget code may have run by the time the functions below are called: what
+ * they use of the shared globals is taken here, when the module loads.
+ */
+const { isArray } = Array;
+const { values } = Object;
+const { stringify } = JSON;
+const NativeMap = Map;
+const NativeSet = Set;
+
+/** How `<TransactionList>` wants its rows drawn. */
+interface WidgetTransactionListLayout {
     /** Rows drawn at first and added by "Load more"; null draws them all. */
     pageSize: number | null;
     /** The widget hides the account: no Account column, none on a row. */
@@ -17,7 +32,23 @@ export interface WidgetTransactionTableProps {
     badgeOf: (transaction: DecryptedTransaction) => string | undefined;
     hiddenLabelId: string | undefined;
     showDayTotals: boolean;
-    /** The user's categories and labels, plus any a row names that the page does not know. */
+}
+
+/**
+ * What `<TransactionList>` asks the host's table to draw: which transactions
+ * (by id) and how they read. The rows themselves are never the widget's: the
+ * host builds each one from the data it fetched (scopedTransactionTable).
+ */
+export interface WidgetTransactionListRequest extends WidgetTransactionListLayout {
+    /** The ids of the rows the widget passed. */
+    transactionIds: readonly string[];
+}
+
+/** What the host's table draws. */
+export interface WidgetTransactionTableProps extends WidgetTransactionListLayout {
+    /** The rows, newest first, built from the host's own data. */
+    transactions: DecryptedTransaction[];
+    /** The user's own categories and labels: nothing a widget made up. */
     categories: Category[];
     labels: Label[];
 }
@@ -32,15 +63,20 @@ export type RenderWidgetTransactionTable = (
     props: WidgetTransactionTableProps,
 ) => ReactNode;
 
+/** The host's table narrowed to one widget's data (scopedTransactionTable). */
+export type ScopedWidgetTransactionTable = (
+    request: WidgetTransactionListRequest,
+) => ReactNode;
+
 const WidgetTransactionTableContext =
-    createContext<RenderWidgetTransactionTable | null>(null);
+    createContext<ScopedWidgetTransactionTable | null>(null);
 
 /** Where the host lets the SDK's `<TransactionList>` act on its rows. */
 export function WidgetTransactionTableProvider({
     render,
     children,
 }: {
-    render: RenderWidgetTransactionTable | null;
+    render: ScopedWidgetTransactionTable | null;
     children: ReactNode;
 }) {
     return (
@@ -54,79 +90,117 @@ export function WidgetTransactionTableProvider({
  * Null where rows can only be read: the MCP preview, a dashboard being
  * edited.
  */
-export function useWidgetTransactionTable(): RenderWidgetTransactionTable | null {
+export function useWidgetTransactionTable(): ScopedWidgetTransactionTable | null {
     return useContext(WidgetTransactionTableContext);
 }
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null;
-}
-
 /**
- * The ids of the transactions in a widget's data: the rows of each
+ * The transactions in a widget's data, by id: the rows of each
  * `GET /transactions` call, listed or as the `{ data }` of `paginate: "all"`.
- * Only these reach the host's table.
+ * Only these reach the host's table, each as the host fetched it.
  */
-export function transactionIdsIn(
+export function transactionRowsIn(
     data: Readonly<Record<string, unknown>>,
-): ReadonlySet<string> {
-    const ids = new Set<string>();
+): ReadonlyMap<string, Record<string, unknown>> {
+    const rows = new NativeMap<string, Record<string, unknown>>();
 
-    for (const answer of Object.values(data)) {
-        const rows =
-            isRecord(answer) && !Array.isArray(answer) ? answer.data : answer;
+    for (const answer of values(data)) {
+        const list =
+            isRecord(answer) && !isArray(answer) ? answer.data : answer;
 
-        if (!Array.isArray(rows)) {
+        if (!isArray(list)) {
             continue;
         }
 
-        for (const row of rows) {
+        for (const row of list) {
             if (
                 isRecord(row) &&
                 typeof row.id === 'string' &&
                 typeof row.transaction_date === 'string'
             ) {
-                ids.add(row.id);
+                rows.set(row.id, row);
             }
         }
     }
 
-    return ids;
+    return rows;
 }
 
-const scopedRows = new WeakMap<
-    DecryptedTransaction[],
-    DecryptedTransaction[]
->();
+/** The ids of the transactions in a widget's data (transactionRowsIn). */
+export function transactionIdsIn(
+    data: Readonly<Record<string, unknown>>,
+): ReadonlySet<string> {
+    return new NativeSet(transactionRowsIn(data).keys());
+}
+
+/** What the host knows about the user, to build rows with. */
+export interface WidgetTransactionTableHost {
+    accounts: Readonly<Record<string, WidgetAccount>>;
+    categories: readonly Category[];
+    labels: readonly Label[];
+}
 
 /**
  * The host's table narrowed to the transactions of one widget's data, or
- * null when the host offers none. A widget cannot have a transaction its
- * manifest never read edited by handing `<TransactionList>` a made-up row.
+ * null when the host offers none. The widget only says which transactions
+ * (by id, among those its manifest read) and how they read; every row the
+ * table acts on is built from the host's own copy of the data, so a widget
+ * cannot have one transaction edited or deleted while another is on screen,
+ * nor one its manifest never read. Ids the data lacks are dropped.
  */
 export function scopedTransactionTable(
     render: RenderWidgetTransactionTable | undefined,
     data: Readonly<Record<string, unknown>>,
-): RenderWidgetTransactionTable | null {
+    host: WidgetTransactionTableHost,
+): ScopedWidgetTransactionTable | null {
     if (render === undefined) {
         return null;
     }
 
-    const allowed = transactionIdsIn(data);
+    const hostRows = transactionRowsIn(data);
+    const categories = [...host.categories];
+    const labels = [...host.labels];
+    const categoryById = new NativeMap(
+        categories.map((category) => [category.id, category]),
+    );
+    // The same ids keep the same list, whichever render asks: the host's
+    // table reloads its rows whenever it is handed a new one, local edits and
+    // all. A widget's rows and its data change together.
+    const built = new NativeMap<string, DecryptedTransaction[]>();
 
-    return (props) => {
-        // The same rows keep the same list, whichever render asks: the host's
-        // table reloads its rows whenever it is handed a new one, local edits
-        // and all. A widget's rows and its data change together.
-        let transactions = scopedRows.get(props.transactions);
+    const rowsFor = (ids: readonly string[]): DecryptedTransaction[] => {
+        const key = stringify(ids);
+        let transactions = built.get(key);
 
         if (transactions === undefined) {
-            transactions = props.transactions.filter((transaction) =>
-                allowed.has(transaction.id),
-            );
-            scopedRows.set(props.transactions, transactions);
+            const seen = new NativeSet<string>();
+
+            transactions = [];
+
+            for (const id of ids) {
+                const row = hostRows.get(id);
+                const held = row && !seen.has(id) ? apiTransaction(row) : null;
+
+                if (held !== null) {
+                    seen.add(id);
+                    transactions.push(
+                        toHeldTransaction(held, host.accounts, categoryById),
+                    );
+                }
+            }
+
+            transactions.sort(compareNewestFirst);
+            built.set(key, transactions);
         }
 
-        return render({ ...props, transactions });
+        return transactions;
     };
+
+    return ({ transactionIds, ...layout }) =>
+        render({
+            ...layout,
+            transactions: rowsFor(transactionIds),
+            categories,
+            labels,
+        });
 }

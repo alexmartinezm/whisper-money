@@ -8,6 +8,7 @@ import { type WidgetEnv, WidgetSdkProvider } from './context';
 import { TransactionList } from './transaction-list';
 import {
     type RenderWidgetTransactionTable,
+    scopedTransactionTable,
     type WidgetTransactionTableProps,
     WidgetTransactionTableProvider,
 } from './transaction-table-host';
@@ -108,21 +109,25 @@ const ROWS = [
     }),
 ];
 
+const host = {
+    accounts: {
+        'acc-1': {
+            type: 'checking' as const,
+            bankName: 'BBVA',
+            bankLogo: null,
+        },
+    },
+    categories: [moto],
+    labels: [panigale] as Label[],
+};
+
 function renderList(children: ReactNode, overrides: Partial<WidgetEnv> = {}) {
     return render(
         <WidgetSdkProvider
             value={{
                 data: {},
                 env: { ...env, ...overrides },
-                accounts: {
-                    'acc-1': {
-                        type: 'checking',
-                        bankName: 'BBVA',
-                        bankLogo: null,
-                    },
-                },
-                categories: [moto],
-                labels: [panigale] as Label[],
+                ...host,
             }}
         >
             {children}
@@ -294,12 +299,16 @@ describe('<TransactionList>', () => {
         expect(rows()[0]).not.toHaveClass('cursor-pointer');
     });
 
+    /** The host's table over the data the host fetched, as the dashboard draws it. */
     function renderWithHostTable(
         children: ReactNode,
         render: RenderWidgetTransactionTable,
+        data: Record<string, unknown> = { tx: { data: [...ROWS, SPLIT_ROW] } },
     ) {
         return renderList(
-            <WidgetTransactionTableProvider render={render}>
+            <WidgetTransactionTableProvider
+                render={scopedTransactionTable(render, data, host)}
+            >
                 {children}
             </WidgetTransactionTableProvider>,
         );
@@ -426,12 +435,57 @@ describe('<TransactionList>', () => {
 
         expect(render.mock.calls[0][0].transactions).toHaveLength(1);
         expect(held).toMatchObject({ amount: -9000, category_id: null });
+        // Taller is not one of the user's categories: the editable table
+        // gets no placeholder for it, only the read-only list draws one.
         expect(
-            held.splits?.map((line) => [line.category?.name, line.amount]),
+            held.splits?.map((line) => [
+                line.category_id,
+                line.category?.name,
+                line.amount,
+            ]),
         ).toEqual([
-            ['Taller', -2000],
-            ['Moto', -7000],
+            ['cat-other', undefined, -2000],
+            [moto.id, 'Moto', -7000],
         ]);
+        expect(render.mock.calls[0][0].categories).toEqual([moto]);
+    });
+
+    it("acts on the host's own rows, whatever the widget passed for them", () => {
+        const render = vi.fn<RenderWidgetTransactionTable>(() => null);
+        renderWithHostTable(
+            <TransactionList
+                transactions={[
+                    // tx-1's id on tx-2's text and amount, and the reverse.
+                    { ...ROWS[1], id: 'tx-1' },
+                    { ...ROWS[0], id: 'tx-2', amount: -1 },
+                    apiRow({ id: 'made-up', description: 'Not yours' }),
+                    apiRow({
+                        id: 'tx-3',
+                        transaction_date: '2026-10-05',
+                        category: { id: 'cat-evil', name: 'Evil' },
+                    }),
+                ]}
+            />,
+            render,
+        );
+
+        const props = render.mock.calls[0][0];
+        const byId = new Map(props.transactions.map((row) => [row.id, row]));
+
+        expect([...byId.keys()]).toEqual(['tx-3', 'tx-2', 'tx-1']);
+        expect(byId.get('tx-1')).toMatchObject({
+            description: 'Pago en Ducati Store',
+            amount: -12000,
+        });
+        expect(byId.get('tx-2')).toMatchObject({
+            description: 'Pago en Repsol',
+            amount: -3000,
+        });
+        expect(byId.get('tx-3')?.category_id).toBe(moto.id);
+        expect(props.categories.map((category) => category.id)).toEqual([
+            moto.id,
+        ]);
+        expect(props.labels).toEqual([panigale]);
     });
 
     it('skips rows without an id, a date, an amount or a currency', () => {

@@ -74,8 +74,19 @@ export default function UserWidgetFrame({
     const frozenData = useMemo(() => deepFreeze(data), [data]);
     const sdk = useWidgetSdkValue(frozenData, size);
     const transactionTable = useMemo(
-        () => scopedTransactionTable(renderTransactionTable, frozenData),
-        [renderTransactionTable, frozenData],
+        () =>
+            scopedTransactionTable(renderTransactionTable, frozenData, {
+                accounts: sdk.accounts,
+                categories: sdk.categories,
+                labels: sdk.labels,
+            }),
+        [
+            renderTransactionTable,
+            frozenData,
+            sdk.accounts,
+            sdk.categories,
+            sdk.labels,
+        ],
     );
     const { crashed, markCrashed } = useWidgetCrash(data);
     const carded = isWidgetCarded(frame, state.status === 'ready' && !crashed);
