@@ -7,7 +7,6 @@ use App\Enums\BankingProvider;
 use App\Features\CalculateBalancesOnImport;
 use App\Features\CashflowAvailableFree;
 use App\Features\CustomDashboards;
-use App\Features\FullImport;
 use App\Features\RecurringTransactions;
 use App\Features\TransactionSplitting;
 use App\Jobs\PurgeResidualEncryptionArtifactsJob;
@@ -361,7 +360,6 @@ class HandleInertiaRequests extends Middleware
             TransactionSplitting::class,
             RecurringTransactions::class,
             CashflowAvailableFree::class,
-            FullImport::class,
             CustomDashboards::class,
         ]);
 

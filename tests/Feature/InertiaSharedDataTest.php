@@ -115,6 +115,16 @@ test('shared feature flags do not include coinbase flag', function () {
     ]);
 });
 
+test('the full import stays closed by default, even to a user inside the onboarding window', function () {
+    $user = User::factory()->create(['onboarded_at' => now()->subDay()]);
+
+    actingAs($user)->withoutVite()->get(route('settings.connections.index'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('features.fullImport', false)
+            ->where('features.fullImportSettings', false)
+        );
+});
+
 test('authenticated users receive their transaction splitting flag value', function () {
     $user = User::factory()->onboarded()->create();
     Feature::for($user)->deactivate(TransactionSplitting::class);
