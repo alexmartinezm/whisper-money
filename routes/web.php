@@ -193,10 +193,11 @@ Route::middleware(['auth', 'verified', 'onboarded', 'subscribed'])->group(functi
     Route::get('dashboard', DashboardController::class)->name('dashboard');
 
     // The user's own dashboards and the system widgets placed on them. Only
-    // for users with the CustomDashboards flag: DashboardPolicy and the form
-    // requests refuse everyone else with a 403. Writes are closed to the demo
-    // account, whose dashboards everybody shares.
-    Route::middleware('block-demo')->prefix('dashboards')->name('dashboards.')->group(function () {
+    // for users with the CustomDashboards flag: the custom-dashboards
+    // middleware refuses everyone else with a 403 before anything runs, and
+    // DashboardPolicy and the form requests check it again. Writes are closed
+    // to the demo account, whose dashboards everybody shares.
+    Route::middleware(['custom-dashboards', 'block-demo'])->prefix('dashboards')->name('dashboards.')->group(function () {
         Route::post('/', [DashboardManagementController::class, 'store'])->name('store');
         Route::patch('reorder', [DashboardManagementController::class, 'reorder'])->name('reorder');
         Route::put('default', DefaultDashboardController::class)->name('default.update');
@@ -214,11 +215,11 @@ Route::middleware(['auth', 'verified', 'onboarded', 'subscribed'])->group(functi
     // The widgets the user's agent writes: their data, read from the saved
     // manifest through the widget gateway, the runtime errors they raise and
     // going back to an earlier revision. Like the dashboards, only for users
-    // with the CustomDashboards flag (WidgetDefinitionPolicy and the data
-    // request refuse everyone else with a 403); writes are closed to the demo
-    // account.
-    Route::get('dashboards/{dashboard}/widgets/data', [WidgetDataController::class, 'dashboard'])->name('dashboards.widgets.data');
-    Route::prefix('widgets/{widget}')->name('widgets.')->group(function () {
+    // with the CustomDashboards flag (the custom-dashboards middleware, then
+    // WidgetDefinitionPolicy and the data request, refuse everyone else with
+    // a 403); writes are closed to the demo account.
+    Route::get('dashboards/{dashboard}/widgets/data', [WidgetDataController::class, 'dashboard'])->middleware('custom-dashboards')->name('dashboards.widgets.data');
+    Route::middleware('custom-dashboards')->prefix('widgets/{widget}')->name('widgets.')->group(function () {
         Route::get('data', [WidgetDataController::class, 'show'])->name('data');
         Route::middleware('block-demo')->group(function () {
             Route::post('errors', [WidgetErrorController::class, 'store'])->middleware('throttle:widget-errors')->name('errors.store');

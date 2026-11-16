@@ -9,6 +9,7 @@ use App\Http\Middleware\ApiV1\ThrottleApiRequestsByIp;
 use App\Http\Middleware\AssignPriceExperimentArm;
 use App\Http\Middleware\BlockDemoAccountActions;
 use App\Http\Middleware\DenyFraming;
+use App\Http\Middleware\EnsureCustomDashboards;
 use App\Http\Middleware\EnsureOnboardingComplete;
 use App\Http\Middleware\EnsureOpenBankingConfigured;
 use App\Http\Middleware\EnsureUserIsAdmin;
@@ -97,6 +98,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'open-banking' => EnsureOpenBankingConfigured::class,
             'block-demo' => BlockDemoAccountActions::class,
             'deny-framing' => DenyFraming::class,
+            'custom-dashboards' => EnsureCustomDashboards::class,
             'abilities' => CheckAbilities::class,
             'ability' => CheckForAnyAbility::class,
         ]);
