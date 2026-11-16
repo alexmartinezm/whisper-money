@@ -225,8 +225,12 @@ it('fits a phone: every widget full width, keeping its height', function () {
     expect($layout['overflow'])->toBeLessThanOrEqual(0)
         ->and($layout['netWorth']['width'])->toEqual($layout['grid'])
         ->and($layout['topCategories']['width'])->toEqual($layout['grid'])
-        // L is two M rows plus the gap between them.
-        ->and($layout['netWorth']['height'])->toBeGreaterThan($layout['topCategories']['height'] * 2);
+        // On a phone a height is a floor: L is two M rows plus the gap between
+        // them, and a card taller than its floor grows with its content, as
+        // this fork's top categories card does at M.
+        ->and($layout['netWorth']['height'])->toBeGreaterThanOrEqual(536)
+        ->and($layout['topCategories']['height'])->toBeGreaterThanOrEqual(256)
+        ->and($layout['netWorth']['height'])->toBeGreaterThan($layout['topCategories']['height']);
 
     $page->assertNoJavascriptErrors();
 });
