@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Servers;
 
+use App\Mcp\Tools\AggregateTransactions;
 use App\Mcp\Tools\CategorizeTransaction;
 use App\Mcp\Tools\CreateAccount;
 use App\Mcp\Tools\CreateAutomationRule;
@@ -143,6 +144,22 @@ themselves.
   `everyday_spending` block is an estimate and is null when there is too little history;
   when it is present, quote its figures rather than the exact ones, which ignore
   groceries and everything else that never repeats on a cadence.
+- For totals over many transactions (spending per month, per label, per account,
+  income against expenses over time), use `aggregate_transactions` instead of
+  paging through `search_transactions`. Like `search_transactions` it reads one
+  space, every member's transactions in it, and groups them by up to two
+  dimensions, at most one of them a period, returning one bucket per group and
+  currency: amounts in different currencies are never added together, so read
+  each bucket's `currency`. Like the other analytics, amounts are the owner's
+  share of the account, and an archived account stops counting from the day it
+  was archived. A split transaction counts by its lines: each line lands in its
+  own category and type, a category or type filter keeps only the lines it
+  matches, and a label keeps every line. Every type counts unless `types`
+  narrows it, so pass `types: ["expense"]` for spending: otherwise transfers,
+  savings and investments add in too. Grouped by a period, every period of the
+  range comes back, zeros included; a request that would return more than 1000
+  buckets is refused, so narrow the range or pick a longer period. A transaction
+  with several labels counts once under each of them.
 
 Write tools ... require a read & write Sanctum token; OAuth connections follow the current
 WriteTool policy. A read-only Sanctum token can analyse data but never change it. Manual
@@ -215,6 +232,7 @@ class WhisperMoneyServer extends Server
         // Read
         SearchTransactions::class,
         SpendingByCategory::class,
+        AggregateTransactions::class,
         GetCashflow::class,
         GetRunway::class,
         GetNetWorth::class,

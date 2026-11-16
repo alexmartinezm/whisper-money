@@ -2,15 +2,18 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Http\Requests\Api\V1\AggregateTransactionsRequest;
 use App\Http\Requests\Api\V1\CashflowRequest;
 use App\Http\Requests\Api\V1\NetWorthRequest;
 use App\Http\Requests\Api\V1\SpendingByCategoryRequest;
 use App\Http\Resources\V1\CashflowResource;
 use App\Http\Resources\V1\NetWorthResource;
 use App\Http\Resources\V1\SpendingByCategoryResource;
+use App\Http\Resources\V1\TransactionAggregateResource;
 use App\Services\CashflowAnalyticsService;
 use App\Services\CategorySpendingService;
 use App\Services\NetWorthAnalyticsService;
+use App\Services\Transactions\TransactionAggregator;
 
 /**
  * Figures rolled up from the caller's own transactions and balances over a
@@ -18,7 +21,9 @@ use App\Services\NetWorthAnalyticsService;
  * the MCP tools do, and only ever the caller's own rows: another member of a
  * shared space's money never counts. There is no `space`: a figure for one
  * space is not what the screens show, so sending one is refused rather than
- * ignored.
+ * ignored. Aggregates are the exception: they read the caller's own
+ * transactions in one space, the `space` parameter's, and give each currency
+ * its own bucket.
  */
 class AnalyticsController extends Controller
 {
@@ -72,6 +77,32 @@ class AnalyticsController extends Controller
 
         return new SpendingByCategoryResource(
             $spending->forPeriod($this->user($request)->id, $period->from, $period->to, $request->parentCategoryId()),
+        );
+    }
+
+    /**
+     * Aggregate transactions
+     *
+     * Your transactions in a space over a date range, grouped by up to two
+     * dimensions and added up: their sum, count, average, smallest and
+     * largest amount. As in the app, another member's transactions are left
+     * out. Each bucket is also split by currency, so amounts in different
+     * currencies are never added together, and every amount is your share of
+     * the account, in minor units of the bucket's currency. A transaction
+     * booked on an archived account stops counting from the day it was
+     * archived. A split transaction counts by its lines: each in its own
+     * category and type, a category or type filter keeping only the lines it
+     * matches, and a label keeping them all. Every type of transaction counts
+     * unless `types` narrows it: pass `types=expense` for spending, since
+     * transfers, savings and investments otherwise add in too. Grouped by a
+     * period, every period of the range comes back, with zeros where nothing
+     * was booked. A response holds at most 1000 buckets: one that would hold
+     * more is a `422` under `group_by`.
+     */
+    public function aggregate(AggregateTransactionsRequest $request, TransactionAggregator $aggregator): TransactionAggregateResource
+    {
+        return new TransactionAggregateResource(
+            $aggregator->aggregate($this->user($request), $this->space($request), $request->parameters()),
         );
     }
 }

@@ -179,22 +179,40 @@ abstract class McpTool extends Tool
      */
     protected function labelsInSpace(Request $request, Space $space, string $key): Collection
     {
-        $ids = $this->requestedIds($request, $key);
+        return $this->rowsInSpace($space, $this->requestedIds($request, $key), $key, Label::class, 'label', 'list_labels');
+    }
 
+    /**
+     * Resolve every id of a $model in $ids, asserting each belongs to the
+     * space, whichever member keeps it: the MCP is space-wide, unlike
+     * `/api/v1`. Returns an empty collection when $ids is empty.
+     *
+     * @template TModel of Model
+     *
+     * @param  list<string>  $ids
+     * @param  string  $key  the argument the ids came under, for the message
+     * @param  class-string<TModel>  $model  a model scoped by space (`forSpace`)
+     * @param  string  $noun  how a row is named in the message: `label`, `account`, `category`
+     * @param  string  $listTool  the tool that lists the valid ids
+     * @return Collection<int, TModel>
+     */
+    protected function rowsInSpace(Space $space, array $ids, string $key, string $model, string $noun, string $listTool): Collection
+    {
         if ($ids === []) {
-            /** @var Collection<int, Label> */
+            /** @var Collection<int, TModel> */
             return new Collection;
         }
 
-        $labels = Label::query()->forSpace($space)->whereIn('id', $ids)->get();
+        /** @var Collection<int, TModel> $rows */
+        $rows = $model::query()->forSpace($space)->whereIn('id', $ids)->get();
 
-        if ($labels->count() !== count($ids)) {
+        if ($rows->count() !== count($ids)) {
             throw ValidationException::withMessages([
-                $key => "One or more label ids do not exist in space {$space->id}. Call list_labels to see valid ids.",
+                $key => "One or more {$noun} ids do not exist in space {$space->id}. Call {$listTool} to see valid ids.",
             ]);
         }
 
-        return $labels;
+        return $rows;
     }
 
     /**
