@@ -18,6 +18,7 @@ import { useStoredColumnVisibility } from '@/hooks/use-stored-column-visibility'
 import { useTransactionBulkActions } from '@/hooks/use-transaction-bulk-actions';
 import { useTransactionRowEditing } from '@/hooks/use-transaction-row-editing';
 import { PHONE_INSET } from '@/lib/compact-list-style';
+import { type SharedData } from '@/types';
 import {
     type Account,
     type Bank,
@@ -33,6 +34,7 @@ import {
 } from '@/types/transaction-table-source';
 import { type UUID } from '@/types/uuid';
 import { __ } from '@/utils/i18n';
+import { usePage } from '@inertiajs/react';
 import {
     type ColumnFiltersState,
     getCoreRowModel,
@@ -95,6 +97,12 @@ interface TransactionTableProps {
     resolveRow?: (
         transaction: DecryptedTransaction,
     ) => Promise<DecryptedTransaction>;
+    /**
+     * Brings the parts in once a split is made or merged back. The source's
+     * own reload by default: a partial reload of the rows on /transactions,
+     * the page's reload (or a widget's data) elsewhere.
+     */
+    onSplitChanged?: () => void;
     /** Told how many rows are ticked whenever they are (not when a new query drops them). */
     onSelectionChange?: (selectedCount: number) => void;
     /**
@@ -170,6 +178,7 @@ export function TransactionTable({
     badgeOf,
     showDayTotals = true,
     resolveRow,
+    onSplitChanged,
     onSelectionChange,
     portalBulkActionsBar = false,
     frameless = false,
@@ -213,11 +222,17 @@ export function TransactionTable({
         [rowSelection, onSelectionChange],
     );
 
+    // The server answers a split with 403 while the feature is off, so the
+    // action is not offered then; merging a split back always is.
+    const canStartSplits =
+        usePage<SharedData>().props.features?.transactionSplitting ?? false;
+
     const editing = useTransactionRowEditing({
         initialLabels,
         setRows: source.setRows,
         onRowUpdated: onTransactionsChanged,
         resolveRow,
+        canStartSplits,
     });
     const {
         labels,
@@ -344,6 +359,14 @@ export function TransactionTable({
         [setRowSelection],
     );
 
+    // A split or a merge replaces the rows it touched with others, so ticks
+    // kept across it would count ids that no longer exist. Cleared the way the
+    // bar's own Clear does, "all matching filters" included.
+    const handleSplitChanged = () => {
+        selectionMode.clear();
+        (onSplitChanged ?? source.reload)();
+    };
+
     const bulkActionsBar = (
         <BulkActionsBar
             {...bulk.barProps}
@@ -446,6 +469,7 @@ export function TransactionTable({
                 banks={banks}
                 automationRules={automationRules}
                 onDuplicated={source.reload}
+                onSplitChanged={handleSplitChanged}
             />
 
             <TransactionDeleteDialogs

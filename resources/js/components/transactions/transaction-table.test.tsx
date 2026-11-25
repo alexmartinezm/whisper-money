@@ -7,6 +7,11 @@ import { TransactionTable } from './transaction-table';
 
 vi.mock('@/hooks/use-locale', () => ({ useLocale: () => 'en-US' }));
 
+vi.mock('@inertiajs/react', async (importOriginal) => ({
+    ...(await importOriginal<object>()),
+    usePage: () => ({ props: { features: { transactionSplitting: true } } }),
+}));
+
 const viewport = vi.hoisted(() => ({ isMobile: false }));
 vi.mock('@/hooks/use-mobile', () => ({ useIsMobile: () => viewport.isMobile }));
 
@@ -61,8 +66,21 @@ vi.mock('@/components/transactions/transaction-filters', () => ({
         </div>
     ),
 }));
+const rowDialogs = vi.hoisted(() => ({
+    latest: null as {
+        onSplitChanged: () => void;
+        editing: { canStartSplits: boolean };
+    } | null,
+}));
 vi.mock('@/components/transactions/transaction-row-dialogs', () => ({
-    TransactionRowDialogs: () => null,
+    TransactionRowDialogs: (props: {
+        onSplitChanged: () => void;
+        editing: { canStartSplits: boolean };
+    }) => {
+        rowDialogs.latest = props;
+
+        return null;
+    },
 }));
 vi.mock('@/components/transactions/transaction-delete-dialogs', () => ({
     TransactionDeleteDialogs: () => null,
@@ -178,6 +196,54 @@ describe('TransactionTable', () => {
             }),
         ).toBeTruthy();
         expect(screen.getByTestId('filters-trailing').textContent).toBe('');
+    });
+
+    it("brings a split's parts in with the source's own reload, and offers splitting while the feature is on", () => {
+        const tableSource = source();
+        renderTable(tableSource);
+
+        act(() => rowDialogs.latest?.onSplitChanged());
+
+        expect(tableSource.reload).toHaveBeenCalledOnce();
+        expect(rowDialogs.latest?.editing.canStartSplits).toBe(true);
+    });
+
+    // Merging two ticked parts takes both rows away: the bar must not go on
+    // counting ids that no longer exist.
+    it('drops the ticked rows when a split or a merge replaces them', () => {
+        const tableSource = source();
+        renderTable(tableSource);
+
+        fireEvent.click(screen.getByText('tick a'));
+        fireEvent.click(screen.getByText('tick b'));
+        expect(screen.getByTestId('bulk-bar').textContent).toBe('2 selected');
+
+        act(() => rowDialogs.latest?.onSplitChanged());
+
+        expect(screen.getByTestId('bulk-bar').textContent).toBe('0 selected');
+        expect(tableSource.reload).toHaveBeenCalledOnce();
+    });
+
+    it('lets the page say how a split brings its parts in', () => {
+        const onSplitChanged = vi.fn();
+        const tableSource = source();
+
+        render(
+            <TransactionTable
+                source={tableSource}
+                categories={[]}
+                accounts={[]}
+                banks={[]}
+                labels={[]}
+                automationRules={[]}
+                onSplitChanged={onSplitChanged}
+            />,
+        );
+
+        act(() => rowDialogs.latest?.onSplitChanged());
+
+        expect(onSplitChanged).toHaveBeenCalledOnce();
+        expect(tableSource.reload).not.toHaveBeenCalled();
     });
 
     it('draws the skeleton while the source loads', () => {
